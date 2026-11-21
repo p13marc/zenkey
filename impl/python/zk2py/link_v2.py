@@ -1,4 +1,4 @@
-"""``link.v2``, text 0.1 to 0.17 (``spec/profiles/link/v2.md``, draft,
+"""``link.v2``, text 0.1 to 0.18 (``spec/profiles/link/v2.md``, draft,
 written against core 0.77 to 0.100; #988 L1 to L4, #1098, #1106, #1107, #1108): a constrained face, and the
 transport it runs. Read cold by zk2py in round 96 (#609).
 
@@ -59,6 +59,11 @@ them names the far principal the faces other than device faces share, as
 ``transport.auth.usrpwd.user``, beside placeholders; :func:`stamps` reads a
 ``null`` as left out. Text 0.16 is editorial: the block is three objects,
 merged key by key, the block's value kept (:func:`merge`).
+
+**Text 0.18** (round 112), a ``null`` among the eight keys (§2.19): at
+``routing/interests/timeout`` it is left out, read at the binding's default
+(:data:`NULL_LEFT_OUT`); at each of the seven others it is no value zenoh
+runs, ``transport_differs``, and ``wait_under_lease`` skips it.
 
 **Text 0.17** (#1108; round 110), §2.16's keep-alives beside data as
 zenoh's timer counts them: :func:`keep_alives_a_gap`, the bounds of what
@@ -994,6 +999,11 @@ def keep_alives(sent_ms: list[int], interval_ms: int) -> int:
     return count
 
 
+#: §2.19 (0.18): the one of the eight keys a ``null`` leaves out, zenoh's
+#: ``routing/interests/timeout``.
+NULL_LEFT_OUT = "interests_timeout_ms"
+
+
 def read_config(config: dict[str, Any]) -> dict[str, Any]:
     """A router's configuration (its JSON5 read as a JSON document), as a
     tool reads it for §2.19 and as ``transport.json``'s ``router`` states
@@ -1051,7 +1061,16 @@ def _read(config: dict[str, Any], binding: str) -> dict[str, Any]:
     """A configuration's eight keys, by zenoh's key, one it omits at the
     binding's default (§2.19's table); values as stated, never converted."""
     d = DEFAULTS[binding]
-    return {k: config.get(path, d[k]) for k, (path, _, _) in TRANSPORT.items()}
+    out = {k: config.get(path, d[k]) for k, (path, _, _) in TRANSPORT.items()}
+    # 0.18, "A null reads as zenoh 1.10.1 reads it": "Left out, where zenoh
+    # fills an optional value with its default. There are four such places:
+    # timestamping/enabled, a mode of it, the mode, and
+    # routing/interests/timeout. A tool reads each at the binding's default."
+    # At each of the seven other keys it stays the value stated, "No value
+    # zenoh runs … It is transport_differs, as a string is".
+    if out[NULL_LEFT_OUT] is None:
+        out[NULL_LEFT_OUT] = d[NULL_LEFT_OUT]
+    return out
 
 
 def _same(got: Any, want: Any) -> bool:

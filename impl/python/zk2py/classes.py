@@ -783,6 +783,31 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "bodies.json's reads) (round 96, core 0.81)"),
     ("static", "core §7.5", "Every body an implementation accepts MUST write back to the same bytes", MET,
      "heartbeat.write in the form read (heartbeat family: every accepted read written back) (round 96, core 0.81)"),
+    # core 0.108 (#1110): the owner heartbeat's six static rules (round 112).
+    ("static", "core §7.5", "An implementation MUST NOT choose the layout by a payload's bytes", MET,
+     "owner_heartbeat.read and heartbeat.read are two functions, each called by what its caller holds of the key; "
+     "neither reads a byte to pick the other, and no zk2py reader tries one then the other (heartbeat family: "
+     "owner.json's either, one body accepted by both; readings: the same payload read both ways) (round 112, core "
+     "0.108)"),
+    ("static", "core §7.5", "An implementation that writes an owner heartbeat MUST write it so", MET,
+     "owner_heartbeat.write: CH's tag 0, the groups ordered by index, none, sixteen or one index twice refused, "
+     "each size its sections' count of bits in LEB128 (heartbeat family: owner.json's 12 writes; readings: "
+     "unordered groups written ascending, the refusals) (round 112, core 0.108)"),
+    ("static", "core §7.5", "An implementation MUST then refuse an owner heartbeat for the first of these", MET,
+     "owner_heartbeat.read: the envelope's parse, then tag, then short, code, order and leb128 as each field is "
+     "read whole and judged, then trailing, then pad (heartbeat family: owner.json's 45 reads, 32 refused) (round "
+     "112, core 0.108)"),
+    ("static", "core §7.5", "An implementation MUST write every owner heartbeat it accepts back to the same bytes",
+     MET, "owner_heartbeat.write_back (heartbeat family: every accepted read written back; readings: every "
+     "truncation and one-bit change of a payload refused or written back the same) (round 112, core 0.108)"),
+    ("static", "core §7.5", "An implementation MUST refuse a group for the first of these that applies", MET,
+     "owner_heartbeat.read_group: §8.6's unknown_catalog or unknown_index through catalog.resolve, then short and "
+     "code as the sections' fields are read, then trailing for a bit after the last (heartbeat family: owner.json's "
+     "32 groups, 20 refused) (round 112, core 0.108)"),
+    ("static", "core §7.5", "An implementation MUST read each other group as it would with the refused one left out",
+     MET, "owner_heartbeat.read_groups reads each group from its own bits, by its size: a refused group moves no "
+     "other's reading (readings: a refused group between two read, each as in the owner heartbeat without it) "
+     "(round 112, core 0.108)"),
     # core 0.97 (#977 E1): the snapshot's four static rules (round 103).
     ("static", "core §7.5", "An implementation MUST refuse a body for the first of these that applies, reading its "
      "fields in order", MET,

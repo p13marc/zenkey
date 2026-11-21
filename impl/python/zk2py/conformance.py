@@ -5061,11 +5061,12 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "owner 76; 249 since core 0.99's one fewer (round 104); 262 and the owner 83 since core 0.100 "
                 "(round 105); 267 since observer 0.29's five (round 106); 268 since core 0.102's one, and 273 and the "
                 "owner 85 since core 0.103's five (round 107); 274 since core 0.104's one, the consumer's (round "
-                "108); 277 and the owner 88 since core 0.107's three owner rules (round 111)",
+                "108); 277 and the owner 88 since core 0.107's three owner rules (round 111); 283 and the static rules 73 "
+                "since core 0.108's six, the owner heartbeat's (round 112)",
                 missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
                         "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [277, 67, 88]))
+                   counted.get("Owner")], [283, 73, 88]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -5273,6 +5274,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round109_readings(root)
     out += _round110_readings(root)
     out += _round111_readings(root)
+    out += _round112_readings(root)
     return out
 
 
@@ -5862,10 +5864,11 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
     counts = dict(re.findall(r"^\| \[([A-Za-z][^\]]*)\]\(#[^)]*\) \| (\d+)", rules, re.M))
     every = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.105's figures: RULES.md lists 274 rules, as 0.104 did, the consumer's MUST NOT widened in "
-                "place (consumer 32); the row names a delete; 277 since core 0.107 (round 111)",
+                "place (consumer 32); the row names a delete; 277 since core 0.107 (round 111); 283 since core 0.108 "
+                "(round 112)",
                 [int(every.group(1)) if every else None, counts.get("Consumer"),
                  "or a delete on an events key, whether a subscription heard it" in rules],
-                [277, "32", True]))
+                [283, "32", True]))
     # Round 109's findings, each text as it quotes it, so an answer moves it
     from .contract import load_contract
     from .owner import keeps_timestamp
@@ -6034,15 +6037,16 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     owner33 = [r[3] for r in rows if r[0] == "owner" and r[1] == "core §3.3"]
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
-    out.append(("core 0.107's figures: RULES.md lists 277 rules, 274 in 0.106, the owner's the MUST NOT on `minor` "
-                "and the two SHOULDs of a descriptor over 1 KB; the 1 KB SHOULD's row shows the MAY that excepts it",
+    out.append(("core 0.107's figures: RULES.md listed 277 rules, 274 in 0.106 (283 since core 0.108, round 112), "
+                "the owner's the MUST NOT on `minor` and the two SHOULDs of a descriptor over 1 KB; the 1 KB "
+                "SHOULD's row shows the MAY that excepts it",
                 missing(log, "`RULES.md` lists 277 rules, 274 in 0.106 (owner 88, 85 before)")
                 + [int(once.group(1)) if once else None,
                    sum(1 for t in owner33 if "MUST NOT state a minor its revision does not have" in t),
                    sum(1 for t in owner33 if "exceeds 1 KB SHOULD leave out every empty member" in t),
                    sum(1 for t in owner33 if "That owner SHOULD also keep every member but" in t),
                    sum(1 for t in owner33 if "SHOULD stay within 1 KB" in t and "So an owner MAY exceed 1 KB with" in t)],
-                [277, 1, 1, 1, 1]))
+                [283, 1, 1, 1, 1]))
     # The checker, by §3.3's sentences and the schema: `minor` optional, an
     # integer of the record's uint64 where stated.
     nav = load_contract(dd / "contracts" / "nav.v2.toml", spec_dir=spec)
@@ -6243,6 +6247,397 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.108 (#1110, the owner heartbeat) and link.v2 0.18 (round 110
+    answered), read cold (#609, round 112): each version and its entry, the
+    rules as their texts state them, what the changelogs claim of their
+    fixtures and figures, zk2py's owner heartbeat beyond ``owner.json``
+    (what no case pins, each named as zk2py's own reading where the text
+    states none), a ``null`` at each of the eight keys, F-529 to F-534 as
+    answered, and the texts round 112's findings quote. The fixtures are the
+    heartbeat family's ``owner.json`` and the link family's ``v2/`` files."""
+    import json
+    import random
+    import re
+
+    from . import catalog as cat, classes, heartbeat, link_v2, owner_heartbeat as oh, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log_ = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log_)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def version_of(rel: str) -> str | None:
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", flat(rel))
+        return v.group(1) if v else None
+
+    core, log = flat("core.md"), flat("CHANGELOG.md")
+    l2, llog = flat("profiles/link/v2.md"), flat("profiles/link/CHANGELOG.md")
+    fv2 = flat("profiles/freshness/v2.md")
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.108 or later and link.v2 0.18 or later, each with its entry; observer stays 0.33",
+         [m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.108"),
+          _at_least(version_of("profiles/link/v2.md"), "0.18"), version_of("observer.md")]
+         + entry("CHANGELOG.md", "0.108", "the owner heartbeat: form 6 with a group per interface")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.18", "a `null` among the eight keys"),
+         [True, True, "0.33"]),
+    ]
+    # -- core 0.108 §7.5: the rules as the text states them ----------------------------
+    out.append(("core 0.108 §7.5, the owner heartbeat: its six rules and its layout as the text states them",
+                missing(core,
+                        "Nothing in the bytes tells the two apart. An implementation MUST NOT choose the layout by a "
+                        "payload's bytes.",
+                        "- **CH's tag** is 0. Each group carries its covered revision's tag.",
+                        "So an owner given no catalog writes no owner heartbeat.",
+                        "body time · groups · that many groups · pad",
+                        "group index · tag · size · sections",
+                        "Each of its bytes is the next 8 bits of the body, wherever they fall.",
+                        "A group has no pad of its own.",
+                        "An implementation that writes an owner heartbeat MUST write it so: CH's tag 0, from 1 to 15 "
+                        "groups in ascending order of their indices, and each group's size the count of bits in its "
+                        "sections.",
+                        "**The groups.** The envelope's parse comes first (above). An implementation MUST then refuse "
+                        "an owner heartbeat for the first of these that applies, in this order, naming the refusal:",
+                        "Each field is read whole, then judged, and the first field that draws a refusal decides. So "
+                        "an unused code is refused before a later field cut short, and an index out of order before "
+                        "its own group's size.",
+                        "An implementation MUST write every owner heartbeat it accepts back to the same bytes.",
+                        "A reader reads the groups it has a use for, and skips every other by its size, one whose "
+                        "revision it does not hold among them.",
+                        "- the sections hold a bit after their last field (`trailing`).",
+                        "An implementation MUST read each other group as it would with the refused one left out.",
+                        "Another tag refuses nothing here: the sections read the same."), []))
+    # -- the changelog's claims ---------------------------------------------------------
+    hb_dir = root / "heartbeat"
+    own = _load_json(hb_dir / "owner.json")
+    lay = _load_json(hb_dir / "layouts.json")
+    rows = classes._rules_md(spec)
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    static = re.search(r"^\| \[Implementation: the static rules\]\([^)]*\) \| (\d+) \|", rules, re.M)
+    out.append(("core 0.108's entry, its evidence: owner.json holds 12 writes, 45 reads, 32 groups read through three "
+                "catalogs and one body read both ways, 90 cases; layouts.json holds six revisions, alert.v1, knob.v1, "
+                "vital.v1 and mixed.v1 beside hb.v1 and bare.v1; RULES.md lists 283 rules, the static rules 73, six "
+                "of them citing owner.json",
+                [len(own["writes"]), len(own["reads"]), len(own["groups"]), len(own["either"]),
+                 sorted(own["catalogs"]), sorted(c["contract"] for c in lay["layouts"]),
+                 int(once.group(1)) if once else None, int(static.group(1)) if static else None,
+                 sum(1 for ln in rules.splitlines() if "`[F: heartbeat/owner.json]`" in ln)]
+                + missing(log, "`conformance/heartbeat/owner.json` is new: 12 writes, 45 reads, 32 groups read through "
+                               "three catalogs, and one body that reads both ways.",
+                          "- **Six rules**, all static"),
+                [12, 45, 32, 1, ["first", "other", "second"],
+                 ["alert.v1", "bare.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1"], 283, 73, 6]))
+    w2 = own["writes"][0]
+    w2_sizes = [len(g["sections"]) for g in w2["value"]["groups"]]
+    a_day = lambda sdu, every_s: round(86_400 / every_s * sdu / 1000)  # noqa: E731
+    out.append(("core 0.108's entry, \"What it costs\", computed from §7.5's Sizes: W2's three groups, 46, 34 and 34 "
+                "bits, take 226 bits of body and a 35-byte payload on a 16-bit run, 37 on a 32-bit one; without the "
+                "three sizes, 202 bits and 32 bytes; a 58-byte SDU every 28.5 s is 176 KB a day, and a 55-byte one "
+                "167 KB; today's three, 17, 16 and 16 B of payload, each in a put 4 B over it and an SDU 19 B over "
+                "that, come to 245 KB only with alert.v1's sent less often than the others (every 427.5 s, half its "
+                "900 s horizon less 5 %, as 28.5 s is of 60 s), a period the entry does not state: 358 KB with all "
+                "three every 28.5 s",
+                [w2_sizes, 46 + sum(14 + 8 + n for n in w2_sizes), oh.size_of(16, w2_sizes), oh.size_of(32, w2_sizes),
+                 6 + (46 + sum(14 + n for n in w2_sizes) + 7) // 8, a_day(58, 28.5), a_day(55, 28.5),
+                 round((2 * 39 * 86_400 / 28.5 + 40 * 86_400 / 427.5) / 1000),
+                 round(118 * 86_400 / 28.5 / 1000)]
+                + missing(log, "W2's three interfaces take a 35-byte payload on a 16-bit run: 226 bits of body after "
+                               "the 6 bytes of CH, run and seq. The design said 32, without the three sizes. At a "
+                               "39-byte put in a 58-byte SDU every 28.5 s, that is 176 KB a day, where the design "
+                               "said 167 KB. Today's three heartbeats, each alone in its SDU, cost 245 KB on the "
+                               "same basis.")
+                + missing(core, "Its body is 46 bits, then 14 bits and a size for each group, over the groups' "
+                                "sections. A size is 8 bits while its group's sections are under 128 bits."),
+                [[46, 34, 34], 226, 35, 37, 32, 176, 167, 245, 358]))
+    # -- zk2py's owner heartbeat beyond owner.json ---------------------------------------
+    import tempfile
+
+    layouts: dict[str, heartbeat.Layout] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, text in lay["contracts"].items():
+            c = load_contract(Path(tmp) / f"{name}.toml", text=text)
+            layouts[name] = heartbeat.layout_of(c.canonical, c.fingerprint)
+    by_entry = {(lo.interface, lo.fingerprint): lo for lo in layouts.values()}
+    cats = {name: cat.read(json.dumps(doc)) for name, doc in own["catalogs"].items()}
+    second = cats["second"]
+    w2_groups = [oh.Group(g["index"], g["tag"], g["sections"]) for g in w2["value"]["groups"]]
+    w2_payload = bytes.fromhex(w2["expect"]["hex"])
+
+    def token(payload: bytes) -> str:
+        try:
+            oh.read(payload)
+            return "read"
+        except oh.Refused as e:
+            return e.token
+
+    # The first reading where no case of owner.json goes: the envelope's
+    # refusals first, and a form that is not 6.
+    out.append(("core 0.108 §7.5, \"The envelope's parse comes first\": no byte and CH alone are the parse's short, "
+                "whatever CH's tag; CH, run and seq with a tag are tag; a delete's CH on a put is the parse's "
+                "sample_kind. A mutation, a frame or a snapshot on an owner heartbeat's key is a form the parse "
+                "accepts of a put, and §7.5 names no refusal for it (F-540): zk2py's own is form, as on a "
+                "heartbeat's key",
+                [token(b""), token(b"\xc5"), token(bytes.fromhex("c5000700")), token(bytes.fromhex("c50007000001")),
+                 token(bytes.fromhex("200007000001")), token(bytes.fromhex("00") + w2_payload[1:]),
+                 token(bytes.fromhex("a0") + w2_payload[1:]), token(bytes.fromhex("e0") + w2_payload[1:])],
+                ["short", "short", "short", "tag", "sample_kind", "form", "form", "form"]))
+    # "MUST NOT choose the layout by a payload's bytes", and F-541: CH's tag
+    # does tell most payloads apart.
+    either = own["either"][0]
+    e_body = bytes.fromhex(either["body"])
+    e_layout = layouts[either["heartbeat"]["layout"]]
+    as_owner = zk2c.write("heartbeat", 16, 7, 1, 0, e_body)
+    as_heartbeat = zk2c.heartbeat(zk2c.InBand(16, 7, 1), e_body, e_layout.tag)
+    zero_tag = [name for name, lo in layouts.items() if lo.tag == 0]
+    out.append(("core 0.108 §7.5, \"Nothing in the bytes tells the two apart\" (F-541): owner.json's either is one "
+                "body, and its two puts differ in CH, 0xc0 for the owner heartbeat and 0xce for the heartbeat "
+                "covering hb.v1, whose tag is 14; the heartbeat's payload read as an owner heartbeat's is refused "
+                "tag; none of layouts.json's six revisions has tag 0, so no payload of the fixtures reads both "
+                "ways; the body alone does, which the rule's own MUST rests on",
+                [as_owner[:1].hex(), as_heartbeat[:1].hex(), e_layout.tag, token(as_owner), token(as_heartbeat),
+                 zero_tag, heartbeat.read(e_layout, e_body) == either["heartbeat"]["expect"]],
+                ["c0", "ce", 14, "read", "tag", [], True]))
+    # The second reading: a refused group leaves the others read, and a
+    # revision the reader does not hold is skipped, never refused.
+    def second_reading(groups: list[oh.Group], held_layouts: Any = None) -> list[Any]:
+        body = oh.read_body(oh.write_body({"s": 1, "ms": 0}, groups))
+        res = oh.read_groups(body, second.id, [second], by_entry if held_layouts is None else held_layouts)
+        return [r.refused or ("skipped" if r.skipped else r.sections) for r in res]
+
+    alert, knob, vital = w2_groups
+    cut = oh.Group(knob.index, knob.tag, knob.bits[:20])        # short: its sections end in a digest
+    beyond = oh.Group(9, 0, "1")                                # unknown_index: 9 of second's 6
+    whole = second_reading([alert, knob, vital])
+    vital_alone = {k: v for k, v in by_entry.items() if k[0] == "vital.v1"}
+    out.append(("core 0.108 §7.5, \"That group alone\": W2's three groups with knob.v1's cut to 20 bits, and with a "
+                "group of index 9 beside them: the refused group is short or unknown_index, and alert.v1's and "
+                "vital.v1's read as in the owner heartbeat without it; a reader that holds vital.v1's revision alone "
+                "skips the two others by their sizes and reads its own (\"one whose revision it does not hold "
+                "among them\": skipped, never refused)",
+                [second_reading([alert, cut, vital]) == [whole[0], "short", whole[2]],
+                 second_reading([alert, vital]) == [whole[0], whole[2]],
+                 second_reading([alert, knob, vital, beyond]) == whole + ["unknown_index"],
+                 second_reading([alert, knob, vital], vital_alone) == ["skipped", "skipped", whole[2]]],
+                [True, True, True, True]))
+    # The writer.
+    def writes(groups: list[oh.Group]) -> Any:
+        try:
+            return [g.index for g in oh.read_body(oh.write_body(None, groups)).groups]
+        except ValueError as e:
+            return str(e).split(":")[0]
+
+    one = lambda i: oh.Group(i, 0, "")  # noqa: E731
+    out.append(("core 0.108 §7.5, the writer's MUST: zk2py writes groups given out of order in ascending order of "
+                "their indices (its own reading: the text has the writer write them so, and names no refusal), and "
+                "refuses none, sixteen, one index twice, an index of 1,024 and a tag of 16; a group of no bit is "
+                "written with a size of 0 and read back",
+                [writes([one(4), one(0), one(2)]), writes([]), writes([one(i) for i in range(16)]),
+                 writes([one(3), one(3)]), writes([one(1024)]), writes([oh.Group(1, 16, "")]),
+                 oh.write_body(None, [one(5)]).hex()],
+                [[0, 2, 4], "0 groups", "16 groups", "index 3 twice", "index 1024 does not fit 10 bits",
+                 "tag 16 does not fit 4 bits", "ffffffffffc4050000"]))
+    # The round trip, beyond the fixture: every truncation and every one-bit
+    # change of W2's payload, and random bodies.
+    tokens = set(oh.TOKENS) | {"short", "form", "sample_kind", "key_stamp"}
+    seen: dict[str, int] = {}
+    stray: list[str] = []
+
+    def walk(payload: bytes) -> None:
+        try:
+            put = oh.read(payload)
+        except oh.Refused as e:
+            seen[e.token] = seen.get(e.token, 0) + 1
+            if e.token not in tokens:
+                stray.append(f"{payload.hex()}: {e.token}")
+            return
+        seen["read"] = seen.get("read", 0) + 1
+        if oh.write_back(put) != payload:
+            stray.append(f"{payload.hex()}: not written back")
+        for g in put.body.groups:      # the second reading never raises, whatever the bits
+            r = oh.read_group(g, second.id, [second], by_entry)
+            if r.refused is not None and r.refused not in oh.GROUP_TOKENS:
+                stray.append(f"{payload.hex()}: group {g.index}: {r.refused}")
+            if r.sections is not None and r.entry is not None \
+                    and heartbeat.sections_bits(by_entry[r.entry], r.sections) != g.bits:
+                stray.append(f"{payload.hex()}: group {g.index}: sections not written back")
+
+    for n in range(len(w2_payload)):
+        walk(w2_payload[:n])
+    for i in range(len(w2_payload) * 8):
+        q = bytearray(w2_payload)
+        q[i >> 3] ^= 0x80 >> (i & 7)
+        walk(bytes(q))
+    rng = random.Random(112)
+    for _ in range(3000):
+        walk(b"\xc0\x00\x07\x00\x00\x01" + bytes(rng.randrange(256) for _ in range(rng.randrange(0, 24))))
+    for _ in range(300):
+        gs = [oh.Group(i, rng.randrange(16), "".join(rng.choice("01") for _ in range(rng.choice((0, 1, 7, 34, 127, 128, 300)))))
+              for i in sorted(rng.sample(range(1024), rng.randrange(1, 16)))]
+        payload = oh.write(zk2c.InBand(rng.choice((16, 32)), 7, rng.randrange(1 << 24)),
+                           rng.choice((None, {"s": rng.randrange(1 << 32), "ms": rng.randrange(1000)})), gs)
+        put = oh.read(payload)
+        if list(put.body.groups) != gs or oh.write_back(put) != payload \
+                or len(payload) != oh.size_of(put.stamp.width, [g.size for g in gs]):
+            stray.append(f"{payload.hex()}: a written owner heartbeat not read back")
+    out.append(("core 0.108 §7.5, the round trip beyond owner.json: every truncation and every one-bit change of W2's "
+                "payload, 3,000 random bodies and 300 random owner heartbeats written: each refused by a token of "
+                "the text's (or the parse's), or read and written back to the same bytes, each group's second "
+                "reading a token of its list or sections written back to its bits, and each written one's size "
+                "§7.5's Sizes; every refusal of the first reading is met at least once",
+                [stray, sorted(t for t in oh.TOKENS if t not in seen)], [[], []]))
+    # F-542 and F-543: what the later text holds.
+    fresh_keys = re.findall(r"`zk2/<system>/<service>/freshness\.v2/[^`]*`", fv2)
+    fv = version_of("profiles/freshness/v2.md")
+    out.append(("F-542 (open): core 0.108 §7.5 says freshness.v2 §3 names both keys, a heartbeat's and an owner "
+                "heartbeat's, and its entry that freshness.v2 0.9 adopts the form; on this main freshness.v2 is 0.8, "
+                "its §3 names one key, and its changelog holds no 0.9 entry",
+                missing(core, "[`freshness.v2`](profiles/freshness/v2.md) §3 names both keys.",
+                        "- **Who sends one**, on which key, and what each group covers, is `freshness.v2`'s to say.")
+                + missing(log, "`freshness.v2` 0.9 adopts it")
+                + [fv, sorted(set(fresh_keys)), "owner heartbeat" in fv2,
+                   entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.9", "")],
+                (["0.8", ["`zk2/<system>/<service>/freshness.v2/stream/heartbeat/<iface>`"], False,
+                  ["profiles/freshness/CHANGELOG.md has no `v2.md` 0.9 entry saying ''"]]
+                 if fv == "0.8" else [fv, sorted(set(fresh_keys)), True, []])))
+    out.append(("F-543 (open): core 0.108 §7.5's reader \"bound to one interface holds that interface's revision "
+                "alone\", and finds its group only through the catalog its owner names, which §8.6 provisions to "
+                "owners and to the far side of a constrained face; a reader that holds vital.v1's revision and no "
+                "catalog reads every group of W2's unknown_catalog",
+                missing(core, "- **Why a size.** A reader bound to one interface holds that interface's revision "
+                              "alone.",
+                        "A **catalog** is a file that a deployment provisions to its owners, and to the far side of "
+                        "a constrained face (§8.5).",
+                        "A catalog is never fetched, and no participant serves one on the bus")
+                + [[r.refused for r in oh.read_groups(oh.read(w2_payload).body, second.id, [], vital_alone)]],
+                [["unknown_catalog"] * 3]))
+    # -- link.v2 0.18 -------------------------------------------------------------------
+    out.append(("link.v2 0.18 §2.19, §2.18 and Appendix B as the text states them, and the sentences they replaced "
+                "gone",
+                missing(l2, "**A `null`** reads as zenoh 1.10.1 reads it.",
+                        "- **Left out**, where zenoh fills an optional value with its default. There are four such "
+                        "places: `timestamping/enabled`, a mode of it, the `mode`, and `routing/interests/timeout`. "
+                        "A tool reads each at the binding's default.",
+                        "- **No value zenoh runs**, at each of the seven other keys. zenoh refuses the file at load. "
+                        "It is `transport_differs`, as a string is.",
+                        "A string, a fraction or a `null` is no value zenoh runs. It is `transport_differs`, and this "
+                        "check skips it.",
+                        "- **Unfilled, each part fails its own way.** zenoh 1.10.1 opens no dictionary it cannot "
+                        "read. So the far end does not start from the block as written.",
+                        "With the password removed it presents no user at all: zenoh loads no user without one.",
+                        "The near router refuses its link either way (§2.5). A far router then runs attached to "
+                        "nothing.",
+                        "Their plans are `plan.json`'s cases 14 to 18, counted from 0: RF, LoRa at SF7, SF9 and "
+                        "SF12, then SBD.")
+                + [q for q in ("A `null` reads as left out: as the value, at a mode, or as the `mode`.",
+                               "so the far end runs none of it unfilled.",
+                               "Their plans are `plan.json`'s last five cases.") if q in l2], []))
+    conv_text = _scenarios_v2_policy(spec)
+    conv = link_v2.parse_policy(conv_text)[0]
+    eight = {k: path for k, (path, _, _) in link_v2.TRANSPORT.items()}
+    as_run = link_v2.read_config(link_v2.block(conv)) if conv is not None else {}
+
+    def null_at(key: str, peer: bool = False) -> list[str]:
+        nulled = {**as_run, eight[key]: None}
+        res = link_v2.check_transport(conv_text, as_run, nulled) if peer else link_v2.check_transport(conv_text, nulled)
+        return [f["code"] + " " + f["at"] for f in res["findings"]]
+
+    policy_interests = (conv.transport or {}).get("interests_timeout_ms") if conv is not None else None
+    out.append(("link.v2 0.18 §2.19, a null at each of the eight keys of a router that otherwise runs zk2py's block "
+                "for scenarios-v2.md's policy (F-532, resolved): at routing/interests/timeout it is left out, read "
+                "at the binding's 10,000, the policy's, and no finding; at each of the seven others "
+                "transport_differs at the policy's key, and no wait_under_lease for a null lease or a null "
+                "wait_before_close; a far end's null lease or keep_alive is not the router's, peer_differs (zk2py's "
+                "reading of \"as a string is\" for the far end, which §2.19 reads for the two alone), and its null "
+                "interests timeout nothing",
+                [policy_interests, {k: null_at(k) for k in eight},
+                 {k: null_at(k, peer=True) for k in ("lease_ms", "keep_alive", "interests_timeout_ms")}],
+                [10_000, {k: ([] if k == "interests_timeout_ms" else [f"transport_differs transport.{k}"])
+                          for k in eight},
+                 {"lease_ms": ["peer_differs transport.lease_ms"], "keep_alive": ["peer_differs transport.keep_alive"],
+                  "interests_timeout_ms": []}]))
+    v2 = spec / "profiles" / "link" / "conformance" / "v2"
+    plan_doc, tr_doc = _load_json(v2 / "plan.json"), _load_json(v2 / "transport.json")
+    plan, tr = plan_doc["cases"], tr_doc["cases"]
+    paths = list(eight.values())
+    with_null = {i: [p for p in paths if c["router"].get(p, 0) is None] for i, c in enumerate(tr)
+                 if any(c["router"].get(p, 0) is None for p in paths)}
+
+    def draws(c: dict[str, Any], code: str = "keep_alive_not_suppressed") -> bool:
+        return any(f["code"] == code for fp in c["expect"].get("faces", []) for f in fp["findings"])
+
+    def lease_of(c: dict[str, Any]) -> int | None:
+        mm = re.search(r"lease_ms\s*=\s*(\d+)", c["policy"])
+        return int(mm.group(1)) if mm else None
+
+    out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases, v2/transport.json "
+                "27; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
+                "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
+                "where case 5 at 240,000 ms does: §2.16's inequality pinned on both sides; transport.json's cases "
+                "24 to 26 state a null among the eight keys, the lease and twice routing/interests/timeout, drawing "
+                "transport_differs at the lease, at the interests timeout under a policy at 40,000 ms, and nothing",
+                [len(plan), len(tr), "keyframe_s = 675" in plan[44]["policy"], "refused" in plan[44]["expect"],
+                 draws(plan[44]), draws(plan[44], "frame_over_interval"), lease_of(plan[45]), draws(plan[45]),
+                 lease_of(plan[5]), draws(plan[5]), with_null,
+                 [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
+                + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
+                [46, 27, True, False, False, True, 240_001, False, 240_000, True,
+                 {24: ["transport/link/tx/lease"], 25: ["routing/interests/timeout"],
+                  26: ["routing/interests/timeout"]},
+                 [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
+    desc = " ".join(plan_doc["description"].split())
+    modem = [i for i, c in enumerate(plan) if "zm-1.10.2-r1" in c["policy"] and "modem.v3" in c["policy"]]
+    order = [re.search(r"zenoh-modem's (\w+(?: router at)? ?\w*)", plan[i]["note"]).group(1) for i in modem]
+    out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
+                "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
+                "then SBD, in that order, of 46",
+                ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
+                 [("RF" in o, "SF7" in o, "SF9" in o, "SF12" in o, "SBD" in o).index(True) for o in order], len(plan)],
+                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 46]))
+    zm = repo / "examples" / "zk2" / "zenoh-modem"
+    zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    # link.md's notes are block quotes: their lines' "> " is no word of theirs.
+    linkmd, mig, readme = zflat("link.md").replace(" > ", " "), zflat("MIGRATION.md"), zflat("README.md")
+    rows_warned = sum(1 for ln in (zm / "link.md").read_text(encoding="utf-8").splitlines()
+                      if ln.startswith("> | [`zenohd-") and "`keep_alive_not_suppressed`" in ln)
+    gap = link_v2.keep_alives_a_gap
+    per_day = {"RF": (86_400 // 60, gap(60_000, 240_000, 4)), "SF7": (86_400 // 60, gap(60_000, 120_000, 4)),
+               "SF9": (86_400 // 120, gap(120_000, 480_000, 4)), "SF12": (86_400 // 900, gap(900_000, 3_600_000, 4)),
+               "SBD": (86_400 // 1800, gap(1_800_000, 3_600_000, 2))}
+    out.append(("F-533, resolved (link.v2 0.18): zenoh-modem's mapping prices its faces' keep-alives by §2.16 as 0.17 "
+                "states it; computed from the rule, none to 1,440 a day on RF, 1,440 to 2,880 at SF7, none to 720 "
+                "at SF9, 96 at SF12 and 48 on SBD, as link.md, README.md and MIGRATION.md print them; the table "
+                "lists keep_alive_not_suppressed for every face, as cases 14 to 18 draw it; the sums at the most, "
+                "376 to 450 s, 534 to 653 s and 785 to 927 s, 96 to 144 messages; MIGRATION.md §6 holds neither "
+                "#1107 nor #1108; the sentences the finding quoted are gone",
+                [{k: (n * lo, n * hi) for k, (n, (lo, hi)) in per_day.items()},
+                 [302 + 74, 302 + 148, 534 + 119, 785 + 142, 48 + 48, 48 + 48 + 48],
+                 [i for i in (14, 15, 16, 17, 18) if draws(plan[i])],
+                 rows_warned]
+                + missing(linkmd, "at most 1,440 a day on RF, 720 at SF9 (119 s of air), 96 at SF12 (142 s) and 48 on "
+                                  "SBD, each a paid message.",
+                          "1,440 to 2,880 a day, 74 s to 148 s of air.",
+                          "So LoRa spends 376 s to 450 s, 534 s to 653 s and 785 s to 927 s, and SBD 96 to 144 "
+                          "messages a day.")
+                + missing(readme, "none to 720 a day, at most 119 s", "96 messages a day: 96 to 144")
+                + [q for q in ("so data replaces every keep-alive the uplink would send.",
+                               "so the uplink pays one keep-alive between two frames, 74 s of air a day")
+                   if q in linkmd]
+                + [q for q in ("the frames replace every uplink keep-alive.", "| #1107 |", "| #1108 |") if q in mig],
+                [{"RF": (0, 1440), "SF7": (1440, 2880), "SF9": (0, 720), "SF12": (0, 96), "SBD": (0, 48)},
+                 [376, 450, 653, 927, 96, 144], [14, 15, 16, 17, 18], 5]))
+    return out
+
+
 def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """link.v2 0.15 (#1107), 0.16 and 0.17 (#1108), and core 0.106 (round 109
     answered), read cold (#609, round 110): each version and its entry, the
@@ -6312,8 +6707,10 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "name. Then the block names it, as `transport.auth.usrpwd.user`. Its `password` and "
                         "`dictionary_file` are placeholders, since both are the deployment's (§2.5).",
                         "A device's session presents its own principal's user.",
-                        "A `null` reads as left out: as the value, at a mode, or as the `mode`. zenoh 1.10.1 fills "
-                        "each such optional value with its default.",
+                        # 0.18 (round 112) rewrote 0.15's "A `null` reads as left out: as the value,
+                        # at a mode, or as the `mode`": the three places are four now.
+                        "There are four such places: `timestamping/enabled`, a mode of it, the `mode`, and "
+                        "`routing/interests/timeout`.",
                         "| Can the near router bind the far principal by its user name? | The far end opens the face "
                         "(§2.5). | `near_opens_user`, an error. |"), []))
     # 0.15's evidence, counted
@@ -6330,8 +6727,8 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("link.v2 0.15's evidence as zk2py counts it: v2/lints.json 75 cases, six with opens (69 to 74, from "
                 "0), three of them drawing bad_value at opens and the link.v1 one unknown_field; v2/plan.json gained "
                 "three with users (41 to 43), the first refused near_opens_user alone and the other two planned; "
-                "v2/transport.json 24, three with a null (21 to 23), two warning face_timestamping; scenarios-v2.md "
-                "gains §4",
+                "v2/transport.json 24 then, 27 since 0.18 (round 112), three with a null at mode or "
+                "timestamping/enabled (21 to 23), two warning face_timestamping; scenarios-v2.md gains §4",
                 [len(lints), opens_l, [[f["code"] for f in lints[i]["expect"]] for i in opens_l],
                  with_users, [sorted(plan[i]["expect"]) if "refused" not in plan[i]["expect"]
                               else [f["code"] + " " + f["at"] for f in plan[i]["expect"]["refused"]]
@@ -6344,7 +6741,7 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                 ["unknown_field"]],
                  [41, 42, 43], [["near_opens_user opens"], ["binding", "catalog", "faces", "transport"],
                                 ["binding", "catalog", "faces", "transport"]],
-                 24, [21, 22, 23], [["face_timestamping"], ["face_timestamping"], []]]))
+                 27, [21, 22, 23], [["face_timestamping"], ["face_timestamping"], []]]))
     # zk2py's far block over §4's policy, offline (§4 Expected 1 and 4)
     from .link_v2_live import LATE_MS, s4_policy
 
@@ -6461,94 +6858,18 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
                   "RF a gap, and a day": [(0, 1), 0, 1440, 23],
                   "SF12 at 3,600 s": [900_000, 192, 0.02, (0, 1)],
                   "SF12 at 1,080 s": [270_000, (3, 3), 288, 3], "SF9 and SBD": [120_000, 1_800_000]}]))
-    # 0.17's evidence, counted: who draws the warning, and case 44 (F-529)
+    # 0.17's evidence, counted: who draws the warning. Case 44 (F-529) and
+    # F-530 to F-534 are answered by link.v2 0.18: :func:`_round112_readings`.
     def draws(c: dict[str, Any]) -> bool:
         return any(f["code"] == "keep_alive_not_suppressed" for fp in c["expect"].get("faces", [])
                    for f in fp["findings"])
 
-    drawn = [i for i, c in enumerate(plan) if draws(c)]
-    c44 = plan[44] if len(plan) > 44 else {"policy": "", "expect": {}, "note": "", "implements": {}}
-    ifs44 = _link_interfaces(c44) if c44["policy"] else {}
-
-    def planned44(text: str) -> Any:
-        p = link_v2.plan(text, c44["implements"], ifs44, c44.get("catalog"))
-        if "refused" in p:
-            return [f["code"] for f in p["refused"]]
-        return any(f["code"] == "keep_alive_not_suppressed" for fp in p["faces"] for f in fp["findings"])
-
-    reach = c44["policy"].replace("every_s = 45, keyframe_s = 900", "every_s = 45")
-    at_i = c44["policy"].replace("every_s = 45, keyframe_s = 900", "every_s = 60")
-    out.append(("link.v2 0.17's evidence as zk2py counts it: v2/plan.json 45 cases; keep_alive_not_suppressed is "
-                "drawn by 6, 15 and 19, above their intervals as before, and now by the eleven the entry names, "
-                "each at its interval. F-529: case 44, the entry's case of a cadence below the interval, expects a "
-                "refusal, keyframe_unreachable (probe.v1's frames/link reaches a full record every 15 frames, 675 "
-                "s at 45 s, under the 900 s asked), so it shows no plan, and nothing of the warning; zk2py plans "
-                "its face with the keyframe_s left out and draws none, and at 60 s draws it",
-                [len(plan), drawn, c44["expect"].get("refused", [{}])[0].get("code"),
-                 "the plan warns no `keep_alive_not_suppressed`" in c44["note"], reach != c44["policy"],
-                 planned44(c44["policy"]), planned44(reach), planned44(at_i)]
-                + missing(log, "`v2/plan.json` gains case 44** (from 0): case 5's face with its frame every 45 s, "
-                               "below the 60-s interval, which draws no `keep_alive_not_suppressed`.",
-                          "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
-                [45, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23], "keyframe_unreachable", True, True,
-                 ["keyframe_unreachable"], False, True]))
-    # F-530 to F-534, each text as its finding quotes it, so an answer moves it
-    desc = " ".join(plan_doc["description"].split())
-    out.append(("F-530 (open): v2/plan.json's description states every optional member of a case but users, which "
-                "three cases carry and link.v2 0.15's entry alone explains",
-                ["`users`" in desc, "`narrow`" in desc and "`catalog`" in desc, with_users]
-                + missing(log, "A case may give `users`, the principals the deployment binds by a user name."),
-                [False, True, [41, 42, 43]]))
-    out.append(("F-531 (open): link.v2 §2.18 says the far end runs none of the block unfilled, since zenoh loads no "
-                "user without a password and opens no dictionary it cannot read; measured (link_v2_live), a "
-                "zenoh 1.10.1 router starts with a usrpwd user and no password, or the placeholder one, once its "
-                "dictionary is filled in, and attaches to nothing",
-                missing(l2, "zenoh loads no user without a password, and opens no dictionary it cannot read, so the "
-                            "far end runs none of it unfilled."), []))
-    conv = link_v2.parse_policy(_scenarios_v2_policy(spec))[0]
-    null_timeout = [f["code"] + " " + f["at"] for f in link_v2.check_transport(
-        _scenarios_v2_policy(spec), {**link_v2.read_config(link_v2.block(conv)), "routing/interests/timeout": None}
-    )["findings"]] if conv is not None else None
-    eight = [p for p, _, _ in link_v2.TRANSPORT.values()]
-    out.append(("F-532 (open): link.v2 §2.19 reads a null as left out in three places, timestamping/enabled, a mode "
-                "of it and mode, for zenoh's reason that it fills an optional value with its default; "
-                "routing/interests/timeout is a fourth value zenoh 1.10.1 loads as null (measured on zenoh-python, "
-                "the other seven keys refused), which the text does not name: zk2py reads it as stated, "
-                "transport_differs, as the reference's check face does (observed); no v2/transport.json case "
-                "states a null among the eight keys",
-                missing(l2, "A `null` reads as left out: as the value, at a mode, or as the `mode`. zenoh 1.10.1 "
-                            "fills each such optional value with its default.")
-                + [null_timeout, [i for i, c in enumerate(tr) for r in (c["router"], c.get("peer") or {})
-                                  if any(r.get(p, 0) is None for p in eight)]],
-                [["transport_differs transport.interests_timeout_ms"], []]))
-    zm = repo / "examples" / "zk2" / "zenoh-modem"
-    zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
-    linkmd, mig, sf7face = zflat("link.md"), zflat("MIGRATION.md"), zflat("faces/zenohd-lora0-sf7.face.toml")
-    out.append(("F-533 (open): zenoh-modem's mapping still prices its faces' keep-alives by the rule link.v2 0.17 "
-                "replaced, and lists warnings its plans no longer stop at: link.md's \"A batch sent resets its "
-                "end's keep-alive interval … so data replaces every keep-alive the uplink would send\", its table's "
-                "warnings for RF, SF9, SF12 and SBD without keep_alive_not_suppressed, SF7's one keep-alive "
-                "between two frames, 1,440 a day and 74 s; MIGRATION.md §3.1's warnings and §3.3, and §6's rows "
-                "that hold #1107 and #1108 open beside its own §3.2 and §3.4; plan.json's cases 14, 16, 17 and 18, "
-                "the faces' plans, draw the warning, and Appendix B measures 2,160 a day and 111 s",
-                missing(linkmd, "**Keep-alives.** A batch sent resets its end's keep-alive interval.",
-                        "so data > replaces every keep-alive the uplink would send.",
-                        "so the uplink pays one keep-alive between two frames, 74 s of air a day",
-                        "| 240 s / 4, 240 s | 10 s | 222 | `frames/fast`, 60 s | 120 | `frame_unlisted` |")
-                + missing(sf7face, "the uplink pays one keep-alive between two # frames, 1,440 a day and 74 s of air")
-                + missing(mig, "on 3.3, `keep_alive_not_suppressed` at SF7, and `frame_over_batch` at SF9",
-                          "At four frame intervals a lease, the frames replace every uplink keep-alive.",
-                          "neither the policy nor `--far-config`'s block says so yet | #1107 |",
-                          "2,160 a day, where §2.16 counts 1,440 | Budget SF7's uplink at the measured count | "
-                          "#1108 |",
-                          "Since `link.v2` 0.15 (#1107) its `transport` also names the far principal's usrpwd "
-                          "`user`")
-                + [[i for i in (14, 16, 17, 18) if draws(plan[i])]], [[14, 16, 17, 18]]))
-    modem = [i for i, c in enumerate(plan) if "zm-1.10.2-r1" in c["policy"] and "modem.v3" in c["policy"]]
-    out.append(("F-534 (open): link.v2 Appendix B says zenoh-modem's faces' plans are plan.json's last five cases; "
-                "they are cases 14 to 18 of 45",
-                missing(l2, "Their plans are `plan.json`'s last five cases.") + [modem, len(plan)],
-                [[14, 15, 16, 17, 18], 45]))
+    out.append(("link.v2 0.17's evidence as zk2py counts it: keep_alive_not_suppressed is drawn by 6, 15 and 19, "
+                "above their intervals as before, and by the eleven the entry names, each at its interval; "
+                "v2/plan.json held 45 cases then, 46 since 0.18",
+                [len(plan), [i for i, c in enumerate(plan) if draws(c)]]
+                + missing(log, "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
+                [46, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
     # review-bot's note 5 on #1121: stamps() reads a shape the text does not
     # name as stamping. No spec case hits it; zk2py's own cases pin it.
     shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731
@@ -7438,12 +7759,13 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("core 0.96's entry: RULES.md lists 246 rules, 0.95's 239, the core's four and observer 0.26's three; "
                 "250 since core 0.97's four, and core 0.98's still; 249 since core 0.99 (round 104); 262 since core "
                 "0.100's 13 (round 105); 267 since observer 0.29 (round 106); 273 since core 0.102's one and 0.103's "
-                "five (round 107); 274 since core 0.104's one (round 108); 277 since core 0.107's three (round 111)",
+                "five (round 107); 274 since core 0.104's one (round 108); 277 since core 0.107's three (round 111); 283 "
+                "since core 0.108's six (round 112)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
                         "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
                         "lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more than 0.99's")
                 + missing(flat("observer-CHANGELOG.md"), "**`RULES.md`** counts 267 rules, 82 of them the observer's.")
-                + [int(once.group(1)) if once else None], [277]))
+                + [int(once.group(1)) if once else None], [283]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
@@ -12402,6 +12724,8 @@ def family_heartbeat(root: Path) -> list[Result]:
                     out.append(_check(f"{name}: writes back", heartbeat.write(lo, got).hex(), c["hex"]))
         elif path.name == "times.json":
             out += _heartbeat_times(data, layouts)
+        elif path.name == "owner.json":
+            out += _heartbeat_owner(data, layouts)
         elif path.name == "digests.json":
             for i, c in enumerate(data["cases"]):
                 ms = [(m["key"], m["run_width"], m["run"], m["seq"]) for m in c["members"]]
@@ -12410,6 +12734,93 @@ def family_heartbeat(root: Path) -> list[Result]:
                 out.append(_check(f"heartbeat: digest {i}: {c['note']}", got, c["expect"]))
         else:
             out.append((f"heartbeat/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+    return out
+
+
+def _owner_value(put: Any) -> dict[str, Any]:
+    """An owner heartbeat read, as ``owner.json`` writes a value."""
+    return {"run_width": put.stamp.width, "run": put.stamp.run, "seq": put.stamp.seq, "time": put.body.time,
+            "groups": [{"index": g.index, "tag": g.tag, "sections": g.bits} for g in put.body.groups]}
+
+
+def _heartbeat_owner(data: dict[str, Any], layouts: dict[str, Any]) -> list[Result]:
+    """``heartbeat/owner.json`` (core §7.5's owner heartbeat, 0.108, #1110),
+    through :mod:`zk2py.owner_heartbeat`. ``writes``: a value -> the body's
+    bits, the pad, the put's payload and its count of bytes, each read back
+    to its value. ``reads``: a payload -> the value, written back to the same
+    bytes, or the first refusal of the first reading. ``groups``: the catalog
+    the owner names, the catalogs the reader holds and one group -> the
+    layout its index names, whether its tag is that revision's and its
+    sections, written back to the group's bits, or the refusal of that group
+    alone. ``either``: one body read as an owner heartbeat's and as a
+    heartbeat's."""
+    import json
+
+    from . import catalog as cat, heartbeat, owner_heartbeat as oh, zk2c
+
+    out: list[Result] = []
+    catalogs = {name: cat.read(json.dumps(doc)) for name, doc in data["catalogs"].items()}
+    by_entry = {(lo.interface, lo.fingerprint): lo for lo in layouts.values()}
+    name_of = {(lo.interface, lo.fingerprint): name for name, lo in layouts.items()}
+    for i, c in enumerate(data["writes"]):
+        v = c["value"]
+        groups = [oh.Group(g["index"], g["tag"], g["sections"]) for g in v["groups"]]
+        name = f"heartbeat: owner write {i}: {c['note']}"
+        try:
+            bits = oh.body_bits(v["time"], groups)
+            payload = oh.write(zk2c.InBand(v["run_width"], v["run"], v["seq"]), v["time"], groups)
+            got: Any = {"bits": bits, "pad": -len(bits) % 8, "hex": payload.hex(), "bytes": len(payload)}
+        except ValueError as e:
+            got = {"refused": str(e)}
+        out.append(_check(name, got, c["expect"]))
+        if "refused" not in got:
+            try:
+                back: Any = _owner_value(oh.read(payload))
+            except oh.Refused as e:
+                back = {"refused": e.token}
+            out.append(_check(f"{name}: read back", back, v))
+    for i, c in enumerate(data["reads"]):
+        raw = bytes.fromhex(c["hex"])
+        name = f"heartbeat: owner read {i} {c['hex'] or '(empty)'}: {c['note']}"
+        try:
+            put = oh.read(raw)
+            got = _owner_value(put)
+        except oh.Refused as e:
+            put, got = None, {"refused": e.token}
+        out.append(_check(name, got, c["expect"]))
+        if put is not None:
+            out.append(_check(f"{name}: writes back", oh.write_back(put).hex(), c["hex"]))
+    for i, c in enumerate(data["groups"]):
+        g = oh.Group(c["group"]["index"], c["group"]["tag"], c["group"]["sections"])
+        named = None if c["names"] is None else catalogs[c["names"]].id
+        r = oh.read_group(g, named, [catalogs[h] for h in c["holds"]], by_entry)
+        name = f"heartbeat: owner group {i}: {c['note']}"
+        if r.refused is not None:
+            got = {"refused": r.refused}
+        elif r.skipped:
+            got = {"skipped": list(r.entry or ())}
+        else:
+            assert r.entry is not None
+            got = {"layout": name_of[r.entry], "tag": r.tag_matches, "sections": r.sections}
+        out.append(_check(name, got, c["expect"]))
+        if r.sections is not None and r.entry is not None:
+            out.append(_check(f"{name}: writes back in the form read",
+                              heartbeat.sections_bits(by_entry[r.entry], r.sections), g.bits))
+    for i, c in enumerate(data["either"]):
+        raw = bytes.fromhex(c["body"])
+        name = f"heartbeat: owner either {i}: {c['note']}"
+        try:
+            body = oh.read_body(raw)
+            got = {"time": body.time, "groups": [{"index": g.index, "tag": g.tag, "sections": g.bits}
+                                                 for g in body.groups]}
+        except oh.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(f"{name}: as an owner heartbeat's", got, c["owner"]))
+        try:
+            got = heartbeat.read(layouts[c["heartbeat"]["layout"]], raw)
+        except heartbeat.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(f"{name}: as a heartbeat's", got, c["heartbeat"]["expect"]))
     return out
 
 
