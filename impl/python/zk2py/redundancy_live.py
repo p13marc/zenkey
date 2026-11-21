@@ -900,6 +900,32 @@ def _start_peer(owner: Owner, lease_ms: int | None = None) -> None:
 # -- §2.10 a consumer following the incumbent ------------------------------------------
 
 
+def seed_of(replies: Any, key: str, accepts: Any) -> tuple[str, bytes | None, list[str | None], list[Any]]:
+    """What a follower's seed makes of every reply its GET brought on
+    ``key`` (:attr:`zk2py.live.StateReading.every`), with no session:
+    ``(result, value, ids, discarded)``.
+
+    Each reply is a :class:`zk2py.live.StateReply`. Its ``stamp_id`` and
+    ``stamp_ns`` are fields of the dataclass, None on a reply that carries
+    no Zenoh timestamp (an unstamped put's, a snapshot's entry), so reading
+    them never raises (review-bot on #1143, 1). Such a reply is one "it
+    cannot attribute" (§2.10): ``accepts(None)`` is False, and it is
+    discarded. ``result`` is ``accepted`` where a reply is the followed
+    incumbent's, its latest by stamp where it answered twice, ``discarded``
+    where replies arrived and none was, ``silent`` for none."""
+    mine: list[Any] = []
+    ids: list[str | None] = []
+    discarded: list[Any] = []
+    for r in replies:
+        if r.key != key or r.deleted:
+            continue
+        ids.append(r.stamp_id)
+        (mine if accepts(r.stamp_id) else discarded).append(r)
+    if mine:
+        return "accepted", max(mine, key=lambda r: r.stamp_ns or 0).payload, ids, discarded
+    return ("discarded" if ids else "silent"), None, ids, discarded
+
+
 class Follower:
     """§2.10: "accept its state, stream and event samples only from the
     incumbent: a sample whose stamp's id is the incumbent's meta.zid,
@@ -1001,25 +1027,14 @@ class Follower:
         ``Latest`` reading 0.11 replaced: where the merge kept the higher's,
         the lower's reply, arrived, was never looked at."""
         st = live.get_state(self.session, self.key, self.timeout)
-        mine: list[Any] = []
-        got = False
         with self.lock:
-            self.seed_ids = []
-            for r in st.every:
-                if r.key != self.key or r.deleted:
-                    continue
-                got = True
-                self.seed_ids.append(r.stamp_id)
-                if self._accepts(r.stamp_id):
-                    mine.append(r)
-                else:
-                    self.discarded.append((time.monotonic(), r.payload, r.stamp_id))
-            if mine:
-                self.value = max(mine, key=lambda r: r.stamp_ns or 0).payload
-                self.seed_result = "accepted"
-            else:
-                self.seed_result = "discarded" if got else "silent"
-            return self.seed_result
+            result, value, self.seed_ids, discarded = seed_of(st.every, self.key, self._accepts)
+            now = time.monotonic()
+            self.discarded += [(now, r.payload, r.stamp_id) for r in discarded]
+            if result == "accepted":
+                self.value = value
+            self.seed_result = result
+            return result
 
     def close(self) -> None:
         for e in self._entities:

@@ -570,7 +570,7 @@ class Subscriber:
         try:
             # core §7.5 (0.109), "Another form on a heartbeat's key": the
             # gate of both readings, a put with no envelope refused too
-            env = _hb.put_of(sample.payload.to_bytes(), enveloped=str(sample.encoding) == zk2c.ENCODING)
+            env = _hb.put_of(sample.payload.to_bytes(), enveloped=zk2c.envelope_encoding(sample.encoding))
         except _hb.Refused as e:
             answer: dict[str, Any] = {"refused": e.token}
             env = None

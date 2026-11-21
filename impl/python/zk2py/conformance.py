@@ -6679,6 +6679,66 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "- **No value zenoh runs**, at each of the seven other keys."),
                 [[], ["transport_differs transport.lease_ms"], ["transport_differs transport.lease_ms"],
                  ["face_timestamping timestamping"], []]))
+    # -- review-bot's notes on #1143 ------------------------------------------------------
+    import dataclasses
+
+    from . import live, redundancy_live as rl
+
+    def reply(payload: bytes, stamp: str | None, ns: int | None = None, key: str = "k", deleted: bool = False) -> Any:
+        """A reply as get_state builds one; with no stamp, by its shortest
+        constructor, as a snapshot's entry and an unstamped put are."""
+        if stamp is None:
+            return live.StateReply(key, deleted, payload, zk2c.ENCODING, None, None)
+        return live.StateReply(key, deleted, payload, zk2c.ENCODING, stamp, stamp.split("/", 1)[1], ns)
+
+    follows_a = lambda sid: sid == "a1"  # noqa: E731
+
+    def seeded(*replies: Any) -> tuple[str, bytes | None, list[str | None], int]:
+        result, value, ids, discarded = rl.seed_of(list(replies), "k", follows_a)
+        return result, value, ids, len(discarded)
+
+    bare = reply(b"u", None)
+    out.append(("redundancy.v1 0.11 §2.10, the follower's seed with no session (review-bot on #1143, 1): a StateReply "
+                "holds stamp_id and stamp_ns as fields, None on a reply with no Zenoh timestamp, so the seed reads "
+                "both of any reply; an unstamped reply alone is one it cannot attribute, discarded, no value; beside "
+                "A's it is discarded and A's taken; A's and B's in either order, A's; A's twice, its later stamp; "
+                "B's alone, discarded and no value; none, a delete or another key's, silent",
+                [{"stamp_id", "stamp_ns"} <= {f.name for f in dataclasses.fields(live.StateReply)},
+                 (bare.stamp_id, bare.stamp_ns), seeded(bare), seeded(bare, reply(b"A", "5/a1", 5)),
+                 seeded(reply(b"A", "5/a1", 5), reply(b"B", "9/b2", 9)),
+                 seeded(reply(b"B", "9/b2", 9), reply(b"A", "5/a1", 5)),
+                 seeded(reply(b"A1", "5/a1", 5), reply(b"A2", "7/a1", 7))[:2], seeded(reply(b"B", "9/b2", 9)),
+                 seeded(), seeded(reply(b"A", "5/a1", 5, deleted=True), reply(b"A", "5/a1", 5, key="other"))],
+                [True, (None, None), ("discarded", None, [None], 1), ("accepted", b"A", [None, "a1"], 1),
+                 ("accepted", b"A", ["a1", "b2"], 1), ("accepted", b"A", ["b2", "a1"], 1), ("accepted", b"A2"),
+                 ("discarded", None, ["b2"], 1), ("silent", None, [], 0), ("silent", None, [], 0)]))
+    carry = _load_json(root / "envelope" / "carries.json")
+    hb_key = "zk2/lab/svc/freshness.v2/stream/heartbeat/hb.v1"
+
+    def gate(encoding: str) -> str:
+        try:
+            heartbeat.put_of(as_beat, "stream", zk2c.envelope_encoding(encoding))
+            return "form 6"
+        except heartbeat.Refused as e:
+            return e.token
+
+    out.append(("core §7.2 and envelope/carries.json, an envelope's Encoding (review-bot on #1143, 3): it is "
+                "`zenoh/bytes` whole, and an owner MUST NOT add a schema suffix to it; the fixture reads a schema "
+                "suffix on `zenoh/bytes` as another Encoding, no envelope. So zk2py's heartbeat subscribers compare "
+                "the whole Encoding (zk2c.envelope_encoding, which zk2c.carries reads too): a heartbeat under "
+                "`zenoh/bytes` passes the gate, and the same bytes under `zenoh/bytes;zk2c` or another Encoding are a "
+                "put with no envelope, `form`",
+                missing(core, "except a sample that carries §7.5's envelope (§4.3) or a call's form (§5.1). It MUST "
+                              "NOT add a schema suffix to it.",
+                        "- **An envelope's sample,** and a form's, has the `Encoding` `zenoh/bytes`.")
+                + missing(" ".join(carry["description"].split()),
+                          "neither does a sample under any other Encoding, a schema suffix on `zenoh/bytes` included")
+                + [[c["expect"] for c in carry["cases"] if c.get("encoding") == "zenoh/bytes;zk2c"],
+                   [zk2c.envelope_encoding(e) for e in ("zenoh/bytes", "zenoh/bytes;zk2c", "application/octet-stream",
+                                                        "")],
+                   [zk2c.carries(hb_key, e) for e in ("zenoh/bytes", "zenoh/bytes;zk2c")],
+                   [gate(e) for e in ("zenoh/bytes", "zenoh/bytes;zk2c", "application/octet-stream")]],
+                [[False], [True, False, False, False], [True, False], ["form 6", "form", "form"]]))
     # -- round 114's findings, each text as it quotes it, so an answer moves it ----------
     out.append(("round 114's findings, the texts they quote: F-560, core 0.109's entry says RULES.md lists 285 rules, "
                 "283 in 0.108, and that observer.md stays 0.33, on a tree whose RULES.md lists 286 and whose "

@@ -741,9 +741,12 @@ class Subscriber:
         try:
             # core §7.5 (0.109), "Another form on a heartbeat's key": the
             # parse, then the put's form, "before it reads a tag or a body";
-            # "A put with no envelope on either key is refused the same way"
+            # "A put with no envelope on either key is refused the same way".
+            # An envelope's Encoding is `zenoh/bytes` whole, a schema suffix
+            # being another Encoding (core §7.2, `envelope/carries.json`):
+            # :func:`zk2py.zk2c.envelope_encoding` holds the sentences
             env = heartbeat.put_of(sample.payload.to_bytes(),
-                                   enveloped=str(sample.encoding) == zk2c.ENCODING)
+                                   enveloped=zk2c.envelope_encoding(sample.encoding))
         except heartbeat.Refused as e:
             with self.lock:
                 self.heartbeats.append(HeartbeatRecord(at, None, None, None, {"refused": e.token}, refusal=e.token))
@@ -957,7 +960,7 @@ class Provider:
                 lk.acquire()
             try:
                 answer = self.reader.owner_heartbeat_put(cls, payload, at,
-                                                         enveloped=str(sample.encoding) == zk2c.ENCODING)
+                                                         enveloped=zk2c.envelope_encoding(sample.encoding))
             finally:
                 for lk in reversed(locks):
                     lk.release()

@@ -28356,6 +28356,11 @@ zenoh-python routers, zenoh 1.10.1; the black boxes of 1374e566.
 | `presence_scenarios` | §1 to §10 in the four pairings. With the owner example, step 8's check of the empty members failed once in each pairing before it was re-keyed: zk2py's runner asked every entry's `unavailable` to be empty, and since fcc2f65b that owner's `freshness.v2` entry lists `stream/heartbeats/{class}`. Round 113 did not run the suite. The two pairings with zk2py's owner ran whole before the re-key, and §2 again after it, 11/11 and 8/8 | 103/103, 38/38, 97/97 and 37/37; 1, 6, 2 and 7 not run |
 | `live_interop` | whole, three times and a control | 490/490 once the health section's token watch had a session of its own. Before that, 486 and 489 of 490: T's presence read, beside its own liveliness subscriber, read a present owner `absent` (core Appendix B). Round 113's zk2py, run as the control, 489 of 490, the same check |
 
+**After review-bot's notes on #1143:** scenario §9's check that both
+replies arrived is a note, since Expected 2 lets A's reply not arrive,
+and `redundancy_scenarios` whole is 88/88. One run before it failed 1 of
+88, §5 step 3, a timing of zk2py's runner, mended.
+
 ### The reference, observed
 
 Not findings but where one is named.
