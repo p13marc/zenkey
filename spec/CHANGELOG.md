@@ -3,6 +3,140 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.109 — 2026-11-21: what §3.3's size counts, an owner's `minor` from its file, and a group's size never allocated from (#609, #1126, #1127)
+
+zk2py round 111 read 0.107 cold and filed F-535 to F-539, none a
+blocker. This version answers the core's four, F-535 to F-538.
+`desired.v1` 0.14 answers F-539
+([`profiles/desired/CHANGELOG.md`](profiles/desired/CHANGELOG.md)), and
+`observer.md` stays 0.33. One sentence of §7.5 comes with them, from the
+review of 0.108.
+
+**Changed: §3.3, what an owner may exceed 1 KB with (F-535, an
+ambiguity).**
+- **Before:** "an owner MAY exceed 1 KB with `interfaces`,
+  `capabilities`, `requires` and `profiles`". It read two ways: those
+  four alone hold more than 1 KB, or the descriptor does while its other
+  members stay small. A second rule asked the second: over 1 KB, the
+  other members SHOULD stay within 512 B together.
+- **Now:** an owner MAY exceed 1 KB while the rest of its descriptor is
+  within 512 B. The rest is the size less the four members.
+  `[F: descriptors/ok-over-1kb]`
+- **One rule where there were two.** The 512 B SHOULD is the MAY's
+  condition now, and is no rule of its own. A descriptor over 1 KB whose
+  rest is over 512 B is not excepted, so it misses the 1 KB SHOULD. What
+  an owner is asked is as it was: within 1 KB, or the rest within 512 B.
+- **The reference** computes exactly this, and did:
+  `zenkey_model::descriptor::Size::meets`.
+- **0.107's entry is corrected.** It said zenoh-modem's node "exceeds
+  1 KB with the four members alone". Its four members hold 947 B, within
+  1 KB. The node exceeds 1 KB with a rest of 237 B. That sentence now
+  says so, and says that it was corrected.
+
+**Stated: §3.3, what is counted (F-536, an ambiguity).**
+- **Before:** "1 KB" had no figure, and "each counted with its name" no
+  word on a member's comma.
+- **Now, three things.**
+  - **The size** is the count of bytes of the document its owner puts
+    and answers, as the owner wrote it.
+  - **1 KB is 1,024 B,** as the reference's `SIZE_BYTES` already was.
+  - **A member** is counted from the opening quote of its name to the
+    last byte of its value, and one comma with it. So the rest is the
+    size of the same document with the four taken out.
+- **Why the comma.** A member taken out of an object takes one comma
+  with it, since `format`, `service` and `instance` are always there.
+  The rest is then a document's size, and needs no count of its own for
+  braces and commas. The reference counts so already
+  (`Descriptor::size`).
+- **Two counts of one node, explained.** 0.107's entry says 1,184 B, and
+  round 111 measured 1,167 B. Both are right, of two runs of `zenctl
+  gen` over the same three files.
+  - Given no catalog and no run file, it draws a 32-bit run: 1,167 B.
+  - Given zenoh-modem's catalog and a run file, it states `catalog`,
+    21 B with its comma, and a 16-bit run, 4 digits fewer: 1,184 B.
+  - 0.107's entry measured the second, and did not say so.
+  - Both runs were repeated for this version, on the black boxes of
+    e46b040b.
+- **The four members' two counts** were 944 B and 947 B. The first
+  counts each name and value, as round 111 did. The second adds a comma
+  each, as 0.107's entry did and as the text now says.
+- **The rule is about an owner's own bytes.** The same members written
+  with other spacing are another size. No checker reads a size, so no
+  two implementations need agree on a document neither wrote.
+
+**Stated: §3.3, `minor` from the authoring file (F-537, an ambiguity).**
+- **Before:** the bullet said what `minor` is, when an owner leaves it
+  out, and what it must never state. No sentence asked an owner that
+  holds the file to state it, though `presence.md` §2 expects it.
+- **Now:** an owner that holds the revision's authoring file SHOULD
+  state the file's minor, where it states one. `[Sc: presence.md §2]`
+- **Why a SHOULD, not a MUST.** No check reads `minor`. A tool that
+  finds none classifies both ways (§9.8). That can leave a pair
+  undecided, and is never wrong.
+- **A file that states none** (W104) gives its revision no minor. Its
+  owner leaves the member out, which the MUST NOT already asked.
+- **The reference** already does both. An implementation built from an
+  authoring file states the file's minor, and one built from a bundle
+  states none (`zenkey/src/descriptor.rs`, `build`).
+
+**Changed: §3.3, "Over 1 KB" (F-538, minor).**
+- **Before:** "SHOULD leave out every empty member". By its letter that
+  held `interfaces` and a requirement's `bindings`, which the schema
+  requires. A descriptor that left either out would be D000.
+- **Now:** every member that holds nothing and whose schema default is
+  empty. "Empty members" lists the seven, and says that `interfaces`
+  and `bindings` have no default and stay.
+  `[F: descriptors/ok-over-1kb]`
+
+**Added: §7.5, "The body bounds the sections, never the size".**
+- A group's size can claim up to 2^32 − 1 bits. An implementation MUST
+  NOT allocate from a size. It takes a group's bits only as the body
+  holds them, and a size above the bits left is `short`.
+  `[F: heartbeat/owner.json]`
+- **The evidence** was there: `owner.json`'s read 17, counted from 0, is
+  a size of 2^32 − 1 over a body of a few bytes, refused `short`.
+- **The reference** copies a group's bits as the body gives them, and
+  allocates nothing from the size (`OwnerHeartbeat::parse`).
+
+**The evidence.**
+- **`descriptors/ok-over-1kb`** is new: zenoh-modem's node as `zenctl
+  gen` served it under the catalog, byte for byte, on one line.
+  - It is 1,184 B before the file's newline.
+  - It states three of the four members, in 526 B, 366 B and 52 B. With
+    a comma each they are 947 B, and its rest is 237 B.
+  - It states no `requires`, and no entry of it states `unavailable` or
+    `cardinality`.
+  - It draws no D code. `expect.json` lists 61 cases, 60 before.
+- **§3.3's checks** list the size among what no check reads.
+
+**Migration.**
+- **An owner that met 0.107** meets this version, but for a few bytes at
+  one bound. 0.107 counted the other members with their names alone.
+  The rest also holds the two braces and the commas between them, 7 B on
+  the fixture. So other members that 0.107 counted just within 512 B
+  can be a rest over it.
+- **An owner between 1,001 B and 1,024 B** is within 1 KB.
+- **An owner that holds its file and states no `minor`** now misses a
+  SHOULD.
+- **A reader of an owner heartbeat** that refused `short` already
+  changes nothing.
+
+**Deliberately not changed.**
+- **The four members and the 512 B** are 0.107's, and the maintainer's
+  to overrule.
+- **A rule with one figure** would be shorter: the rest within 512 B at
+  any size, and no 1 KB. It would fault a descriptor of 900 B whose
+  `meta` holds 600 B, which this rule allows. It is not taken here.
+- **No D code** reads a size, and no D code reads `minor`.
+- **`token`.** Its default is `true`, no empty list or object, so the
+  seven do not hold it.
+- **The constrained level's MUST** to fit one fragment (§12).
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 284 rules, 283 in 0.108. The owner
+keeps 88: the SHOULD on `minor` comes, and the 512 B SHOULD goes into
+its MAY. The static rules are 74, 73 before, with §7.5's MUST NOT.
+
 ## 0.108 — 2026-11-21: §7.5, the owner heartbeat: form 6 with a group per interface (#1110)
 
 `freshness.v2` sends one heartbeat per interface. On W2's RF link its
@@ -146,8 +280,12 @@ answers both. `observer.md` stays 0.33.
   1,344 B before and 1,184 B now. The four members hold 947 B
   (`interfaces` 513, `capabilities` 351, `profiles` 41, and their
   names), and the others 237 B, 61 of them `zenctl gen`'s marker. So
-  zenoh-modem's node exceeds 1 KB with the four members alone, and
-  meets the rule as now worded.
+  zenoh-modem's node exceeds 1 KB with its other members within 512 B,
+  and meets the rule as now worded.
+  - **Corrected in 0.109 (F-535).** This said "with the four members
+    alone", which 947 B is not.
+  - **The run** was given zenoh-modem's catalog and a run file. Given
+    neither, the same owner serves 1,167 B (0.109).
 - **The reference** leaves out every empty member the schema defaults
   (`capabilities`, `requires`, `profiles`, `meta`, an entry's
   `unavailable` and `cardinality`, a requirement's `params`). It warns

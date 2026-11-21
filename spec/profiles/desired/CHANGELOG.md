@@ -4,6 +4,24 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.14 — 2026-11-21: editorial: `scenarios.md` §8's unbound role states no parameter bound, no rule changed (#609)
+
+zk2py round 111 (PR #1129) found §8's Expected 1 quoting a sentence core
+0.107 replaced (F-539).
+
+**Expected 1** said the descriptor lists `task` with `"bindings": []`
+and `"params": {}`, citing core §3.2. Since core 0.107, §3.2 says "with
+`"bindings": []` and no parameter bound", and an owner may leave out a
+`params` that holds nothing (core §3.3, "Empty members"). Read by its
+letter, the old sentence failed on the reference and on zk2py, which
+both leave `params` out. It now reads "no parameter bound", and says
+that its `params` is absent or `{}`.
+
+**Deliberately not changed.** No rule, fixture, section number or label.
+`conformance/bindings.json` and `slices.json` keep the descriptors that
+write `"params": {}`: both spellings are valid. The reference's `s8_the_kill_switch` reads
+the role's `params` as empty, absent or not, as it did.
+
 ## 0.13 — 2026-11-01: editorial: 0.12's scenario change said, and §6's Expected 1 holds no setup, no rule changed (#976)
 
 zk2py round 93 (PR #1005) found 0.12's entry incomplete (F-421).

@@ -274,8 +274,8 @@ EXCEPTED_BY = {
     # profile's stricter order, which a `desired.v1` target uses (F-394).
     ("core.md", "A consumer MUST accept a value under a run other than"): "A profile MAY order a consumer's values more strictly",
     # core §3.3: the SHOULD to stay within 1 KB, and the MAY for the four
-    # members an owner cannot shorten (#1126).
-    ("core.md", "An owner's descriptor SHOULD stay within 1 KB."): "So an owner MAY exceed 1 KB with `interfaces`",
+    # members an owner cannot shorten, the rest within 512 B (#1126, F-535).
+    ("core.md", "An owner's descriptor SHOULD stay within 1 KB."): "So an owner MAY exceed 1 KB while the rest",
     # the self-test's text
     ("text.md", "An owner MUST publish with the contract's QoS."): "One that does not, or whose binding",
     ("text.md", "A consumer MUST order an owner's values by time."): "A profile MAY order",

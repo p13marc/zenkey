@@ -254,6 +254,9 @@
     "ok-optional-unchecked": {
       "codes": []
     },
+    "ok-over-1kb": {
+      "codes": []
+    },
     "ok-run": {
       "codes": []
     },
@@ -276,5 +279,5 @@
       "codes": []
     }
   },
-  "description": "<name>.json \u2192 the sorted D\u2026 codes of the descriptor checks (core.md \u00a73.3, the D-code table), against contracts/nav.v2.toml. An interface whose contract is not supplied (any but nav.v2 here) is checked for syntax only."
+  "description": "<name>.json \u2192 the sorted D\u2026 codes of the descriptor checks (core.md \u00a73.3, the D-code table), against contracts/nav.v2.toml. An interface whose contract is not supplied (any but nav.v2 here) is checked for syntax only. `ok-over-1kb.json` is one line, an owner's descriptor byte for byte as it served it, then the file's newline: core.md \u00a73.3's size counts the 1,184 B before the newline, and its rest is 237 B."
 }
