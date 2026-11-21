@@ -5297,6 +5297,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round111_readings(root)
     out += _round112_readings(root)
     out += _round113_readings(root)
+    out += _round114_readings(root)
     return out
 
 
@@ -6293,6 +6294,416 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # Round 111's findings, F-535 to F-539, are answered by core 0.109 and
     # desired.v1 0.14: `_round114_readings` holds each answer as its text
     # states it, and the sentences the findings quoted gone.
+    return out
+
+
+def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.109, ``desired.v1`` 0.14, ``redundancy.v1`` 0.11 and
+    ``link.v2`` 0.20, the answers to F-535 to F-546, read cold (#609, round
+    114): each version and its entry, each answer as its text states it and
+    the sentence it replaced gone, ``descriptors/ok-over-1kb`` counted
+    against the figures §3.3 gives, ``owner.json``'s ``forms`` and
+    ``beside`` beyond what the heartbeat family runs, Appendix B's figures
+    recomputed, and the texts round 114's findings quote, so that an answer
+    moves each."""
+    import re
+    import tempfile
+
+    from . import catalog as cat, descriptor as dsc, heartbeat, link_v2, owner_heartbeat as oh, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def present(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log_ = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log_)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    core, log = flat("core.md"), flat("CHANGELOG.md")
+    dv, dlog, dsc_md = flat("profiles/desired/v1.md"), flat("profiles/desired/CHANGELOG.md"), \
+        flat("profiles/desired/scenarios.md")
+    rv, rlog, rsc = flat("profiles/redundancy/v1.md"), flat("profiles/redundancy/CHANGELOG.md"), \
+        flat("profiles/redundancy/scenarios.md")
+    l2, llog = flat("profiles/link/v2.md"), flat("profiles/link/CHANGELOG.md")
+    obs = flat("observer.md")
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.109 or later, desired.v1 0.14 or later and redundancy.v1 0.11 or later, both still written against "
+         "core 0.73, and link.v2 0.20 or later, against 0.108, each with its entry; RULES.md lists 286 rules, the "
+         "static rules 75 and the owner 88",
+         [m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.109"),
+          _at_least(header("profiles/desired/v1.md")[0], "0.14"), header("profiles/desired/v1.md")[1],
+          _at_least(header("profiles/redundancy/v1.md")[0], "0.11"), header("profiles/redundancy/v1.md")[1],
+          _at_least(header("profiles/link/v2.md")[0], "0.20"), header("profiles/link/v2.md")[1],
+          int(once.group(1)) if once else None, counted.get("Implementation: the static rules"), counted.get("Owner")]
+         + entry("CHANGELOG.md", "0.109", "what §3.3's size counts")
+         + entry("profiles/desired/CHANGELOG.md", "0.14", "two reports on one key are merged")
+         + entry("profiles/redundancy/CHANGELOG.md", "0.11", "a split's seed under consolidation `None`")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.20", "a file zenoh refuses"),
+         [True, True, "0.73", True, "0.73", True, "0.108", 286, 75, 88]),
+    ]
+    # -- core 0.109 §3.3: F-535 to F-538 answered ----------------------------------------
+    out.append(("core 0.109 §3.3, F-535 to F-538 answered, each as the text states it: what is counted and 1 KB's "
+                "figure (F-536); the MAY's condition and the rest (F-535); the SHOULD on `minor` and a file that "
+                "states none (F-537); the seven members, and `interfaces` and `bindings` that stay (F-538); the size "
+                "among what no check reads; and the sentences the findings quoted gone",
+                missing(core,
+                        "- **What is counted.** A descriptor's size is the count of bytes of the document its owner "
+                        "puts and answers, as the owner wrote it. 1 KB is 1,024 B. So the rule is about an owner's "
+                        "own bytes: the same members written with other spacing are another size.",
+                        "So an owner MAY exceed 1 KB while the rest of its descriptor is within 512 B. "
+                        "`[F: descriptors/ok-over-1kb]`",
+                        "- **The rest** is the descriptor's size less each of those four members it states.",
+                        "- A member is counted from the opening quote of its name to the last byte of its value, "
+                        "and one comma with it.",
+                        "- So the rest is the size of the same document with the four taken out: its two braces, "
+                        "every other member, the commas between those, and any spacing the owner wrote.",
+                        "- `descriptors/ok-over-1kb` is one owner's descriptor of 1,184 B, on one line of its file. "
+                        "It states three of the four, in 526 B, 366 B and 52 B, with a comma each: 947 B. Its rest "
+                        "is 237 B.",
+                        "- An owner that holds the revision's authoring file SHOULD state the file's minor, where "
+                        "it states one. `[Sc: presence.md §2]`",
+                        "So does the owner of a revision whose file states none (W104).",
+                        "- They are seven: `capabilities`, `requires`, `profiles` and `meta`, an entry's "
+                        "`unavailable` and `cardinality`, and a requirement's `params`.",
+                        "- `interfaces` and a requirement's `bindings` have no default. The schema requires both, "
+                        "so each is written when it is empty too.",
+                        "- the descriptor's size: the rule is its owner's (above), and a descriptor over 1 KB draws "
+                        "no code `[F: descriptors/ok-over-1kb]`.")
+                + present(core, "So an owner MAY exceed 1 KB with `interfaces`, `capabilities`, `requires` and "
+                                "`profiles`.",
+                          "SHOULD leave out every empty member.", "each counted with its name")
+                + missing(log, "So zenoh-modem's node exceeds 1 KB with its other members within 512 B, and meets "
+                               "the rule as now worded.",
+                          "- **Corrected in 0.109 (F-535).** This said \"with the four members alone\", which 947 B "
+                          "is not.")
+                + present(log.split("## 0.108 ")[1], "exceeds 1 KB with the four members alone, and meets"),
+                []))
+    # descriptors/ok-over-1kb, counted by the code written before it was opened.
+    dd = root / "descriptors"
+    raw = (dd / "ok-over-1kb.json").read_bytes()
+    line = raw.rstrip(b"\n")
+    z, zfile = dsc.size(line), dsc.size(raw)
+    doc = json.loads(line)
+    expect = json.loads((dd / "expect.json").read_text(encoding="utf-8"))
+    compact = lambda v: len(json.dumps(v, separators=(",", ":"), ensure_ascii=False).encode())  # noqa: E731
+    others = sum(n for k, n in z.members.items() if k not in dsc.FOUR)
+    out.append(("core 0.109 §3.3, descriptors/ok-over-1kb counted as \"What is counted\" and \"The rest\" say, against "
+                "the figures the text gives: one line and the file's newline, 1,184 B before it; three of the four "
+                "stated, 526 B, 366 B and 52 B, 947 B with a comma each; the rest 237 B, which is the size of the "
+                "same document with the four taken out; over 1 KB, excepted by its rest, no empty member written; "
+                "no `requires`, and no entry's `unavailable` or `cardinality`; 61 cases, this one clean; the other "
+                "members' names and values 230 B, as 0.107 counted them, so the rest holds 7 B more, two braces and "
+                "five commas, the entry's figure; with the file's newline it would be 1,185 B and 238 B",
+                [raw.count(b"\n"), raw.endswith(b"\n"), z.total,
+                 [z.members.get(k) for k in dsc.FOUR], z.four, z.rest,
+                 compact({k: v for k, v in doc.items() if k not in dsc.FOUR}), compact(doc) == z.total,
+                 z.over, z.meets, z.within, z.should, z.empty,
+                 "requires" in doc, sorted({k for e in doc["interfaces"] for k in e} & {"unavailable", "cardinality"}),
+                 len(expect["cases"]), expect["cases"].get("ok-over-1kb"), others, z.rest - others,
+                 (zfile.total, zfile.rest)]
+                + missing(" ".join(expect.get("description", "").split()),
+                          "core.md §3.3's size counts the 1,184 B before the newline, and its rest is 237 B")
+                + missing(log, "The rest also holds the two braces and the commas between them, 7 B on the fixture."),
+                [1, True, 1184, [526, 366, None, 52], 947, 237, 237, True, True, True, "rest", [], [], False, [],
+                 61, {"codes": []}, 230, 7, (1185, 238)]))
+    # -- core 0.109 §7.5 and §8.6: F-540, F-541, F-543 and F-544 answered ----------------
+    out.append(("core 0.109 §7.5 and §8.6, F-540, F-541 and F-543 answered, each as the text states it: another form "
+                "on a heartbeat's key refused `form` before a tag or a body, a put with no envelope too; nothing in "
+                "a body tells the layouts apart, and CH's tag only most of the time; a reader holds the catalog "
+                "beside its revision, and §8.6 provisions each reader of an owner heartbeat; the body bounds the "
+                "sections, never the size; and the sentences the findings quoted gone",
+                missing(core,
+                        "**Another form on a heartbeat's key.** A heartbeat's key and an owner heartbeat's carry "
+                        "form 6, and no other form.",
+                        "An implementation that reads a heartbeat or an owner heartbeat MUST refuse a put of "
+                        "another form on that key, naming `form`, before it reads a tag or a body. "
+                        "`[F: heartbeat/owner.json]`",
+                        "A put with no envelope on either key is refused the same way.",
+                        "It is a form-6 put's: a put of another form on a heartbeat's key carries none (below).",
+                        "- **Nothing in a body tells the two apart.** One body can read as either, as `owner.json`'s "
+                        "`either` does.",
+                        "- **CH's tag tells them apart only most of the time.** An owner heartbeat's is 0. A "
+                        "heartbeat's is its covered revision's, which is 0 for 1 revision in 16.",
+                        "- **A reader needs the catalog too.** It finds its own group by its index. So beside its "
+                        "revision it holds the catalog its owner names, or a successor (§8.6).",
+                        "- **Without one it reads no group.** §8.6 refuses each index (`unknown_catalog`), its own "
+                        "interface's among them.",
+                        "- **The tag finds no group.**",
+                        "A **catalog** is a file that a deployment provisions to its owners, to the far side of a "
+                        "constrained face (§8.5), and to each reader of an owner heartbeat (§7.5).",
+                        "- **The body bounds the sections, never the size.** A size can claim up to 2^32 − 1 bits, "
+                        "and a body holds what its put carried. An implementation MUST NOT allocate from a size",
+                        "So it reads on past a refused group, the first one too, and drops none after it.")
+                + present(core, "Nothing in the bytes tells the two apart.",
+                          "A reader bound to one interface holds that interface's revision alone.",
+                          "provisions to its owners, and to the far side of a constrained face (§8.5)."),
+                []))
+    hb_dir = root / "heartbeat"
+    own = _load_json(hb_dir / "owner.json")
+    lay = _load_json(hb_dir / "layouts.json")
+    layouts: dict[str, heartbeat.Layout] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, text in lay["contracts"].items():
+            c = load_contract(Path(tmp) / f"{name}.toml", text=text)
+            layouts[name] = heartbeat.layout_of(c.canonical, c.fingerprint)
+    by_entry = {(lo.interface, lo.fingerprint): lo for lo in layouts.values()}
+    cats = {name: cat.read(json.dumps(d)) for name, d in own["catalogs"].items()}
+    forms, beside = own.get("forms", []), own.get("beside", [])
+    w2_payload = bytes.fromhex(own["writes"][0]["expect"]["hex"]) if own["writes"] else b""
+
+    def owner_token(payload: bytes, enveloped: bool = True) -> str:
+        try:
+            oh.read(payload, "stream", enveloped)
+            return "read"
+        except oh.Refused as e:
+            return e.token
+
+    def beat_token(payload: bytes, layout: str = "hb.v1", enveloped: bool = True) -> str:
+        try:
+            heartbeat.read_put(layouts[layout], payload, "stream", enveloped)
+            return "read"
+        except heartbeat.Refused as e:
+            return e.token
+
+    def past_form(payload: bytes) -> str:
+        """What 0.108's list answered of the put, its form not looked at:
+        ``tag``, then the body's reading."""
+        env = zk2c.parse(payload, "put", "stream")
+        if env.tag != 0:
+            return "tag"
+        try:
+            return f"{len(oh.read_body(env.record or b'').groups)} groups"
+        except oh.Refused as e:
+            return e.token
+
+    out.append(("core 0.109's evidence, `forms` (F-540 answered): five cases, two mutations and a frame over W2's "
+                "body, a mutation whose tag is not 0 and one with no record; each is `form` on an owner heartbeat's "
+                "key and, with every one of layouts.json's six revisions, on a heartbeat's; read past its form, as "
+                "0.108's list was written, each would be three groups, `tag` or `short`, which is what the rule "
+                "is said for; nine RULES.md rows cite owner.json",
+                [len(forms), sorted({c["expect"].get("refused") for c in forms}),
+                 [owner_token(bytes.fromhex(c["hex"])) for c in forms],
+                 sorted({beat_token(bytes.fromhex(c["hex"]), name) for c in forms for name in layouts}),
+                 [zk2c.parse(bytes.fromhex(c["hex"]), "put", "stream").form for c in forms],
+                 [past_form(bytes.fromhex(c["hex"])) for c in forms],
+                 sum(1 for ln in rules.splitlines() if "`[F: heartbeat/owner.json]`" in ln)],
+                [5, ["form"], ["form"] * 5, ["form"], ["mutation", "mutation", "frame", "mutation", "mutation"],
+                 ["3 groups", "3 groups", "3 groups", "tag", "short"], 9]))
+
+    def beside_read(c: dict[str, Any], stop: bool = False, drop: bool = False) -> list[Any]:
+        """A `beside` case's groups as zk2py reads them; ``stop``, a reader
+        that ends at the first refused group; ``drop``, one that drops the
+        group after a refused one."""
+        named = None if c["names"] is None else cats[c["names"]].id
+        res = oh.read_put_groups(bytes.fromhex(c["hex"]), named, [cats[h] for h in c["holds"]], by_entry, "stream")
+        got: list[Any] = []
+        skip = False
+        for r in res:
+            if skip:
+                skip = False
+                continue
+            got.append({"index": r.index, "refused": r.refused} if r.refused is not None else
+                       {"index": r.index, "layout": next(n for n, lo in layouts.items()
+                                                         if (lo.interface, lo.fingerprint) == r.entry),
+                        "tag": r.tag_matches, "sections": r.sections})
+            if r.refused is not None and stop:
+                break
+            skip = r.refused is not None and drop
+        return got
+
+    def others_of(c: dict[str, Any]) -> list[Any]:
+        return [g for g in c["expect"] if "refused" not in g]
+
+    out.append(("core 0.109's evidence, `beside` (F-544 answered): nine cases, each a payload the first reading "
+                "accepts; a reader that stops at the first refused group fails six of them, and one that drops the "
+                "group after a refused one the same six, where both passed the file whole at 0.108; case 0's two read "
+                "groups are case 1's, the same owner heartbeat with the refused group left out; cases 7 and 8 are "
+                "F-543's reader, with no catalog and with an unrelated one, each group unknown_catalog",
+                [len(beside), [i for i, c in enumerate(beside) if beside_read(c) != c["expect"]],
+                 [i for i, c in enumerate(beside) if beside_read(c, stop=True) != c["expect"]],
+                 [i for i, c in enumerate(beside) if beside_read(c, drop=True) != c["expect"]],
+                 len(beside) > 1 and others_of(beside[0]) == beside[1]["expect"],
+                 [[g.get("refused") for g in c["expect"]] for c in beside[7:9]],
+                 [c["holds"] for c in beside[7:9]]],
+                [9, [], [0, 2, 3, 5, 7, 8], [0, 2, 3, 5, 7, 8], True,
+                 [["unknown_catalog"] * 3] * 2, [[], ["other"]]]))
+    # What neither list holds (F-563), by zk2py's own readings.
+    as_beat = zk2c.heartbeat(zk2c.InBand(16, 7, 1), bytes.fromhex(own["either"][0]["body"]) if own["either"] else b"",
+                             layouts["hb.v1"].tag)
+    vital_alone = {k: v for k, v in by_entry.items() if k[0] == "vital.v1"}
+    w2_read = oh.read_put_groups(w2_payload, cats["second"].id, [cats["second"]], vital_alone, "stream")
+    out.append(("core 0.109 §7.5 beyond `forms` and `beside` (F-563): \"A put with no envelope on either key is "
+                "refused the same way\", where no case states an Encoding: a put whose Encoding carries no envelope "
+                "is `form` on either key, W2's own payload and a heartbeat's too, their bytes never parsed; no byte "
+                "at all under `zenoh/bytes` is the parse's `short`, the parse coming first, and a mutation cut "
+                "short too; and \"skips every other by its size, one whose revision it does not hold among them\", "
+                "where every `beside` reader holds layouts.json whole: a reader that holds vital.v1's revision alone "
+                "skips W2's two others and reads its own; no case states the revisions a reader holds",
+                [owner_token(w2_payload, enveloped=False), beat_token(as_beat, enveloped=False),
+                 owner_token(w2_payload), beat_token(as_beat),
+                 owner_token(b""), beat_token(b""), owner_token(b"", enveloped=False),
+                 owner_token(bytes.fromhex("000007")), beat_token(bytes.fromhex("000007")),
+                 [("skipped" if r.skipped else r.refused or "read") for r in w2_read],
+                 sorted({k for c in beside for k in c}), sorted({k for c in forms for k in c})],
+                ["form", "form", "read", "read", "short", "short", "form", "short", "short",
+                 ["skipped", "skipped", "read"], ["expect", "hex", "holds", "names", "note"],
+                 ["expect", "hex", "note"]]))
+    # -- desired.v1 0.14 and redundancy.v1 0.11 ------------------------------------------
+    slices = _load_json(spec / "profiles" / "desired" / "conformance" / "slices.json")
+    out.append(("desired.v1 0.14, F-539 and F-545 answered, each as the text states it: scenarios.md §8's unbound "
+                "role states no parameter bound, its `params` absent or `{}`; §2.10's two reports on one key are "
+                "merged per key as observer §4.1 says, within one run the higher seq and across two runs the later "
+                "arrival, which is observer §4.1's own sentence; slices.json gives the replies as a tool's merge "
+                "leaves them, and its case 13 one reply; `Latest` is in neither text",
+                missing(dsc_md, "1. The descriptor lists `task` with `\"bindings\": []` and no parameter bound (core "
+                                "§3.2). Its `params` is absent or `{}` (core §3.3).")
+                + missing(dv, "Two instances' reports on one key are not two. S4's GET answers both, under "
+                              "consolidation `None` (core S4), and a tool merges its replies per key, as observer "
+                              "§4.1 says. So one reply is left on a key, and it is that resource's reply here: "
+                              "within one run the higher seq, and across two runs, which nothing orders, the later "
+                              "arrival. §2.17 reads a split target's report so. `[F: slices.json]`")
+                + missing(obs, "Within one run it orders by seq, plain or serial as the key's kind says (core §4.3). "
+                               "Across two runs it keeps the later arrival, since nothing orders them.")
+                + missing(" ".join(slices["description"].split()),
+                          "to S4's GET, as a tool's merge leaves them, one a key (observer §4.1)")
+                + present(dv + dsc_md, "S4's GET answers the later (core §4.1)", "`\"params\": {}` (core §3.2)",
+                          "`Latest`")
+                + [len(slices["cases"][13]["reading"]["replies"]),
+                   "the one a tool's merge of S4's replies keeps (observer §4.1)" in slices["cases"][13]["note"]],
+                [1, True]))
+    out.append(("redundancy.v1 0.11, §2.10's \"A seed\" and scenarios.md §9's Expected 2 as the text states them, "
+                "without `Latest`: each incumbent's reply arrives, the follower discards the higher's and keeps the "
+                "lower's, and holds no value only where the lower's did not arrive",
+                missing(rv, "- **A seed.** S4's GET is answered by every incumbent. Under consolidation `None` each "
+                            "one's reply arrives, two on one key (core S4). A consumer following the lower discards "
+                            "the higher's reply, as it discards its samples, and keeps the lower's. Where the "
+                            "lower's reply did not arrive, it holds no value for that key until the incumbent it "
+                            "follows puts it again: silence, never a verdict (core S6, O5).")
+                + missing(rsc, "2. K's seed takes A's reply and discards B's: under S4's `None` both arrive (core "
+                               "S4). Where A's reply did not arrive, K holds no value for `balance` until A's next "
+                               "put: never B's (§2.10).")
+                + present(rv + rsc, "`Latest`"), []))
+    # -- link.v2 0.20 ---------------------------------------------------------------------
+    out.append(("link.v2 0.20 §2.19 and §5, F-546 answered, as the text states them: the codes are findings over the "
+                "keys a configuration states; a tool that reads the file through zenoh's loader names the refusal "
+                "and asks nothing, and one that reads it as data reports transport_differs at the key; §5's first "
+                "row lists the refused file under \"Not asked\"",
+                missing(l2, "**A file zenoh refuses.** The codes below are findings over the keys a configuration "
+                            "states. The fixture's `router` is those keys, however a tool read them. Reading the "
+                            "file comes before, and a tool reads it one of two ways.",
+                        "- **Through zenoh's own loader.** A file that loader refuses gives the tool no "
+                        "configuration. A file with a `null` at one of the seven keys is one, and so is one with a "
+                        "string for its lease. The tool names zenoh's refusal, and asks none of §5's questions of "
+                        "that file. It read no key, so it reports no `transport_differs`.",
+                        "- **As data.** A tool that reads the file's own tree reports each such value at its key: "
+                        "`transport_differs`, as the fixture does.",
+                        "- **Both are true of one file.** The first says no router of that zenoh starts from it. "
+                        "The second says which key is at fault.",
+                        "**Not asked:** the file is one the tool's loader refuses, the refusal named, as in each "
+                        "row that reads the file (§2.19).")
+                + present(l2, "zenoh refuses the file at load. It is `transport_differs`, as a string is."), []))
+    # Appendix B's measured figures, recomputed from the rule and from each other.
+    plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+
+    def codes(o: Any) -> set[str]:
+        if isinstance(o, dict):
+            return ({o["code"]} if isinstance(o.get("code"), str) else set()) | {x for v in o.values() for x in codes(v)}
+        if isinstance(o, list):
+            return {x for v in o for x in codes(v)}
+        return set()
+
+    faces_dir = repo / "examples" / "zk2" / "zenoh-modem" / "faces"
+    batch = {}
+    for name in ("zenohd-rf0", "zenohd-lora0-sf7", "zenohd-lora0-sf9", "zenohd-lora0-sf12"):
+        mb = re.search(r"^batch_bytes\s*=\s*(\d+)", (faces_dir / f"{name}.face.toml").read_text(encoding="utf-8"), re.M)
+        batch[name] = int(mb.group(1)) if mb else None
+    ran = {"zenohd-rf0": 206, "zenohd-lora0-sf7": 208, "zenohd-lora0-sf9": 101, "zenohd-lora0-sf12": 210}
+    out.append(("link.v2 0.20, Appendix B's SF9 and SF12 runs and \"The batch a driver leaves zenoh\", recomputed: a "
+                "keep-alive before 26 frames of 30 at a 120 s interval is 624 a day of §2.16's 720, and before 6 of "
+                "8 at 900 s is 72 of 96; at 119 s for 720 and 142 s for 96, 103 s and 107 s of air (106.5 s, as the "
+                "mapping's 864.5 s holds it); the policies "
+                "state 222, 224, 117 and 224 B, and the lean stack's layers took 16, 16, 16 and 14 B of them; a "
+                "205 B full record is a message of 213 B, over each batch zenoh ran; `frames/fast`'s 216 B is "
+                "fewer than 10 B under 222 and 224; the plans of cases 14, 15 and 17 hold no frame_over_batch, and "
+                "case 16's does",
+                [round(26 / 30 * 86_400 / 120), round(6 / 8 * 86_400 / 900), 86_400 // 120, 86_400 // 900,
+                 int(119 / 720 * 624 + 0.5), int(142 / 96 * 72 + 0.5), list(batch.values()),
+                 [batch[k] - ran[k] if batch[k] is not None else None for k in ran],
+                 all(205 + 8 > v for v in ran.values()), [222 - 216 < 10, 224 - 216 < 10],
+                 ["frame_over_batch" in codes(plan[i]["expect"]) for i in (14, 15, 16, 17)]]
+                + missing(l2, "The uplink sent 624 keep-alives a day beside its frames, 103 s of air. §2.16's range "
+                              "is none to 720: a keep-alive went before 26 frames of 30.",
+                          "The uplink sent 72 a day, 107 s of air, of none to 96: a keep-alive went before 6 frames "
+                          "of 8.",
+                          "- **Measured:** zenoh ran a batch of 206 B on RF, 208 B at SF7, 101 B at SF9 and 210 B at "
+                          "SF12, where the policies state 222, 224, 117 and 224.",
+                          "So a payload fewer than 10 B under the batch would fragment unwarned.")
+                + missing(" ".join((repo / "examples/zk2/zenoh-modem/link.md").read_text(encoding="utf-8").split()),
+                          "624 a day at SF9, 103 s, and 72 at SF12, 107 s."),
+                [624, 72, 720, 96, 103, 107, [222, 224, 117, 224], [16, 16, 16, 14], True, [True, True],
+                 [False, False, True, False]]))
+    # zk2py's reading of a refused file's keys, as data, and what §2.19 leaves open (F-562).
+    conv_text = _scenarios_v2_policy(spec)
+    conv = link_v2.parse_policy(conv_text)[0]
+    as_run = link_v2.read_config(link_v2.block(conv)) if conv is not None else {}
+
+    def found(**kw: Any) -> list[str]:
+        return [f["code"] + " " + f["at"] for f in link_v2.check_transport(conv_text, {**as_run, **kw})["findings"]]
+
+    out.append(("link.v2 0.20 §2.19, \"As data\", by zk2py's check, which reads a file's keys as data under either "
+                "binding: a string lease and a null lease are transport_differs at the lease, with no "
+                "wait_under_lease; and what the text names no code for (F-562): a `mode` that is none of zenoh's "
+                "three, which zenoh refuses at load, and which zk2py reads as a router that stamps, "
+                "face_timestamping, until the file shows timestamping off at a mode it can read",
+                [found(), found(**{"transport/link/tx/lease": "2000"}), found(**{"transport/link/tx/lease": None}),
+                 found(mode="bogus"), found(mode="peer")]
+                + missing(l2, "the router stamps the puts it routes, read at the mode it runs.",
+                          "- **No value zenoh runs**, at each of the seven other keys."),
+                [[], ["transport_differs transport.lease_ms"], ["transport_differs transport.lease_ms"],
+                 ["face_timestamping timestamping"], []]))
+    # -- round 114's findings, each text as it quotes it, so an answer moves it ----------
+    out.append(("round 114's findings, the texts they quote: F-560, core 0.109's entry says RULES.md lists 285 rules, "
+                "283 in 0.108, and that observer.md stays 0.33, on a tree whose RULES.md lists 286 and whose "
+                "observer is 0.34 or later; F-561, desired.v1 and redundancy.v1 cite consolidation `None` as core "
+                "S4's under a header written against core 0.73, whose S4 is 0.100's only since 0.100; F-562, §2.19 "
+                "reads `timestamping/enabled` at the mode the router runs, and names the seven keys alone as "
+                "holding no value zenoh runs; F-563, §7.5's put with no envelope and its group of a revision not "
+                "held, beside an owner.json whose description gives a reader catalogs and no revisions",
+                missing(log, "`RULES.md` lists 285 rules, 283 in 0.108.", "and `observer.md` stays 0.33.",
+                        "- **What a tool shows** is `observer.md`'s, which stays 0.33 here.",
+                        "- **So the sentence stands,** and is true once that text merges.")
+                + [int(once.group(1)) if once else None,
+                   bool(re.search(r"\| \*\*Text version\*\* \| 0\.(3[4-9]|[4-9]\d) ", obs)),
+                   _at_least(header("profiles/freshness/v2.md")[0], "0.9")]
+                + missing(dlog, "- **Written against core 0.73**, still.")
+                + missing(rlog, "- **Written against core 0.73**, still.")
+                + missing(log, "**Changed: S4.** A state GET's consolidation is `None`, where it was `Latest`, and "
+                               "the consumer merges its replies per key.")
+                + missing(rlog, "Core 0.100 moved S4's GET to consolidation `None`")
+                + missing(" ".join(own["description"].split()),
+                          "`beside`: the catalog the owner `names`, the catalogs the reader `holds`, and a put's "
+                          "payload in `hex` that the first reading accepts",
+                          "`forms`: a put's payload in hex, on an owner heartbeat's key or a heartbeat's, whose "
+                          "envelope the parse accepts as another form than 6"),
+                [286, True, True]))
     return out
 
 
@@ -13376,7 +13787,10 @@ def _heartbeat_owner(data: dict[str, Any], layouts: dict[str, Any]) -> list[Resu
     the owner names, the catalogs the reader holds and one group -> the
     layout its index names, whether its tag is that revision's and its
     sections, written back to the group's bits, or the refusal of that group
-    alone. ``either``: one body read as an owner heartbeat's and as a
+    alone. ``forms`` (0.109): a put of another form, on an owner heartbeat's
+    key and on a heartbeat's -> ``form``. ``beside`` (0.109): the catalogs
+    and one payload -> every group's reading or refusal, in order.
+    ``either``: one body read as an owner heartbeat's and as a
     heartbeat's."""
     import json
 
@@ -13430,6 +13844,45 @@ def _heartbeat_owner(data: dict[str, Any], layouts: dict[str, Any]) -> list[Resu
         if r.sections is not None and r.entry is not None:
             out.append(_check(f"{name}: writes back in the form read",
                               heartbeat.sections_bits(by_entry[r.entry], r.sections), g.bits))
+    # core 0.109: `forms` and `beside`. The two readers were written from
+    # §7.5 and committed (33746b0d) before either list was opened; what
+    # follows renames to the fixture's spelling, and decides nothing.
+    for i, c in enumerate(data.get("forms", [])):
+        raw = bytes.fromhex(c["hex"])
+        name = f"heartbeat: owner form {i}: {c['note']}"
+        try:
+            got = _owner_value(oh.read(raw, "stream"))
+        except oh.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(f"{name}: on an owner heartbeat's key", got, c["expect"]))
+        # "on an owner heartbeat's key or a heartbeat's": the same put on a
+        # heartbeat's key, through the gate a heartbeat's reader goes through
+        try:
+            env = heartbeat.put_of(raw, "stream")
+            got = {"form": env.form, "tag": env.tag}
+        except heartbeat.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(f"{name}: on a heartbeat's key", got, c["expect"]))
+    for i, c in enumerate(data.get("beside", [])):
+        named = None if c["names"] is None else catalogs[c["names"]].id
+        name = f"heartbeat: owner beside {i}: {c['note']}"
+        try:
+            reads = oh.read_put_groups(bytes.fromhex(c["hex"]), named, [catalogs[h] for h in c["holds"]], by_entry,
+                                       "stream")
+        except oh.Refused as e:
+            out.append(_check(name, {"refused": e.token}, c["expect"]))
+            continue
+        got_groups: list[dict[str, Any]] = []
+        for r in reads:
+            if r.refused is not None:
+                got_groups.append({"index": r.index, "refused": r.refused})
+            elif r.skipped:
+                got_groups.append({"index": r.index, "skipped": list(r.entry or ())})
+            else:
+                assert r.entry is not None
+                got_groups.append({"index": r.index, "layout": name_of[r.entry], "tag": r.tag_matches,
+                                   "sections": r.sections})
+        out.append(_check(name, got_groups, c["expect"]))
     for i, c in enumerate(data["either"]):
         raw = bytes.fromhex(c["body"])
         name = f"heartbeat: owner either {i}: {c['note']}"
