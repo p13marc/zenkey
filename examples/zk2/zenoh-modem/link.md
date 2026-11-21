@@ -12,11 +12,11 @@
 >
 > | Face policy | Node, service | bit/s | Lease / keep-alives, `wait_before_close` | Timeouts | Batch | What crosses, at each frame's `every_s` | `horizon_s` | The plan's warnings |
 > |---|---|---:|---|---|---:|---|---:|---|
-> | [`zenohd-rf0`](faces/zenohd-rf0.face.toml) | `h-3fa9c2d41b7e`, `rf0` | 2,400 | 240 s / 4, 240 s | 10 s | 222 | `frames/fast`, 60 s | 120 | `frame_unlisted` |
+> | [`zenohd-rf0`](faces/zenohd-rf0.face.toml) | `h-3fa9c2d41b7e`, `rf0` | 2,400 | 240 s / 4, 240 s | 10 s | 222 | `frames/fast`, 60 s | 120 | `frame_unlisted`, `keep_alive_not_suppressed`, `not_packed` |
 > | [`zenohd-lora0-sf7`](faces/zenohd-lora0-sf7.face.toml) | `h-c2a95e41d7f0`, `lora0` | 5,469 | 120 s / 4, 120 s | 10 s | 224 | `frames/fast`, 60 s | 120 | `frame_unlisted`, `keep_alive_not_suppressed` |
-> | [`zenohd-lora0-sf9`](faces/zenohd-lora0-sf9.face.toml) | `lora0` | 1,758 | 480 s / 4, 480 s | 10 s | 117 | `frames/fast`, 120 s; `keyframe_s` 900 | 120 | `frame_unlisted`, `frame_over_batch` |
-> | [`zenohd-lora0-sf12`](faces/zenohd-lora0-sf12.face.toml) | `lora0` | 293 | 3,600 s / 4, 3,600 s | 40 s, interests 40 s | 224 | `frames/slow`, 900 s; `keyframe_s` 3,600 | 1,800 | `frame_unlisted` |
-> | [`zenohd-sat0`](faces/zenohd-sat0.face.toml) | `h-71c0e2a9d4b3`, `sat0` | 2,400 | 3,600 s / 2, 3,600 s | 1,000 s | 271 | `frames/paid`, 1,800 s | 3,600 | `frame_unlisted` |
+> | [`zenohd-lora0-sf9`](faces/zenohd-lora0-sf9.face.toml) | `lora0` | 1,758 | 480 s / 4, 480 s | 10 s | 117 | `frames/fast`, 120 s; `keyframe_s` 900 | 120 | `frame_unlisted`, `frame_over_batch`, `keep_alive_not_suppressed` |
+> | [`zenohd-lora0-sf12`](faces/zenohd-lora0-sf12.face.toml) | `lora0` | 293 | 3,600 s / 4, 3,600 s | 40 s, interests 40 s | 224 | `frames/slow`, 900 s; `keyframe_s` 3,600 | 1,800 | `frame_unlisted`, `keep_alive_not_suppressed` |
+> | [`zenohd-sat0`](faces/zenohd-sat0.face.toml) | `h-71c0e2a9d4b3`, `sat0` | 2,400 | 3,600 s / 2, 3,600 s | 1,000 s | 271 | `frames/paid`, 1,800 s | 3,600 | `frame_unlisted`, `keep_alive_not_suppressed` |
 >
 > The three LoRa policies are alternatives for `lora0`'s one router, one per spreading factor. Every
 > face runs `16bit` sequence numbers. RF and LoRa lose 5 % and repair nothing, so their linter also
@@ -34,13 +34,24 @@
 >   leaves those frames unpublished (`config:device.frames.<name>`).
 > - **The cadences** are the owner's configuration (#991's per-medium table), and each plan states
 >   them as the deployment's word to the ground. The owner puts each listed frame at its `every_s`.
-> - **Keep-alives.** A batch sent resets its end's keep-alive interval. On RF and SF9 the interval
->   is the frame's cadence, 60 s on RF, 120 s at SF9, 900 s at SF12 and 1,800 s on SBD, so data
->   replaces every keep-alive the uplink would send. For that, #991 moved SF9's lease from 240 s
->   to 480 s and SF12's from 1,080 s to 3,600 s, each four frame intervals: SF12's 270 s interval
->   had cost 288 keep-alives and 427 s of air a day, half its duty. SF7's 30 s is below its
->   frame's minute, so the uplink pays one keep-alive between two frames, 74 s of air a day
->   (`keep_alive_not_suppressed`).
+> - **Keep-alives** (`link.v2` 0.17 §2.16). An end sends a keep-alive one interval after the
+>   later of the last batch it sent and its last keep-alive. Every plan warns
+>   `keep_alive_not_suppressed`: each face's cadence is its keep-alive interval, or above it.
+>   - **RF, SF9, SF12 and SBD** run an interval equal to the frame's cadence: 60 s, 120 s, 900 s
+>     and 1,800 s. A keep-alive falls due when the next frame does, and goes first when that
+>     frame is later on its schedule than the one before. So the uplink pays none to one
+>     keep-alive a gap: at most 1,440 a day on RF, 720 at SF9 (119 s of air), 96 at SF12 (142 s)
+>     and 48 on SBD, each a paid message.
+>   - **SF7's 30 s** is half its frame's minute. The uplink pays one keep-alive between two
+>     frames, and a second before each frame later than the one before: 1,440 to 2,880 a day,
+>     74 s to 148 s of air.
+>   - **Measured** (`link.v2` Appendix B): 2,160 a day at SF7, 111 s of air; on RF none bare, and
+>     336 a day under the lean stack. SF9, SF12 and SBD have not run (#989).
+>   - **Why the leases.** #991 moved SF9's from 240 s to 480 s and SF12's from 1,080 s to
+>     3,600 s, each four frame intervals. SF12's 270 s interval had sent three keep-alives a gap,
+>     288 a day and 427 s of air, half its duty.
+>   - **To spare every keep-alive,** a face runs an interval above its cadence by more than its
+>     frames' lateness (§2.16). These leases are zenoh-modem's to move.
 > - **Keyframes** (#991's table). `frames/fast` writes a full record at least every 15: 15 minutes
 >   on RF and SF7; SF9's face asks for one every 15 minutes, which its owner meets by one every
 >   seventh frame. `frames/slow` writes one at least every 4, hourly at SF12. `frames/paid` is a
@@ -70,8 +81,9 @@
 > **Why `modem.v3` still lists `link.v1`.** A face policy is the deployment's, never on the bus
 > (`link.v2` §3). A contract lists `link.v2` only to take its packed requirement (its §1 and
 > §2.17), and one that lists `link.v1` crosses a `link.v2` face as `link.v1` says, warned
-> `not_packed` for each unpacked resource that crosses. Every resource `modem.v3` exposes, 3.2's
-> and 3.3's, is a packed frame, so no plan draws one. Revision 3.3 (#991) keeps `uses` at `link.v1`:
+> `not_packed` for each unpacked resource that crosses. Every frame `modem.v3` exposes, 3.2's
+> and 3.3's, is packed. Since 3.4, `face/device_fault`, JSON, crosses RF alone, and RF's plan
+> draws the one `not_packed` ("Events", below). Revision 3.3 (#991) keeps `uses` at `link.v1`:
 > whether `modem.v3` lists `link.v2`, which would make that profile draft, is the maintainer's
 > call, and moving it later takes a revision of its own, a new fingerprint and a successor
 > catalog. Until then a descriptor of a `modem.v3` instance lists `link.v1`, and so does the
@@ -126,8 +138,12 @@
 > | `frames/slow` | 1,800 s, at least every 4; deadbands | LoRa SF12 (900 s) | 216 B: a delta of all 73 |
 > | `frames/paid` | 3,600 s, every frame | SBD (1,800 s) | 207 B: a full record |
 >
-> With every reading present and 24 of them moving, RF carries 177 KB a day, LoRa spends 376 s,
-> 534 s and 785 s of its 864 s at SF7, SF9 and SF12, and SBD 96 messages a day, as idle.
+> With every reading present and 24 of them moving, the frames take 177 KB a day on RF, 302 s,
+> 534 s and 785 s of LoRa's 864 s at SF7, SF9 and SF12, and 48 paid messages on SBD. The uplink's
+> keep-alives come beside them (the first note's "Keep-alives"): 74 s to 148 s at SF7, up to
+> 119 s at SF9 and 142 s at SF12, and up to 48 messages on SBD, beside the 48 keep-alives down.
+> So LoRa spends 376 s to 450 s, 534 s to 653 s and 785 s to 927 s, and SBD 96 to 144 messages
+> a day. At the most, SF12 is over its duty and SBD over its 96.
 
 > **Events, since `modem.v3` 3.4 (#991, after #980's C2).** Since core 0.103 an occurrence's key
 > ends in its run and seq, and its payload is form 4, the event, which carries its time (core
@@ -159,14 +175,18 @@
 > | `face/oper_change`, 47 B | 1,128 | 2.2 | 7.4 | 79.0 (2 tiles) | 24 |
 > | `face/identity_change`, 60 B | 1,440 | 2.7 | 8.9 | 90.8 | 24 |
 > | `face/device_fault`, 220 + 68 B (115 B SDUs at SF9) | 414,720 | 679 | 2,423 | 22,496 | 1,440 |
-> | 3.3's frames, all 73 readings | 177,000 | 376 | 534 | 785 | 96 |
+> | 3.3's frames, all 73 readings, at the fewest keep-alives `link.v2` §2.16 allows | 177,000 | 376 | 534 | 785 | 96 |
 > | **Carried** | the three: **594,288**, 2.3 % of 25.9 MB | two: **381**, 44 % of 864 | two: **550**, 64 % | none: **785**, 91 % | none: **96**, as idle |
+> | The uplink's keep-alives at the most, beyond those | 24,480 | 74 | 119 | 142 | 48 |
+> | **Carried, at the most keep-alives** | **618,768**, 2.4 % | **455**, 53 % | **669**, 77 % | **927**, 107 % | **144** |
 >
 > What each leaves out would not fit: `face/device_fault` takes LoRa past its duty at every
 > spreading factor (1,060 s at SF7); at SF12 `face/oper_change` alone reaches 864.04 s, beside
 > frames/slow's 785 s, and each event on SBD is a paid message of its own. With lora0's own
 > readings, 434 s at SF12, the two `rare` events would fit there (604 s): a choice for lora0's
-> owner, which the check does not take.
+> owner, which the check does not take. The check reads each face at the fewest keep-alives. At
+> the most, SF12 and SBD are over their budgets with no event at all (the first note's
+> "Keep-alives").
 
 zenoh-modem carries stock Zenoh over radios where every byte is billed in airtime:
 - 220 B MTU at 2,400 bit/s on RF;

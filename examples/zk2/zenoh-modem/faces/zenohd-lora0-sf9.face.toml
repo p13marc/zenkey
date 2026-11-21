@@ -5,10 +5,13 @@
 #
 # The transport: at 60 s with 2, the keep-alive interval was 30 s, so one
 # frame a minute still left a keep-alive between every two. 480 s with 4
-# puts the interval at 120 s, which frames/fast at one every 2 minutes
-# replaces: 1,440 keep-alives a day idle, 0.18 false closes a day at 5 %
-# loss. (#988 L5 ran 240 s, for frames/link every minute; #991's 3.3 puts
-# the readings in one frame every 2.)
+# puts the interval at 120 s, frames/fast's cadence: 1,440 keep-alives a
+# day idle, 0.18 false closes a day at 5 % loss. A frame then replaces a
+# keep-alive unless it is later on its schedule than the one before (v2
+# §2.16), so the plan warns `keep_alive_not_suppressed`: none to 720
+# uplink keep-alives a day, at most 119 s of air, not measured at SF9.
+# (#988 L5 ran 240 s, for frames/link every minute; #991's 3.3 puts the
+# readings in one frame every 2.)
 #
 # Across the face: frames/fast every two minutes, a full record every 15
 # minutes (`keyframe_s`, #991's table): all 73 readings in 534 s of air a
@@ -19,8 +22,9 @@
 #
 # Events (modem.v3 3.4, #991): the face lists `face/oper_change` and
 # `face/identity_change` (link.v2 0.12 §2.7), 16 s of air a day at their
-# worst case beside the frames' 534 s: 550 s, 64 % of the duty. The plan
-# denies `face/device_fault` by name: it would take 2,423 s more (link.md,
+# worst case beside the frames' 534 s: 550 s, 64 % of the duty, and
+# 669 s, 77 %, with every uplink keep-alive paid. The plan denies
+# `face/device_fault` by name: it would take 2,423 s more (link.md,
 # "Events").
 profile  = "link.v2"
 system   = "h-c2a95e41d7f0"
