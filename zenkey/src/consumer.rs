@@ -1266,7 +1266,8 @@ impl Consumer {
                     Some(SectionRead::Confirmed(keys)) => HeartbeatSection::Confirmed(keys.clone()),
                     Some(SectionRead::Diverged) => HeartbeatSection::Diverged,
                     Some(SectionRead::Absent) => HeartbeatSection::Absent,
-                    Some(SectionRead::NotFollowed) | None => return,
+                    // `OtherClass` is a group's reading alone, never a heartbeat's.
+                    Some(SectionRead::NotFollowed | SectionRead::OtherClass) | None => return,
                 };
                 on_confirm(HeartbeatRead {
                     provider: addr,

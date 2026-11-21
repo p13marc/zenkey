@@ -7,6 +7,114 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.19 — 2026-11-21: §2.9, an owner heartbeat crosses by its class; §2.16, its put weighed against the batch (#1110)
+
+`freshness.v2` 0.9 lets an owner confirm several interfaces in one put,
+one per class of exposure. `link.v1` 0.20 keeps both classes' keys off
+its faces. This text lets the `link` class's cross.
+
+**Added: §2.9.**
+- **The `link` class's key** crosses a face exactly when a listed
+  interface's heartbeat crosses it (a MUST).
+- **The `host` class's key** crosses no face on which `freshness.v2` is
+  listed (a MUST NOT).
+- **In the denies.** `freshness.v2`'s stream carve holds
+  `heartbeats/link` and `heartbeats/host` as templates. Wherever a
+  heartbeat crosses, the plan denies
+  `zk2/*/*/freshness.v2/stream/heartbeats/host/**`.
+- **A crossing heartbeat, wherever one is weighed.** The `link` key is
+  liveness evidence of each listed service that implements an interface
+  whose heartbeat crosses. Its horizon is the shortest among the `link`
+  collections of that service's listed interfaces. `horizon_under_face`
+  and `keep_alive_not_suppressed` weigh it, `at`
+  `freshness.v2/stream/heartbeats/link`.
+
+**Added: §2.16, an owner heartbeat's put against the batch.**
+- `block_over_batch` warns of a face the `link` key crosses when a
+  listed service's longest owner heartbeat is above `batch_bytes`.
+- **Why that code**, for a `drop` put. Zenoh fragments it the same, and
+  one lost fragment loses every group. A code keeps one severity, and
+  this one is a warning already.
+- **Its longest put** is stated bit by bit: every `link` collection's
+  longest section, a size per group, 8 bytes of envelope.
+
+**The header** restates `link.v1` text 0.20, and is written against core
+0.108, whose §7.5 defines the owner heartbeat.
+
+**Evidence.** `conformance/v2/plan.json`, 48 cases.
+- **Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8,
+  9, 10, 12, 19, 20, 22, 23, 44 and 45. Under a `link.v2` policy each
+  plan gains `stream:freshness.v2`, the `host` key's deny, and the `link`
+  key among `probe-a`'s evidence. Case 6 gains its `horizon_under_face`.
+  Case 10 is a `link.v1` policy: it gains `link.v1` 0.20's deny of both
+  classes, and no evidence.
+- **How they were checked.** Cases 5 and 6 were written by hand from
+  §2.9 before the reference derived them, and the two agree. The ten
+  others differ from their plans before by those keys alone.
+- **Cases 46 and 47 are new, written by hand** from §2.9 and §2.16, and
+  the reference derives the same plans. One service's `link` owner
+  heartbeat holds two groups, one with a collection of cardinality
+  1,000: 1,211 bits, a put of 160 bytes. Case 46's batch is 159 bytes,
+  and it warns `block_over_batch`. Case 47's is 160, and it does not.
+  An interface whose one collection is `host` has no group there.
+- **An inline resource may state `cardinality`,** which the longest put
+  reads. A templated one that states none is read as no ceiling.
+- **Cases 14 to 18** carry zenoh-modem's catalog, which appends
+  `freshness.v2`'s revision 1.1: `8982cc41`. Their plans name it, and
+  nothing else in them moves, since no heartbeat crosses those faces.
+
+**Read where the text does not say.** A group is counted, for the
+horizon and for the longest put, for an interface that has a heartbeat:
+one a revision of which uses `freshness.v2`. An owner covers an
+interface in place of its heartbeat (`freshness.v2` §2.4), so an
+interface with none has no group. §2.9 and §2.16 say "listed interface"
+alone. No case pins the difference.
+
+**Deliberately not changed.**
+- **The heartbeat's crossing.** `link.v1` §2.9's rule holds.
+- **No per-face horizon.** `horizon_s` stays a budget floor.
+
+## 0.20 — 2026-11-21: §2.9, no owner heartbeat crosses a face (#1110)
+
+`freshness.v2` 0.9 lets an owner confirm several interfaces in one put,
+an owner heartbeat, on `…/freshness.v2/stream/heartbeats/<class>`
+([`../freshness/CHANGELOG.md`](../freshness/CHANGELOG.md)). This text's
+plan carved `freshness.v2`'s stream denies from the per-interface
+heartbeats alone. So wherever one heartbeat crossed, no deny named the
+new keys. Under `allow`, both classes' owner heartbeats would have
+crossed, the `host` collections' digests and bits with them.
+
+**Added: §2.9, "No owner heartbeat crosses".**
+- **The rule.** Wherever `freshness.v2` is a listed interface, a
+  generator MUST NOT let an owner heartbeat's key cross a face, whatever
+  its class.
+- **In the denies (§2.7).** `freshness.v2`'s stream carve holds its
+  template `heartbeats/{class}`, which never crosses. Wherever a
+  heartbeat crosses, the plan denies
+  `zk2/*/*/freshness.v2/stream/heartbeats/**`. Where none crosses, the
+  whole deny already covers it.
+- **The owner's side.** An owner whose collections cross a face of this
+  text's policy keeps their interfaces' heartbeats. `freshness.v2` §2.4
+  and §2.9 say so.
+
+**Why a deny, and not `link.v2`'s rule.** `link.v2` 0.18 lets the `link`
+class's key cross where a heartbeat does. This text has no notion of a
+class crossing, and faces are moving to `link.v2`. The deny is the safe
+side: nothing new crosses a `link.v1` face.
+
+**Evidence.** `plan.json`'s cases 12 and 14 gain the deny beside
+`heartbeat/notes.v2`'s. A new case 17 is case 12 without `notes.v2`:
+every heartbeat crosses, and the stream deny of `freshness.v2` holds the
+owner heartbeat keys alone. The three denies were derived twice from the
+text. The rest of case 17's plan is case 12's, less `notes.v2`'s denies.
+
+**Deliberately not changed.**
+- **The heartbeat's crossing.** It crosses exactly where a collection of
+  its interface does, as before.
+- **Liveness evidence and warnings.** An owner heartbeat is none, and
+  draws none.
+- **The header** is still written against core 0.32.
+
 ## link.v2 0.18 — 2026-11-21: §2.19, a `null` among the eight keys; §2.18, the far end's block unfilled; `keep_alive_not_suppressed` pinned below the interval, no keyword changed (#609)
 
 zk2py round 110 read 0.15 to 0.17 cold, beside core 0.106. It filed

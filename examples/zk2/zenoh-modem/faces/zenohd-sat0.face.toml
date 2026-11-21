@@ -27,7 +27,7 @@ profile  = "link.v2"
 system   = "h-71c0e2a9d4b3"
 services = ["sat0"]
 binding  = "zm-1.10.2-r1"
-catalog  = "29bf7d47"
+catalog  = "8982cc41"
 
 [transport]
 lease_ms             = 3600000

@@ -539,6 +539,42 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `mixed.v1`: computed twice, by two readings of the text that shared no
   code, never blessed, and the reference reads all 90 unchanged
   (`heartbeat_owner_vectors`). 283 rules (implementation 73).
+  `freshness.v2` 0.9 (#1110's H2a) adopts it, with no core keyword rule
+  (§11.1's Consume and §8.5 name the owner heartbeat key; still 283
+  rules): an owner given a catalog MAY confirm several interfaces in one
+  put per class, on `…/freshness.v2/stream/heartbeats/<class>`, the class
+  a collection's resolved `link.exposure` (`link`, else `host`); in a
+  group it MUST set no map bit of another class, MUST NOT also send a
+  covered interface's heartbeat, and sends at most half the shortest
+  covered horizon apart, per key (`[Sc: §8]`, which H3 writes). A
+  subscriber subscribes to both forms' keys and reads an owner heartbeat
+  by §2.5's steps: refused whole, older on its key, else each group
+  alone (no index, not followed, another revision, refused, read; a
+  followed collection of the other class `other_class`), the sequence
+  and a gap the key's, lost for every collection the key covers: those
+  of its class in each interface a group on it named within the run.
+  `conformance/apply.json` holds 32 cases, 17 of them over owner
+  heartbeats, computed twice outside the repo, never blessed. The
+  standard contract's revision 1.1 adds the optional `heartbeats/{class}`
+  (`9e07704d…`, published in `profiles/.history/freshness.v2/` beside
+  1.0, compatible), and zenoh-modem's catalog appends it at index 11
+  (`8982cc41`, its five faces naming it). `link.v1` 0.20: no owner
+  heartbeat key crosses a face where `freshness.v2` is listed (MUST
+  NOT), the carve holding `heartbeats/{class}`, so a face a heartbeat
+  crosses denies `zk2/*/*/freshness.v2/stream/heartbeats/**`
+  (`plan.json` cases 12, 14 and 17, 18 cases). `link.v2` 0.19: the
+  `link` class's key crosses exactly when a listed interface's heartbeat
+  does (MUST) and the `host` class's never (MUST NOT), so such a face
+  denies `…/heartbeats/host/**`; the `link` key is evidence of each
+  service implementing an interface whose heartbeat crosses, weighed by
+  `horizon_under_face` and `keep_alive_not_suppressed` at the shortest
+  horizon of that service's `link` collections, and `block_over_batch`
+  weighs any listed service's longest owner heartbeat, all `at`
+  `freshness.v2/stream/heartbeats/link`. `v2/plan.json` holds 48 cases:
+  fourteen faces changed (cases 5 and 6 read by hand before the bless,
+  the rest differing by those keys alone), and cases 46 and 47, written
+  by hand, pin the longest put at 160 bytes on both sides of the batch;
+  an inline resource may state `cardinality`.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
@@ -625,9 +661,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   #991's 3.3 (`link.v1` 0.17, `link.v2` 0.8, `telemetry.v2` 0.3, all
   editorial) puts the readings in `frames/fast`, `slow` and `paid` and
   deprecates the nine. Cases 14–18 carry `catalog.json`'s catalog
-  inline, `0ff6bf6d` since `link.v2` 0.11 (its lineage ends at
-  `e3a529fe`, `expect.catalog` `0ff6bf6d`): a new catalog is copied into
-  them before their plans re-bless.
+  inline, `8982cc41` since `link.v2` 0.19 (its lineage ends at
+  `29bf7d47`, `expect.catalog` `8982cc41`): a new catalog is copied into
+  them, and its id into their policies, before their plans are checked
+  again.
 - **`config.v2`** (#985 G1, text 0.1, `experimental` until G4, written against
   core 0.94) sits beside `config.v1` in `spec/profiles/config/`: `v2.md`,
   `scenarios-v2.md`, `config.v2.json` (the change event), and

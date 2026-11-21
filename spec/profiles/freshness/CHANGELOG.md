@@ -5,6 +5,99 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.9 — 2026-11-21: the owner heartbeat, one put per owner and class in place of one per interface (#1110)
+
+Text 0.8 sends one heartbeat per interface. W2's device has three. On
+RF they measured 238 KB a day, where the first model said 52 KB: each is
+a put of its own, most often in an SDU of its own. On LoRa SF7, three
+interfaces at a 60-s horizon would take 747 s of air a day, 86 % of the
+duty. The maintainer chose one heartbeat per owner and class of
+exposure. Core 0.108 defines its bytes
+([`../../CHANGELOG.md`](../../CHANGELOG.md)). This text, written against
+it, adopts them.
+
+**Added: §2.4, "The owner heartbeat".**
+- **The MAY.** An owner given a catalog MAY confirm several interfaces
+  in one put, in place of their heartbeats. It sends one for each class
+  of collection it holds.
+- **The class** is a collection's resolved `link.exposure`, as `link.v1`
+  §2.2 reads it: `link`, or `host`.
+- **Three rules.** In a group, an owner MUST set the map bit of no
+  collection of another class. It MUST NOT send a heartbeat covering an
+  interface while its owner heartbeats cover it. Its owner heartbeats on
+  one key MUST be at most half the shortest horizon among the
+  collections their groups cover apart.
+- **The heartbeat's own MUST** excepts an interface that the owner's
+  owner heartbeats cover.
+- **What stays the owner's choice:** which interfaces it covers. An
+  owner with no catalog, an interface the catalog does not list, a
+  sixteenth interface, and an interface whose collections cross a
+  `link.v1` face all keep their heartbeats.
+
+**Added: §2.5, "An owner heartbeat", "What counts" and "A lost owner
+heartbeat".**
+- **One heartbeat per group.** A subscriber reads an owner heartbeat in
+  three steps: refused whole, older on its key, or read. A read one's
+  groups are each read alone: no index, not followed, another revision,
+  refused, or read.
+- **Only the key's class.** A collection of the other class is not read
+  on a key, whatever its map bit says (`other_class`).
+- **The sequence is the key's.** A gap is one owner heartbeat lost for
+  every interface the key covers. The subscriber reads their members of
+  that class as lost deliveries until one arrives in sequence.
+- **A collection's divergences in a row** count the groups read for its
+  interface on its class's key. A group stopped earlier is not counted.
+  Neither is an owner heartbeat with no group for the interface.
+- **Both forms.** A subscriber subscribes to the provider's owner
+  heartbeat keys beside its heartbeat key. It cannot tell which form an
+  owner sends before it hears one.
+
+**Added: §2.9.** An owner heartbeat crosses by its class: the `link`
+class's where `link.v2` 0.19 lets it, the `host` class's nowhere, and
+neither under a `link.v1` policy (`link.v1` 0.20). It is liveness
+evidence for each interface it holds a group of.
+
+**Changed: §3, the standard contract, revision 1.1.**
+- **Added:** `heartbeats/{class}`, a stream, `optional`, with the
+  heartbeat's QoS and a cardinality of 2.
+- **Compatible** (core §9.8): an optional resource added. Its
+  fingerprint is
+  `sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1`,
+  as the reference's `zk2 contract fingerprint` computes it.
+- **Published.** `../.history/freshness.v2/` holds revisions 1.0 and
+  1.1. The reference's `zk2 contract fingerprint` gives the same
+  fingerprint, and its `compat --history` reads 1.1 compatible.
+- **zenoh-modem's catalog appends it** at index 11, beside 1.0 at index
+  9: `8982cc41`, which succeeds `29bf7d47`. Its five faces name it. It is
+  the one adopter's catalog.
+
+**What it costs.** W2's three interfaces take one payload of 35 bytes on
+a 16-bit run, where their heartbeats took 16, 16 and 17. One SDU every
+28.5 s is 176 KB a day, where today's three cost 245 KB with each alone
+in its SDU. The count falls from 6,264 puts a day to 3,032.
+
+**What it risks.**
+- **One loss hides every group at once.** Within ttl it is harmless, as
+  one lost heartbeat is.
+- **A mixed fleet.** A reader of text 0.8 hears no owner heartbeat, and
+  a covered interface's members go stale to it. A deployment turns the
+  owner heartbeat on once its readers read it.
+- **The catalog is needed to confirm.** A reader that does not hold the
+  catalog its owner names reads no group, and its members go stale.
+
+**Evidence.** `conformance/apply.json` gains 17 cases over owner
+heartbeats, beside its 15. They were computed twice, by two readings of
+this text that shared no code. `scenarios-v2.md` §8 runs an owner
+heartbeat on a bus.
+
+**Deliberately not changed.**
+- **The heartbeat.** An owner may send it for every interface, as
+  before. A reader reads it as before, and the 15 cases stand.
+- **No period in the key.** One key per class is simpler. A collection
+  with a longer horizon rides the class's shortest period.
+- **No horizon per face.** A reader's horizon stays its contract's.
+- **`freshness.v1`.** No change.
+
 ## `v2.md` 0.8 — 2026-11-08: editorial: a member's times minted at each put, no rule changed (#609)
 
 zk2py round 107 read core 0.103 cold. Its F-515 found that this text

@@ -566,7 +566,21 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   comparison naming it; a `null` lease refused by stock zenoh's loader and
   `transport_differs` read as data), and its tcgui and walkthrough plans grant each bound
   `freshness.v2` heartbeat since #978 F5 moved those contracts (bless with
-  `ACL_BLESS=1`). Since F5 no tcgui state is on core §4.3's table: a test
+  `ACL_BLESS=1`). Since `freshness.v2` 0.9 (#1110's H2a, core §11.1) a
+  binding that consumes a collection of a `freshness.v2` contract is
+  granted each bound provider's owner heartbeat key too,
+  `…/freshness.v2/stream/heartbeats/<class>`, for each class those
+  collections have (`heartbeat_classes`, `owner_heartbeat_pattern`,
+  beside `heartbeat_covers`), and the key is a surface of its owner, so
+  the fan-in and the allow posture's complement hold it; the fifteen
+  pinned plans gained those keys and the cite's words, every changed rule
+  its old keys in order plus `heartbeats/host`. A face's block takes the
+  plan's denies as they are: `…/heartbeats/**` on a `link.v1` face a
+  heartbeat crosses, `…/heartbeats/host/**` on a link.v2 one (link.v1
+  0.20, link.v2 0.19), which `link_says` explains for `horizon_under_face`
+  and `block_over_batch` at `freshness.v2/stream/heartbeats/link`. No
+  reader here subscribes the key yet: `FaceScope`, the books and
+  `watch_across` are H2b's. Since F5 no tcgui state is on core §4.3's table: a test
   that needs row 1 reads `zenkey/tests/contracts/beacon.v1.toml` or runs
   `tc.netif.v1`'s published revision 1.0 from its bundle
   (`zk2_observe`'s timeline); `tests/link_face.rs`' `v2_s1_the_router_runs_the_block` runs

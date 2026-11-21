@@ -697,6 +697,10 @@ struct Held<T> {
 pub enum SectionRead {
     /// The view does not follow the collection: nothing read.
     NotFollowed,
+    /// In a group of an owner heartbeat, a followed collection that is not
+    /// of the key's class: not read, whatever its map bit says (v2 §2.5).
+    /// A heartbeat's own section is never this.
+    OtherClass,
     /// Its map bit is 0: nothing confirmed there.
     Absent,
     /// The digest, or the live count, is not the view's: nothing
@@ -708,11 +712,12 @@ pub enum SectionRead {
 }
 
 impl SectionRead {
-    /// `not_followed`, `absent`, `diverged` or `confirmed`.
+    /// `not_followed`, `other_class`, `absent`, `diverged` or `confirmed`.
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::NotFollowed => "not_followed",
+            Self::OtherClass => "other_class",
             Self::Absent => "absent",
             Self::Diverged => "diverged",
             Self::Confirmed(_) => "confirmed",
@@ -735,6 +740,120 @@ pub enum Applied {
     Read {
         gap: bool,
         sections: Vec<SectionRead>,
+    },
+}
+
+/// One heartbeat key's sequence, as a reader counts it (v2 §2.5): the
+/// stamp of the last heartbeat read on the key, and whether that one
+/// followed a lost one. A heartbeat key has one, and so has each owner
+/// heartbeat key, whatever its groups cover: older and lost are the
+/// key's, never an interface's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Sequence {
+    last: Option<Stamp>,
+    gap: bool,
+}
+
+/// What [`Sequence::read`] says of a heartbeat that is not older.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sequenced {
+    /// Within one run, its seq is not the last read one's plus 1: one or
+    /// more were lost.
+    pub gap: bool,
+    /// It is of another run than the last read one: the sequence starts
+    /// again. `false` for the first one read.
+    pub run: bool,
+}
+
+impl Sequence {
+    /// A heartbeat about to be read on the key, one core §7.5 did not
+    /// refuse: `None` when, within one run, its seq is not after the last
+    /// read one's by core §4.3's serial order (`older`), which moves
+    /// nothing; else the sequence moves to it.
+    pub fn read(&mut self, stamp: Stamp) -> Option<Sequenced> {
+        let read = match self.last {
+            Some(l) if l.run == stamp.run => {
+                match crate::seed::Order::Serial.seqs(l.seq, stamp.seq) {
+                    Some(std::cmp::Ordering::Greater) => Sequenced {
+                        gap: stamp.seq.get().wrapping_sub(l.seq.get())
+                            & crate::wire::Seq::MAX.get()
+                            != 1,
+                        run: false,
+                    },
+                    _ => return None,
+                }
+            }
+            Some(_) => Sequenced {
+                gap: false,
+                run: true,
+            },
+            None => Sequenced {
+                gap: false,
+                run: false,
+            },
+        };
+        self.last = Some(stamp);
+        self.gap = read.gap;
+        Some(read)
+    }
+
+    /// The last heartbeat read on the key: its stamp.
+    #[must_use]
+    pub fn last(&self) -> Option<Stamp> {
+        self.last
+    }
+
+    /// Whether the last heartbeat read on the key followed a lost one.
+    #[must_use]
+    pub fn gap(&self) -> bool {
+        self.gap
+    }
+}
+
+/// What one group of an owner heartbeat did to a reader's views (v2
+/// §2.5's "An owner heartbeat", step 3), the first of these that answers.
+/// Only [`GroupRead::Read`] counts toward a collection's divergences in a
+/// row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupRead {
+    /// Core §8.6 refuses its index (`unknown_catalog`, `unknown_index`),
+    /// or, after the two readings below, core §7.5 its sections (`short`,
+    /// `code`, `trailing`): the group confirms nothing.
+    Refused(crate::heartbeat::GroupRefusal),
+    /// The reader follows no collection of the interface its index names:
+    /// skipped.
+    NotFollowed,
+    /// The revision its index names is not the one the reader holds, or
+    /// its tag is not that revision's: the group confirms nothing.
+    Revision,
+    /// Read, each collection of its interface in map order.
+    Read(Vec<SectionRead>),
+}
+
+/// One group of a read owner heartbeat: its index, the interface the
+/// index names where core §8.6 resolved it, and what it did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupApplied {
+    pub index: u16,
+    pub iface: Option<crate::grammar::IfaceId>,
+    pub read: GroupRead,
+}
+
+/// What an owner heartbeat did to a reader's [`Views`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnerApplied {
+    /// Core §7.5 refuses it whole, before any group's sections are read:
+    /// nothing confirmed, nothing counted.
+    Refused(crate::heartbeat::OwnerRefusal),
+    /// Its key's seq is not after the last read owner heartbeat's on that
+    /// key, within one run: nothing confirmed, nothing counted.
+    Older,
+    /// Read, each group alone, in order. `gap` says the key's seqs skipped
+    /// since the last one read on it: one or more were lost, for every
+    /// collection the key covers.
+    Read {
+        gap: bool,
+        groups: Vec<GroupApplied>,
     },
 }
 
@@ -765,8 +884,9 @@ pub struct View<T> {
     follows: Vec<bool>,
     members: BTreeMap<String, Held<T>>,
     diverged: Vec<u32>,
-    last: Option<Stamp>,
-    gap: bool,
+    /// Its heartbeat key's sequence. An owner heartbeat key's is
+    /// [`Views`]'s.
+    seq: Sequence,
     time: Option<crate::heartbeat::Time>,
     heartbeats: u64,
 }
@@ -781,8 +901,7 @@ impl<T: Arrival> View<T> {
             follows: vec![false; n],
             members: BTreeMap::new(),
             diverged: vec![0; n],
-            last: None,
-            gap: false,
+            seq: Sequence::default(),
             time: None,
             heartbeats: 0,
         }
@@ -948,7 +1067,7 @@ impl<T: Arrival> View<T> {
     /// A heartbeat heard at `at`: CH's tag, its stamp and its body. See
     /// [`View`]'s doc for what it confirms.
     pub fn apply(&mut self, tag: crate::wire::Tag, stamp: Stamp, body: &[u8], at: T) -> Applied {
-        use crate::heartbeat::{Heartbeat, Members};
+        use crate::heartbeat::Heartbeat;
         if tag != self.layout.tag {
             return Applied::Revision;
         }
@@ -956,57 +1075,112 @@ impl<T: Arrival> View<T> {
             Ok(hb) => hb,
             Err(r) => return Applied::Refused(r),
         };
-        let gap = match self.last {
-            Some(l) if l.run == stamp.run => {
-                match crate::seed::Order::Serial.seqs(l.seq, stamp.seq) {
-                    Some(std::cmp::Ordering::Greater) => {
-                        stamp.seq.get().wrapping_sub(l.seq.get()) & crate::wire::Seq::MAX.get() != 1
-                    }
-                    _ => return Applied::Older,
-                }
-            }
-            _ => false,
+        let Some(read) = self.seq.read(stamp) else {
+            return Applied::Older;
         };
-        self.last = Some(stamp);
-        self.gap = gap;
         self.time = Some(hb.time);
         self.heartbeats += 1;
         let mut sections = Vec::with_capacity(hb.sections.len());
         for (i, section) in hb.sections.iter().enumerate() {
-            if !self.follows[i] {
-                sections.push(SectionRead::NotFollowed);
-                continue;
-            }
-            let Some(s) = section else {
-                self.diverged[i] = 0;
-                sections.push(SectionRead::Absent);
-                continue;
-            };
-            let keys: Vec<String> = self.live(i).map(|(k, _)| k.clone()).collect();
-            let same_count = match &s.members {
-                Members::One { .. } => keys.len() <= 1,
-                m => m.live() == Some(keys.len() as u64),
-            };
-            if self.digest(i) != Some(s.digest) || !same_count {
-                self.diverged[i] = self.diverged[i].saturating_add(1);
-                sections.push(SectionRead::Diverged);
-                continue;
-            }
-            self.diverged[i] = 0;
-            let vouched: Vec<String> = s
-                .members
-                .vouched()
-                .into_iter()
-                .filter_map(|r| keys.get(usize::try_from(r).ok()?).cloned())
-                .collect();
-            for k in &vouched {
-                if let Some(h) = self.members.get_mut(k) {
-                    h.confirmed = Some(at);
-                }
-            }
-            sections.push(SectionRead::Confirmed(vouched));
+            sections.push(if self.follows[i] {
+                self.read_section(i, section.as_ref(), at)
+            } else {
+                SectionRead::NotFollowed
+            });
         }
-        Applied::Read { gap, sections }
+        Applied::Read {
+            gap: read.gap,
+            sections,
+        }
+    }
+
+    /// One followed collection's section, read against the view (v2 §2.5,
+    /// step 4): a map bit of 0 ends a row of divergences, a digest or a
+    /// live count that is not the view's adds one, and a section in step
+    /// confirms each member it vouches for at `at`.
+    fn read_section(
+        &mut self,
+        i: usize,
+        section: Option<&crate::heartbeat::Section>,
+        at: T,
+    ) -> SectionRead {
+        use crate::heartbeat::Members;
+        let Some(s) = section else {
+            self.diverged[i] = 0;
+            return SectionRead::Absent;
+        };
+        let keys: Vec<String> = self.live(i).map(|(k, _)| k.clone()).collect();
+        let same_count = match &s.members {
+            Members::One { .. } => keys.len() <= 1,
+            m => m.live() == Some(keys.len() as u64),
+        };
+        if self.digest(i) != Some(s.digest) || !same_count {
+            self.diverged[i] = self.diverged[i].saturating_add(1);
+            return SectionRead::Diverged;
+        }
+        self.diverged[i] = 0;
+        let vouched: Vec<String> = s
+            .members
+            .vouched()
+            .into_iter()
+            .filter_map(|r| keys.get(usize::try_from(r).ok()?).cloned())
+            .collect();
+        for k in &vouched {
+            if let Some(h) = self.members.get_mut(k) {
+                h.confirmed = Some(at);
+            }
+        }
+        SectionRead::Confirmed(vouched)
+    }
+
+    /// One group of a read owner heartbeat of `class`, heard at `at` (v2
+    /// §2.5's "An owner heartbeat", step 3 from "Not followed" on): `entry`
+    /// is what core §8.6 read its index as ([`crate::heartbeat::Group::entry`]),
+    /// and `time` the owner heartbeat's. The caller has read the owner
+    /// heartbeat on its key first ([`Views::apply_owner`] does both): this
+    /// moves no sequence.
+    ///
+    /// - **Not followed:** the entry names another interface, or the view
+    ///   follows no collection.
+    /// - **Another revision:** the entry's revision is not the view's, or
+    ///   the group's tag is not that revision's.
+    /// - **Refused:** core §7.5 refuses its sections, parsed whole, the
+    ///   other class's too.
+    /// - **Read:** each followed collection of `class` as a heartbeat's
+    ///   section is read, on the collection's one count of divergences in
+    ///   a row; a followed one of the other class is
+    ///   [`SectionRead::OtherClass`], unread and uncounted.
+    pub fn apply_group(
+        &mut self,
+        class: crate::heartbeat::Class,
+        entry: &crate::catalog::Entry,
+        group: &crate::heartbeat::Group,
+        time: crate::heartbeat::Time,
+        at: T,
+    ) -> GroupRead {
+        if entry.iface != self.layout.iface || !self.follows_any() {
+            return GroupRead::NotFollowed;
+        }
+        if entry.contract != self.layout.fingerprint || !group.tag_is(&self.layout) {
+            return GroupRead::Revision;
+        }
+        let read = match group.read(&self.layout) {
+            Ok(s) => s,
+            Err(r) => return GroupRead::Refused(r),
+        };
+        self.time = Some(time);
+        self.heartbeats += 1;
+        let mut sections = Vec::with_capacity(read.len());
+        for (i, section) in read.iter().enumerate() {
+            sections.push(if !self.follows[i] {
+                SectionRead::NotFollowed
+            } else if self.layout.collections[i].class != class {
+                SectionRead::OtherClass
+            } else {
+                self.read_section(i, section.as_ref(), at)
+            });
+        }
+        GroupRead::Read(sections)
     }
 
     /// A GET's snapshot vouched for `key`'s live value at `at` (v2 §2.6,
@@ -1040,25 +1214,53 @@ impl<T: Arrival> View<T> {
             .collect()
     }
 
-    /// Whether the last heartbeat came after a gap in its key's seqs.
+    /// Whether the last heartbeat came after a gap in its key's seqs: the
+    /// interface's own heartbeat key's. A gap on an owner heartbeat key is
+    /// [`Views::gap`]'s.
     #[must_use]
     pub fn gap(&self) -> bool {
-        self.gap
+        self.seq.gap()
     }
 
-    /// The owner's time in the last heartbeat applied.
+    /// Whether it follows the collection at `index`.
+    #[must_use]
+    pub fn follows(&self, index: usize) -> bool {
+        self.follows.get(index).copied().unwrap_or(false)
+    }
+
+    /// The classes of the collections it follows, `link` first: the
+    /// provider's owner heartbeat keys a subscriber subscribes to beside
+    /// its heartbeat key (v2 §2.5, "Both forms").
+    #[must_use]
+    pub fn classes(&self) -> Vec<crate::heartbeat::Class> {
+        crate::heartbeat::Class::ALL
+            .into_iter()
+            .filter(|c| {
+                self.layout
+                    .collections
+                    .iter()
+                    .zip(&self.follows)
+                    .any(|(x, f)| *f && x.class == *c)
+            })
+            .collect()
+    }
+
+    /// The owner's time in the last heartbeat applied, or in the last
+    /// owner heartbeat a group of which was read for the interface.
     #[must_use]
     pub fn owner_time(&self) -> Option<crate::heartbeat::Time> {
         self.time
     }
 
-    /// The last heartbeat applied: its stamp.
+    /// The last heartbeat applied on the interface's own heartbeat key:
+    /// its stamp. An owner heartbeat's is its key's ([`Views::last`]).
     #[must_use]
     pub fn last_heartbeat(&self) -> Option<Stamp> {
-        self.last
+        self.seq.last()
     }
 
-    /// How many heartbeats it applied.
+    /// How many heartbeats it applied, each group read for the interface
+    /// among them.
     #[must_use]
     pub fn heartbeats(&self) -> u64 {
         self.heartbeats
@@ -1093,8 +1295,266 @@ impl<T: Arrival> View<T> {
         Observation::Subscribed {
             last: self.last(key, now),
             listened,
-            complete: complete && !self.gap,
+            complete: complete && !self.seq.gap(),
         }
+    }
+}
+
+/// What a reader reads a group's index through (core §8.6): the catalogs
+/// it holds, and the one the owner names in its descriptor, `None` where
+/// it names none, which refuses every index (`unknown_catalog`).
+#[derive(Debug, Clone, Copy)]
+pub struct Catalogs<'a> {
+    pub held: &'a [crate::catalog::Catalog],
+    pub named: Option<crate::catalog::CatalogId>,
+}
+
+/// One owner heartbeat key's state, as a reader holds it.
+#[derive(Debug, Clone, Default)]
+struct ClassKey {
+    seq: Sequence,
+    /// The interfaces a group on the key has named within the run: whose
+    /// collections of the key's class it covers, to this reader.
+    named: std::collections::BTreeSet<crate::grammar::IfaceId>,
+    read: u64,
+}
+
+/// One provider's views as one reader holds them, an interface each, with
+/// a [`Sequence`] per owner heartbeat key in front of them (`freshness.v2`
+/// §2.5, text 0.9; #1110's H2a). A heartbeat is still its interface's
+/// view's ([`Views::view_mut`], [`View::apply`]); an owner heartbeat is
+/// read here ([`Views::apply_owner`]), since its sequence is its key's and
+/// its groups are several views'.
+///
+/// - **Older and lost are per key.** Each class's key has one sequence. A
+///   gap on it is one owner heartbeat lost for every collection the key
+///   covers: those of the key's class, in each interface a group on the
+///   key has named within the run ([`Views::lost`]). It says nothing of
+///   the other class's key, nor of an interface confirmed by its own
+///   heartbeat.
+/// - **Divergences are per collection.** A collection has one count, its
+///   view's, which a heartbeat's section and a read group's move alike.
+/// - **A reader bound to one interface** holds one view here, and reads
+///   the other groups as not followed, by their sizes.
+#[derive(Debug, Clone)]
+pub struct Views<T> {
+    views: BTreeMap<crate::grammar::IfaceId, View<T>>,
+    keys: BTreeMap<crate::heartbeat::Class, ClassKey>,
+}
+
+impl<T> Default for Views<T> {
+    fn default() -> Self {
+        Self {
+            views: BTreeMap::new(),
+            keys: BTreeMap::new(),
+        }
+    }
+}
+
+impl<T: Arrival> Views<T> {
+    /// No view, and no owner heartbeat read.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Holds `view` as its interface's, in place of any view held for it.
+    pub fn insert(&mut self, view: View<T>) -> Option<View<T>> {
+        self.views.insert(view.layout().iface.clone(), view)
+    }
+
+    /// The view of an interface.
+    #[must_use]
+    pub fn view(&self, iface: &crate::grammar::IfaceId) -> Option<&View<T>> {
+        self.views.get(iface)
+    }
+
+    /// The view of an interface, to hear a mutation, a read's answer or
+    /// the interface's own heartbeat with.
+    pub fn view_mut(&mut self, iface: &crate::grammar::IfaceId) -> Option<&mut View<T>> {
+        self.views.get_mut(iface)
+    }
+
+    /// The view of the interface a state key is of, namespace in front or
+    /// none.
+    #[must_use]
+    pub fn view_of(&self, key: &str) -> Option<&View<T>> {
+        self.views.get(&iface_of(key)?)
+    }
+
+    /// As [`Views::view_of`], to change it.
+    pub fn view_of_mut(&mut self, key: &str) -> Option<&mut View<T>> {
+        self.views.get_mut(&iface_of(key)?)
+    }
+
+    /// Every view, in order of its interface.
+    pub fn iter(&self) -> impl Iterator<Item = &View<T>> {
+        self.views.values()
+    }
+
+    /// The classes of the collections the views follow, `link` first: the
+    /// provider's owner heartbeat keys to subscribe to (v2 §2.5, "Both
+    /// forms").
+    #[must_use]
+    pub fn classes(&self) -> Vec<crate::heartbeat::Class> {
+        crate::heartbeat::Class::ALL
+            .into_iter()
+            .filter(|c| self.views.values().any(|v| v.classes().contains(c)))
+            .collect()
+    }
+
+    /// An owner heartbeat heard at `at` on the key of `class`: CH's tag,
+    /// its stamp and its body, read through the catalog its owner names
+    /// among those the reader holds (`through`), by v2 §2.5's steps.
+    ///
+    /// 1. **Refused:** core §7.5 refuses it whole.
+    /// 2. **Older:** within one run, its seq is not after the last read
+    ///    one's on this key.
+    /// 3. **Read:** each group alone, in order: no index
+    ///    ([`GroupRead::Refused`]), then as its interface's view reads it
+    ///    ([`View::apply_group`]), not followed where no view is held for
+    ///    the interface. A group that confirms nothing takes nothing from
+    ///    the groups beside it.
+    ///
+    /// One stopped at step 1 or 2 moves neither the key's sequence nor a
+    /// count of divergences, and names no interface.
+    pub fn apply_owner(
+        &mut self,
+        class: crate::heartbeat::Class,
+        tag: crate::wire::Tag,
+        stamp: Stamp,
+        body: &[u8],
+        through: Catalogs<'_>,
+        at: T,
+    ) -> OwnerApplied {
+        let hb = match crate::heartbeat::OwnerHeartbeat::parse(tag, body) {
+            Ok(hb) => hb,
+            Err(r) => return OwnerApplied::Refused(r),
+        };
+        let key = self.keys.entry(class).or_default();
+        let Some(read) = key.seq.read(stamp) else {
+            return OwnerApplied::Older;
+        };
+        if read.run {
+            // Another run starts the sequence again, and its covered
+            // collections with it.
+            key.named.clear();
+        }
+        key.read += 1;
+        let mut groups = Vec::with_capacity(hb.groups.len());
+        for g in &hb.groups {
+            let entry = match g.entry(through.held, through.named) {
+                Ok(e) => e,
+                Err(r) => {
+                    groups.push(GroupApplied {
+                        index: g.index,
+                        iface: None,
+                        read: GroupRead::Refused(r),
+                    });
+                    continue;
+                }
+            };
+            // A group names an interface once its index is read, whatever
+            // becomes of it after.
+            key.named.insert(entry.iface.clone());
+            let read = match self.views.get_mut(&entry.iface) {
+                Some(v) => v.apply_group(class, entry, g, hb.time, at),
+                None => GroupRead::NotFollowed,
+            };
+            groups.push(GroupApplied {
+                index: g.index,
+                iface: Some(entry.iface.clone()),
+                read,
+            });
+        }
+        OwnerApplied::Read {
+            gap: read.gap,
+            groups,
+        }
+    }
+
+    /// Whether the last owner heartbeat read on the key of `class`
+    /// followed a gap in that key's seqs; `None` while none was read on
+    /// it.
+    #[must_use]
+    pub fn gap(&self, class: crate::heartbeat::Class) -> Option<bool> {
+        let k = self.keys.get(&class)?;
+        k.seq.last().map(|_| k.seq.gap())
+    }
+
+    /// The last owner heartbeat read on the key of `class`: its stamp.
+    #[must_use]
+    pub fn last(&self, class: crate::heartbeat::Class) -> Option<Stamp> {
+        self.keys.get(&class)?.seq.last()
+    }
+
+    /// How many owner heartbeats were read on the key of `class`, whatever
+    /// became of their groups.
+    #[must_use]
+    pub fn owner_heartbeats(&self, class: crate::heartbeat::Class) -> u64 {
+        self.keys.get(&class).map_or(0, |k| k.read)
+    }
+
+    /// Whether the followed collection at `index` of `iface` is read as a
+    /// lost delivery (v1 §2.5 rule 3): its interface's heartbeat key's
+    /// last heartbeat followed a gap, or its class's owner heartbeat key's
+    /// did and a group on that key has named the interface within the
+    /// run. Until one arrives in sequence on that key, or one of another
+    /// run does.
+    #[must_use]
+    pub fn is_lost(&self, iface: &crate::grammar::IfaceId, index: usize) -> bool {
+        let Some(v) = self.views.get(iface) else {
+            return false;
+        };
+        if !v.follows(index) {
+            return false;
+        }
+        v.gap()
+            || self
+                .keys
+                .get(&v.layout().collections[index].class)
+                .is_some_and(|k| k.seq.gap() && k.named.contains(iface))
+    }
+
+    /// Every followed collection read as a lost delivery
+    /// ([`Views::is_lost`]), by interface, then in map order.
+    #[must_use]
+    pub fn lost(&self) -> Vec<(crate::grammar::IfaceId, usize)> {
+        self.views
+            .iter()
+            .flat_map(|(iface, v)| {
+                (0..v.layout().collections.len())
+                    .filter(|i| self.is_lost(iface, *i))
+                    .map(|i| (iface.clone(), i))
+            })
+            .collect()
+    }
+
+    /// `key` as a subscription's observation at `now` (§2.5), as
+    /// [`View::observation`], complete only while its collection is read
+    /// as no lost delivery on either key that confirms it
+    /// ([`Views::is_lost`]). `None` for a key of no view held.
+    #[must_use]
+    pub fn observation(
+        &self,
+        key: &str,
+        now: T,
+        listened: Duration,
+        complete: bool,
+    ) -> Option<Observation> {
+        let v = self.view_of(key)?;
+        let lost = crate::heartbeat::base_relative(key)
+            .and_then(|k| v.layout().collection_of(k))
+            .is_some_and(|i| self.is_lost(&v.layout().iface, i));
+        Some(v.observation(key, now, listened, complete && !lost))
+    }
+}
+
+/// The interface a data key is of, namespace in front or none.
+fn iface_of(key: &str) -> Option<crate::grammar::IfaceId> {
+    match crate::grammar::parse(crate::heartbeat::base_relative(key)?) {
+        Ok(crate::grammar::ZkKey::Data { iface, .. }) => Some(iface),
+        _ => None,
     }
 }
 
@@ -1406,6 +1866,342 @@ annotations = { "freshness.ttl_s" = 2 }
                 Applied::Refused(_)
             ));
             assert_eq!(v.heartbeats(), 4);
+        }
+    }
+
+    /// `freshness.v2` §2.5's owner heartbeat, where `apply.json` leaves a
+    /// reading unpinned: what a key covers, and a group's steps one by one.
+    mod views {
+        use super::super::*;
+        use crate::catalog::Catalog;
+        use crate::contract::load_str;
+        use crate::heartbeat::{
+            Class, Digest, Group, GroupRefusal, Layout, Members, OwnerHeartbeat, Section, Time,
+        };
+        use crate::timing::Mono;
+        use crate::wire::{Run, Seq, Tag};
+
+        const MIXED: &str = r#"
+[interface]
+name = "mixed"
+major = 1
+minor = 0
+uses = ["freshness.v2", "link.v1"]
+[resources."peer/{peer}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { peer = "string" }
+cardinality = 8
+annotations = { "freshness.ttl_s" = 120 }
+[resources.status]
+kind = "state"
+type = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 60, "link.exposure" = "link" }
+"#;
+        const VITAL: &str = r#"
+[interface]
+name = "vital"
+major = 1
+minor = 0
+uses = ["freshness.v2"]
+[resources.status]
+kind = "state"
+type = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 60 }
+"#;
+        const PEER: &str = "zk2/lab/n1/mixed.v1/state/peer/p1";
+        const STATUS: &str = "zk2/lab/n1/mixed.v1/state/status";
+        const VITALS: &str = "zk2/lab/n1/vital.v1/state/status";
+
+        fn layout(text: &str) -> Layout {
+            Layout::of(
+                &load_str(text, std::path::Path::new("."), None)
+                    .contract
+                    .unwrap(),
+            )
+        }
+        fn st(run: u16, seq: u32) -> Stamp {
+            Stamp {
+                run: Run::U16(run),
+                seq: Seq::new(seq).unwrap(),
+            }
+        }
+        fn ms(n: u64) -> Mono {
+            Mono::after(Duration::from_millis(n))
+        }
+        /// mixed.v1 at index 0 and vital.v1 at index 1.
+        fn catalog(mixed: &Layout, vital: &Layout) -> Catalog {
+            let mut c = Catalog::new(0).unwrap();
+            c.push(mixed.iface.clone(), mixed.fingerprint.clone())
+                .unwrap();
+            c.push(vital.iface.clone(), vital.fingerprint.clone())
+                .unwrap();
+            c
+        }
+        fn one(key: &str, stamp: Stamp) -> Option<Section> {
+            Some(Section {
+                digest: Digest::of([(key, stamp)]),
+                members: Members::One { vouched: true },
+            })
+        }
+        /// mixed.v1's group on the `host` key: `peer/p1` vouched for, and
+        /// no bit for `status`, a `link` collection.
+        fn mixed_host(l: &Layout) -> Group {
+            let peers = Section {
+                digest: Digest::of([(PEER, st(1, 1))]),
+                members: Members::templated(1, [0]),
+            };
+            Group::of(0, l, &[Some(peers), None]).unwrap()
+        }
+        fn vital_host(l: &Layout) -> Group {
+            Group::of(1, l, &[one(VITALS, st(1, 3))]).unwrap()
+        }
+        fn body(groups: Vec<Group>) -> Vec<u8> {
+            OwnerHeartbeat {
+                time: Time::Unknown,
+                groups,
+            }
+            .write()
+            .unwrap()
+        }
+        /// Both views, every collection followed, a member in each.
+        fn views(mixed: &Layout, vital: &Layout) -> Views<Mono> {
+            let mut vs = Views::new();
+            for l in [mixed, vital] {
+                let mut v = View::new(l.clone());
+                for i in 0..l.collections.len() {
+                    assert!(v.follow(i));
+                }
+                assert!(vs.insert(v).is_none());
+            }
+            vs.view_of_mut(PEER)
+                .unwrap()
+                .put(PEER, Some(st(1, 1)), ms(0));
+            vs.view_of_mut(STATUS)
+                .unwrap()
+                .put(STATUS, Some(st(1, 2)), ms(0));
+            vs.view_of_mut(VITALS)
+                .unwrap()
+                .put(VITALS, Some(st(1, 3)), ms(0));
+            vs
+        }
+
+        #[test]
+        fn a_class_is_the_exposure_and_a_key_is_one_classs() {
+            let (mixed, vital) = (layout(MIXED), layout(VITAL));
+            assert_eq!(
+                mixed
+                    .collections
+                    .iter()
+                    .map(|c| c.class)
+                    .collect::<Vec<_>>(),
+                vec![Class::Host, Class::Link]
+            );
+            assert_eq!(mixed.classes(), vec![Class::Link, Class::Host]);
+            assert_eq!(vital.classes(), vec![Class::Host]);
+            assert_eq!(
+                mixed.class_horizon(Class::Link),
+                Some(Duration::from_secs(60))
+            );
+            assert_eq!(
+                mixed.class_horizon(Class::Host),
+                Some(Duration::from_secs(120))
+            );
+            assert_eq!(vital.class_horizon(Class::Link), None);
+            // A subscriber subscribes to the keys of the classes it follows.
+            let mut v = View::<Mono>::new(mixed.clone());
+            assert!(v.classes().is_empty());
+            assert!(v.follow_resource("state/status"));
+            assert_eq!(v.classes(), vec![Class::Link]);
+            let vs = views(&mixed, &vital);
+            assert_eq!(vs.classes(), vec![Class::Link, Class::Host]);
+        }
+
+        #[test]
+        fn a_sequence_is_its_keys_alone() {
+            let mut s = Sequence::default();
+            let first = s.read(st(9, 5)).unwrap();
+            assert!(!first.gap && !first.run);
+            assert_eq!(s.read(st(9, 5)), None, "the same seq");
+            assert_eq!(s.read(st(9, 4)), None, "an earlier one");
+            assert_eq!(s.read(st(9, 5 + (1 << 23))), None, "2^23 ahead, unordered");
+            assert_eq!(s.last(), Some(st(9, 5)), "an older one moves nothing");
+            assert!(!s.read(st(9, 6)).unwrap().gap);
+            assert!(s.read(st(9, 8)).unwrap().gap);
+            assert!(s.gap());
+            let other = s.read(st(10, 3)).unwrap();
+            assert!(other.run && !other.gap, "another run starts it again");
+            assert!(!s.gap());
+            // The seq wraps in serial order.
+            let mut s = Sequence::default();
+            s.read(st(9, Seq::MAX.get())).unwrap();
+            assert!(!s.read(st(9, 0)).unwrap().gap);
+        }
+
+        #[test]
+        fn a_gap_loses_what_a_group_on_the_key_named_within_the_run() {
+            let (mixed, vital) = (layout(MIXED), layout(VITAL));
+            let held = [catalog(&mixed, &vital)];
+            let named = Some(held[0].id());
+            let mut vs = views(&mixed, &vital);
+            let alone = body(vec![mixed_host(&mixed)]);
+            let both = body(vec![mixed_host(&mixed), vital_host(&vital)]);
+            let through = Catalogs { held: &held, named };
+            let host = |vs: &mut Views<Mono>, stamp, body: &[u8], at| match vs.apply_owner(
+                Class::Host,
+                Tag::NONE,
+                stamp,
+                body,
+                through,
+                ms(at),
+            ) {
+                OwnerApplied::Read { gap, .. } => gap,
+                other => panic!("{other:?}"),
+            };
+            let lost = |vs: &Views<Mono>| -> Vec<(String, usize)> {
+                vs.lost()
+                    .into_iter()
+                    .map(|(i, c)| (i.to_string(), c))
+                    .collect()
+            };
+            // mixed.v1's group alone, then a gap: vital.v1 was never named
+            // on the key, so its collection is no lost delivery.
+            assert!(!host(&mut vs, st(9, 0), &alone, 100));
+            assert!(host(&mut vs, st(9, 2), &alone, 200));
+            assert_eq!(lost(&vs), vec![("mixed.v1".to_owned(), 0)]);
+            assert!(vs.is_lost(&mixed.iface, 0));
+            assert!(!vs.is_lost(&mixed.iface, 1), "a `link` collection");
+            assert!(!vs.is_lost(&vital.iface, 0), "not named on the key");
+            // The member is read as a lost delivery: incomplete.
+            let o = |vs: &Views<Mono>, key| {
+                let o = vs
+                    .observation(key, ms(250), Duration::from_secs(1), true)
+                    .unwrap();
+                matches!(o, Observation::Subscribed { complete: true, .. })
+            };
+            assert!(!o(&vs, PEER));
+            assert!(o(&vs, STATUS));
+            assert!(o(&vs, VITALS));
+            assert_eq!(vs.gap(Class::Host), Some(true));
+            assert_eq!(vs.gap(Class::Link), None, "nothing read on the `link` key");
+            // One in sequence ends it, and names vital.v1.
+            assert!(!host(&mut vs, st(9, 3), &both, 300));
+            assert!(lost(&vs).is_empty());
+            // The next gap on the key covers both, though the owner
+            // heartbeat after it holds mixed.v1's group alone.
+            assert!(host(&mut vs, st(9, 5), &alone, 400));
+            assert_eq!(
+                lost(&vs),
+                vec![("mixed.v1".to_owned(), 0), ("vital.v1".to_owned(), 0)]
+            );
+            // Another run starts the sequence again, and what the key
+            // covers with it.
+            assert!(!host(&mut vs, st(10, 0), &alone, 500));
+            assert!(lost(&vs).is_empty());
+            assert!(host(&mut vs, st(10, 2), &alone, 600));
+            assert_eq!(lost(&vs), vec![("mixed.v1".to_owned(), 0)]);
+            assert_eq!(vs.owner_heartbeats(Class::Host), 6);
+            assert_eq!(vs.last(Class::Host), Some(st(10, 2)));
+            // A key of no view held has no observation.
+            assert!(
+                vs.observation(
+                    "zk2/lab/n1/other.v1/state/x",
+                    ms(700),
+                    Duration::from_secs(1),
+                    true
+                )
+                .is_none()
+            );
+        }
+
+        #[test]
+        fn a_group_stops_at_the_first_step_that_answers() {
+            let (mixed, vital) = (layout(MIXED), layout(VITAL));
+            let cat = catalog(&mixed, &vital);
+            let (e_mixed, e_vital) = (cat.entry(0).unwrap(), cat.entry(1).unwrap());
+            let mut v = View::<Mono>::new(vital.clone());
+            let g = vital_host(&vital);
+            // Not followed: the view follows no collection yet, or the
+            // index names another interface.
+            assert_eq!(
+                v.apply_group(Class::Host, e_vital, &g, Time::Unknown, ms(1)),
+                GroupRead::NotFollowed
+            );
+            assert!(v.follow(0));
+            v.put(VITALS, Some(st(1, 3)), ms(0));
+            assert_eq!(
+                v.apply_group(Class::Host, e_mixed, &g, Time::Unknown, ms(1)),
+                GroupRead::NotFollowed
+            );
+            // Another revision: by the catalog's word, or by the tag.
+            let elsewhere = crate::catalog::Entry {
+                iface: vital.iface.clone(),
+                contract: mixed.fingerprint.clone(),
+            };
+            assert_eq!(
+                v.apply_group(Class::Host, &elsewhere, &g, Time::Unknown, ms(1)),
+                GroupRead::Revision
+            );
+            let mut retagged = g.clone();
+            retagged.tag = Tag::new((vital.tag.get() + 1) % 16).unwrap();
+            assert_eq!(
+                v.apply_group(Class::Host, e_vital, &retagged, Time::Unknown, ms(1)),
+                GroupRead::Revision
+            );
+            // Refused: its sections, here cut one bit short. Counted for
+            // nothing: the divergence before it and the one after are two
+            // in a row.
+            let diverged = Group::of(1, &vital, &[one(VITALS, st(1, 4))]).unwrap();
+            assert_eq!(
+                v.apply_group(Class::Host, e_vital, &diverged, Time::Unknown, ms(2)),
+                GroupRead::Read(vec![SectionRead::Diverged])
+            );
+            let mut short = g.clone();
+            short.sections.bits -= 1;
+            assert_eq!(
+                v.apply_group(Class::Host, e_vital, &short, Time::Unknown, ms(3)),
+                GroupRead::Refused(GroupRefusal::Short)
+            );
+            assert!(v.reread_due().is_empty());
+            assert_eq!(
+                v.apply_group(Class::Host, e_vital, &diverged, Time::Unknown, ms(4)),
+                GroupRead::Read(vec![SectionRead::Diverged])
+            );
+            assert_eq!(v.reread_due(), vec![0]);
+            // Read, and on the other class's key not read at all: the
+            // count of divergences stands.
+            assert_eq!(
+                v.apply_group(Class::Link, e_vital, &g, Time::Unknown, ms(5)),
+                GroupRead::Read(vec![SectionRead::OtherClass])
+            );
+            assert_eq!(v.reread_due(), vec![0]);
+            assert_eq!(v.confirmed(VITALS), None);
+            assert_eq!(
+                v.apply_group(Class::Host, e_vital, &g, Time::Unknown, ms(6)),
+                GroupRead::Read(vec![SectionRead::Confirmed(vec![VITALS.to_owned()])])
+            );
+            assert_eq!(v.confirmed(VITALS), Some(ms(6)));
+            assert!(v.reread_due().is_empty());
+            // Its own heartbeat key heard nothing through all this.
+            assert_eq!(v.last_heartbeat(), None);
+            assert!(!v.gap());
+        }
+
+        #[test]
+        fn an_owner_heartbeat_key_names_its_class() {
+            use crate::heartbeat::{covered, owner_class, owner_key};
+            let k = owner_key("lab", "n1", Class::Link);
+            assert_eq!(k, "zk2/lab/n1/freshness.v2/stream/heartbeats/link");
+            let (addr, class) = owner_class(&format!("ns/{k}")).unwrap();
+            assert_eq!((addr.to_string().as_str(), class), ("lab/n1", Class::Link));
+            assert_eq!(
+                owner_class("zk2/lab/n1/freshness.v2/stream/heartbeats/host").map(|x| x.1),
+                Some(Class::Host)
+            );
+            // No other chunk is a class, and neither key reads as the other.
+            assert!(owner_class("zk2/lab/n1/freshness.v2/stream/heartbeats/near").is_none());
+            assert!(owner_class("zk2/lab/n1/freshness.v2/stream/heartbeat/link.v1").is_none());
+            assert!(covered(&k).is_none());
         }
     }
 

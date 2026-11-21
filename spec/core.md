@@ -3474,6 +3474,9 @@ facts.
     covered interface each period, never downsampled
     ([`freshness.v2`](profiles/freshness/v2.md) §2.9,
     [`link.v1`](profiles/link/v1.md) §2.8, §2.12).
+  - **An owner heartbeat that crosses** is evidence for each interface it
+    holds a group of: one put per owner each period
+    (`freshness.v2` §2.9, [`link.v2`](profiles/link/v2.md) §2.9).
 - **Attachment decides what crosses.**
   - A router-to-router link carries every declaration of both sides. A
     `@zk` deny on it hides presence from the far side, but the denied
@@ -3582,7 +3585,8 @@ facts.
   - **A subscription's horizon** is that of what it hears: its resource's
     `freshness.ttl_s` above 0, or a heartbeat's, the shortest horizon of
     the collections it covers
-    ([`freshness.v2`](profiles/freshness/v2.md) §2.4). A state of a
+    ([`freshness.v2`](profiles/freshness/v2.md) §2.4). An owner
+    heartbeat's is the shortest of the collections its groups cover. A state of a
     contract that uses `freshness.v2` has none of its own: its owner
     re-puts nothing, and its heartbeat speaks for it. A subscription to
     what has no horizon is never declared again.
@@ -4772,7 +4776,7 @@ The format is the generator's own. The reference reads an enrollment file
 | Grant | Rule |
 |---|---|
 | **Own** | A service principal puts, deletes, declares queryables, replies and declares tokens under `zk2/<system>/<service>/**`, on ingress. It also holds each verbatim subtree, spelled out because `**` never crosses one: `…/*/@stream/**`, `…/*/@state/**`, `…/*/@op/**`, `…/@zk/**`. A service using advanced publication (§2.5) also holds `…/*/stream/**/@adv/**` and `…/*/state/**/@adv/**`. On egress, it receives queries and subscriber declarations on the same keys (spike S14). |
-| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1) and the descriptor's GET and subscription (§3.3) on the `…/@zk/**` subtree of each provider they name. Plus each **heartbeat** a binding needs: where a bound interface's contract uses `freshness.v2` and the binding consumes one of its collections (§7.5), the subscription to each named provider's `…/freshness.v2/stream/heartbeat/<iface>`. A consumer denied it hears no confirmation, and every member it follows goes stale (`freshness.v2` §2.5). A binding that leaves a parameter of a state template unbound reads its collection whole: its GET covers the collection's snapshot key, `<snapshot key>/**` (§4.2). |
+| **Consume** | Subscribe or GET on the prefixes a principal's bindings name, plus their `@adv` subtrees where the consumer uses history, plus **presence**: liveliness reads (GETs and subscriptions, §8.1) and the descriptor's GET and subscription (§3.3) on the `…/@zk/**` subtree of each provider they name. Plus each **heartbeat** a binding needs: where a bound interface's contract uses `freshness.v2` and the binding consumes one of its collections (§7.5), the subscription to each named provider's `…/freshness.v2/stream/heartbeat/<iface>`. With it goes the subscription to that provider's owner heartbeat key, `…/freshness.v2/stream/heartbeats/<class>`, for each class those collections have (`freshness.v2` §2.4). A consumer denied it hears no confirmation, and every member it follows goes stale (`freshness.v2` §2.5). A binding that leaves a parameter of a state template unbound reads its collection whole: its GET covers the collection's snapshot key, `<snapshot key>/**` (§4.2). |
 | **Call** | Query on specific `…/@op/<op>` keys, plus presence on the `…/@zk/**` subtree of each service whose operations it calls. |
 | **Tool** | A role a principal plays, with no address of its own: Consume and Call on what it reads and calls, and presence on the services it inspects. **Inspection** is presence alone, on the `…/@zk/**` subtree of each service named, exact or wildcard, and none of its data. A tool drawing the graph (R3), a doctor, or a service listing reads descriptors through presence. A tool that checks S4, runs a doctor or draws the mesh (§4.2) also holds the **admin read**: `query` on `@/*/router`, `@/*/router/status/plugins/storage_manager/storages/**` and `@/*/*`, and their `reply`, never namespaced. Under `deny`, no other grant reaches the admin space. |
 

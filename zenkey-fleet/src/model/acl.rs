@@ -24,6 +24,13 @@
 //!    far consumer under `deny` hears no confirmation, and every member it
 //!    follows reads stale. The owner serves it beside the interface, a
 //!    surface of its own for the fan-in and the allow posture's complement.
+//!    Since `freshness.v2` 0.9 (#1110's H2a) the provider's owner heartbeat
+//!    key goes with it,
+//!    `zk2/<provider>/freshness.v2/stream/heartbeats/<class>`, for each
+//!    class those collections have: an owner under a catalog may confirm
+//!    by it in place of the heartbeat, and a consumer cannot tell which
+//!    before it hears one. It is a surface of the owner's too, for each
+//!    class its collections have.
 //!    Since core 0.100 (#977's E3), a state template a binding leaves
 //!    unbound is granted by its collection read, `<snapshot key>/**`: an
 //!    owner answers it with the collection's snapshot on the snapshot key,
@@ -338,7 +345,8 @@ const CITE_FAN_IN_REPLY: &str = "§11.2: the same selectors for this provider's 
 const CITE_CONSUME_IN: &str = "§11.1 Consume: subscribe or GET on what the bindings name, one \
      selector per bound provider (R1), R2's parameter bindings applied, and (0.86) each bound \
      provider's heartbeat covering a bound interface that uses freshness.v2, where the binding \
-     consumes one of its collections (§7.5, freshness.v2 §2.5)";
+     consumes one of its collections, and its owner heartbeat key for each class those \
+     collections have (§7.5, freshness.v2 §2.4, §2.5)";
 const CITE_CONSUME_OUT: &str = "§11.1 Consume, egress: the samples and replies those selectors \
      receive";
 const CITE_HISTORY_IN: &str = "§11.1 Consume, §2.5: the `@adv` subtrees of what is read with \
@@ -868,6 +876,10 @@ fn compile_binding(
         .contracts(&iface)
         .iter()
         .any(|c| heartbeat_covers(c, &consumed));
+    // With it goes each provider's owner heartbeat key, for each class
+    // those collections have (`freshness.v2` 0.9 §2.4): the consumer
+    // cannot tell which form an owner sends before it hears one.
+    let classes = heartbeat_classes(&contracts.contracts(&iface), &consumed);
     // Everything, unparameterized: the prefixes the binding names, one per
     // kind token (§11.1), so a fan-in over an interface's whole state is
     // granted. Otherwise each resource's own selector.
@@ -922,6 +934,9 @@ fn compile_binding(
         }
         if beats {
             push_unique(&mut h.data, heartbeat_pattern(&addr, &iface));
+        }
+        for class in &classes {
+            push_unique(&mut h.data, owner_heartbeat_pattern(&addr, *class));
         }
         push_unique(&mut h.presence, format!("zk2/{addr}/@zk/**"));
         dep.check_provider(h, p, &iface, &what);
@@ -1121,6 +1136,38 @@ fn heartbeat_pattern(addr: &str, iface: &IfaceId) -> String {
     )
 }
 
+/// The classes of the collections among `consumed` that a revision of
+/// their interface using `freshness.v2` gives them (`freshness.v2` §2.4),
+/// `link` first: the owner heartbeat keys that confirm them. A collection
+/// two revisions class apart has both.
+fn heartbeat_classes(
+    revisions: &[&Contract],
+    consumed: &[&Resource],
+) -> Vec<zenkey_model::heartbeat::Class> {
+    let mut found = std::collections::BTreeSet::new();
+    for c in revisions
+        .iter()
+        .filter(|c| zenkey_model::freshness::uses_v2(c))
+    {
+        let layout = zenkey_model::heartbeat::Layout::of(c);
+        for r in consumed {
+            if let Some(i) = layout.index_of(&format!("{}/{}", r.token, r.template)) {
+                found.insert(layout.collections[i].class);
+            }
+        }
+    }
+    found.into_iter().collect()
+}
+
+/// The owner heartbeat key of `class` from `addr` (`freshness.v2` §3,
+/// revision 1.1), its chunks as a provider names them, `*` kept.
+fn owner_heartbeat_pattern(addr: &str, class: zenkey_model::heartbeat::Class) -> String {
+    format!(
+        "zk2/{addr}/{}/stream/heartbeats/{class}",
+        zenkey_model::heartbeat::PROFILE
+    )
+}
+
 /// What a service serves, enumerated from its contracts: each resource's
 /// pattern (a templated state's `<snapshot key>/**`, its snapshot's key
 /// among them), its `@adv` subtree where it declares history, and its `@zk`
@@ -1222,6 +1269,11 @@ fn compile_service(
                 .any(|c| heartbeat_covers(c, &all))
             {
                 push_unique(s, heartbeat_pattern(&label, iface));
+            }
+            // Under a catalog it may send its owner heartbeats in their
+            // place, one key per class its collections have (0.9 §2.4).
+            for class in heartbeat_classes(&contracts.contracts(iface), &all) {
+                push_unique(s, owner_heartbeat_pattern(&label, class));
             }
         }
     }
@@ -2533,13 +2585,16 @@ pub fn link_says(code: link::Code) -> &'static str {
              full records more often than its contract says, never less (link.v2 §2.7)"
         }
         C::HorizonUnderFace => {
-            "a crossing frame or heartbeat whose horizon is below the face's horizon_s: no \
-             router thins it, so its owner spends more than the face affords (link.v2 §2.12)"
+            "a crossing frame, heartbeat or owner heartbeat whose horizon is below the face's \
+             horizon_s: no router thins it, so its owner spends more than the face affords \
+             (link.v2 §2.9, §2.12)"
         }
         C::BlockOverBatch => {
             "a crossing block resource whose longest put is above the batch: its fragments \
              queue behind everything before them, and a block push that cannot be queued \
-             within wait_before_close closes the transport (link.v2 §2.16)"
+             within wait_before_close closes the transport; or the `link` owner heartbeat's \
+             longest put, which fragments the same, and one lost fragment loses every group \
+             (link.v2 §2.16)"
         }
         C::KeepAliveNotSuppressed => {
             "the face's shortest crossing cadence is the keep-alive interval or above it: \
@@ -5052,17 +5107,19 @@ type = { raw = "text/plain" }
             ["zk2/vehicle-01/*/thruster.v1/state/status"]
         );
         // The vehicle's notifier reads health.v1 on `*/*` (#614, FL3): the
-        // two providers of health.v1 get that selector, and the heartbeat
-        // covering it (core 0.86, #978's F4: health.v1 uses freshness.v2),
-        // and nothing of the tracker's detections, whose providers they
-        // are not.
+        // two providers of health.v1 get that selector, the heartbeat
+        // covering it (core 0.86, #978's F4: health.v1 uses freshness.v2)
+        // and the owner heartbeat key of its collections' class, `host`
+        // (`freshness.v2` 0.9, #1110), and nothing of the tracker's
+        // detections, whose providers they are not.
         for provider in ["vehicle-01/navigation", "vehicle-01/zenwatch"] {
             assert_eq!(
                 rule_of(&plan, &format!("fan-in:{provider}")).key_exprs,
                 [
                     "zk2/*/*/health.v1/state/**",
                     "zk2/*/*/health.v1/stream/**",
-                    "zk2/*/*/freshness.v2/stream/heartbeat/health.v1"
+                    "zk2/*/*/freshness.v2/stream/heartbeat/health.v1",
+                    "zk2/*/*/freshness.v2/stream/heartbeats/host"
                 ],
                 "{provider}"
             );
