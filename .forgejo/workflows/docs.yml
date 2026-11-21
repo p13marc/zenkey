@@ -8,8 +8,12 @@
 # the `v1` branch keeps both, and this file's copy there.
 name: Docs
 on:
+  # No push trigger for the default branch (since 2026-11-21). Branch
+  # protection blocks merging a PR that is behind it, so the PR run has
+  # already tested the exact tree that lands. myserver:
+  # docs/services/ci-templates/README.md §No second run after a merge.
   push:
-    branches: [main, v1]
+    branches: [v1]
     paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh', 'scripts/check-spec-prose.py', 'spec/.prose-baseline.json', 'scripts/gen-rules-index.py', 'scripts/fixtures/rules-index/**']
   pull_request:
     paths: ['**.md', 'docs/**', 'scripts/check-spec-status.sh', 'scripts/check-spec-prose.py', 'spec/.prose-baseline.json', 'scripts/gen-rules-index.py', 'scripts/fixtures/rules-index/**']
