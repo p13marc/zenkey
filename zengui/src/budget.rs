@@ -226,6 +226,9 @@ pub struct BudgetInputs {
     pub reader: ReaderLoss,
     /// The reply timeout a subscription is taken to need to reach an owner.
     pub timeout: Duration,
+    /// The routers' lease, keep-alives and `wait_before_close` (`--binding`,
+    /// #1011): the lease a window ends before now, and the stall bound.
+    pub routers: budget::Routers,
     /// The judgement's clock, monotonic and wall.
     pub now: Instant,
     pub wall: SystemTime,
@@ -367,16 +370,12 @@ fn judge(
 
     let end = inputs
         .now
-        .checked_sub(budget::DEFAULT_LEASE)
+        .checked_sub(inputs.routers.lease)
         .unwrap_or(start);
     let listened = end.saturating_duration_since(start + inputs.timeout);
     let stall = budget::ReaderStall {
         gap: inputs.reader.gap,
-        bound: budget::stall_bound(
-            budget::DEFAULT_WAIT_BEFORE_CLOSE,
-            budget::DEFAULT_LEASE,
-            budget::DEFAULT_KEEP_ALIVE,
-        ),
+        bound: inputs.routers.stall_bound(),
         transport_closed: false,
     };
     let lossless = budget::delivery_of(r, inputs.reader.lost, stall, None)
@@ -577,6 +576,7 @@ congestion = "block"
             watches: vec![("**".into(), start)],
             reader: ReaderLoss::default(),
             timeout: Duration::from_secs(2),
+            routers: budget::Routers::default(),
             now,
             wall,
         }
@@ -703,6 +703,39 @@ congestion = "block"
                 "{reader:?}"
             );
         }
+    }
+
+    /// The stall bound is the routers' the window is told (`--binding`,
+    /// #1011): a 6 s gap is past zenoh 1.10.1's 5 s `wait_before_close`,
+    /// and within zm-1.10.2-r1's bound, its 10 s lease less a keep-alive,
+    /// since the fork waits 10 s on a full queue; 8 s is past both.
+    #[test]
+    fn a_stall_is_judged_by_the_bindings_routers() {
+        use zenkey_model::link::Binding;
+        let start = Instant::now();
+        let now = start + Duration::from_secs(7200);
+        let wall = SystemTime::now() + Duration::from_secs(7200);
+        // Seen a moment before the window began: present throughout.
+        let f = fixture(SystemTime::now() - Duration::from_secs(1));
+        let keys = ["zk2/site/probe/probe.v1/stream/m/a"];
+        let label = |binding: Binding, gap: u64| {
+            let mut i = inputs(&f, &keys, start, now - Duration::from_secs(60), now, wall);
+            i.routers = budget::Routers::of_binding(binding);
+            i.reader = ReaderLoss {
+                lost: 0,
+                gap: Duration::from_secs(gap),
+            };
+            badges(&i).get(M).map(BudgetBadge::label)
+        };
+        let lossy = Some("budget unobservable (lossy)".to_owned());
+        assert_eq!(label(Binding::Zenoh1_10_1, 6), lossy);
+        assert_ne!(label(Binding::Zm1_10_2R1, 6), lossy);
+        assert_eq!(
+            label(Binding::Zm1_10_2R1, 6),
+            label(Binding::Zenoh1_10_1, 0),
+            "as a window that never stalled"
+        );
+        assert_eq!(label(Binding::Zm1_10_2R1, 8), lossy);
     }
 
     /// No watch covering the family whole, no window, no badge (O4) — a

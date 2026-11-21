@@ -800,6 +800,7 @@ mod tests {
             history_entries: 10,
             max_keys: 1000,
             across: None,
+            binding: Default::default(),
         }
     }
 

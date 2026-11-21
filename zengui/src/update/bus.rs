@@ -597,6 +597,7 @@ fn schedule_budget(dep: &Deployment, obs: &Observation, work: &Workspace) -> Tas
             gap: obs.tick_gap.longest(now),
         },
         timeout: dep.timeout(),
+        routers: dep.settings.routers(),
         now,
         wall: std::time::SystemTime::now(),
     })

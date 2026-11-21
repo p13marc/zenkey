@@ -440,6 +440,7 @@ fn the_tree_badges_the_budget_judgement() {
         watches: vec![("**".into(), start)],
         reader: ReaderLoss::default(),
         timeout: Duration::from_secs(2),
+        routers: Default::default(),
         now: start + Duration::from_secs(120),
         wall: SystemTime::now() + Duration::from_secs(120),
     });

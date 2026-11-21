@@ -97,6 +97,7 @@ pub fn settings() -> Settings {
         history_entries: 50,
         max_keys: 50_000,
         across: None,
+        binding: Default::default(),
     }
 }
 

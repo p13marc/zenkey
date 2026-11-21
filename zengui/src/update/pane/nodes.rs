@@ -181,6 +181,7 @@ pub(crate) fn arbitration(
         addr,
         cx.dep.store.clone(),
         cx.dep.timeout(),
+        cx.dep.settings.routers(),
     )
 }
 
