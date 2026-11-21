@@ -3,7 +3,7 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.109 — 2026-11-21: what §3.3's size counts, an owner's `minor` from its file, and a group's size never allocated from (#609, #1126, #1127)
+## 0.109 — 2026-11-21: what §3.3's size counts, an owner's `minor` from its file, a group's size never allocated from, and on a heartbeat's key another form refused and the catalog a reader needs (#609, #1110, #1126, #1127)
 
 zk2py round 111 read 0.107 cold and filed F-535 to F-539, none a
 blocker. This version answers the core's four, F-535 to F-538.
@@ -11,6 +11,14 @@ blocker. This version answers the core's four, F-535 to F-538.
 ([`profiles/desired/CHANGELOG.md`](profiles/desired/CHANGELOG.md)), and
 `observer.md` stays 0.33. One sentence of §7.5 comes with them, from the
 review of 0.108.
+
+zk2py round 112 (PR #1138) then read 0.108's owner heartbeat cold. It
+passed `heartbeat/owner.json` 90 of 90 on its first run, and filed F-540
+to F-546 at the form's edges, none a blocker. This version answers the
+core's five, F-540 to F-544, in §7.5 and §8.6. `desired.v1` 0.14 answers
+F-545, and `link.v2` 0.20 answers F-546
+([`profiles/link/CHANGELOG.md`](profiles/link/CHANGELOG.md)).
+`redundancy.v1` 0.11 repairs the sentence that F-545's has a twin of.
 
 **Changed: §3.3, what an owner may exceed 1 KB with (F-535, an
 ambiguity).**
@@ -98,6 +106,100 @@ ambiguity).**
 - **The reference** copies a group's bits as the body gives them, and
   allocates nothing from the size (`OwnerHeartbeat::parse`).
 
+**Added: §7.5, "Another form on a heartbeat's key" (F-540, a gap).**
+- **Before:** the parse accepts a mutation or a frame on any `stream`
+  key, and an owner heartbeat's refusals started at CH's tag. So a
+  mutation whose tag is 0 passed them, and its record read as groups.
+  The same held of a heartbeat's key since 0.81.
+- **Now:** an implementation that reads a heartbeat or an owner
+  heartbeat MUST refuse a put of another form on that key, naming
+  `form`, before it reads a tag or a body. `[F: heartbeat/owner.json]`
+- **It binds a reader of the form,** as the lists above it do. What a
+  tool shows of such a put is `observer.md`'s, and unchanged.
+- **The name** is the one §2.6 gives a put on an events key that carries
+  no event, and §4.2 a stray `reply_del`. A put with no envelope on
+  either key is refused the same way, as §2.6's is.
+- **A heartbeat on an owner heartbeat's key** needed no new refusal. It
+  is form 6, refused `tag` 15 times in 16, as `owner.json`'s read 18 is.
+  Under tag 0 it is read as the body it is. The text now says so, and
+  says the reverse of an owner heartbeat on a heartbeat's key.
+- **The reference reads no body from such a put.** Its readers take a
+  put on a heartbeat's key only where it reads as form 6
+  (`zenkey::inband::Read::Heartbeat`), and count any other unread. It
+  gives that refusal no token yet, which is the code half's.
+
+**Changed: §7.5, what tells the two layouts apart (F-541, minor).**
+- **Before:** "Nothing in the bytes tells the two apart." That is true
+  of a body, and not of a put: an owner heartbeat's CH carries tag 0,
+  and a heartbeat's its covered revision's.
+- **Now:** nothing in a body tells them apart. CH's tag does only most
+  of the time, since a revision's tag is 0 for 1 revision in 16. So the
+  key chooses.
+- **The MUST NOT** names CH's tag among the bytes an implementation does
+  not choose by. It asked that already: the tag is a payload's byte.
+- **`owner.json`'s description** says "nothing in a body" too.
+
+**Not changed: §7.5 cites `freshness.v2` §3 for both keys (F-542, a
+gap).**
+- **The finding is right of main at fc16a564.** `freshness.v2` is 0.8
+  there, and its §3 names the heartbeat's key alone.
+- **`freshness.v2` 0.9 names both** (#1110's H2a, PR #1137):
+  `heartbeat/{iface}` and `heartbeats/{class}`, the class `link` or
+  `host`. It was read on its branch for this entry.
+- **It answers the finding's list.** Its §2.4 says who sends one, which
+  interfaces get a group, what a group covers, and what a sixteenth
+  interface does. Its §2.5 says what a reader concludes, and its §2.9
+  what crosses a face. Core §11.1's Consume names the owner heartbeat's
+  key with it.
+- **What a tool shows** is `observer.md`'s, which stays 0.33 here.
+- **So the sentence stands,** and is true once that text merges.
+
+**Stated: §7.5, "A reader needs the catalog too", and §8.6's first
+sentence (F-543, an ambiguity).**
+- **Before:** "A reader bound to one interface holds that interface's
+  revision alone." It reads a group's index through a catalog, which
+  §8.6 said a deployment provisions to owners and to a face's far side.
+- **Now:** that reader holds the catalog its owner names, or a
+  successor, beside its revision. §8.6 lists each reader of an owner
+  heartbeat among those a deployment provisions.
+- **Without one it reads no group.** §8.6 refuses each index
+  (`unknown_catalog`), its own interface's among them, and the tag finds
+  none. To that reader the owner heartbeat confirms nothing, so its
+  members go stale: the safe side (`freshness.v2` §2.5).
+- **No keyword.** §8.6's "Never a guess" already is the MUST.
+- **The reference** refuses so: `Group::entry` with no catalog held.
+
+**Evidence added: `heartbeat/owner.json`'s `beside` and `forms` (F-544,
+minor, and F-540).**
+- **Before:** "That group alone" cited a file whose `groups` cases each
+  read one group. An implementation that stopped at the first refused
+  group passed it whole.
+- **`beside`, nine cases:** the catalogs and one payload, then every
+  group's reading or refusal.
+  - W2's three groups with the middle one refused `trailing`, and the
+    same owner heartbeat with that group left out. The two others read
+    the same in both.
+  - The first group refused (`short`), the middle one (`code`), the
+    last one (`unknown_index`, read through a successor), and two
+    refused around one read.
+  - A tag that is not its revision's, which refuses nothing.
+  - W2's owner heartbeat to a reader with no catalog, and to one with an
+    unrelated catalog: `unknown_catalog` three times each. That is
+    F-543's reader.
+- **`forms`, five cases:** a mutation and a frame whose bytes after the
+  seq are W2's body, under each run width, a mutation whose tag is not
+  0, and one with no record. Each is `form`.
+- **How they were written.** A reading of this text was written for
+  them, in Python with the standard library. It first reproduced the
+  file's 89 cases of `writes`, `reads` and `groups`. zk2py's reader of
+  round 112, which read §7.5 cold, then read the 14 new cases, and the
+  two agree on each. Each group's expectation in `beside` is the one
+  its `groups` case gives it alone. Never blessed.
+- **The reference's runner reads neither list yet**
+  (`heartbeat_owner_vectors`). By its code it reads each group from its
+  own bits (`Group::entry`, `Group::read`), so `beside` holds as
+  written. `forms` waits for the token above. Both are the code half's.
+
 **The evidence.**
 - **`descriptors/ok-over-1kb`** is new: zenoh-modem's node as `zenctl
   gen` served it under the catalog, byte for byte, on one line.
@@ -120,6 +222,10 @@ ambiguity).**
   SHOULD.
 - **A reader of an owner heartbeat** that refused `short` already
   changes nothing.
+- **A reader that took any put on a heartbeat's key as form 6** now
+  refuses a mutation or a frame there as `form`.
+- **A deployment that turns the owner heartbeat on** provisions its
+  catalog to the readers too.
 
 **Deliberately not changed.**
 - **The four members and the 512 B** are 0.107's, and the maintainer's
@@ -133,9 +239,10 @@ ambiguity).**
 - **The constrained level's MUST** to fit one fragment (§12).
 - **No section number** and no fingerprint moves.
 
-**The figures.** `RULES.md` lists 284 rules, 283 in 0.108. The owner
+**The figures.** `RULES.md` lists 285 rules, 283 in 0.108. The owner
 keeps 88: the SHOULD on `minor` comes, and the 512 B SHOULD goes into
-its MAY. The static rules are 74, 73 before, with §7.5's MUST NOT.
+its MAY. The static rules are 75, 73 before, with §7.5's two: the MUST
+NOT on a size, and the MUST on another form.
 
 ## 0.108 — 2026-11-21: §7.5, the owner heartbeat: form 6 with a group per interface (#1110)
 

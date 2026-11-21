@@ -2450,8 +2450,10 @@ An implementation MUST compute a digest so. `[F: heartbeat/digests.json]`
   share a digest 1 time in 2^32.
 
 **Reading a body.** A body is read with the covered revision's
-collections. An implementation MUST refuse a body for the first of these
-that applies, in this order, naming the refusal:
+collections. It is a form-6 put's: a put of another form on a
+heartbeat's key carries none (below). An implementation MUST refuse a
+body for the first of these that applies, in this order, naming the
+refusal:
 - reading the fields in order:
   - the body ends before a bit its fields need (`short`);
   - a code is unused (`code`): a millisecond code from 1000 up but the
@@ -2473,9 +2475,15 @@ read.
 
 - **It is form 6** too, on a key of its own. Which of the two layouts a
   put carries is its key's to say, and
-  [`freshness.v2`](profiles/freshness/v2.md) §3 names both keys. Nothing
-  in the bytes tells the two apart. An implementation MUST NOT choose
-  the layout by a payload's bytes. `[F: heartbeat/owner.json]`
+  [`freshness.v2`](profiles/freshness/v2.md) §3 names both keys.
+  - **Nothing in a body tells the two apart.** One body can read as
+    either, as `owner.json`'s `either` does.
+  - **CH's tag tells them apart only most of the time.** An owner
+    heartbeat's is 0. A heartbeat's is its covered revision's, which is
+    0 for 1 revision in 16.
+  - **So the key chooses.** An implementation MUST NOT choose the layout
+    by a payload's bytes, CH's tag among them.
+    `[F: heartbeat/owner.json]`
 - **CH's tag** is 0. Each group carries its covered revision's tag.
 - **Its run and seq** are its key's, as a heartbeat's are. A gap in the
   seqs is an owner heartbeat lost, with every group it held.
@@ -2518,9 +2526,19 @@ pad        zero bits up to the next whole byte, fewer than 8
   the map, then a section for each map bit set. They are read with the
   covered revision's collections (above). A group has no pad of its own.
 - **Why a size.** A reader bound to one interface holds that interface's
-  revision alone. With the size it skips the groups of the others, whose
-  sections it cannot read. And a group whose index its catalog does not
-  hold loses only itself, never the groups after it.
+  revision, and no other interface's. With the size it skips the groups
+  of the others, whose sections it cannot read. And a group whose index
+  its catalog does not hold loses only itself, never the groups after it.
+- **A reader needs the catalog too.** It finds its own group by its
+  index. So beside its revision it holds the catalog its owner names, or
+  a successor (§8.6).
+  - **Without one it reads no group.** §8.6 refuses each index
+    (`unknown_catalog`), its own interface's among them. To that reader
+    the owner heartbeat confirms nothing (`freshness.v2` §2.5).
+    `owner.json`'s `beside` reads W2's owner heartbeat so.
+  - **The tag finds no group.** It is a check, and 1 revision in 16
+    shares it. §8.6's refusal stands whatever a group's tag says: never
+    a guess.
 - **Why a tag beside the index.** The index names a revision in the
   owner's catalog. The tag says which revision the owner wrote with. A
   reader whose catalog gives that index another revision reads a tag
@@ -2535,9 +2553,10 @@ group's size the count of bits in its sections.
 groups without any contract, as an envelope is parsed. The second reads
 a group's sections with its covered revision's collections.
 
-**The groups.** The envelope's parse comes first (above). An
-implementation MUST then refuse an owner heartbeat for the
-first of these that applies, in this order, naming the refusal:
+**The groups.** The envelope's parse comes first (above), then the
+put's form (`form`, below). An implementation MUST then refuse an owner
+heartbeat for the first of these that applies, in this order, naming the
+refusal:
 - CH's tag is not 0 (`tag`);
 - reading the body's fields in order:
   - the body ends before a bit its fields need, a size's or a group's
@@ -2581,11 +2600,35 @@ the first of these that applies, in this order, naming the refusal:
   a refusal decides.
 - **That group alone.** A refused group says nothing of the groups
   beside it. An implementation MUST read each other group as it would
-  with the refused one left out. `[F: heartbeat/owner.json]`
+  with the refused one left out. `[F: heartbeat/owner.json]` So it reads
+  on past a refused group, the first one too, and drops none after it.
 - **The tag is a check**, as a heartbeat's is. A reader compares it with
   the tag of the revision the entry names. Another tag refuses nothing
   here: the sections read the same. What a reader concludes from it is
   `freshness.v2`'s to say.
+
+**Another form on a heartbeat's key.** A heartbeat's key and an owner
+heartbeat's carry form 6, and no other form. Both are `stream` keys, and
+the parse reads a key's kind token alone (above). So it accepts a
+mutation or a frame on either. Such a put is no heartbeat, and no owner
+heartbeat. An implementation that reads a heartbeat or an owner
+heartbeat MUST refuse a put of another form on that key, naming `form`,
+before it reads a tag or a body. `[F: heartbeat/owner.json]`
+- **Why it is said.** A mutation whose tag is 0 would pass the lists
+  above. Its record would then be read as a body.
+- **The name is §2.6's,** for a put on an events key that carries no
+  event: its envelope reads as another form, or it carries none. A put
+  with no envelope on either key is refused the same way.
+- **A heartbeat on an owner heartbeat's key** is form 6, in the other
+  layout. Its CH carries its covered revision's tag, so it is refused
+  `tag` 15 times in 16. Under tag 0 its body is read as an owner
+  heartbeat's, and refused or accepted as its bits fall.
+- **An owner heartbeat on a heartbeat's key** is form 6 too, under tag
+  0. A reader's revision has another tag 15 times in 16
+  (`freshness.v2` §2.5). Where its tag is 0, the body is read as a
+  heartbeat's.
+- **A subscriber confirms nothing** by a put refused so, as by any put
+  this section refuses (`freshness.v2` §2.5).
 
 **The snapshot.** A snapshot answers a GET with one collection's state,
 in one or more pages. Each page is a GET's reply, with the snapshot's
@@ -3644,8 +3687,9 @@ facts.
 
 ### 8.6 The deployment catalog
 
-A **catalog** is a file that a deployment provisions to its owners, and to
-the far side of a constrained face (§8.5). It states the **deployment
+A **catalog** is a file that a deployment provisions to its owners, to
+the far side of a constrained face (§8.5), and to each reader of an
+owner heartbeat (§7.5). It states the **deployment
 epoch**, which §7.6's `time` fields count from. It also gives each
 contract revision it lists an **index**. A later form can carry that
 small number in place of an interface id and a fingerprint. A catalog is
