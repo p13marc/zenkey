@@ -754,3 +754,16 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   still drop any other sample uncounted. `tests/owner_heartbeat.rs`'
   `another_form_on_a_heartbeats_key_is_refused_form_by_the_lens` runs
   both keys through the lens and one revision in hand.
+  Core 0.110's held stamp (#986's J1): `model::inband::payload` reads a
+  snapshot's envelope with no byte after its seq as
+  `Payload::Refused(Refusal::Held(stamp))`, or `Refusal::HeldTag` where
+  its tag is not 0, never as `Payload::Snapshot`: a tool's GETs carry no
+  held stamp, so one in reply, or heard on a subscription, is no answer
+  (core §4.2), undecodable with its run and seq named, never a page whose
+  body is cut `short`. So `page` gives none, every mutation's reader
+  refuses it, and the lens, `render` and `structural_text` show `zk2c held
+  stamp (run r, seq s), unchanged only to the GET that carried it, and no
+  answer here: held`. The runtime's `inband::read`, which the bus readers
+  use, refuses alike. No tool sends a held stamp but through `zenctl get
+  --body`. `model::inband`'s `a_held_stamp_is_read_as_what_it_is_never_as_a_page_cut_short`
+  and `model::lens`'s `a_held_stamp_renders_as_a_held_stamp_refused_held`.

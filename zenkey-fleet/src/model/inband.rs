@@ -22,6 +22,10 @@
 //!       (Payload::Snapshot): a GET's reader takes its entries as the
 //!       per-key replies they stand for ([`page`], [`member_views`]);
 //!       a reader of mutations refuses it ([`SNAPSHOT_AS_MUTATION`])
+//! a put whose envelope is a snapshot's with no byte after its seq (core
+//! 0.110): a held stamp, never a page cut short
+//!     → refused as `held`, its stamp named (Payload::Refused): it
+//!       answers no GET a tool made, and merges nothing (core §4.2)
 //! every other sample
 //!     → read with no envelope (Payload::Plain)
 //! ```
@@ -227,6 +231,18 @@ pub fn payload<'a>(key: &str, encoding: Option<&str>, bytes: &'a [u8]) -> Payloa
             stamp: e.stamp,
             tag: e.tag,
         },
+        // A snapshot's envelope with no byte after its seq is a held
+        // stamp, never a page cut short (core 0.110 §7.5; #986's J1). A
+        // tool's GETs carry none, so it answers nothing a tool asked, and
+        // one heard on a subscription is no owner's answer: undecodable,
+        // refused as `held` (core §4.2), or `tag` where its tag is not 0.
+        Reading::Snapshot(e) if e.record.is_empty() => {
+            Payload::Refused(if e.tag == wire::Tag::NONE {
+                Refusal::Held(e.stamp)
+            } else {
+                Refusal::HeldTag(e.tag)
+            })
+        }
         Reading::Snapshot(e) => Payload::Snapshot {
             body: e.record,
             header: e.stamp,
@@ -1191,6 +1207,68 @@ pub fn resource_of<'c>(
 mod tests {
     use super::*;
     use zenkey_model::wire::{Envelope, Run, Seq, Stamp, Tag};
+
+    /// Core 0.110 §7.5, "A held stamp on a reply" (#986's J1): a
+    /// snapshot's envelope with no byte after its seq is a held stamp,
+    /// never a page whose body is cut `short`. A tool sent none, so it is
+    /// undecodable, refused as `held` with its stamp named (`tag` where its
+    /// tag is not 0); no reader takes a page, a record or a stamp from it,
+    /// and nothing sniffs it. One byte more is a page again, refused by
+    /// its own reading.
+    #[test]
+    fn a_held_stamp_is_read_as_what_it_is_never_as_a_page_cut_short() {
+        let key = "prod/zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01";
+        let stamp = Stamp {
+            run: Run::U16(5),
+            seq: Seq::new(7).expect("a seq"),
+        };
+        let held = zenkey_model::wire::HeldStamp::new(stamp).write();
+        assert_eq!(held, [0xe0, 0, 5, 0, 0, 7]);
+        let read = payload(key, Some(wire::ENCODING), &held);
+        assert_eq!(read, Payload::Refused(Refusal::Held(stamp)));
+        assert_eq!(page(key, Some(wire::ENCODING), &held), None, "no page");
+        let text = structural_text(key, Some(wire::ENCODING), &held);
+        assert_eq!(
+            text,
+            "<undecodable: zk2c held stamp (run 0005, seq 7), unchanged only to the GET that \
+             carried it, and no answer here: held>"
+        );
+        assert!(
+            !text.contains("snapshot") && !text.contains("short"),
+            "{text}"
+        );
+        // A reader of mutations: refused, never ordered.
+        assert_eq!(
+            read_parts(
+                key,
+                false,
+                Some(wire::ENCODING),
+                std::borrow::Cow::Borrowed(&held[..]),
+                None
+            )
+            .1,
+            Some(Err(Refusal::Held(stamp)))
+        );
+        // Tag 5 on the same bytes: `tag`.
+        let mut tagged = held.clone();
+        tagged[0] |= 5;
+        let tag = Tag::new(5).expect("a tag");
+        assert_eq!(
+            payload(key, Some(wire::ENCODING), &tagged),
+            Payload::Refused(Refusal::HeldTag(tag))
+        );
+        // One byte after the seq: a page, which its own reading refuses.
+        let mut longer = held.clone();
+        longer.push(0);
+        assert!(matches!(
+            payload(key, Some(wire::ENCODING), &longer),
+            Payload::Snapshot { .. }
+        ));
+        assert_eq!(
+            page(key, Some(wire::ENCODING), &longer),
+            Some(Err(BodyRefusal::Short))
+        );
+    }
 
     /// Core §4.3's table, read from the contracts that exercise each row: a
     /// `freshness.v1` state with a horizon, a desired resource, a state
