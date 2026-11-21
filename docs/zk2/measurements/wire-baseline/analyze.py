@@ -28,6 +28,11 @@ an 8-symbol preamble, explicit header, CRC on, low-data-rate optimisation at
 SF11-12). On LoRa each direction's duty use is its airtime an hour against
 EU868's 1 %, 36 s, which nothing here enforces.
 
+freshness.v2's heartbeats (#1110's H4), in every window of a zk2c run whose far
+side heard one: each key's puts, their payloads, the SDUs that carried them and
+how many shared one, and the element a day (heartbeats' docstring). A bare run
+decodes them; a lean run's are placed by what the far side received and when.
+
 W2 (marks with steady_start): the steady window as above, then the acts and
 the reconnect (w2's docstring says how each is costed). When the link failed
 in the steady window and never came back, --link-failed-at-s says when (s
@@ -203,6 +208,167 @@ def in_window(run, d, t0, t1):
     return [r for r in run["air"] if r.get("dir") == d and t0 <= r["t"] < t1]
 
 
+HEARTBEAT = "/freshness.v2/stream/heartbeat"
+# The relay delivers a datagram 120 to 180 ms after it took it (150 +- 30 ms on RF), and
+# the far reader prints it within milliseconds. A paced driver sends nothing for an SDU's
+# own air time after it, 130 ms for 39 bytes at 2,400 bit/s.
+RELAY_MIN_S = 0.10
+
+
+def far_puts(run):
+    """Each put the far side received, once: several far readers may hold one key (each
+    reader of a class's collection holds the class's owner heartbeat key), and each prints
+    the put. Rows on one key less than 1 s apart are one put."""
+    if "_far_puts" not in run:
+        last, out = {}, []
+        for r in sorted((r for r in run["far"] if r.get("key")), key=lambda r: r["t"]):
+            if r["t"] - last.get(r["key"], -1e9) >= 1.0:
+                out.append(r)
+            last[r["key"]] = r["t"]
+        run["_far_puts"] = out
+    return run["_far_puts"]
+
+
+def heartbeats(run, t0, t1):
+    """freshness.v2's heartbeats A->B in [t0, t1): a heartbeat per interface on
+    `…/heartbeat/<iface>`, an owner heartbeat per class on `…/heartbeats/<class>` (#1110).
+
+    Per key: the puts the owner made, received and lost; their payload sizes; the sizes of
+    the SDUs that carried one, and how many carried nothing else. Then the element: its
+    SDUs, bytes and air time, in the window and a day.
+
+    A bare run decodes (zdecode): every put of the capture, a dropped SDU's too, with its
+    payload, its own bytes and its SDU's. An SDU shared with another message counts for the
+    heartbeat's share of its bytes, as zdecode shares every SDU.
+
+    A lean run's SDUs are sealed. Each put the far side received (far.jsonl) is placed in
+    the last SDU the relay passed at least RELAY_MIN_S before it arrived. A put that never
+    arrived is a slot of its key's cadence with no arrival, and it is placed in the SDU the
+    relay dropped nearest that slot, within 2 s. One it cannot place is counted
+    (`lost_unplaced`) and costs nothing here. An SDU that carried other puts too counts for
+    the heartbeat's share of the payload bytes it delivered. The same placing runs on a
+    bare run beside its decode (`placed`), so the two can be compared.
+    """
+    params, air_s = run["params"], run["airtime"]
+    span = t1 - t0
+    scale = DAY / span
+    ab = [r for r in run["air"] if r.get("dir") == "ab"]
+    passed = [r for r in ab if not r["drop"]]
+    dropped = [r for r in ab if r["drop"]]
+    puts = far_puts(run)
+
+    def carrier(t):
+        got = None
+        for r in passed:
+            if r["t"] <= t - RELAY_MIN_S:
+                got = r
+            else:
+                break
+        return got
+
+    if "_carried" not in run:
+        # SDU (by its time at the relay) -> the puts it delivered.
+        carried = {}
+        for r in puts:
+            c = carrier(r["t"])
+            if c is not None:
+                carried.setdefault(c["t"], []).append(r)
+        run["_carried"] = carried
+    carried = run["_carried"]
+    keys = sorted({r["key"] for r in puts if HEARTBEAT in r["key"]})
+    if not keys:
+        return None
+
+    def short(key):
+        return key.split("/freshness.v2/", 1)[1]
+
+    placed = {"keys": {}, "sdus": 0.0, "bytes": 0.0, "lost_unplaced": 0}
+    used = set()
+    for key in keys:
+        mine = [r for r in puts if r["key"] == key]
+        gaps = sorted(b["t"] - a["t"] for a, b in zip(mine, mine[1:]))
+        period = gaps[len(gaps) // 2] if gaps else None
+        k = {"received": 0, "lost": 0, "period_s": round(period, 2) if period else None,
+             "payload_bytes": Counter(), "sdu_bytes": Counter(), "alone": 0, "shared": 0,
+             "shared_with": Counter()}
+        for r in mine:
+            if not t0 <= r["t"] < t1:
+                continue
+            k["received"] += 1
+            k["payload_bytes"][r["n"]] += 1
+            c = carrier(r["t"])
+            if c is None:
+                continue
+            k["sdu_bytes"][c["n"]] += 1
+            others = [x for x in carried[c["t"]] if x is not r]
+            if others:
+                k["shared"] += 1
+                for x in others:
+                    k["shared_with"][short(x["key"]) if HEARTBEAT in x["key"]
+                                     else x["key"].split("/", 3)[-1].rsplit("/", 1)[0]] += 1
+            else:
+                k["alone"] += 1
+            if c["t"] not in used:
+                # The SDU once, for the share of its payload bytes that were heartbeats'.
+                used.add(c["t"])
+                all_n = sum(x["n"] or 0 for x in carried[c["t"]])
+                hb_n = sum(x["n"] or 0 for x in carried[c["t"]] if HEARTBEAT in x["key"])
+                share = hb_n / all_n if all_n else 1.0
+                placed["sdus"] += share
+                placed["bytes"] += share * c["n"]
+        # The slots of its cadence that no arrival filled.
+        for a, b in zip(mine, mine[1:]):
+            n = round((b["t"] - a["t"]) / period) if period else 1
+            for j in range(1, n):
+                slot = a["t"] + j * (b["t"] - a["t"]) / n
+                if not t0 <= slot < t1:
+                    continue
+                k["lost"] += 1
+                near = [r for r in dropped if abs(r["t"] + 0.15 - slot) <= 2.0 and r["t"] not in used]
+                if not near:
+                    placed["lost_unplaced"] += 1
+                    continue
+                c = min(near, key=lambda r: abs(r["t"] + 0.15 - slot))
+                used.add(c["t"])
+                k["sdu_bytes"][c["n"]] += 1
+                placed["sdus"] += 1
+                placed["bytes"] += c["n"]
+        placed["keys"][short(key)] = {
+            **{x: k[x] for x in ("received", "lost", "period_s", "alone", "shared")},
+            "payload_bytes": dict(sorted(k["payload_bytes"].items())),
+            "sdu_bytes": dict(sorted(k["sdu_bytes"].items())),
+            "shared_with": dict(sorted(k["shared_with"].items()))}
+    placed["sdus"], placed["bytes"] = round(placed["sdus"], 2), round(placed["bytes"], 1)
+    placed["airtime_s"] = round(air_s(placed["bytes"]), 3)
+    placed["per_day"] = {"puts": round(sum(k["received"] + k["lost"] for k in placed["keys"].values()) * scale),
+                         "sdus": round(placed["sdus"] * scale), "bytes": round(placed["bytes"] * scale),
+                         "airtime_s": round(air_s(placed["bytes"]) * scale, 1)}
+    out = {"placed": placed}
+    if params.get("stack") != "lean" and "fragment" not in params:
+        if "_pushes" not in run:
+            run["_pushes"] = []
+            zdecode.decode(run["air"], pushes=run["_pushes"])
+        mine = [x for x in run["_pushes"] if x["dir"] == "ab" and x["element"] == "heartbeat"
+                and t0 <= x["t"] < t1]
+        at = Counter(x["t"] for x in run["_pushes"] if x["dir"] == "ab")
+        dec = {}
+        for x in mine:
+            k = dec.setdefault(short(x["key"]), {
+                "puts": 0, "lost": 0, "payload_bytes": Counter(), "put_bytes": Counter(),
+                "sdu_bytes": Counter(), "alone": 0, "shared": 0})
+            k["puts"] += 1
+            k["lost"] += 1 if x["drop"] else 0
+            k["payload_bytes"][x["payload"]] += 1
+            k["put_bytes"][x["message"]] += 1
+            k["sdu_bytes"][x["sdu"]] += 1
+            k["alone" if at[x["t"]] == 1 else "shared"] += 1
+        out["decoded"] = {key: {**{x: k[x] for x in ("puts", "lost", "alone", "shared")},
+                                **{x: dict(sorted(k[x].items()))
+                                   for x in ("payload_bytes", "put_bytes", "sdu_bytes")}}
+                          for key, k in sorted(dec.items())}
+    return out
+
+
 def window(run, name, t0, t1):
     span = t1 - t0
     scale = DAY / span
@@ -298,17 +464,24 @@ def window(run, name, t0, t1):
         # An event's last chunk is its occurrence (core §2.6): count by resource.
         rest = key.split("/", 4)[-1]
         return rest.rsplit("/", 1)[0] if rest.startswith("events/") or "/events/" in rest else rest
-    far = Counter(resource(r["key"]) for r in run["far"] if r.get("key") and t0 <= r["t"] < t1)
+    # A heartbeat counts once, however many far readers hold its key (far_puts).
+    heard = [r for r in run["far"] if r.get("key") and HEARTBEAT not in r["key"]]
+    heard += [r for r in far_puts(run) if HEARTBEAT in r["key"]]
+    far = Counter(resource(r["key"]) for r in heard if t0 <= r["t"] < t1)
     if far:
         res["far_samples"] = dict(sorted(far.items()))
     # zk2c's (#989): each frame's payload size as the far reader got it, and
     # what its records held (every field known, or every one absent).
     sizes = {}
-    for r in run["far"]:
+    for r in heard:
         if r.get("key") and t0 <= r["t"] < t1 and r.get("n") is not None:
             sizes.setdefault(resource(r["key"]), Counter())[r["n"]] += 1
     if sizes and any("/frames/" in k or "/events/" in k for k in sizes):
         res["far_payload_bytes"] = {k: dict(sorted(v.items())) for k, v in sorted(sizes.items())}
+    if params.get("medium", "").endswith("-zk2c"):
+        hb = heartbeats(run, t0, t1)
+        if hb:
+            res["heartbeats"] = hb
     if params.get("stack") != "lean" and "fragment" not in params:
         # A bare run decodes: each element's share of the window, per day.
         got = zdecode.decode(run["air"], t0, t1)

@@ -1,0 +1,1 @@
+{"seconds": 2873.906, "loss": 0.0, "latency_ms": 150.0, "jitter_ms": 30.0, "seed": 0, "strangers": 0, "ab": {"datagrams": 282, "sdu_bytes": 23844, "dropped": 14, "dropped_bytes": 1128, "cut_dropped": 22, "cut_bytes": 1653}, "ba": {"datagrams": 77, "sdu_bytes": 4182, "dropped": 2, "dropped_bytes": 179, "cut_dropped": 9, "cut_bytes": 276}}

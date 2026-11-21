@@ -35,13 +35,32 @@ reference writes it today, at link.v2's transport:
 - the config changes are config.v2's `zenctl config set` on rfcfg.v1.
 The owner is zenkey's reference, not a constrained device's firmware.
 
+With --owner-heartbeat (#1110's H4; it needs --catalog) the device confirms
+its interfaces by owner heartbeats (freshness.v2 §2.4): `owner --catalog FILE
+--owner-heartbeat`, one put per class of exposure in place of each listed
+interface's heartbeat. The catalog lists the device's revisions that have a
+collection; gen, whose gendev.v1 has none, runs as before. The host's probes
+inside the cut read through the same catalog.
+
+With --watch (the honesty run of the same; it needs --health-contract) the
+host also reads health.v1's status as a consumer does, from the device's
+ready line to the end: `zenctl watch … state/status --across-face`, once
+through the catalog (watch-catalog.jsonl) and once with none
+(watch-none.jsonl), each row stamped. And `zenctl health --across-face
+crosses` reads it 60 s before the cut, while heartbeats cross
+(probe-health-crossing), and beside the two probes inside it
+(probe-health-across). The costing runs leave it out: a watch re-reads its
+collection by a GET of its own when it diverges, which is no part of W2.
+
 Writes, in --logs: marks.json (every bound and act, wall clock), device.out
 and author.out (each owner's answers, stamped), and acts.jsonl.
 Standard library only.
 """
 import argparse
+import atexit
 import json
 import random
+import signal
 import socket
 import subprocess
 import sys
@@ -132,7 +151,17 @@ def main():
     ap.add_argument("--gen-s", type=float, default=4 * 3600, help="with --zk2c: gen's --duration")
     ap.add_argument("--run-files", action="store_true",
                     help="with --zk2c: the device and gen take 16-bit runs from run files")
+    ap.add_argument("--catalog", help="with --zk2c: the deployment catalog the device writes under")
+    ap.add_argument("--owner-heartbeat", action="store_true",
+                    help="with --zk2c and --catalog: the device sends owner heartbeats (#1110)")
+    ap.add_argument("--watch", action="store_true",
+                    help="with --zk2c: the host watches health.v1's status and reads health (above)")
+    ap.add_argument("--health-contract", help="with --watch: health.v1's contract")
     a = ap.parse_args()
+    if a.owner_heartbeat and not (a.zk2c and a.catalog):
+        ap.error("--owner-heartbeat needs --zk2c and --catalog")
+    if a.watch and not (a.zk2c and a.health_contract):
+        ap.error("--watch needs --zk2c and --health-contract")
     rng = random.Random(a.seed)
     marks = {}
     acts = open(f"{a.logs}/acts.jsonl", "w", buffering=1)
@@ -151,6 +180,10 @@ def main():
     if a.zk2c and a.run_files:
         # 16-bit runs from a run file, as a constrained owner takes them (core §4.3).
         runs = ["--run-file", f"{a.logs}/device.run"]
+    # The catalog the device writes under and the host's tools read through (core §8.6).
+    catalog = ["--catalog", a.catalog] if a.zk2c and a.catalog else []
+    if a.owner_heartbeat:
+        runs += [*catalog, "--owner-heartbeat"]
     if a.zk2c:
         device = Owner("device", [a.owner, "--connect", a.device_connect, "--health", "--alarms",
                                   "--config-v2", "--desired-target", AUTHOR, "--desired-watch",
@@ -161,6 +194,40 @@ def main():
                                   "--desired-reread-ms", "300000", DEVICE, a.contract], a.logs)
     device.wait("ready", 120)
     mark("device_ready")
+    watches = []
+
+    def stop_watches():
+        """Each watch and the stamp.py it feeds, ended and waited for. Registered below, so
+        it also runs when the drive ends early: an owner that never answers, a probe's
+        timeout, the harness's SIGTERM. A second call finds nothing left."""
+        while watches:
+            w, stamp = watches.pop()
+            w.terminate()
+            for proc in (w, stamp):      # stamp.py ends at its input's end
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+
+    if a.watch:
+        atexit.register(stop_watches)
+        # `wire.sh down` signals the drive: leave by SystemExit, so atexit runs.
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+        here = __file__.rsplit("/", 1)[0]
+        for name, extra in (("watch-catalog", catalog), ("watch-none", [])):
+            w = subprocess.Popen(
+                [a.zenctl, "watch", DEVICE, "health.v1", "state/status", "--across-face",
+                 "--contracts", a.health_contract, *extra, "--namespace", "",
+                 "--timeout", str(a.config_timeout_s), "-c", a.host_connect,
+                 "--format", "ndjson"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=open(f"{a.logs}/{name}.err", "w"))
+            stamp = subprocess.Popen([sys.executable, "-I", "-u", f"{here}/stamp.py",
+                                      f"{a.logs}/{name}.jsonl", "--all"], stdin=w.stdout,
+                                     stdout=subprocess.DEVNULL)
+            w.stdout.close()
+            watches.append((w, stamp))
     gen = None
     if a.zk2c:
         gen = subprocess.Popen([a.zenctl, "gen", "--namespace", "", DEVICE, "gendev.v1",
@@ -264,7 +331,25 @@ def main():
     run_acts([p for p in plan if p[0] != "config"], 0)
     mark("acts_end")
 
+    def probe(name, argv):
+        mark(name)
+        out = subprocess.run(argv + [*catalog, "--namespace", "", "-c", a.host_connect,
+                                     "--format", "json"],
+                             capture_output=True, text=True, timeout=120)
+        open(f"{a.logs}/{name}.json", "w").write(out.stdout)
+        open(f"{a.logs}/{name}.err", "w").write(out.stderr)
+        acts.write(json.dumps({"t": round(time.time(), 6), "probe": name,
+                               "exit": out.returncode}) + "\n")
+
+    # health.v1's reader as it reads an owner across a constrained link: the
+    # deployment's word that it implements health.v1, no presence read.
+    across = [a.zenctl, "health", DEVICE, "--across-face", "crosses", "--clocks-synced",
+              "--timeout", str(a.config_timeout_s)]
     t = next_tick(time.time(), 4)
+    if a.watch:
+        t = next_tick(t + 60, 4)
+        at(t - 60)
+        probe("probe-health-crossing", across)
     at(t)
     ctl.sendto(b"cut", (host, int(port)))
     mark("cut")
@@ -275,14 +360,9 @@ def main():
         at(t + min(100, a.cut_s - 30))
         for name, argv in (
                 ("probe-health", [a.zenctl, "health", DEVICE, "--clocks-synced"]),
-                ("probe-doctor", [a.zenctl, "doctor", "--clocks-synced", "--check", "health-stale"])):
-            mark(name)
-            out = subprocess.run(argv + ["--namespace", "", "-c", a.host_connect, "--format", "json"],
-                                 capture_output=True, text=True, timeout=120)
-            open(f"{a.logs}/{name}.json", "w").write(out.stdout)
-            open(f"{a.logs}/{name}.err", "w").write(out.stderr)
-            acts.write(json.dumps({"t": round(time.time(), 6), "probe": name,
-                                   "exit": out.returncode}) + "\n")
+                ("probe-doctor", [a.zenctl, "doctor", "--clocks-synced", "--check", "health-stale"]),
+                *([("probe-health-across", across)] if a.watch else [])):
+            probe(name, argv)
     at(t + a.cut_s)
     ctl.sendto(b"restore", (host, int(port)))
     mark("restore")
@@ -294,6 +374,7 @@ def main():
     mark("end")
     stop.set()
     json.dump(marks, open(f"{a.logs}/marks.json", "w"), indent=1)
+    stop_watches()
     if gen is not None:
         gen.terminate()
         try:

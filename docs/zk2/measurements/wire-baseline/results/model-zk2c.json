@@ -357,5 +357,133 @@
     }
    }
   }
+ },
+ "w2_rf_zk2c_owner_heartbeat": {
+  "layout": {
+   "bits": 226,
+   "payload_bytes": 35,
+   "put_bytes": 39,
+   "sdu_bytes": 58,
+   "period_s": 28.5,
+   "bare_32bit_run": {
+    "payload_bytes": 37,
+    "put_bytes": 41,
+    "sdu_bytes": 44
+   }
+  },
+  "heartbeat": {
+   "puts": 3032,
+   "sdus": 3032,
+   "bytes": 175832,
+   "airtime_s": 586.1
+  },
+  "three_heartbeats_alone_bytes": 244547,
+  "per_direction": {
+   "a_to_b": {
+    "telemetry": {
+     "zk2c_bytes": 334080,
+     "airtime_s": 1113.6
+    },
+    "health": {
+     "zk2c_bytes": 152,
+     "airtime_s": 0.5
+    },
+    "alarms": {
+     "zk2c_bytes": 430,
+     "airtime_s": 1.4
+    },
+    "config": {
+     "zk2c_bytes": 295,
+     "airtime_s": 1.0
+    },
+    "events": {
+     "zk2c_bytes": 675,
+     "airtime_s": 2.2
+    },
+    "heartbeat": {
+     "zk2c_bytes": 175832,
+     "airtime_s": 586.1
+    },
+    "desired": {
+     "zk2c_bytes": 11232,
+     "airtime_s": 37.4
+    },
+    "reconnect": {
+     "zk2c_bytes": 3076,
+     "airtime_s": 10.3
+    },
+    "total": {
+     "zk2c_bytes": 525772,
+     "airtime_s": 1752.6
+    }
+   },
+   "b_to_a": {
+    "desired": {
+     "zk2c_bytes": 16128,
+     "airtime_s": 53.8
+    },
+    "keep-alive": {
+     "zk2c_bytes": 24480,
+     "airtime_s": 81.6
+    },
+    "reconnect": {
+     "zk2c_bytes": 460,
+     "airtime_s": 1.5
+    },
+    "total": {
+     "zk2c_bytes": 41068,
+     "airtime_s": 136.9
+    }
+   }
+  },
+  "corrected_total_bytes": 612069,
+  "corrected_total_three_heartbeats_bytes": 674206,
+  "tolerance": {
+   "sizes": "exact",
+   "heartbeat_bytes": 0.0136,
+   "w2_day_bytes": 0.01
+  },
+  "measured": {
+   "zk2c-w2-lean-2": {
+    "window_s": 2100.001,
+    "puts": 74,
+    "lost": 6,
+    "alone": 68,
+    "shared": 0,
+    "payload_bytes": {
+     "35": 68
+    },
+    "sdu_bytes": {
+     "58": 74
+    },
+    "per_day": {
+     "puts": 3045,
+     "sdus": 3045,
+     "bytes": 176585,
+     "airtime_s": 588.6
+    }
+   },
+   "zk2c-w2-bare-2": {
+    "window_s": 2100.0,
+    "puts": 74,
+    "lost": 5,
+    "alone": 74,
+    "shared": 0,
+    "payload_bytes": {
+     "37": 74
+    },
+    "sdu_bytes": {
+     "44": 74
+    },
+    "put_bytes": {
+     "41": 74
+    },
+    "per_day": {
+     "sdus": 3045,
+     "bytes": 133961,
+     "lean_derived_bytes": 182675
+    }
+   }
+  }
  }
 }

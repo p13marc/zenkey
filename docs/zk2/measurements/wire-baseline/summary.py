@@ -19,6 +19,10 @@ Usage: summary.py [results-dir]
   day: the lean runs' counters and airtime, the duty used, the keep-alives
   sent and lost and the links opened again, and the model (model-zk2c.json's
   w1_73_sf*_zk2c), its uplink a range by link.v2 §2.16.
+- W2 zk2c with owner heartbeats (#1110's H4), a day: the heartbeat element of
+  the run with three heartbeats beside the run with one owner heartbeat, bare
+  and lean, against the layout (model-zk2c.json's w2_rf_zk2c_owner_heartbeat);
+  then the second pair of runs' tables, as the first pair's.
 Standard library only.
 """
 import json
@@ -230,6 +234,7 @@ def zk2c_tables(model):
     if w2:
         zk2c_window(w2, "steady", model["w2_rf_zk2c_per_direction"], "W2 zk2c, the steady window", w2l)
         w2_day(w2, model["w2_rf_zk2c_per_direction"])
+    owner_heartbeat_tables(model, w2, w2l)
     for run, key, sf in (("zk2c-sf7-lean-1", "w1_73_sf7_zk2c", "SF7"),
                          ("zk2c-sf9-lean-1", "w1_73_sf9_zk2c", "SF9"),
                          ("zk2c-sf12-lean-1", "w1_73_sf12_zk2c", "SF12")):
@@ -263,6 +268,117 @@ def zk2c_tables(model):
                       f"{p['airtime_s']:,} s | {p['airtime_s'] / 864 * 100:,.0f} % | {ev} | {mod} |")
 
 W2_EVENTS = 15
+RF_BPS = 2400
+# Under the lean stack an SDU that compress stored is 19 B over its puts (the stack's 16
+# and the 3-byte frame), and a heartbeat's put 4 B over its payload. zk2c-w2-lean-1's
+# three heartbeats were 16, 16 and 17 B: SDUs of 39 B and 40 B hold one, of 58 B and 59 B
+# two. Its capture was not kept, so its heartbeat element is read from its SDU sizes.
+LEAN1_HEARTBEAT_SDUS = {39: 1, 40: 1, 58: 2, 59: 2}
+# One of gen's events under the lean stack: a 42-B payload in a 77-B SDU, in both lean runs.
+EVENT_SDU = 77
+
+
+def lean_day(a):
+    """A lean W2 zk2c run's day as W2 makes it, both directions, from its counters: the
+    steady window, less gen's events cut to W2's 15 at their SDU's size. None without a
+    steady window."""
+    s = win(a, "steady")
+    if not s:
+        return None
+    scale = DAY / s["seconds"]
+    events = s.get("far_samples", {}).get("events/oper_change", 0) * scale
+    return {"ab": s["ab"]["per_day"]["bytes"], "ba": s["ba"]["per_day"]["bytes"],
+            "events": events}
+
+
+def owner_heartbeat_tables(model, bare1, lean1):
+    """#1110's H4: W2 again, its owner sending one owner heartbeat per class."""
+    bare2, lean2 = load("zk2c-w2-bare-2"), load("zk2c-w2-lean-2")
+    m = model.get("w2_rf_zk2c_owner_heartbeat")
+    if not (bare2 or lean2) or not m:
+        return
+    lay = m["layout"]
+    print("\n## W2 zk2c with owner heartbeats (#1110)")
+    print("\n#### The heartbeat element A->B, a day\n")
+    print("| Run | Puts in the window (lost) | Payload | Put | SDU | Alone in its SDU | SDUs | Bytes | Air |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+    if bare1:
+        s = win(bare1, "steady")
+        e = s["elements_per_day"]["ab"]["heartbeat"]
+        print(f"| zk2c-w2-bare-1, three heartbeats, 32-bit runs, decoded | | 18, 18, 19 B | | | | "
+              f"{e['sdus']:,.0f} | {kb(e['bytes'])} | {e['bytes'] * 8 / RF_BPS:,.1f} s |")
+        print(f"| the same under the lean stack, derived (+16 B an SDU) | | | | | | {e['sdus']:,.0f} | "
+              f"{kb(e['bytes'] + LEAN * e['sdus'])} | {(e['bytes'] + LEAN * e['sdus']) * 8 / RF_BPS:,.1f} s |")
+    if lean1:
+        s = win(lean1, "steady")
+        scale = DAY / s["seconds"]
+        sizes = {int(k): v for k, v in s["ab"]["other_sizes"].items() if int(k) in LEAN1_HEARTBEAT_SDUS}
+        n = sum(sizes.values())
+        b = sum(k * v for k, v in sizes.items())
+        puts = sum(LEAN1_HEARTBEAT_SDUS[k] * v for k, v in sizes.items())
+        alone = sum(v for k, v in sizes.items() if LEAN1_HEARTBEAT_SDUS[k] == 1)
+        print(f"| zk2c-w2-lean-1, three heartbeats, 16-bit runs, by SDU size | {puts} | 16, 16, 17 B | "
+              f"20, 20, 21 B | 39, 40 B; 58, 59 B for two | {alone} of {puts} | {n * scale:,.0f} | "
+              f"{kb(b * scale)} | {b * scale * 8 / RF_BPS:,.1f} s |")
+    for name, a in (("zk2c-w2-bare-2, one owner heartbeat, 32-bit run, decoded", bare2),
+                    ("zk2c-w2-lean-2, one owner heartbeat, 16-bit run, placed", lean2)):
+        s = win(a, "steady") if a else None
+        if not s or "heartbeats" not in s:
+            continue
+        hb = s["heartbeats"]
+        dec = hb.get("decoded")
+        p = hb["placed"]
+        for key, k in p["keys"].items():
+            d = (dec or {}).get(key, {})
+            puts = d.get("puts", k["received"] + k["lost"])
+            lost = d.get("lost", k["lost"])
+            sizes = lambda c: ", ".join(f"{x} B" + (f" ({n})" if len(c) > 1 else "") for x, n in c.items())
+            put = sizes(d["put_bytes"]) if d else "sealed"
+            alone = d.get("alone", k["alone"] + k["lost"] - p["lost_unplaced"])
+            if dec:
+                e = s["elements_per_day"]["ab"]["heartbeat"]
+                day = (e["sdus"], e["bytes"])
+            else:
+                day = (p["per_day"]["sdus"], p["per_day"]["bytes"])
+            print(f"| {name}: `{key}` | {puts} ({lost}) | {sizes(d.get('payload_bytes', k['payload_bytes']))} | "
+                  f"{put} | {sizes(d.get('sdu_bytes', k['sdu_bytes']))} | {alone} of {puts} | {day[0]:,.0f} | "
+                  f"{kb(day[1])} | {day[1] * 8 / RF_BPS:,.1f} s |")
+        if dec:
+            e = s["elements_per_day"]["ab"]["heartbeat"]
+            print(f"| the same under the lean stack, derived (+16 B an SDU) | | | | | | {e['sdus']:,.0f} | "
+                  f"{kb(e['bytes'] + LEAN * e['sdus'])} | {(e['bytes'] + LEAN * e['sdus']) * 8 / RF_BPS:,.1f} s |")
+            print(f"| the same, placed by what the far side received (the lean run's method) | | | | | | "
+                  f"{p['per_day']['sdus']:,.0f} | {kb(p['per_day']['bytes'])} | {p['per_day']['airtime_s']:,.1f} s |")
+    h = m["heartbeat"]
+    print(f"| **the layout** (core §7.5), 16-bit run, lean, each put alone, every {lay['period_s']} s | | "
+          f"{lay['payload_bytes']} B | {lay['put_bytes']} B | {lay['sdu_bytes']} B | | {h['puts']:,} | "
+          f"{kb(h['bytes'])} | {h['airtime_s']:,.1f} s |")
+    print(f"| the three heartbeats, each alone in its SDU, 16-bit runs, lean | | 16, 16, 17 B | 20, 20, 21 B | "
+          f"39, 39, 40 B | | | {kb(m['three_heartbeats_alone_bytes'])} | "
+          f"{m['three_heartbeats_alone_bytes'] * 8 / RF_BPS:,.1f} s |")
+    if bare2:
+        zk2c_window(bare2, "steady", m["per_direction"], "W2 zk2c with owner heartbeats, the steady window",
+                    lean2)
+        w2_day(bare2, m["per_direction"])
+    # The day as W2 makes it under the lean stack, 16-bit runs: each lean run's counters, with
+    # the acts and the reconnects of its bare twin, decoded, plus 16 B an SDU.
+    print("\n#### W2 zk2c under the lean stack, 16-bit runs, both directions, a day as W2 makes it\n")
+    print("| Run | Steady A->B | Steady B->A | gen's events cut to 15 | Acts | 4 reconnects | Total | Of RF |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|")
+    for name, lean, bare in (("zk2c-w2-lean-1", lean1, bare1), ("zk2c-w2-lean-2", lean2, bare2)):
+        d = lean_day(lean) if lean else None
+        if not d or not bare:
+            continue
+        cut = (W2_EVENTS - d["events"]) * EVENT_SDU
+        pd = bare["w2"]["per_day"]
+        extra = {k: sum(pd[x].get(k, {"bytes": 0, "sdus": 0})["bytes"]
+                        + LEAN * pd[x].get(k, {"bytes": 0, "sdus": 0})["sdus"] for x in ("ab", "ba"))
+                 for k in ("acts", "reconnects")}
+        total = d["ab"] + d["ba"] + cut + extra["acts"] + extra["reconnects"]
+        print(f"| {name} | {kb(d['ab'])} | {kb(d['ba'])} | {kb(cut)} | {kb(extra['acts'])} | "
+              f"{kb(extra['reconnects'])} | **{kb(total)}** | {100 * total / (RF_BPS / 8 * DAY):.2f} % |")
+    print(f"\nThe model with the layout's owner heartbeat: {kb(m['corrected_total_bytes'])} a day "
+          f"(tolerances: {m['tolerance']}).")
 
 
 def w2_day(a, model):
