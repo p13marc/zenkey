@@ -252,7 +252,10 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   (`telemetry`, `watchdog`, `record --on`), so its policy is read once and
   refused in one place, and `zk2::routers` reads the routers' policy from
   its file; `--binding` parses by `Binding`'s `FromStr`, the model's one
-  list of names); #990 V8: `get state`, `watch` and `call`
+  list of names; `record --on` opens its namespaced session for an
+  `alert-firing` rule too, `cmd::watchdog::reads_deployment`, without
+  which the rule alone had no reader and read unobservable, `live_zk2.rs`'s
+  `record_on_an_alert_firing_rule_alone_reads_the_owners_alarms`); #990 V8: `get state`, `watch` and `call`
   take `cli::OwnerFaceArgs` (`--across-face`, the revision `--contracts`
   holds, never presence, `zk2::held_across` refusing one it does not
   name, exit 2; `--face-policy F --face N`, `zk2::across` →

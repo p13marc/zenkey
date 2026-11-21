@@ -434,9 +434,9 @@ async fn run_triggered(
 
     let session = dep.link().session().await?;
     // The rules that read the deployment — the doctor, an address's
-    // instance tokens, the lens a payload or a QoS is judged through — read
-    // it through a session in its namespace, beside this one (#612, FJ6,
-    // FJ8b).
+    // instance tokens, the lens a payload or a QoS is judged through, the
+    // owners' alarms — read it through a session in its namespace, beside
+    // this one (#612, FJ6, FJ8b; `alert-firing` since #1011).
     // Its live presence readers hold their subscribers on a watch session
     // of its own (#830).
     let deployment = if rules.iter().any(super::watchdog::reads_deployment) {

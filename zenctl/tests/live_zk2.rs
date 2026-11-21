@@ -8954,6 +8954,77 @@ fn alarm_owner<'a>(doc: &'a Value, address: &str) -> &'a Value {
 /// The alarms' wire selector T reads, every owner of `lab`.
 const LAB: &str = "zk2/lab/*/alarms.v1/state/alarms/*";
 
+/// `record --on 'alert-firing …'` with no other rule reads the owners'
+/// alarms (#1011): the rule's reader is alarms.v1's, as the watchdog's, and
+/// reads through a session in the deployment's namespace, which `record
+/// --on` must open for it as for every rule that reads the deployment.
+/// `lab/svc` holds no alarm as the capture arms, then raises A at
+/// `warning`: the rule goes to `firing` and the capture is written.
+///
+/// With no such session the reader never opens: the rule reads
+/// unobservable, "no session in the deployment's namespace was given to
+/// read alarms", for as long as the capture is armed, and nothing is
+/// written.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn record_on_an_alert_firing_rule_alone_reads_the_owners_alarms() {
+    use zenkey::alarms::Severity;
+    let bus = Bus::bare(None).await;
+    let owning = client(&bus.endpoint, None).await;
+    let (_svc, alarms) = alarms_owner(&owning, "lab/svc", false).await;
+    wait_for(&bus, &["lab/svc"]).await;
+
+    let out = bus.home.join("alert.zrec");
+    let out = out.to_str().expect("a UTF-8 path").to_owned();
+    let (armed, capture) = bus.spawn_on_line(
+        &[
+            "record",
+            "-o",
+            &out,
+            "--on",
+            "alert-firing zk2/lab/** warning",
+            "--pre",
+            "2",
+            "--post",
+            "1",
+            "--every",
+            "0.5",
+            "--for",
+            "15",
+            "--clocks-synced",
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ],
+        "  watching ",
+    );
+    armed.await.expect("the capture arms");
+    // A few evaluations with the owner known whole and nothing firing, so
+    // the rule's move to `firing` is a transition the capture hears.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    alarms
+        .raise(alarm_a(Severity::Warning))
+        .await
+        .expect("A raised");
+
+    let run = capture.await.expect("the capture's run");
+    assert!(
+        !run.stderr
+            .contains("no session in the deployment's namespace"),
+        "the rule's reader has a session in the namespace: {run}"
+    );
+    assert!(
+        run.stderr
+            .contains("fired: alert-firing zk2/lab/** warning"),
+        "the rule fires on A: {run}"
+    );
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(doc["trigger"]["to"], "firing", "{run}");
+    assert_eq!(doc["out"], out, "{run}");
+    assert!(Path::new(&out).exists(), "the capture is written: {run}");
+}
+
 /// alarms.v1 `scenarios.md` §8 (§2.7, §2.9, §2.14, §2.15): an absent
 /// owner, last-known, for a tool. T reads `lab/svc` holding A firing: yes,
 /// `firing`, and the watchdog's `alert-firing` fires. The owner closes

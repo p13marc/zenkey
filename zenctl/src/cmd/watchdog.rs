@@ -32,8 +32,11 @@ use crate::bus::Deployment;
 use crate::cmd::zk2;
 
 /// Whether a rule reads the deployment — its doctor, an address's instance
-/// tokens, a key's contract or declared QoS — and so needs a session in
-/// its namespace beside the raw one.
+/// tokens, a key's contract or declared QoS, the owners' alarms — and so
+/// needs a session in its namespace beside the raw one. `record --on` opens
+/// that session only for such a rule: an `alert-firing` rule left out of
+/// here had no reader, and read unobservable for as long as the capture
+/// was armed (#1011).
 pub(crate) fn reads_deployment(rule: &Condition) -> bool {
     matches!(
         rule,
@@ -41,6 +44,7 @@ pub(crate) fn reads_deployment(rule: &Condition) -> bool {
             | Condition::InstanceGone { .. }
             | Condition::InvalidPayload { .. }
             | Condition::QosMismatch { .. }
+            | Condition::AlertFiring { .. }
     )
 }
 
