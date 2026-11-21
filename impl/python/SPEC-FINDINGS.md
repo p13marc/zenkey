@@ -27652,3 +27652,287 @@ without it.
   - F-540 to F-546.
 
   F-365 stays open as #965's.
+
+## At freshness.v2 0.9, link.v2 0.19 and link.v1 0.20
+
+Round 113 read main at c4e1065a (#1110's H2a): `freshness.v2` 0.9, which
+gives core 0.108's owner heartbeat a profile and a key, `link.v2` 0.19
+and `link.v1` 0.20, which let its class keys cross or not, the standard
+contract's revision 1.1 and zenoh-modem's catalog `8982cc41`. It read
+cold:
+- `freshness.v2` §2.4, §2.5, §2.9 and §3, and §0 and §1 beside them;
+- `link.v2` §2.9 and §2.16, `link.v1` §2.7 and §2.9;
+- core §11.1's Consume row and §8.5's two sentences;
+- the three changelog entries, `apply.json` (after the code, below),
+  `plan.json` and `v2/plan.json`.
+
+zk2py diffed `spec/` and `examples/zk2/` between fc16a564 and c4e1065a.
+`spec/CLAUDE.md` moved too, and the barrier keeps it unread. Core stays
+0.108 and `RULES.md` 283 rules: its entry's three adopted places are no
+keyword rule. `freshness.v2`'s and `link`'s MUSTs are in no index.
+
+### The reader, written from §2.5 before its fixture
+
+zk2py wrote `freshness_v2.Reader` from §2.4, §2.5 and §3 alone and
+committed it (f65f969c) before it opened `apply.json`'s new cases. Then
+it read the file's `description`, wrote the adapter to the fixture's
+spelling, and ran the file.
+
+**`apply.json`: 148 of 148 checks on the first run, 75 of them in the 17
+cases over owner heartbeats. No case was wrong, and no line of the
+reader moved after the fixture was read.** The adapter renames, and
+decides nothing: a group's `not_followed` and `revision` as members, a
+check's `lost` and `gap` by layout and by key.
+
+**The gap question, answered from the text before any case was read**
+(the answer is f65f969c's commit message): after a gap on a class key,
+the collections read as lost deliveries are only those of the key's
+class in the interfaces a group on that key has named within the run,
+the owner heartbeat that follows the gap among them. They are never
+every interface the reader follows. §2.5, "A lost owner heartbeat",
+decides it: "They are those of each interface it follows that a group on
+that key has named within the run. The owner heartbeat that follows the
+gap counts among them." And: "A group names an interface once the
+subscriber has read its index: any group of a read owner heartbeat that
+"No index" did not stop."
+
+**The fixture does not decide it** (F-548): a reader that loses every
+interface it follows passes the 17 cases too.
+
+**The sentences that decided the cases a reader could get wrong**, each
+found by changing the reader and running the file:
+- "**Another revision.** The revision its index names is not the one
+  the reader holds, or its tag is not that revision's": case 30 for the
+  catalog's word, case 22 for the tag;
+- "A followed collection of the other class is not read, whatever its
+  map bit says": case 24, where `absent` would answer first;
+- "A group stopped before that is not counted": case 22, for a refused
+  group and for one of another revision, neither ending a row nor
+  adding to one;
+- "One stopped at step 1 or 2 is not counted. It moves neither its
+  key's sequence nor a count": case 17;
+- "Two keys are two sequences": case 24;
+- "**No index.** … the group confirms nothing", the owner heartbeat
+  still a read one: cases 18 to 20.
+
+### The plans
+
+`plan.json` 18 of 18 and `v2/plan.json` 48 of 48. Two things moved in
+zk2py:
+- **The carve holds the owner heartbeat keys itself.** `plan.json`
+  passed 18 of 18 before a line of `link` changed: zk2py read
+  `heartbeats/{class}` from the standard contract's revision 1.1, as
+  any templated stream that crosses nowhere. `link.v1` §2.7 asks more:
+  "It holds it whichever revision of that contract is given, and where
+  none is." No case gives the contract at 1.0. zk2py's own does (a
+  reading), and the deny is there since this round.
+- **Under a `link.v2` policy** the carve holds `heartbeats/link`, which
+  crosses when any listed interface's heartbeat does, and
+  `heartbeats/host`, which never does. The link key is evidence of each
+  listed service with a crossing heartbeat, and its horizon and its
+  longest put are weighed.
+
+**"A listed interface's heartbeat."** zk2py takes "listed" to cover an
+interface that has a heartbeat alone, as `link.v1` §2.9's "Which
+interfaces have one" reads it: a revision given uses `freshness.v2` and
+the revisions together give it a collection. That decides the crossing:
+an interface with no heartbeat has none to cross. For the horizon and
+the longest put the text says "listed interface" alone, and does not
+decide it (F-550).
+
+### F-547 · gap · `freshness.v2` cites `[Sc: §8]` six times, and `scenarios-v2.md` ends at §7
+
+> §2.4: "In a group, an owner MUST set the map bit of no collection of
+> another class. `[Sc: §8]`"; "An owner MUST NOT send a heartbeat
+> covering an interface while its owner heartbeats cover it.
+> `[Sc: §8]`"; "an owner's owner heartbeats MUST be at most half the
+> shortest horizon … `[Sc: §8]`". §2.5, twice, beside `[F: apply.json]`,
+> and §2.9. `CHANGELOG.md`, 0.9: "`scenarios-v2.md` §8 runs an owner
+> heartbeat on a bus." `scenarios-v2.md`: §1 to §7.
+
+- **The gap.** The three owner MUSTs cite that section alone. No
+  fixture and no scenario on this main shows an owner heartbeat on a
+  bus, and the reference's owner sends none.
+- **What zk2py does:** `owner_heartbeat_live` runs steps of its own
+  between two zk2py processes, each a sentence of §2.4 or §2.5.
+- **Fix:** the section, or the tags and the entry's sentence held back
+  until it lands.
+- **Changes:** the scenarios, or six tags and one sentence.
+
+### F-548 · minor · `apply.json`: no case tells "named within the run" from every interface the reader follows
+
+> §2.5: "They are those of each interface it follows that a group on
+> that key has named within the run." `apply.json`, case 29's note:
+> "the collections a key covers are those of each interface a group on
+> it has named within the run, the group read after the gap among them".
+
+- **The error.** Cases 16, 23, 24 and 29 check `lost` after a gap. In
+  each, every interface the reader follows has been named on the key by
+  then: case 29's owner heartbeat after the gap names the three. A
+  reader that loses every followed collection of the key's class passes
+  17 of 17.
+- **Five more sentences of §2.5 no case pins**, each survived a changed
+  reader:
+  - "Another run on a key starts its sequence again, and its covered
+    collections with it", for the names;
+  - a group stopped at "Another revision" names its interface;
+  - `other_class` ends no row of divergences;
+  - a collection not followed, in a read group: no case holds one, of
+    either class;
+  - "A collection has one count. Another run does not start it again."
+- **What zk2py does:** each as the text says, pinned by its own cases
+  (`readings`).
+- **Fix:** a case with a gap before a followed interface is first
+  named, whose `lost` leaves it out.
+- **Changes:** the fixture.
+
+### F-549 · ambiguity · `freshness.v2` §3: an owner that sends heartbeats alone "does not expose" `heartbeats/{class}`, by which descriptor?
+
+> §3: "The resource is `optional`: an owner that sends heartbeats alone
+> does not expose it (core §3.3)." Core §3.3: "The exposed resources of
+> an interface are its contract's resources, minus the optional ones
+> gated on a capability the instance does not hold, minus those listed
+> in `unavailable`." "Each entry gives a cause, `build`, `config` or
+> `capability`".
+
+- **Two readings.**
+  - The owner implements revision 1.1 and lists the resource
+    `unavailable`. The resource has no gate, so nothing implies it. §3
+    names no cause. The member is 74 bytes of every such owner's
+    descriptor, under core §3.3's 1 KB.
+  - The owner implements revision 1.0, which has no such resource.
+- **Measured:** the reference's owner of c4e1065a does the second. Its
+  `freshness.v2` entry names `8756e6a6…`, revision 1.0, with no
+  `unavailable`.
+- **What zk2py does:** the first, with the cause `config`, its own
+  choice. An owner that covers an interface exposes the resource.
+- **Fix:** say which revision an owner that sends heartbeats alone
+  implements, and, at 1.1, the cause it gives.
+- **Changes:** the descriptor of every `freshness.v2` owner.
+
+### F-550 · ambiguity · `link.v2` §2.9 and §2.16: "listed interfaces", with a heartbeat or any?
+
+> §2.9: "Its horizon is the shortest among the `link` collections of
+> the service's listed interfaces". §2.16: "a group for each listed
+> interface of the service that has a `link` collection".
+> `CHANGELOG.md`, link.v2 0.19: "**Read where the text does not say.**
+> A group is counted, for the horizon and for the longest put, for an
+> interface that has a heartbeat … §2.9 and §2.16 say "listed
+> interface" alone. No case pins the difference."
+
+- **The ambiguity** is the entry's own. A listed interface whose
+  revisions use `freshness.v1`, or neither, may hold a `link` state
+  with a horizon. By the letter it shortens the horizon and adds a
+  group. `freshness.v2` §2.4 covers an interface "in place of" its
+  heartbeat, so it has none to replace.
+- **Also unpinned** by `v2/plan.json`, each survived a changed plan:
+  the map's bits (cases 46 and 47 pin bytes, and a bit less fits);
+  a templated collection with no `cardinality`; whether a listed
+  service none of whose heartbeats cross is weighed against the batch;
+  the link key's cadence in `keep_alive_not_suppressed`.
+- **What zk2py does:** an interface with a heartbeat alone, for both.
+  Every listed service with a group is weighed against the batch.
+- **Fix:** the entry's sentence in §2.9 and §2.16, and a case.
+- **Changes:** the plan's `horizon_under_face` and `block_over_batch`.
+
+### F-551 · ambiguity · `link.v2` §2.9: a collection the revisions disagree on is "a `link` collection" and, by §2.3, `host`
+
+> §2.9: "A `link` collection that does not cross a face, overlapped or
+> disagreed on (`link.v1` §2.7, §2.3), keeps its section in the `link`
+> owner heartbeat." And: "the `link` collections of the service's
+> listed interfaces, each read as `link.v1` §2.3 reads it." `link.v1`
+> §2.3: "Where one reads `link` and another does not … it is read as
+> `host`".
+
+- **Two readings** of such a collection, for the horizon and for
+  §2.16's longest put, which says "each `link` collection's longest
+  section" and names no reading. As §2.3 reads it, it is `host`: no
+  horizon, and no section in the longest put, where an owner on the
+  revision that reads `link` writes one. As "What it still carries"
+  calls it, it is `link`.
+- **What zk2py does:** §2.3's, for both. Its longest put is then short
+  of what such an owner sends.
+- **Fix:** say that the longest put counts a collection any revision
+  given reads `link`.
+- **Changes:** `block_over_batch` on a face with such a collection.
+
+### F-552 · minor · `link` `scenarios-v2.md` §2: Expected 1 lists what crosses and what is denied by name, without the class keys
+
+> §2, Expected 1: "The plan lets `frames/link`, `status`, `level` and
+> the heartbeat cross. It denies `frames/detail` and `setpoint` by
+> name."
+
+- **The error.** Since 0.19 that plan also lets `heartbeats/link`
+  cross, lists it as `probe-a`'s evidence, and denies `heartbeats/host`
+  by name. The scenario is as 0.18 left it.
+- **What zk2py does:** its runner reads the three of the plan, and puts
+  on both class keys: on zk2py's block and on `zenctl acl gen`'s, the
+  far side hears every put on the link key and none on the host key.
+- **Fix:** Expected 1 and 4, and step 3's puts.
+- **Changes:** the scenario.
+
+### F-553 · minor · `freshness.v2` §1: "one resource, the heartbeat", of a contract with two
+
+> §1: "Yes: `freshness.v2.toml`, one resource, the heartbeat (§3)." §3
+> lists `heartbeat/{iface}` and `heartbeats/{class}`.
+
+- **Fix:** "two resources, the heartbeat and the owner heartbeat".
+- **Changes:** one row.
+
+### F-554 · minor · `link` `CHANGELOG.md`, 0.20: "`link.v2` 0.18 lets the `link` class's key cross", which 0.19 does
+
+> 0.20: "**Why a deny, and not `link.v2`'s rule.** `link.v2` 0.18 lets
+> the `link` class's key cross where a heartbeat does." link.v2 0.18's
+> entry is §2.19's `null` and §2.18's block. 0.19's is §2.9.
+
+- **Fix:** 0.19.
+- **Changes:** one figure.
+
+### F-555 · minor · `freshness.v2` §2.9: "The `host` class's crosses no face", where both link texts except a face on which `freshness.v2` is not listed
+
+> `freshness.v2` §2.9: "The `host` class's crosses no face." "Under a
+> `link.v1` policy neither class's crosses". §2.4: "So no digest and no
+> bit of a `host` collection rides a put that a face lets across".
+> `link.v1` §2.9: "**Where `freshness.v2` is not listed**, no listed
+> interface has a heartbeat. Where the face lets streams cross, an
+> owner heartbeat then crosses as any key no contract declares does".
+> `link.v2` §2.9: "MUST NOT let `…/freshness.v2/stream/heartbeats/host`
+> cross a face on which `freshness.v2` is a listed interface."
+
+- **The error.** A service the policy does not list, behind a router
+  whose face lets a listed interface's stream cross and lists no
+  interface with a heartbeat, puts on its `host` key, and no deny names
+  it. Under `allow` it crosses. `freshness.v2` states the rule with no
+  exception.
+- **What zk2py does:** the link texts', as its plan derives them.
+- **Fix:** "where `freshness.v2` is listed (`link.v1` §2.9)", in §2.4
+  and §2.9.
+- **Changes:** two sentences.
+
+### The mend
+
+- **F-542 is resolved** by `freshness.v2` 0.9: its §3 names both keys,
+  and says "A reader tells an owner heartbeat from a heartbeat by its
+  key, never by its bytes (core §7.5)."
+- **F-535 to F-541 and F-543 to F-546 stay open:** no text on this main
+  answers one. Core stays 0.108, `desired.v1` 0.13 and `redundancy.v1`
+  0.10, and `link.v2` 0.19 moves none of §2.19.
+- **The three F-545 shapes** stay known divergences.
+- **`own["writes"][0]` and `own["either"][0]`** are guarded.
+
+### Counts at freshness.v2 0.9, link.v2 0.19 and link.v1 0.20
+
+555 entries.
+- **New: F-547 to F-555:**
+  - one gap: F-547;
+  - three ambiguities: F-549, F-550 and F-551;
+  - five minor errors: F-548 and F-552 to F-555.
+  None is a blocker.
+- **Answered this round:** F-542, resolved.
+- **Open:**
+  - F-437 to F-441;
+  - F-535 to F-541 and F-543 to F-546, whose answers are not on this
+    main;
+  - F-547 to F-555.
+
+  F-365 stays open as #965's.

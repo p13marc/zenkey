@@ -1,0 +1,12 @@
+# zk2py's own, for freshness.v2 0.9's owner heartbeat live (round 113): one
+# `link` collection of one member.
+[interface]
+name  = "zk2py_ohb_b"
+major = 1
+minor = 0
+uses  = ["freshness.v2", "link.v1"]
+
+[resources.config]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2, "link.exposure" = "link" }

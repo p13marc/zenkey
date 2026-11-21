@@ -58,6 +58,13 @@ PROBE = REPO / "spec" / "profiles" / "link" / "conformance" / "contracts" / "pro
 SERVICE = "lab/probe-a"
 BASE = f"zk2/{SERVICE}/probe.v1"
 HEARTBEAT = f"zk2/{SERVICE}/freshness.v2/stream/heartbeat/probe.v1"
+#: link.v2 0.19 §2.9 (round 113): the owner heartbeat keys, by class. The
+#: owner puts on both beside its heartbeat, as no owner of one deployment
+#: would (freshness.v2 §2.4, "One form per interface"): what crosses is
+#: decided by keys, and "The plan cannot tell an owner that sends heartbeats
+#: from one that sends owner heartbeats. It lets both cross".
+CLASS_KEYS = {"heartbeats/link": f"zk2/{SERVICE}/freshness.v2/stream/heartbeats/link",
+              "heartbeats/host": f"zk2/{SERVICE}/freshness.v2/stream/heartbeats/host"}
 #: step 3's four keys, by the resource's name in §2
 PUT = {"frames/link": f"{BASE}/stream/frames/link", "frames/detail": f"{BASE}/stream/frames/detail",
        "setpoint": f"{BASE}/stream/setpoint", "level": f"{BASE}/stream/level"}
@@ -96,6 +103,11 @@ def console_selectors(contract: Any) -> dict[str, str]:
     out = {f"{r['token']}/{r['template']}": f"zk2/lab/*/probe.v1/{r['token']}/{r['template']}"
            for r in contract.canonical["resources"] if r["token"] in ("stream", "state", "events")}
     out["heartbeat"] = "zk2/lab/*/freshness.v2/stream/heartbeat/probe.v1"
+    # core §11.1 as freshness.v2 0.9 adopts it: "the subscription to that
+    # provider's owner heartbeat key … for each class those collections
+    # have". The console asks for both keys; a grant decides.
+    out["heartbeats/link"] = "zk2/lab/*/freshness.v2/stream/heartbeats/link"
+    out["heartbeats/host"] = "zk2/lab/*/freshness.v2/stream/heartbeats/host"
     return out
 
 
@@ -165,7 +177,7 @@ class Counted:
 def traffic(owner: Any) -> dict[str, int]:
     """Step 3: 20 Hz for 5 s on the four keys, and the heartbeat at 2 Hz.
     How many puts each key took."""
-    sent = {k: 0 for k in [*PUT.values(), HEARTBEAT]}
+    sent = {k: 0 for k in [*PUT.values(), HEARTBEAT, *CLASS_KEYS.values()]}
     n = int(HZ * SECONDS)
     every = HZ // BEAT_HZ
     t0 = time.monotonic()
@@ -178,8 +190,9 @@ def traffic(owner: Any) -> dict[str, int]:
             owner.put(key, f"{i}".encode())
             sent[key] += 1
         if i % every == 0:
-            owner.put(HEARTBEAT, f"beat {i}".encode())
-            sent[HEARTBEAT] += 1
+            for key in (HEARTBEAT, *CLASS_KEYS.values()):
+                owner.put(key, f"beat {i}".encode())
+                sent[key] += 1
     return sent
 
 
@@ -240,9 +253,14 @@ def _run(work: str, reference: bool) -> list[Result]:
         out.append((f"{tag}, Expected 1: the plan lets frames/link, status and the heartbeat cross by its evidence, "
                     "and denies frames/detail and setpoint by name, level left to its downsampling rule",
                     denied == ["zk2/*/*/probe.v1/stream/frames/detail/**", "zk2/*/*/probe.v1/stream/setpoint/**"]
-                    and crosses == ["freshness.v2/stream/heartbeat/probe.v1", "probe.v1/state/status",
-                                    "probe.v1/stream/frames/link"],
+                    and crosses == ["freshness.v2/stream/heartbeat/probe.v1", "freshness.v2/stream/heartbeats/link",
+                                    "probe.v1/state/status", "probe.v1/stream/frames/link"],
                     f"denied {denied}; evidence {crosses}"))
+        by_name = sorted(e for d in plan.get("deny", []) for e in d["key_exprs"] if "freshness.v2" in e)
+        out.append((f"{tag}, link.v2 0.19 §2.9: the plan denies the host class's owner heartbeat key by name and "
+                    "nothing under heartbeats/link, and lists the link key as probe-a's evidence",
+                    by_name == ["zk2/*/*/freshness.v2/stream/heartbeats/host/**"]
+                    and "freshness.v2/stream/heartbeats/link" in crosses, f"denied {by_name}"))
         rules = [r["key_expr"] for r in (plan.get("downsampling") or {}).get("rules", [])]
         warned = sorted(x["code"] for x in plan.get("findings", []))
         out.append((f"{tag}, Expected 2: its one downsampling rule is level's, and it warns timed_downsampled, "
@@ -281,6 +299,16 @@ def _run(work: str, reference: bool) -> list[Result]:
                     got_g["frames/link"] == want["frames/link"] and got_g["heartbeat"] == want["heartbeat"],
                     f"G frames/link {got_g['frames/link']} of {want['frames/link']}, heartbeat "
                     f"{got_g['heartbeat']} of {want['heartbeat']}"))
+        ohb_l = {name: cl.count(key) for name, key in CLASS_KEYS.items()}
+        ohb_g = {name: cg.count(key) for name, key in CLASS_KEYS.items()}
+        out.append((f"{tag}, link.v2 0.19 §2.9: G receives every put on the link class's owner heartbeat key, "
+                    "never downsampled, and none on the host class's; L, granted the class its collection has "
+                    "(core §11.1), receives every put on the link key",
+                    ohb_g == {"heartbeats/link": sent[CLASS_KEYS["heartbeats/link"]], "heartbeats/host": 0}
+                    and ohb_l["heartbeats/link"] == sent[CLASS_KEYS["heartbeats/link"]] == 10,
+                    f"G {ohb_g}; L {ohb_l}; put {sent[CLASS_KEYS['heartbeats/link']]} on each; refused at the "
+                    f"declaration: G {sorted(k for k in cg.refused if 'heartbeats' in k) or 'none'}, "
+                    f"L {sorted(k for k in cl.refused if 'heartbeats' in k) or 'none'}"))
         out.append((f"{tag}, Expected 5: G receives 4 to 6 puts of level, one a second",
                     4 <= got_g["level"] <= 6, f"G level {got_g['level']} of {want['level']}"))
         out.append((f"{tag}, Expected 6: G receives no put of frames/detail or setpoint",
@@ -292,11 +320,76 @@ def _run(work: str, reference: bool) -> list[Result]:
     return out
 
 
+def blocks() -> list[Result]:
+    """link.v2 0.19 and link.v1 0.20, a face of each kind (round 113):
+    ``v2/plan.json``'s case 5, a link.v2 policy, and its case 10, a link.v1
+    policy over the same contract and deployment. For each, the exposure
+    denies of zk2py's plan beside those of the block ``zenctl acl gen``
+    writes from the same policy, contract and enrollment (a black box, run):
+    the same key expressions, the owner heartbeat keys' among them, on the
+    same flows and messages. And the grants the reference's block gives the
+    console that name a heartbeat key, beside zk2py's (core §11.1)."""
+    from . import acl, link, link_v2
+    from .contract import load_contract
+
+    out: list[Result] = []
+    cases = json.loads((REPO / "spec" / "profiles" / "link" / "conformance" / "v2" / "plan.json")
+                       .read_text(encoding="utf-8"))["cases"]
+    contract = load_contract(PROBE, spec_dir=REPO / "spec")
+    want = {5: ("link.v2", ["zk2/*/*/freshness.v2/stream/heartbeats/host/**"]),
+            10: ("link.v1", ["zk2/*/*/freshness.v2/stream/heartbeats/**"])}
+    use = acl.Use("probe.v1", ["lab/*"], sorted(f"{r['token']}/{r['template']}" for r in contract.canonical["resources"]
+                                               if r["token"] in ("stream", "state", "events")))
+    mine_grant = sorted(acl.heartbeat_selectors(use, {"probe.v1": [contract]}))
+    with workdir("zk2py-blocks-") as work:
+        epath = os.path.join(work, "probe.enrollment.toml")
+        with open(epath, "w") as f:
+            f.write(enrollment_text())
+        for i, (kind, class_denies) in want.items():
+            tag = f"a {kind} face (v2/plan.json's case {i})"
+            text = cases[i]["policy"]
+            ppath = os.path.join(work, f"case{i}.face.toml")
+            with open(ppath, "w") as f:
+                f.write(text)
+            p = subprocess.run([str(BLACKBOX / "zenctl"), "acl", "gen", "--enrollment", epath, "--contracts",
+                                str(PROBE), "--face-policy", ppath, "--json5"], capture_output=True, text=True,
+                               timeout=120)
+            if p.returncode != 0:
+                out.append((f"{tag}: zenctl acl gen writes the block", False,
+                            f"exit {p.returncode}; {p.stderr.strip()[-300:]}"))
+                continue
+            ac = json.loads(_config(p.stdout, {}).get_json("access_control"))
+            ref = {(k, tuple(sorted(r["flows"])), tuple(sorted(r["messages"]))) for r in ac["rules"]
+                   if r["permission"] == "deny" and r["id"].startswith("face:")
+                   and r["id"].split(":")[2] in ("stream", "@stream", "state", "@state", "events")
+                   for k in r["key_exprs"]}
+            face = link_v2.plan(text, {"probe-a": ["probe.v1"]},
+                                {"probe.v1": {"revisions": [link.revision_of(contract)]}})["faces"][0]
+            mine = {(k, tuple(sorted(d["flows"])), tuple(sorted(d["messages"]))) for d in face["deny"]
+                    if d["id"].split(":")[0] in ("stream", "@stream", "state", "@state", "events")
+                    for k in d["key_exprs"]}
+            out.append((f"{tag}: zk2py's exposure denies are zenctl acl gen's, key for key, on the same flows and "
+                        "messages", bool(mine) and mine == ref,
+                        f"{len(mine)} and {len(ref)}; only zk2py's {sorted(mine - ref)[:3]}, only zenctl's "
+                        f"{sorted(ref - mine)[:3]}"))
+            got = sorted(k for k, _, _ in ref if "freshness.v2" in k)
+            out.append((f"{tag}: both deny the owner heartbeat keys as its text says, {class_denies[0]}",
+                        got == class_denies == sorted(k for k, _, _ in mine if "freshness.v2" in k), f"{got}"))
+            grants = sorted({k for r in ac["rules"] if r["permission"] == "allow" for k in r["key_exprs"]
+                             if "/freshness.v2/stream/heartbeat" in k})
+            out.append((f"{tag}: the console's grant holds the heartbeat's key and the link class's owner "
+                        "heartbeat key, status being its one collection bound, in both generators' blocks (core "
+                        "§11.1)", grants == mine_grant == ["zk2/lab/*/freshness.v2/stream/heartbeat/probe.v1",
+                                                           "zk2/lab/*/freshness.v2/stream/heartbeats/link"],
+                        f"zenctl {grants}; zk2py {mine_grant}"))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.link_v2_frames_live", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=("py", "ref"))
+    ap.add_argument("--only", action="append", choices=("py", "ref", "blocks"))
     args = ap.parse_args(argv)
-    runs = {"py": lambda: run(False), "ref": lambda: run(True)}
+    runs = {"py": lambda: run(False), "ref": lambda: run(True), "blocks": blocks}
     failed = 0
     for name in args.only or list(runs):
         for what, ok, detail in runs[name]():

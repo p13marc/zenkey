@@ -170,11 +170,28 @@ def heartbeat_selectors(use: Use, contracts: dict[str, list[Contract]]) -> list[
     its collections (§7.5), the subscription to each named provider's
     …/freshness.v2/stream/heartbeat/<iface>". ``contracts`` are the
     deployment's revisions by interface, any one of which using
-    ``freshness.v2`` with that collection needs it."""
+    ``freshness.v2`` with that collection needs it.
+
+    Core 0.108 as ``freshness.v2`` 0.9 adopts it (round 113): "With it goes
+    the subscription to that provider's owner heartbeat key,
+    …/freshness.v2/stream/heartbeats/<class>, for each class those
+    collections have (freshness.v2 §2.4)": the classes of the collections
+    the binding consumes, as each such revision reads them."""
+    from . import freshness_v2
+
+    classes: set[str] = set()
+    needs = False
     for c in contracts.get(use.interface, []):
-        if "freshness.v2" in c.canonical["uses"] and _collections(c.canonical) & set(use.resources):
-            return [f"zk2/{p}/freshness.v2/stream/heartbeat/{use.interface}" for p in use.providers]
-    return []
+        mine = _collections(c.canonical) & set(use.resources)
+        if "freshness.v2" in c.canonical["uses"] and mine:
+            needs = True
+            by = freshness_v2.classes_of(c.canonical)
+            classes |= {by[r] for r in mine}
+    if not needs:
+        return []
+    return [f"zk2/{p}/freshness.v2/stream/heartbeat/{use.interface}" for p in use.providers] \
+        + [f"zk2/{p}/freshness.v2/stream/heartbeats/{cls}" for p in use.providers
+           for cls in freshness_v2.CLASSES if cls in classes]
 
 
 def heartbeat_keys(service: str, contracts: list[Contract]) -> list[str]:
@@ -183,8 +200,15 @@ def heartbeat_keys(service: str, contracts: list[Contract]) -> list[str]:
     collection: in the deployment's own keys under ``allow`` (§11.1, 0.86:
     "Each owner of a covered interface serves it, for the fan-in and the
     allow posture's complement")."""
-    return sorted({f"zk2/{service}/freshness.v2/stream/heartbeat/{c.interface}" for c in contracts
-                   if "freshness.v2" in c.canonical["uses"] and _collections(c.canonical)})
+    from . import freshness_v2
+
+    covered = [c for c in contracts if "freshness.v2" in c.canonical["uses"] and _collections(c.canonical)]
+    # freshness.v2 0.9 §3: the owner heartbeat keys, one for each class its
+    # covered interfaces' collections have ("Its parameter is link or host,
+    # and an owner puts on no other"), which it may put on in their place.
+    classes = {freshness_v2.classes_of(c.canonical)[r] for c in covered for r in _collections(c.canonical)}
+    return sorted({f"zk2/{service}/freshness.v2/stream/heartbeat/{c.interface}" for c in covered}
+                  | {f"zk2/{service}/freshness.v2/stream/heartbeats/{cls}" for cls in classes})
 
 
 def presence_selectors(providers: list[str]) -> list[str]:

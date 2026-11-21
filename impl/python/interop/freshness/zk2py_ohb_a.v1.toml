@@ -1,0 +1,20 @@
+# zk2py's own, for freshness.v2 0.9's owner heartbeat live (round 113): an
+# interface with a collection of each class. `status` is `link`, and
+# `peer/{peer}` has no `link.exposure`, so it is `host` (freshness.v2 §2.4).
+[interface]
+name  = "zk2py_ohb_a"
+major = 1
+minor = 0
+uses  = ["freshness.v2", "link.v1"]
+
+[resources.status]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2, "link.exposure" = "link" }
+
+[resources."peer/{peer}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { peer = "string" }
+cardinality = 8
+annotations = { "freshness.ttl_s" = 4 }

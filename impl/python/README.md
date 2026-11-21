@@ -7687,6 +7687,142 @@ citing a fixture with no such case). None is a blocker. F-529 to F-534
 are resolved. F-535 to F-539 stay open: their answers are not on this
 main. See "At core 0.108 and link.v2 0.18" in `SPEC-FINDINGS.md`.
 
+## `freshness.v2` 0.9, `link.v2` 0.19 and `link.v1` 0.20: the owner heartbeat's profile, key and plans (round 113)
+
+Round 113 read main at c4e1065a (#1110's H2a):
+- **`freshness.v2` 0.9:** §2.4, an owner given a catalog MAY cover
+  several interfaces in one put per class of exposure; §2.5, a reader's
+  steps over it; §2.9, where it crosses; §3, the standard contract's
+  revision 1.1 with `heartbeats/{class}`;
+- **`link.v2` 0.19:** the `link` class's key crosses a face exactly when
+  a listed interface's heartbeat does, the `host` class's never, and an
+  owner heartbeat's longest put is weighed against the batch;
+- **`link.v1` 0.20:** no owner heartbeat key crosses its faces;
+- **zenoh-modem's catalog** is `8982cc41`, succeeding `29bf7d47`.
+
+Core stays 0.108, and `RULES.md` its 283 rules: the walk's 293 rows keep
+their verdicts.
+
+### The reader, from the text first
+
+`freshness_v2.Reader` was written from §2.4, §2.5 and §3 alone and
+committed (f65f969c) before `apply.json`'s new cases were opened.
+
+**148 of 148 checks on the first run, 75 of them in the 17 cases over
+owner heartbeats: no case wrong, and no line of the reader changed after
+the fixture was read.**
+
+- **`Reader`,** new: a `View` per interface followed and a `KeySequence`
+  per class key in front of them.
+  - `owner_heartbeat`: refused whole (core §7.5's first reading), older
+    on its key, or read. Each group alone: no index (§8.6's
+    `unknown_catalog`, `unknown_index`), not followed, another revision
+    (by the catalog's word or by the tag), refused, or read. A followed
+    collection of the other class is `other_class`, its map bit unread;
+  - `lost`: after a gap on a key, the collections of its class in the
+    interfaces a group has named within the run, and no other;
+  - a collection has one count of divergences, moved by a group read on
+    its own class's key and by its interface's own heartbeat.
+- **The gap question** (the brief's): only the interfaces a group on
+  the key has named within the run read "lost delivery". §2.5 says so:
+  "They are those of each interface it follows that a group on that key
+  has named within the run." `apply.json` does not pin it: a reader
+  that loses every followed interface passes 17 of 17 (F-548).
+- **`classes_of`:** a collection is `link` where `link.v1` §2.2 reads
+  its exposure `link`, and `host` otherwise.
+
+### The owner, and both forms on a session
+
+- **`Owner.owner_heartbeats`**, set before `start` beside
+  `Owner.catalog`: the interfaces it covers, each by its index in the
+  catalog, at most 15. One put per class on
+  `…/freshness.v2/stream/heartbeats/<class>`, CH's tag 0, the key's own
+  run and seq, a group per covered interface it serves, the class's
+  sections alone, every 0.95 of half the shortest horizon its groups
+  cover. A covered interface has no heartbeat of its own. An owner
+  given no catalog, and an interface its catalog does not list, keep
+  their heartbeats.
+- **An owner that sends heartbeats alone** lists
+  `stream/heartbeats/{class}` unavailable, cause `config`: §3 says it
+  "does not expose it", and names no cause (F-549). The reference's
+  owner implements revision 1.0 instead.
+- **`freshness_v2.Provider`**, new: one provider on a session, a
+  `Subscriber` per interface and the owner heartbeat keys, "one for
+  each class that the collections it follows have". It reads the
+  catalog its owner names in its descriptor.
+- **`acl`:** Consume holds the provider's owner heartbeat key for each
+  class the bound collections have (core §11.1).
+
+### The plans
+
+- **`link`:** the stream carve of `freshness.v2` holds
+  `heartbeats/{class}` whichever revision of the standard contract is
+  given (`link.v1` §2.7). `plan.json` passed 18 of 18 before the
+  change, by the standard contract's revision 1.1 alone; zk2py's own
+  case gives it at 1.0.
+- **`link_v2`:** `heartbeats/link` crosses when a listed interface's
+  heartbeat does and `heartbeats/host` never; the link key is evidence
+  of each listed service with a crossing heartbeat;
+  `owner_heartbeat_horizon` and `owner_heartbeat_longest` weigh it
+  (`horizon_under_face`, `keep_alive_not_suppressed`,
+  `block_over_batch`).
+- **"Listed"** is read as an interface that has a heartbeat, for the
+  horizon and the longest put: the text does not decide it (F-550).
+- **`plan.json` 18 of 18 and `v2/plan.json` 48 of 48.**
+
+**`just py-conformance`: 6922 of 6922** on c4e1065a. Of them,
+`freshness` 277, 148 of them `apply.json`'s, `link` 350 and `readings`
+1065: round 113's eighteen, the last review-bot's on #1141, a resource
+read over no declaring row.
+
+### Live
+
+On the black boxes of c4e1065a. Every router is zenoh-python's, zenoh
+1.10.1.
+
+| Runner | What | Result |
+|---|---|---|
+| `owner_heartbeat_live`, new | two zk2py processes, the owner under a catalog covering three interfaces. One `link` put holds three groups in index order, 36 bytes on a 32-bit run, every 0.95 s, and one `host` put a's group alone, every 1.9 s. No link put's bytes hold a section of a `host` collection, and none of the host key's a `link` one. No heartbeat on a covered interface's own key. S, never seeded for b, reads b's group `diverged` twice while a's and c's confirm, re-reads, and b confirms. One `link` owner heartbeat lost: the next follows a gap, the link collections of a, b and c read as lost deliveries and a's `host` collection does not, until the next in sequence. N, which holds no catalog, reads every group `unknown_catalog`. An owner given no catalog sends heartbeats alone, and lists `heartbeats/{class}` unavailable | 25/25 |
+| `link_v2_frames_live` | `scenarios-v2.md` §2 with the owner putting on both class keys too. On zk2py's block and on `zenctl acl gen`'s: the far side hears 10 of 10 on the link key and none on the host key | 14/14 |
+| `link_v2_frames_live --only blocks`, new | a face of each kind, `v2/plan.json`'s case 5 (`link.v2`) and case 10 (`link.v1`): zk2py's exposure denies are `zenctl acl gen`'s key for key, 6 and 4, `heartbeats/host/**` and `heartbeats/**` among them; both generators grant the console the heartbeat's key and `heartbeats/link` | 6/6 |
+| `zk2 contract fingerprint`, `zk2 catalog id` | the standard contract's `sha256:9e07704d…`, zk2py's; `compat --history`: compatible; zenoh-modem's catalog `8982cc41`, zk2py's | the same |
+| `freshness_v2_scenarios`, `heartbeat_epoch_live` | whole, in the three pairings, over an owner that lists `heartbeats/{class}` unavailable and a view whose section step the reader shares | 112/112, 8/8 |
+| `link_scenarios`, `stamp_live`, `link_v2_live` | whole, over the plans' class keys | 89/89, 15/15, 71/71 |
+| `first_hop_live`, `constrained_live` | whole, over the owner's descriptor as it is now | 22/22, 14/14 |
+
+**The mend** (`py-carry-r112.md`):
+1. **F-542** is resolved by `freshness.v2` 0.9's §3. F-535 to F-541 and
+   F-543 to F-546 stay open: no text on this main answers one.
+2. **`own["writes"][0]` and `own["either"][0]`** are guarded: a file
+   with none gives a row that disagrees, and the family goes on.
+3. **The three F-545 shapes** stay known divergences.
+4. **zenohd and F-531's far router:** not run (below).
+
+**The reference, observed (not a finding):** the owner example of
+c4e1065a implements `freshness.v2` at revision 1.0 (`8756e6a6…`), and
+sends no owner heartbeat.
+
+**Not run:**
+- an owner heartbeat against the reference: its owner sends none and
+  its consumers read none, on this main;
+- `freshness.v2`'s `scenarios-v2.md` §8: the file holds none (F-547);
+- an owner heartbeat across a face on routers from a real owner:
+  `link_v2_frames_live` puts counters on the class keys;
+- zenohd as a black box: `bin/current` holds none;
+- F-531's far router, again: round 110's measurement stands;
+- the live runners not named in the table.
+
+Round 113 found F-547 to F-555: one gap (`[Sc: §8]` cited six times, and
+no §8), three ambiguities (which revision an owner that sends heartbeats
+alone implements, and with which cause; "listed interfaces" with a
+heartbeat or any; a collection the revisions disagree on, `link` or
+`host` to the longest put) and five minor errors (`apply.json` pins no
+"named within the run"; link's scenario §2 without the class keys; "one
+resource" of two; "`link.v2` 0.18" for 0.19; "crosses no face" without
+the link texts' exception). None is a blocker. F-542 is resolved. See
+"At freshness.v2 0.9, link.v2 0.19 and link.v1 0.20" in
+`SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -7749,10 +7885,19 @@ main. See "At core 0.108 and link.v2 0.18" in `SPEC-FINDINGS.md`.
   zk2py's owner holds values only for parameterless state. It answers
   templated operations through the handlers and members it is given, and
   otherwise names no member.
-- **The owner heartbeat on a bus** (core 0.108, round 112): zk2py parses
-  and writes one, and reads its groups through a catalog. No zk2py
-  owner sends one and no reader subscribes to one: no text on this main
-  names its key, who sends it or what a reader concludes (F-542).
+- **Of the owner heartbeat** (`freshness.v2` 0.9, round 113): zk2py's
+  owner sends one per class under a catalog, and
+  `freshness_v2.Provider` reads both forms. Not covered:
+  - zk2py's `health.v1`, `alarms.v1` and `config` readers and its echo
+    tool subscribe to no owner heartbeat key. To them a covered
+    interface's members go stale, §2.4's "Readers first";
+  - an owner heartbeat against the reference, whose owner sends none
+    and whose consumers read none on this main;
+  - one across a face on routers from a real owner, and its longest put
+    against a router's batch: `link_v2`'s figure is computed, never
+    sent;
+  - a tool's scope across a face (observer §7.5) names no class key:
+    `observer.md` stays 0.33.
 - **A collection's snapshot** (core 0.97, round 103): zk2py reads, writes
   and cuts pages, and its echo tool shows one. Its owners answer a GET
   per key and its readers read with `Latest`, as S2 to S4 still say: no
@@ -7858,9 +8003,11 @@ impl/python/
     live.py           §3.3 §4 §5 §8 presence, descriptor GET, retrieval, state GET, calls; observer §3, §4,
                                 §7.2, and §7.4's and §8.2's notes (blind_spots, memlock_note)
     owner.py          §3.3 §4 §5 §6 §8 a minimal owner, a standby (0.39), member tokens (§8.1); a minor only where
-                                its revision has one, empty members left out, its descriptor measured (0.107)
+                                its revision has one, empty members left out, its descriptor measured (0.107);
+                                owner heartbeats per class under a catalog (freshness.v2 0.9, round 113)
     live_interop.py             the live runner, with the Rust owner and consume examples
-    acl.py            §11       the grant generator: a deployment → zenoh's access_control block
+    acl.py            §11       the grant generator: a deployment → zenoh's access_control block; Consume's owner
+                                heartbeat key per class (round 113)
     acl_interop.py    §11       the access-control run (`--only acl`)
     security_scenarios.py §11.1 §11.2 scenarios/security.md §4 (0.50, 0.51) on zk2py's block and zenctl acl gen's,
                                 zenctl get as the tool (observer §4.3), and §11.2's inclusion facts (`--only security4`)
@@ -7880,7 +8027,13 @@ impl/python/
                                 reader's pages, entries, Tracker, omitted and ByDescriptor (round 105)
     frame.py          §7.7      frames: the declaration, the frame form and its tag, the body written and read
                                 over packed's fields (round 96, core 0.83)
-    freshness_v2.py   freshness.v2 §2.5's rule (the view), a subscriber that re-reads, the owner's body (round 96)
+    freshness_v2.py   freshness.v2 §2.5's rule (the view), a subscriber that re-reads, the owner's body (round 96);
+                                text 0.9's Reader over an owner heartbeat, a sequence per class key in front of
+                                the views, written from the text before apply.json's cases were opened, and
+                                Provider, both forms on a session (round 113)
+    owner_heartbeat_live.py freshness.v2 0.9 §2.4, §2.5, §3: an owner heartbeat between two zk2py processes, three
+                                interfaces in one put, one lost, a divergence in one group, a host collection
+                                never on the link key, a reader with no catalog, an owner with none (round 113)
     freshness_v2_scenarios.py freshness.v2 scenarios-v2.md §1–§7 in three pairings: zk2py's owner and readers, the
                                 Rust owner with zk2py's, zk2py's owner with zenctl watch and get state (round 96)
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
@@ -7896,7 +8049,8 @@ impl/python/
     config_v2_scenarios.py config.v2 scenarios-v2.md §1–§14 in three pairings (zk2py's owner and caller, the owner
                                 example's --config-v2 with zk2py's caller, zk2py's owner with zenctl config), and a
                                 re-mint (config.v1 §2.12) with both owners (round 102)
-    link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator
+    link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator;
+                                heartbeats/{class} in the stream carve, whichever revision is given (0.20, round 113)
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
     link_v2.py        link.v2   the policy, the plan, the transport block and its checks (round 96); the contract
                                 side and frames per face, exposure.json (0.3, round 99); timestamping off in the
@@ -7904,7 +8058,8 @@ impl/python/
                                 opens, near_opens_user, the far end's user, a null left out (0.15), the block
                                 merged (0.16), and §2.16's keep-alives beside data (0.17) (round 110); a null
                                 routing/interests/timeout left out, and a null at each other key no value zenoh
-                                runs (0.18, round 112)
+                                runs (0.18, round 112); the owner heartbeat's class keys in the plan, the link
+                                key's horizon and its longest put (0.19, round 113)
     far_side.py       §8.1 §8.5 a far side across a face: the reply timeout, a subscription's horizon, Redeclaring
                                 (core 0.91, observer 0.23, link.v2 0.4; round 99)
     far_side_live.py  §8.1 §8.5 constrained.md §8 and §9 in process, a proxy dropping a batch the far client sends
@@ -8002,7 +8157,8 @@ impl/python/
                                 at each of the eight keys, zenoh-python's load, zk2py's check and zenctl check
                                 face under both bindings (--only null; round 112)
     link_v2_frames_live.py link.v2 scenarios-v2.md §2, frames per face, on zk2py's block and on zenctl acl gen's
-                                (round 111)
+                                (round 111); the class keys on both, and a face of each kind beside zenctl acl
+                                gen's block (--only blocks; round 113)
     stray_live.py     §4.2      scenarios/state.md §15, a stray reply_del and an owner on an earlier revision
                                 (round 107); the readers given the owner's revision (step 3, round 108)
     archive_live.py   §4.4 S5   scenarios/state.md §4 to §6: the Rust archive aligning from zk2py's owner
@@ -8037,7 +8193,7 @@ impl/python/
     proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
     checks.py                   a live runner's checks: known failures by identity, XFAIL and XPASS, the exit
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
-                      sysinfo_x, tracker, order, order_b, budget, plans, epoch (presence.md §3); freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; config/ zk2py_author.v1;
+                      sysinfo_x, tracker, order, order_b, budget, plans, epoch (presence.md §3); freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; freshness/ also zk2py_ohb_a.v1, _b and _c, three interfaces under one owner heartbeat (round 113); config/ zk2py_author.v1;
                       telemetry/ meter.v1 and meter.json, telemetry.v1's scenarios' contract, and meterx.v1,
                       zk2py's own, a declaration invalid for §5's over many samples;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4);

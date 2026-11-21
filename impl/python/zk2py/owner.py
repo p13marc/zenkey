@@ -121,6 +121,9 @@ from .contract import Contract
 from .lexical import parse_interface_id
 from .slug import slug
 
+#: freshness.v2 0.9 §3: the standard contract's revision 1.1's resource.
+OWNER_HEARTBEAT_RESOURCE = "heartbeats/{class}"
+
 #: Core R1 (0.20): "a provider whose system position is self.system".
 SELF_SYSTEM = "self.system"
 
@@ -1274,6 +1277,7 @@ class Owner:
     def start(self) -> None:
         self.resolve_system()  # hostid.v1 §2.7: before the session, and before step 1
         self.resolve_bindings()  # core R1 (0.20): from the same system
+        self._cover()        # freshness.v2 0.9 §2.4: which interfaces its owner heartbeats cover
         plan = self._plan()  # step 2 first: a refusal declares nothing
         if self.session is None:
             self.open_session()
@@ -2151,6 +2155,120 @@ class Owner:
                 raise KeyError(f"{key}: no member of a collection a heartbeat of this owner covers")
             (self.unvouched.discard if on else self.unvouched.add)(key)
 
+    # -- freshness.v2 0.9 §2.4: the owner heartbeat ------------------------------
+
+    #: "An owner given a catalog (core §8.6) MAY confirm several interfaces
+    #: in one put, in place of their heartbeats." Set before :meth:`start`:
+    #: None, heartbeats alone; True, every interface it may cover; or the
+    #: interface ids it chooses ("Which interfaces is the owner's choice,
+    #: interface by interface").
+    owner_heartbeats: Any = None
+    #: A test rig's: the class keys whose next owner heartbeat is lost, its
+    #: seq taken and no put made.
+    ohb_lose: frozenset[str] = frozenset()
+    #: The covered interfaces, each its index in the catalog (:meth:`_cover`).
+    ohb_index: dict[str, int] = {}
+
+    def _cover(self) -> None:
+        """Which interfaces the owner heartbeats cover, each with its
+        index in the catalog: of those chosen, the ones whose revision the
+        catalog lists ("An owner given no catalog writes no index. It sends
+        heartbeats alone. So does an owner for an interface its catalog does
+        not list"), at most 15 ("Further interfaces keep their heartbeats").
+
+        §3: "The resource is `optional`: an owner that sends heartbeats
+        alone does not expose it (core §3.3)", so it lists
+        ``stream/heartbeats/{class}`` unavailable; the cause is zk2py's
+        choice, ``config``: §3 names none (F-549)."""
+        from . import owner_heartbeat as oh
+
+        self.ohb_index = {}
+        self._classes: dict[str, dict[str, str]] = {}
+        self.owner_heartbeats_sent: list[tuple[str, zk2c.InBand, dict[str, Any]]] = []
+        self.ohb_lost: list[tuple[str, zk2c.InBand]] = []
+        want = self.owner_heartbeats
+        if want and self.catalog is not None:
+            chosen = set(self.hb_layouts) if want is True else set(want) & set(self.hb_layouts)
+            found = []
+            for iface in chosen:
+                entry = (iface, self.hb_layouts[iface].fingerprint)
+                if entry in self.catalog.entries:
+                    found.append((self.catalog.entries.index(entry), iface))
+            self.ohb_index = {iface: i for i, iface in sorted(found)[:oh.MAX_GROUPS]}
+        std = next((c for c in self.contracts if c.interface == freshness_v2.PROFILE), None)
+        rid = f"stream/{OWNER_HEARTBEAT_RESOURCE}"
+        if std is not None and any(f"{r['token']}/{r['template']}" == rid for r in std.canonical["resources"]):
+            if self.ohb_index:
+                self.unavailable.pop(rid, None)
+            else:
+                self.unavailable.setdefault(rid, "config")
+
+    def _ohb_groups(self, cls: str) -> list[tuple[str, int, hbeat.Layout, set[str]]]:
+        """The class's groups: "one group for each covered interface whose
+        revision has a collection of that class", of those it serves now
+        ("An owner leaves out the group of an interface it does not serve"),
+        as (interface, index, layout, the class's collections)."""
+        out = []
+        for iface, index in self.ohb_index.items():
+            if iface not in self._hb_running:
+                continue
+            lo = self.hb_layouts[iface]
+            by = self._classes.setdefault(iface, freshness_v2.classes_of(
+                next(c for c in self.contracts if c.interface == iface).canonical))
+            mine = {c.resource for c in lo.collections if by[c.resource] == cls}
+            if mine:
+                out.append((iface, index, lo, mine))
+        return sorted(out, key=lambda g: g[1])
+
+    def owner_heartbeat_period_ns(self, cls: str) -> int | None:
+        """"On each owner heartbeat key, an owner's owner heartbeats MUST be
+        at most half the shortest horizon among the collections their groups
+        cover apart": 0.95 of it, as a heartbeat's; None with no group."""
+        ttls = [lo.collection(r).ttl_s for _, _, lo, mine in self._ohb_groups(cls) for r in mine]
+        return min(ttls) * 475_000_000 if ttls else None
+
+    def _put_owner_heartbeat(self, cls: str) -> None:
+        """One owner heartbeat of the class ``cls``: a put on its key (§3)
+        with the heartbeat's QoS, the run and seq that key's own, CH's tag 0,
+        a group per covered interface. "In a group, an owner MUST set the map
+        bit of no collection of another class": each group holds its class's
+        sections alone. "The rest is the heartbeat's, group by group": the
+        time, the sections, the bits. "It sends no owner heartbeat that
+        would hold no group." """
+        from . import owner_heartbeat as oh
+
+        key = freshness_v2.owner_heartbeat_key(self.system, self.service, cls)
+        with self._writes:
+            if self._stop.is_set() or self.session is None:
+                return
+            groups = self._ohb_groups(cls)
+            if not groups:
+                return
+            if key not in self._publishers:
+                self._member_publisher(key)
+            now = self.mint()
+            written, values, time_value = [], {}, None
+            for iface, index, lo, mine in groups:
+                value = self.heartbeat_body(iface, now)
+                time_value = value["time"]
+                sections = {r: sec for r, sec in value["sections"].items() if r in mine}
+                values[iface] = sections
+                written.append(oh.group_of(index, lo, sections))
+            ib = self._next_stream_inband(key)
+            if cls in self.ohb_lose:
+                self.ohb_lose = frozenset(self.ohb_lose) - {cls}
+                self.ohb_lost.append((cls, ib))
+                return
+            self._publishers[key].put(oh.write(ib, time_value, written), encoding=zk2c.ENCODING)
+            self.owner_heartbeats_sent.append((cls, ib, values))
+            for iface, sections in values.items():
+                prefix = f"zk2/{self.system}/{self.service}/{iface}/"
+                for k, h in self._held.items():
+                    if k.startswith(prefix) and h.payload is not None and k not in self.unvouched:
+                        col = self._covered(k)
+                        if col is not None and col.resource in sections:
+                            h.confirm = now
+
     def _start_heartbeats(self, ifaces: list[str]) -> None:
         if not ifaces:
             return
@@ -2213,10 +2331,28 @@ class Owner:
         (:func:`zk2py.freshness_v2.period_ns`), the first at once; "It sends
         them with no member live too"."""
         due: dict[str, int] = {}
+        due_class: dict[str, int] = {}
         while not self._stop.is_set():
             now = time.monotonic_ns()
+            # freshness.v2 0.9 §2.4: one owner heartbeat per class, at the
+            # class's own period.
+            for cls in freshness_v2.CLASSES if self.ohb_index and self.send_heartbeats else ():
+                period = self.owner_heartbeat_period_ns(cls)
+                if period is None:
+                    due_class.pop(cls, None)
+                elif due_class.get(cls, 0) <= now:
+                    try:
+                        self._put_owner_heartbeat(cls)
+                    except Exception as e:  # noqa: BLE001 - the next period tries again
+                        print(f"zk2py owner: owner heartbeat {cls}: {type(e).__name__}: {e}", file=sys.stderr,
+                              flush=True)
+                    due_class[cls] = now + period
             for iface in sorted(self._hb_running):
                 if not self.send_heartbeats:
+                    continue
+                if iface in self.ohb_index:
+                    # "An owner MUST NOT send a heartbeat covering an
+                    # interface while its owner heartbeats cover it."
                     continue
                 if due.get(iface, 0) <= now:
                     try:
@@ -2226,7 +2362,7 @@ class Owner:
                     due[iface] = now + (freshness_v2.period_ns(self.hb_layouts[iface]) or 10**9)
             for iface in [i for i in due if i not in self._hb_running]:
                 due.pop(iface)
-            nxt = min(due.values(), default=time.monotonic_ns() + 50_000_000)
+            nxt = min([*due.values(), *due_class.values()], default=time.monotonic_ns() + 50_000_000)
             self._stop.wait(max(0.0, min((nxt - time.monotonic_ns()) / 1e9, 0.05)))
 
     def _refresh_loop(self) -> None:

@@ -1,0 +1,14 @@
+# zk2py's own, for freshness.v2 0.9's owner heartbeat live (round 113): one
+# templated `link` collection.
+[interface]
+name  = "zk2py_ohb_c"
+major = 1
+minor = 0
+uses  = ["freshness.v2", "link.v1"]
+
+[resources."alarms/{alarm}"]
+kind        = "state"
+type        = { raw = "text/plain" }
+params      = { alarm = "string" }
+cardinality = 8
+annotations = { "freshness.ttl_s" = 4, "link.exposure" = "link" }
