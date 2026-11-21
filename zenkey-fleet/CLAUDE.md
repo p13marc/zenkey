@@ -639,3 +639,12 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   absent or unknown takes its first value's time, so `field-stuck`'s span
   holds values only.
   `tests/first_hop.rs` is constrained.md §10 from the tools' side.
+  Core 0.107 (#1126, #1127): a mock owner's implementation keeps the
+  revision's own contract (`tape::mock::implementation`, through
+  `Implementation::with_bundle`), so `gen` and `serve` state the minor of
+  a revision loaded from its authoring file and none for one read from a
+  bundle; the listings' `IfaceSighting::minor` is the entry's, absent
+  where none is stated, and the doctor's `contract-drift` orders two
+  revisions only by minors stated. `tests/mock_owner.rs`'
+  `gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors`
+  runs zenoh-modem's node shape (1,344 B before, 1,184 B now).

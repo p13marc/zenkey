@@ -172,6 +172,146 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
     assert_eq!(report.failed, 0, "{report:?}");
 }
 
+/// Core §3.3 on zenoh-modem's node shape (#1126, #1127): a `gen` owner of
+/// `modem.v3`, `config.v1` and `health.v1`, as `faces/zenoh-modem.enrollment.toml`'s
+/// `implements` lists them, holding every capability `modem.v3` gates on,
+/// under zenoh-modem's catalog and a 16-bit run.
+///
+/// - **The size rule.** Its descriptor is over 1 KB with the four members
+///   an owner cannot shorten, so it leaves out every empty member and keeps
+///   its other members within 512 B.
+/// - **The minor.** Each entry states the minor its revision has: the
+///   authoring file's for a revision loaded from one, and none for one read
+///   from a bundle, never a 0 the revision does not have.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
+    use zenkey_model::descriptor::{OTHER_BYTES, SIZE_BYTES};
+
+    let (_router, ep) = router(None).await;
+    let owners = client(&ep).await;
+    let tool = client(&ep).await;
+    let address = addr("h-3fa9c2d41b7e/rf0");
+    let modem = revision("zenoh-modem/modem.v3");
+    let config = revision("profiles/config/config.v1");
+    // `health.v1` as a tool holds a revision it retrieved: read back from
+    // its bundle, which keeps no minor (core §9.5).
+    let health_file = revision("profiles/health/health.v1");
+    let health = Arc::new(
+        Revision::from_bundle(health_file.bundle().clone(), ContractSource::Bundle).unwrap(),
+    );
+    assert_eq!(modem.contract().minor, Some(4), "modem.v3 3.4");
+    assert_eq!(config.contract().minor, Some(1));
+    assert_eq!(health_file.contract().minor, Some(1));
+    assert_eq!(health.contract().minor, None, "a bundle keeps no minor");
+
+    let runs = std::env::temp_dir().join(format!("zk2-1126-run-{}", std::process::id()));
+    let _ = std::fs::remove_file(&runs);
+    let catalog = std::fs::read(util::zk2::examples().join("zenoh-modem/catalog.json")).unwrap();
+    let spec = GenSpec {
+        address: address.clone(),
+        revisions: vec![Arc::clone(&modem), Arc::clone(&config), Arc::clone(&health)],
+        members: Vec::new(),
+        bindings: BTreeMap::new(),
+        rate_hz: None,
+        pattern: GenPattern::Steady,
+        duration: Duration::from_secs(4),
+        seed: 42,
+        tool: "zenctl gen".into(),
+        elect: None,
+        run_store: Some(Arc::new(zenkey::run::FileRunStore::new(&runs))),
+        catalog: Some(zenkey_model::catalog::Catalog::parse_bytes(&catalog).unwrap()),
+    };
+    let plan = gen_plan(&spec).unwrap();
+    let (up, came_up) = tokio::sync::oneshot::channel();
+    let run = tokio::spawn({
+        let spec = spec.clone();
+        async move {
+            run_gen(&owners, &spec, &plan, |i| {
+                let _ = up.send(i.to_owned());
+            })
+            .await
+        }
+    });
+    let instance = came_up.await.expect("the mock came up");
+
+    // The bytes a near-side reader GETs.
+    let zenkey::presence::Found::Descriptor(_, bytes) =
+        zenkey::presence::descriptor(&tool, &address, &instance.parse().unwrap(), T)
+            .await
+            .unwrap()
+    else {
+        panic!("no descriptor")
+    };
+    let text = std::str::from_utf8(&bytes).unwrap();
+    let contracts = [modem.contract(), config.contract(), health.contract()];
+    let (d, report) = zenkey_model::descriptor::check(text, &contracts);
+    assert!(!report.has_errors(), "{report}");
+    let d = d.unwrap();
+
+    // The minors: the file's, or none.
+    let minors: BTreeMap<&str, Option<u64>> = d
+        .interfaces
+        .iter()
+        .map(|e| (e.iface.as_str(), e.minor))
+        .collect();
+    assert_eq!(
+        minors,
+        BTreeMap::from([
+            ("modem.v3", Some(4)),
+            ("config.v1", Some(1)),
+            ("health.v1", None),
+            // The runtime's own, from its embedded bundle.
+            ("freshness.v2", None),
+        ]),
+        "{text}"
+    );
+
+    // The size rule. 1,344 B before core 0.107, which wrote every empty
+    // member and a `minor` of 0 for each revision.
+    let size = d.size();
+    assert_eq!(size.bytes, bytes.len(), "the reference writes it compact");
+    assert_eq!(
+        d.capabilities.len(),
+        30,
+        "every capability modem.v3 gates on"
+    );
+    assert!(
+        size.bytes > SIZE_BYTES && size.bytes < 1_200,
+        "over 1 KB with four entries and 30 capabilities: {size:?}"
+    );
+    assert!(size.other <= OTHER_BYTES / 2, "{size:?}: {text}");
+    assert!(size.meets(), "{size:?}");
+    // No empty member, at any depth.
+    fn empties(at: &str, v: &serde_json::Value, found: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                if m.is_empty() {
+                    found.push(at.to_owned());
+                }
+                for (k, v) in m {
+                    empties(&format!("{at}/{k}"), v, found);
+                }
+            }
+            serde_json::Value::Array(a) => {
+                if a.is_empty() {
+                    found.push(at.to_owned());
+                }
+                for (i, v) in a.iter().enumerate() {
+                    empties(&format!("{at}/{i}"), v, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    empties("", &serde_json::from_str(text).unwrap(), &mut found);
+    assert!(found.is_empty(), "empty members written: {found:?}");
+
+    let report = run.await.unwrap().unwrap();
+    assert_eq!(report.failed, 0, "{report:?}");
+    let _ = std::fs::remove_file(&runs);
+}
+
 /// #744: a `--rate` above an event's declared rate (`tc.netem.v1`'s
 /// `events/applied`, `low`) runs, and holds the event to its rate: the plan
 /// says so on the entry, and the run ends with nothing failed and nothing
