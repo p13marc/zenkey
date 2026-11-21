@@ -33,6 +33,11 @@ ignore = [
     # archived on 2026-10-01; it is unmaintained, not vulnerable, and only
     # zengui pulls it in. Re-check on every iced bump (2026-11-07).
     "RUSTSEC-2026-0441", # pin-utils unmaintained
+    # zenoh 1.10.1 -> uhlc 0.8 -> humantime 2, and trycmd -> humantime-serde
+    # (dev, zenctl and zenwatch). It is unmaintained since chrono is, not
+    # vulnerable, and no release replaces it. Re-check on every zenoh bump
+    # (2026-11-21).
+    "RUSTSEC-2026-0542", # humantime unmaintained
 ]
 
 [licenses]
