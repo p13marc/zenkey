@@ -479,7 +479,9 @@ design, §1.4). Every policy runs `sequence = "16bit"`, and `wait_before_close` 
     142 s at SF12, and 48 paid messages on SBD.
   - SF7's interval is half its cadence: one to two a gap, 1,440 to 2,880 a day, 74 s to 148 s.
   - Measured (#989's zk2c runs): 2,160 a day and 111 s at SF7; on RF none bare, and 336 a day
-    under the lean stack. SF9, SF12 and SBD have not run.
+    under the lean stack; 624 a day and 103 s at SF9, 72 and 107 s at SF12
+    (`docs/zk2/measurements/wire-baseline/README.md`, "W1-73 at LoRa SF9 and SF12"). SBD has
+    not run.
   - At the most, SF12's frames and keep-alives take 927 s of its 864 s, and SBD 144 messages of
     its 96. A face that is to spare every keep-alive runs an interval above its cadence by
     more than its frames' lateness. These leases are zenoh-modem's to move.
@@ -620,4 +622,4 @@ A migration started today would hit each of these.
 | **No text in packed records,** so four backends cannot move to `config.v2` | Text stays in the JSON states, and those backends on `config.v1`. Across RF, a GET of the status by grant; the view is never pushed | #979 (B3) |
 | **The link that never comes back** (W2, finding 5). After a reopen over RF, router A sent nothing A→B for a whole lease, at 0 % loss too, so both of W2's `config set` calls drew silence, `no_token_visible` | zenoh-modem's tracker holds the cause, in its driver or its fork: zenkey's reference crosses a reopen (#1114). Keep nothing `block` larger than a batch on a crossing key | zenoh-modem#210; #1109 |
 | **`freshness.v2`'s heartbeat is one put per interface:** on W2 it cost 238 KB a day, where the model folded it into 52 KB | Count a heartbeat for each crossing interface that uses `freshness.v2`, at its own horizon, until the maintainer picks one per owner, one riding a frame, or longer horizons per face | #1110 |
-| **The bytes off RF and LoRa SF7 are modelled.** W1-73 at SF9 and SF12, W2 on LoRa and SBD have not run on zk2c | Read every unmarked figure for those media as a model | #989 |
+| **Off RF and LoRa, most bytes are modelled.** W1-73 ran at SF7, SF9 and SF12 with `zenctl gen`'s frames, never zenoh-modem's own owner (`docs/zk2/measurements/wire-baseline/README.md`, "W1-73 at LoRa SF9 and SF12"). W2 on LoRa and SBD have not run on zk2c | Read every unmarked figure for those media as a model. At its stated cadence and lease, SF12's uplink took the whole duty with all 73 readings | #989 |
