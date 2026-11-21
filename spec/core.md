@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.108** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.109** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -732,8 +732,13 @@ gate does not name.
   (D006). `[F: descriptors/d005-*, d006-implied]`
 - **`minor`** is the minor of the contract revision the entry names, as
   its authoring file states it (§9.1).
+  - An owner that holds the revision's authoring file SHOULD state the
+    file's minor, where it states one. `[Sc: presence.md §2]` A tool
+    orders two revisions only by the minors both descriptors state
+    (§9.8).
   - A bundle keeps no minor (§9.5), so an owner that holds only the
-    revision's bundle leaves the member out. An owner MUST NOT state a
+    revision's bundle leaves the member out. So does the owner of a
+    revision whose file states none (W104). An owner MUST NOT state a
     minor its revision does not have.
     `[F: descriptors/ok-no-minor]` `[Sc: presence.md §2]`
   - A checker reads `minor` as optional, so a descriptor that states
@@ -832,19 +837,39 @@ gate does not name.
 - **Size.** An owner's descriptor SHOULD stay within 1 KB. At the
   constrained level (§12), it MUST fit one fragment.
   `[Sc: constrained.md §5]`
+  - **What is counted.** A descriptor's size is the count of bytes of
+    the document its owner puts and answers, as the owner wrote it. 1 KB
+    is 1,024 B. So the rule is about an owner's own bytes: the same
+    members written with other spacing are another size.
   - **Empty members.** A member whose schema default is an empty list or
     object reads as that default when absent. So an owner MAY leave it out
     when it holds nothing, as the reference does.
     `[F: descriptors/ok-minimal, ok-no-minor]` `[Sc: presence.md §2]`
+    - They are seven: `capabilities`, `requires`, `profiles` and `meta`,
+      an entry's `unavailable` and `cardinality`, and a requirement's
+      `params`.
+    - `interfaces` and a requirement's `bindings` have no default. The
+      schema requires both, so each is written when it is empty too.
   - **What an owner cannot shorten.** Four members state what the
-    instance implements, holds, requires and follows. An entry is at
-    least 100 B, 71 of them its fingerprint, and each capability held is
-    named. So an owner MAY exceed 1 KB with `interfaces`, `capabilities`,
-    `requires` and `profiles`.
+    instance implements, holds, requires and follows: `interfaces`,
+    `capabilities`, `requires` and `profiles`. An entry is at least
+    100 B, 71 of them its fingerprint, and each capability held is named.
+    So an owner MAY exceed 1 KB while the rest of its descriptor is
+    within 512 B. `[F: descriptors/ok-over-1kb]`
+  - **The rest** is the descriptor's size less each of those four members
+    it states.
+    - A member is counted from the opening quote of its name to the last
+      byte of its value, and one comma with it.
+    - So the rest is the size of the same document with the four taken
+      out: its two braces, every other member, the commas between those,
+      and any spacing the owner wrote.
+    - `descriptors/ok-over-1kb` is one owner's descriptor of 1,184 B, on
+      one line of its file. It states three of the four, in 526 B, 366 B
+      and 52 B, with a comma each: 947 B. Its rest is 237 B.
   - **Over 1 KB.** An owner whose descriptor exceeds 1 KB SHOULD leave out
-    every empty member. That owner SHOULD also keep every member but
-    `interfaces`, `capabilities`, `requires` and `profiles` within 512 B
-    together, each counted with its name.
+    every member that holds nothing and whose schema default is empty.
+    `[F: descriptors/ok-over-1kb]` Those are the seven above, so
+    `interfaces` and `bindings` stay.
 - **Updates.** The owner MUST put the descriptor on its instance key whenever
   it changes, and MUST answer a GET there with the current one.
   `[Sc: presence.md §2]`
@@ -940,7 +965,9 @@ and reports these codes. `[F: descriptors/]`
      that states none is checked as any other is
      `[F: descriptors/ok-minimal]`;
    - that `catalog` names a catalog the checker holds: it reads the id's
-     form, and a reader resolves it (§8.6) `[F: descriptors/ok-catalog]`.
+     form, and a reader resolves it (§8.6) `[F: descriptors/ok-catalog]`;
+   - the descriptor's size: the rule is its owner's (above), and a
+     descriptor over 1 KB draws no code `[F: descriptors/ok-over-1kb]`.
 
 ---
 
@@ -2482,6 +2509,11 @@ pad        zero bits up to the next whole byte, fewer than 8
   LEB128, in its shortest form, at most 5 bytes and at most 2^32 − 1.
   Each of its bytes is the next 8 bits of the body, wherever they fall.
   A size is 8 bits while the sections are under 128 bits.
+- **The body bounds the sections, never the size.** A size can claim up
+  to 2^32 − 1 bits, and a body holds what its put carried. An
+  implementation MUST NOT allocate from a size: it takes a group's bits
+  only as the body holds them, and a size above the bits left is `short`
+  (below). `[F: heartbeat/owner.json]`
 - **The sections** are a heartbeat's body between its time and its pad:
   the map, then a section for each map bit set. They are read with the
   covered revision's collections (above). A group has no pad of its own.

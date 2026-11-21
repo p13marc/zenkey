@@ -539,6 +539,22 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `mixed.v1`: computed twice, by two readings of the text that shared no
   code, never blessed, and the reference reads all 90 unchanged
   (`heartbeat_owner_vectors`). 283 rules (implementation 73).
+  Core 0.109 answers zk2py round 111's F-535 to F-538 (`desired.v1` 0.14
+  F-539, its scenarios' §8). §3.3's size is the bytes of the document as
+  its owner wrote it, and 1 KB is 1,024 B. An owner MAY exceed 1 KB while
+  the rest is within 512 B: the rest is the size less each of the four
+  members stated, a member counted from its name's opening quote to its
+  value's last byte with one comma (`Descriptor::size` counts so). The
+  512 B SHOULD went into that MAY (`EXCEPTED_BY`'s phrase moved with it).
+  Over 1 KB an owner SHOULD leave out every member that holds nothing and
+  whose schema default is empty, the seven "Empty members" lists, never
+  `interfaces` or `bindings`. An owner that holds the authoring file
+  SHOULD state its `minor` where the file states one. `descriptors/
+  ok-over-1kb` is zenoh-modem's node as `zenctl gen` served it under the
+  catalog, one line, never re-serialized: 1,184 B, the three of the four
+  it states 947 B, a rest of 237 B (1,167 B with no catalog and a 32-bit
+  run). §7.5: an implementation MUST NOT allocate from a group's size
+  (`heartbeat/owner.json`'s read 17). 284 rules (owner 88, static 74).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
