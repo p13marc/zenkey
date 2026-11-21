@@ -64,9 +64,12 @@ evidence for each interface it holds a group of.
   fingerprint is
   `sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1`,
   as the reference's `zk2 contract fingerprint` computes it.
-- **Not yet published.** `../.history/freshness.v2/` holds revision 1.0
-  alone until the reference publishes 1.1, and the adopters' catalogs
-  append it then.
+- **Published.** `../.history/freshness.v2/` holds revisions 1.0 and
+  1.1. The reference's `zk2 contract fingerprint` gives the same
+  fingerprint, and its `compat --history` reads 1.1 compatible.
+- **zenoh-modem's catalog appends it** at index 11, beside 1.0 at index
+  9: `8982cc41`, which succeeds `29bf7d47`. Its five faces name it. It is
+  the one adopter's catalog.
 
 **What it costs.** W2's three interfaces take one payload of 35 bytes on
 a 16-bit run, where their heartbeats took 16, 16 and 17. One SDU every

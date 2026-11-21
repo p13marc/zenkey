@@ -43,7 +43,7 @@ says what it will be.
 | Event keys by run and seq | Landed in 0.22, PRs #1093 and #1095 | Core 0.103 (#980's C2): an occurrence's key ends in its owner's run and seq, 8 or 12 characters where a ULID took 26, and form 4 carries its time. 0.22 refuses a key that ends in a ULID, which 0.21.0 still writes. Since core 0.105 (PRs #1104 and #1117) a put or a delete on an events key that carries no event is never delivered, and is counted undecodable |
 | The compact descriptor; the archive attachment | Missing | #980's C5 and C3 |
 | **Telemetry,** `telemetry.v2` | Landed | A frame's fields as metric series. The frame writer meters each counter; `zenctl telemetry` and zengui's Series read frames (#983) |
-| **Freshness,** `freshness.v2` | Landed | One heartbeat per interface in place of re-puts. `modem.v3`, `config.v1` and `health.v1` use it (#978). Its standard contract, which every such owner serves, is at index 9 of [`catalog.json`](catalog.json) `29bf7d47`, and a heartbeat's time counts from the catalog's epoch, as a frame's does (`freshness.v2` 0.6). Before #1080 (PR #1082), the doctor's `catalog-missing` warned of that contract on every modem owner, and a heartbeat counted Unix seconds |
+| **Freshness,** `freshness.v2` | Landed | One heartbeat per interface in place of re-puts. `modem.v3`, `config.v1` and `health.v1` use it (#978). Its standard contract, which every such owner serves, is at index 9 of [`catalog.json`](catalog.json) `8982cc41`, and its revision 1.1, which adds the owner heartbeat's key (`freshness.v2` 0.9, #1110), at index 11. A heartbeat's time counts from the catalog's epoch, as a frame's does (`freshness.v2` 0.6). Before #1080 (PR #1082), the doctor's `catalog-missing` warned of that contract on every modem owner, and a heartbeat counted Unix seconds |
 | **The catalog,** and keys on a hop | Landed | Core §8.6 and §8.5: `ServiceBuilder::catalog`, `--catalog` on zenctl and zengui, `zk2 catalog`, `zenctl catalog`, zenctl's `--across-face` scope (#980's C1) |
 | **Configuration,** `config.v1` | Landed | `ServiceBuilder::config_v1`, `zenkey::config_v1::{Startup, Device}`, the compact status, `zenctl config`, zengui's Config tool |
 | A configuration owner's re-mint | Landed | `Service::new_epoch` on a `config.v1` or `config.v2` service restarts its configuration in the new instance (`config.v1` §2.12): a pending change cancelled, the device returned to its startup values through `Device::restore_startup`, revision 0. Refused while an act is in flight, for a runtime value that starts unknown, and when fed through `desired.v1` (#1055, PR #1063; #1064 for `config.v2`) |
@@ -545,10 +545,10 @@ such as `modem-contract`'s. With no descriptor across the face, a key's revision
 `--catalog` lists that gives the key a resource, then the one whose tag is CH's, then the
 catalog's latest of those that read the sample alike, and `echo` names one chosen by tag
 (observer §7.5). A revision no catalog given lists reads no key (`none_left`, `not_listed`), so
-give the catalog that lists the revisions in hand: `29bf7d47` lists all five of modem.v3's.
+give the catalog that lists the revisions in hand: `8982cc41` lists all five of modem.v3's.
 
 **Reading values.** A frame's `t=`, a heartbeat's time and a packed `time` field are dated in
-UTC beside the wire's seconds, the epoch named (`dated`: the catalog's, `29bf7d47`'s
+UTC beside the wire's seconds, the epoch named (`dated`: the catalog's, `8982cc41`'s
 2026-01-01T00:00:00Z, given `--catalog`), and each field shows its bound: `±0.125` for a `fixed`
 field, `(mod 2^24)` for a counter (#990's V3). An assumed epoch is never dated. `field` reads each
 frame record's fields, through one reader per key for the window: a field a record carries

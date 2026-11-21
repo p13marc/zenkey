@@ -2,8 +2,8 @@
 //! confirmations under the epoch of the catalog an owner's descriptor
 //! names, read through the catalogs given (`--catalog`, core §8.6;
 //! `freshness.v2` §2.6; `bus::query::EntryEpochs`). Each test runs an
-//! owner under zenoh-modem's catalog (`catalog.json`'s head, `29bf7d47`
-//! since modem.v3 3.4), whose epoch is
+//! owner under zenoh-modem's catalog (`catalog.json`'s head, `8982cc41`
+//! since `freshness.v2`'s revision 1.1, #1110), whose epoch is
 //! 2026-01-01T00:00:00Z, confirmed: given that catalog, the reader dates the
 //! confirmation at about now; given none, it leaves it undated, never
 //! dated under 0.
