@@ -60,6 +60,18 @@ are of two exposures. Both files' cases were computed twice, by two
 readings of this text that shared no code, and the two agreed on every
 case.
 
+**Adopted, with `freshness.v2` 0.9: three places that name a heartbeat.**
+None is a keyword rule.
+- **§11.1's Consume.** Where a binding consumes a collection of a
+  `freshness.v2` contract, the grant holds the provider's owner heartbeat
+  key too, `…/freshness.v2/stream/heartbeats/<class>`, for each class
+  those collections have. A consumer granted the per-interface key alone
+  would hear no owner heartbeat.
+- **§8.5's liveness.** An owner heartbeat that crosses is evidence for
+  each interface it holds a group of.
+- **§8.5's horizon of a subscription.** An owner heartbeat's is the
+  shortest of the collections its groups cover.
+
 **Deliberately not changed.**
 - **The heartbeat.** Its layout, its refusals and its fixtures are as
   they were. An owner given no catalog writes no other.
