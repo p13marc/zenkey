@@ -3,6 +3,88 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.111 — 2026-11-21: editorial: `conformance/heartbeat/` indexed, a put with no envelope on a heartbeat's key pinned, and what "written against" says, no rule changed (#609, #1110)
+
+zk2py's round 114 read 0.109 cold, and filed F-560, F-561, F-563 and
+F-564 against the core's files. Rounds 113 to 115 filed sixteen more
+against the texts that adopt the owner heartbeat. `freshness.v2` 0.11,
+`link.v2` 0.22 and observer 0.35 answer those
+([`profiles/freshness/CHANGELOG.md`](profiles/freshness/CHANGELOG.md),
+[`profiles/link/CHANGELOG.md`](profiles/link/CHANGELOG.md),
+[`observer-CHANGELOG.md`](observer-CHANGELOG.md)). 0.110 is #986's, and
+this entry sits on it.
+
+**Answered: F-564, minor. Appendix C and Appendix E.**
+- **Appendix C** gains a row for `conformance/heartbeat/`, whose
+  `owner.json` nine rules of §7.5 cite, and one for
+  `conformance/packed/`, §7.6's.
+- **Appendix E** gains a `heartbeat/` entry: each of its five files'
+  format in brief, `owner.json`'s six lists among them.
+- **Why now.** The directory dates from 0.81, and the two lists of 0.109
+  were added to a file no appendix named.
+
+**Answered: F-563, minor. Two sentences of §7.5 with no case.**
+- **A put with no envelope.** §7.5 now says what one is: a put under
+  another `Encoding` than `zenoh/bytes`, whose bytes are not parsed.
+  - `envelope/carries.json` gains three cases, written by hand: each
+    heartbeat key under `application/octet-stream` carries no envelope,
+    and an owner heartbeat's key under `zenoh/bytes` carries one. The
+    reference's `wire::carries` reads the three so, by its source.
+  - The refusal itself, `form`, has no case yet. `owner.json`'s `forms`
+    states no `Encoding`, and the reference's runner reads none. A case
+    of an owner heartbeat's own bytes under another `Encoding` is the
+    code half's to add, with the runner.
+  - Both implementations refuse such a put on a bus (round 114's
+    `owner_heartbeat_live --reference`).
+- **A reader that holds one revision.** §7.5 names where it is pinned:
+  `freshness.v2`'s `apply.json`, whose reader of `vital.v1` alone skips
+  three groups by their sizes, their bits no revision's.
+  - `owner.json`'s description says that a `beside` reader holds every
+    layout's revision, so it skips none.
+  - Its case of a reader with no catalog had a note about "the one
+    whose revision it holds". The case states no revision. The note
+    says "whatever revisions it holds". No vector moved.
+
+**Answered: F-561, minor. `profiles/README.md`, "written against".**
+- **The finding.** `desired.v1` 0.14 and `redundancy.v1` 0.11 each
+  restate one sentence over S4's consolidation `None`, a rule of 0.100.
+  Their headers say core 0.73.
+- **What the header says** is now written down: the core version a
+  text's rules were last read whole against. An entry may restate one
+  sentence over a later core's rule. It then names that core, and the
+  header stays.
+- **Both entries do name it.** `desired.v1` 0.14 says "Since core
+  0.100", and `redundancy.v1` 0.11 "Core 0.100 moved S4's GET".
+  `freshness.v2` 0.8 kept its header the same way.
+- **Not taken: "written against core 0.100" in the two headers.**
+  Neither text was read whole against it. Their entries say which other
+  sentences are older still.
+
+**Answered: F-560, minor. 0.109's entry, below.**
+- **It says** "`RULES.md` lists 285 rules, 283 in 0.108", and that
+  `observer.md` stays 0.33, with no text saying yet what a tool shows of
+  an owner heartbeat.
+- **It was written on its branch** before `freshness.v2` 0.9 and
+  observer 0.34 merged. The tree it merged onto held 286 rules, 284
+  before it, and observer 0.34, whose §7.3 and §7.5 say what a tool
+  shows.
+- **The entry stands as a record.** This one corrects it. The owner's
+  88 rules and the 75 static ones were right.
+
+**Added: §7.5, "A reader needs the catalog too", one item.** Which
+catalog its owner names is in the owner's descriptor, or the
+deployment's word (§8.6). Where a reader learns it, and what it does
+with a put heard before, is `freshness.v2` §2.5's to say (its 0.11,
+F-557).
+
+**Deliberately not changed.**
+- **No rule and no keyword.** `RULES.md` lists 295 rules, as before.
+- **§8.6.** It already says where an owner states its catalog, and that
+  across a face it is the deployment's word.
+- **`owner.json`'s vectors.** Its 104 cases stand. Two sentences of its
+  description and one note moved.
+- **Every profile's header.**
+
 ## 0.110 — 2026-11-21: a conditional read: §7.5's held stamp, and §4.2's owner and reader (#986)
 
 A reader that holds a member's value and reads it again is answered the

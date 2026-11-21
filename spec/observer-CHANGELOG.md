@@ -62,7 +62,7 @@ one that confirms nothing. Members that go stale to it so are no
 finding about their owner (§2).
 
 **Deliberately not changed.**
-- **No MUST and no SHOULD.** `RULES.md` lists 286 rules, as before.
+- **No MUST and no SHOULD.** `RULES.md` lists 295 rules, as before.
   The one keyword added is the MAY above.
 - **The first 29 cases** of `scope/faces.json`.
 - **What a tool says of a catalog it lacks.** `freshness.v2` §5 says a
