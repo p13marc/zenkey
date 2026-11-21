@@ -193,12 +193,36 @@ class Child:
 def _sections(payload: bytes, held: cat.Catalog, layouts: dict[tuple[str, str], heartbeat.Layout]) -> dict[str, Any]:
     """An owner heartbeat's groups, each read whole with its revision: the
     sections its bytes hold, by interface."""
-    put = owner_heartbeat.read(payload)
+    try:
+        put = owner_heartbeat.read(payload)
+    except owner_heartbeat.Refused:
+        return {}  # a put §7.5 refuses holds no section: the checks then fail, and the run goes on
     out = {}
     for g in owner_heartbeat.read_groups(put.body, held.id, [held], layouts):
-        assert g.entry is not None
-        out[g.entry[0]] = g.sections
+        if g.entry is not None:
+            out[g.entry[0]] = g.sections or {}
     return out
+
+
+def _groups(h: Any) -> list[dict[str, Any]]:
+    """A heard owner heartbeat's groups as the reader answered them; none
+    where it was refused or older."""
+    return h.answer.get("read", {}).get("groups", [])
+
+
+def _gap(h: Any) -> Any:
+    """Whether a heard owner heartbeat was read after a gap; None where it
+    was not read."""
+    return h.answer.get("read", {}).get("gap")
+
+
+def _sec(h: Any, n: int, resource: str) -> Any:
+    """The reader's answer for one collection of group ``n``; None where the
+    put was not read, holds no such group, or the group's sections were not
+    read. A broken bus then gives FAIL rows, never a traceback (review-bot
+    on #1141)."""
+    groups = _groups(h)
+    return (groups[n].get("sections") or {}).get(resource) if n < len(groups) else None
 
 
 def _entry(session: Any, address: str) -> dict[str, Any] | None:
@@ -339,7 +363,7 @@ def run() -> int:
             read_link = [h for h in link if "read" in h.answer]
             check("step 2: three interfaces in one owner heartbeat: every link put read, a group for a, b and c in "
                   "ascending index (§2.4 \"The groups\")",
-                  len(read_link) >= 4 and all([g.get("iface") for g in h.answer["read"]["groups"]] == [A, B, C]
+                  len(read_link) >= 4 and all([g.get("iface") for g in _groups(h)] == [A, B, C]
                                               for h in read_link),
                   f"{len(link)} heard, {len(read_link)} read")
             check("step 2: one host owner heartbeat holds a's group alone, b and c having no host collection",
@@ -350,15 +374,15 @@ def run() -> int:
             on_host = [_sections(h.payload, held, layouts) for h in host]
             check("step 2: a host collection never on the link key: no link put's bytes hold a section of "
                   "a's peer/{peer}, and S reads it other_class there (§2.4 \"Only its class\", §2.5)",
-                  bool(on_link) and all("state/peer/{peer}" not in x[A] and "state/status" in x[A] for x in on_link)
-                  and all(h.answer["read"]["groups"][0]["sections"]["state/peer/{peer}"] == "other_class"
-                          for h in read_link),
-                  json.dumps(sorted({r for x in on_link for r in x[A]})))
+                  bool(on_link) and all("state/peer/{peer}" not in x.get(A, {}) and "state/status" in x.get(A, {})
+                                        for x in on_link)
+                  and all(_sec(h, 0, "state/peer/{peer}") == "other_class" for h in read_link),
+                  json.dumps(sorted({r for x in on_link for r in x.get(A, {})})))
             check("step 2: no link collection on the host key: its bytes hold peer/{peer}'s section alone, and S "
                   "reads status other_class there",
-                  bool(on_host) and all(sorted(x[A]) == ["state/peer/{peer}"] for x in on_host)
-                  and all(h.answer["read"]["groups"][0]["sections"]["state/status"] == "other_class" for h in host),
-                  json.dumps(sorted({r for x in on_host for r in x[A]})))
+                  bool(on_host) and all(sorted(x.get(A, {})) == ["state/peer/{peer}"] for x in on_host)
+                  and all(_sec(h, 0, "state/status") == "other_class" for h in host),
+                  json.dumps(sorted({r for x in on_host for r in x.get(A, {})})))
             # "One form per interface": no heartbeat on any covered interface's own key.
             beats = {i: len(sub.answers()) for i, sub in s.subs.items()}
             check("step 2: no heartbeat covers an interface its owner heartbeats cover (§2.4 \"One form per "
@@ -374,9 +398,8 @@ def run() -> int:
                   0 < apart(link) <= 1_000_000_000 + JITTER_NS and 0 < apart(host) <= 2_000_000_000 + JITTER_NS,
                   f"{apart(link) / 1e9:.3f} s and {apart(host) / 1e9:.3f} s")
             # A divergence in one group: b was never seeded.
-            b_answers = [h.answer["read"]["groups"][1]["sections"]["state/config"] for h in read_link]
-            others = [(h.answer["read"]["groups"][0]["sections"]["state/status"],
-                       h.answer["read"]["groups"][2]["sections"]["state/alarms/{alarm}"]) for h in read_link]
+            b_answers = [_sec(h, 1, "state/config") for h in read_link]
+            others = [(_sec(h, 0, "state/status"), _sec(h, 2, "state/alarms/{alarm}")) for h in read_link]
             first_ok = next((i for i, x in enumerate(b_answers) if isinstance(x, dict)), len(b_answers))
             check("step 2: a divergence in one group: b's group diverges twice, S holding no member of it, while "
                   "a's and c's groups of the same puts confirm their members; a group that confirms nothing takes "
@@ -395,16 +418,16 @@ def run() -> int:
                   all(v.get("verdict") == "fresh" for v in verdicts.values()), json.dumps(verdicts))
             seqs = [h.stamp.seq for h in link if h.stamp is not None]
             check("step 2: the link key's seqs are its own, in sequence, and no put read after a gap",
-                  seqs == list(range(seqs[0], seqs[0] + len(seqs))) and not any(h.answer["read"]["gap"]
+                  bool(seqs) and seqs == list(range(seqs[0], seqs[0] + len(seqs))) and not any(_gap(h)
                                                                                   for h in read_link),
-                  f"{seqs[0]} to {seqs[-1]}")
+                  f"{seqs[0]} to {seqs[-1]}" if seqs else "no link put heard")
             # N holds no catalog.
             n_link = n.answers("link")
             check("step 4: N holds no catalog, and reads the id its owner names in its descriptor: every group's "
                   "index is refused unknown_catalog, the owner heartbeat still a read one, and nothing is "
                   "confirmed (§2.5 \"No index\")",
                   bool(n_link) and all("read" in h.answer and all(g.get("refused") == "unknown_catalog"
-                                                                    for g in h.answer["read"]["groups"])
+                                                                    for g in _groups(h))
                                        for h in n_link) and not any(sub.last_conf for sub in n.subs.values()),
                   f"{len(n_link)} heard, named {n.reader.named}")
             # Step 3: one lost.
@@ -427,17 +450,17 @@ def run() -> int:
                   and obs == {STATUS: False, CONFIG: False, PEERS[0]: True, PEERS[1]: True, ALARMS[0]: False,
                               ALARMS[1]: False}, json.dumps(obs))
             check("step 3: the owner heartbeat that follows the gap still confirms its groups' members",
-                  len(after_gap) == 1 and [sorted(g["sections"]) for g in after_gap[0].answer["read"]["groups"]]
-                  and all(any(isinstance(x, dict) and x["confirmed"] for x in g["sections"].values())
-                          for g in after_gap[0].answer["read"]["groups"]))
+                  len(after_gap) == 1 and bool(_groups(after_gap[0]))
+                  and all(any(isinstance(x, dict) and x["confirmed"] for x in (g.get("sections") or {}).values())
+                          for g in _groups(after_gap[0])))
             while time.monotonic() < end and len(s.answers("link")) < before + 2:
                 time.sleep(0.02)
             nxt = s.answers("link")[before + 1:before + 2]
             obs2 = {k: s.subs[k.split("/")[3]].observation(k).complete for k in [STATUS, CONFIG, *ALARMS]}
             check("step 3: until an owner heartbeat arrives in sequence on that key: the next one does, and "
-                  "nothing reads lost", len(nxt) == 1 and nxt[0].answer["read"]["gap"] is False
+                  "nothing reads lost", len(nxt) == 1 and _gap(nxt[0]) is False
                   and s.reader.lost("link") == [] and all(obs2.values()), json.dumps(obs2))
-            check("step 3: the host key heard no gap", not any(h.answer["read"]["gap"] for h in s.answers("host"))
+            check("step 3: the host key heard no gap", not any(_gap(h) for h in s.answers("host"))
                   and len(s.answers("host")) >= host_before)
             got = child.command("report", "report ")
             rep = json.loads(got.split(" ", 1)[1]) if got else {}
@@ -454,10 +477,17 @@ def run() -> int:
             alone(sessions[1], endpoint, held, check)
             reference(sessions[1], endpoint)
             sizes = sorted({len(h.payload) for h in s.answers("link")})
+
+            def sized(h: Any) -> bool:
+                try:
+                    groups = owner_heartbeat.read(h.payload).body.groups
+                except owner_heartbeat.Refused:
+                    return False
+                return h.stamp is not None and len(h.payload) == owner_heartbeat.size_of(
+                    h.stamp.width, [len(g.bits) for g in groups])
+
             check("the link put's size is core §7.5's: 6 bytes over its body under a 16-bit run, or 8",
-                  all(len(h.payload) == owner_heartbeat.size_of(
-                      h.stamp.width, [len(g.bits) for g in owner_heartbeat.read(h.payload).body.groups])
-                      for h in s.answers("link") if h.stamp is not None), f"{sizes} bytes")
+                  bool(sizes) and all(sized(h) for h in s.answers("link")), f"{sizes} bytes")
     finally:
         for p in providers:
             p.close()

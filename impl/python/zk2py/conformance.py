@@ -6587,6 +6587,16 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + missing(l2, "The body is 46 bits, then a group for each listed interface of the service that has a "
                               "`link` collection.", "A templated one of cardinality c is 33 + ⌈log₂(c + 1)⌉ + c bits"),
                 [1211, 160, [1109, None, 56], 159, [LINK_AT], 160, [], [8, 8, 16, 16, 24]]))
+    # review-bot on #1141: a resource read over no declaring row. Neither
+    # caller passes none; the reading holds the empty case all the same.
+    bare = link._contract_side(link.Resource("a.v1", "state", "peer/{peer}", {}), [])
+    one = link._contract_side(link.Resource("a.v1", "state", "peer/{peer}", {}), [{"cardinality": 8}, {"cardinality": 3}])
+    part = link._contract_side(link.Resource("a.v1", "state", "peer/{peer}", {}), [{"cardinality": 8}, {}])
+    out.append(("link's reading of a resource over its declaring rows, for an owner heartbeat's longest put: the "
+                "largest cardinality stated where every row states one, none where a row states none, and none, "
+                "with no longest put, over no row at all, which no caller passes and which raises nothing",
+                [bare.cardinality, bare.longest_put, bare.packed, bare.block, bare.timed, one.cardinality,
+                 part.cardinality], [None, None, True, False, False, 8, None]))
     # link.v1 0.20's evidence, and the carve where the standard contract is
     # given at its revision 1.0 alone.
     with_class = [i for i, c in enumerate(plan1) for f in faces(c)

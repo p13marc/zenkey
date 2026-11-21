@@ -7770,9 +7770,10 @@ the fixture was read.**
   horizon and the longest put: the text does not decide it (F-550).
 - **`plan.json` 18 of 18 and `v2/plan.json` 48 of 48.**
 
-**`just py-conformance`: 6921 of 6921** on c4e1065a. Of them,
+**`just py-conformance`: 6922 of 6922** on c4e1065a. Of them,
 `freshness` 277, 148 of them `apply.json`'s, `link` 350 and `readings`
-1064: round 113's seventeen.
+1065: round 113's eighteen, the last review-bot's on #1141, a resource
+read over no declaring row.
 
 ### Live
 

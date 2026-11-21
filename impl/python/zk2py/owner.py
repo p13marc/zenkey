@@ -119,10 +119,10 @@ from . import bundle, freshness, freshness_v2, snapshot, templates, zk2c
 from . import heartbeat as hbeat
 from .contract import Contract
 from .lexical import parse_interface_id
+from .slug import slug
 
 #: freshness.v2 0.9 §3: the standard contract's revision 1.1's resource.
 OWNER_HEARTBEAT_RESOURCE = "heartbeats/{class}"
-from .slug import slug
 
 #: Core R1 (0.20): "a provider whose system position is self.system".
 SELF_SYSTEM = "self.system"
