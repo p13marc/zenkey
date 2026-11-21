@@ -43,8 +43,9 @@
 //!   alone. A covered interface runs no task of its own (never both
 //!   forms), and an interface the catalog does not list, or a sixteenth
 //!   on a key, keeps its heartbeat. A governed interface's group is left
-//!   out while its instance stands by, and a put that would hold no group
-//!   is not sent. Every [`REFRESH_LEAD`] × half the shortest horizon among
+//!   out while its instance stands by, asked at once and never waited for,
+//!   so the class key keeps its period with the groups beside it; a put
+//!   that would hold no group is not sent. Every [`REFRESH_LEAD`] × half the shortest horizon among
 //!   the collections of the key's class, on the key's own stream seq, in
 //!   the run the descriptor states: a reader finds the owner's catalog by
 //!   it.
@@ -149,7 +150,11 @@ pub fn owner_period<'a>(
 /// interfaces"), from `candidates`: each interface it implements that has
 /// a collection, with the index its catalog lists its revision at and the
 /// classes its collections have. In ascending order of the indices, as a
-/// put's groups go. An owner heartbeat holds at most 15 groups (core
+/// put's groups go. The classes are the revision's, whatever this
+/// instance exposes: v2 §2.4 has "one group for each covered interface
+/// whose revision has a collection of that class", and the exposure is
+/// the group's map bits ("a bit for each one the owner exposes"). So a
+/// group may hold a map of zeros, as a heartbeat does. An owner heartbeat holds at most 15 groups (core
 /// §7.5), so an interface that would be a sixteenth on either of its
 /// classes' keys is left out, whole: it keeps its heartbeat, and each of
 /// its collections one key and one sequence.
@@ -310,18 +315,24 @@ impl OwnerBeat {
     /// Sends one owner heartbeat now: a group for each covered interface
     /// the instance serves, and nothing when it serves none of them.
     pub(crate) async fn once(&self) {
+        // The class key's writer is ungated (freshness.v2 is no governed
+        // interface), so this waits for nothing.
         let Ok(admitted) = self.writer.serving().await else {
             return;
         };
         // redundancy.v1 §2.4: a standby writes nothing of the interface, so
-        // its group is left out. Each serving interface's write guard is
-        // held until the put is made, so a step-down waits for it.
+        // its group is left out. Each governed interface is asked at once,
+        // never waited for (`Gate::try_write`): one standing by, or one
+        // whose step-down is closing its writes, is left out of this put,
+        // and takes nothing from the groups beside it. A serving one's
+        // write guard is held from here to the put, which is the only
+        // await under it, so its step-down waits for this put alone.
         let mut serving = Vec::with_capacity(self.groups.len());
         for g in &self.groups {
             match &g.gate {
                 None => serving.push((g, None)),
                 Some(gate) => {
-                    if let Ok(guard) = gate.write().await {
+                    if let Some(guard) = gate.try_write() {
                         serving.push((g, Some(guard)));
                     }
                 }

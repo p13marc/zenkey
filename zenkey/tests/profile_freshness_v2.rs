@@ -2415,3 +2415,146 @@ async fn a_standbys_group_is_left_out() {
     );
     b_svc.close().await.unwrap();
 }
+
+/// A standby interface never stalls its class key (review of #1144). B
+/// implements the governed `beacon.v2` and the ungoverned `pulse.v1`, and
+/// stands by on the first behind A. Its `host` owner heartbeat keeps
+/// coming at its period, in its own run, with `pulse.v1`'s group alone:
+/// the governed interface's gate is asked at once and never waited for.
+/// Once A closes, B takes over, and the governed interface's group
+/// returns beside it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_standby_interface_never_stalls_the_groups_beside_it() {
+    const PAIR: &str = "lab/pair";
+    const HOST: &str = "zk2/lab/pair/freshness.v2/stream/heartbeats/host";
+    let (_r1, ep) = router(None).await;
+    let hs = client(&ep).await;
+    let governed = contract("beacon-governed.v2");
+    let pulse = contract("pulse.v1");
+    let mut cat = Catalog::new(0).unwrap();
+    cat.push(governed.iface.clone(), Fingerprint::of(&governed))
+        .unwrap();
+    cat.push(pulse.iface.clone(), Fingerprint::of(&pulse))
+        .unwrap();
+    let (_hh, host) = owner_heartbeats(&hs, HOST).await;
+    let (_hi, per_iface) = puts_on(&hs, "zk2/lab/pair/freshness.v2/stream/heartbeat/*").await;
+    let none = Bindings::new();
+
+    // A: the governed interface alone, serving.
+    let (a_claim, a_watch, a_read) = (
+        stamping(&ep).await,
+        stamping(&ep).await,
+        stamping(&ep).await,
+    );
+    let mut a = ServiceBuilder::new(&a_claim, config(PAIR).owner_heartbeat());
+    a.catalog(cat.clone()).unwrap();
+    a.implement(zenkey::Implementation::new(governed.clone()))
+        .unwrap();
+    let _a_status = a
+        .declare_state_writer(&beacon(), STATUS, &none)
+        .await
+        .unwrap();
+    let a_red = a
+        .redundancy(RedundancyStartup::new(a_read).with_watch(a_watch))
+        .unwrap();
+    let a_svc = a.start().await.unwrap();
+    tokio::time::timeout(SETTLE, a_red.until(&beacon(), Role::Serving))
+        .await
+        .expect("A serves");
+    eventually("A's owner heartbeat, its one group", || async {
+        host.lock()
+            .unwrap()
+            .last()
+            .is_some_and(|b| indices(&b.hb) == [0])
+    })
+    .await;
+    let a_run = host.lock().unwrap().last().unwrap().stamp.run;
+
+    // B: both interfaces, standing by on the governed one behind A.
+    let (b_claim, b_watch, b_read) = (
+        stamping(&ep).await,
+        stamping(&ep).await,
+        stamping(&ep).await,
+    );
+    let mut b = ServiceBuilder::new(&b_claim, config(PAIR).owner_heartbeat());
+    b.catalog(cat.clone()).unwrap();
+    b.implement(zenkey::Implementation::new(governed)).unwrap();
+    b.implement(imp("pulse.v1")).unwrap();
+    let _b_status = b
+        .declare_state_writer(&beacon(), STATUS, &none)
+        .await
+        .unwrap();
+    let b_pulse = b
+        .declare_state_writer(&pulse.iface, STATUS, &none)
+        .await
+        .unwrap();
+    let b_red = b
+        .redundancy(RedundancyStartup::new(b_read).with_watch(b_watch))
+        .unwrap();
+    let b_svc = b.start().await.unwrap();
+    assert_eq!(
+        b_svc.owner_heartbeat_cover(),
+        [(beacon(), 0), (pulse.iface.clone(), 1)]
+    );
+    b_pulse.put("ok").await.unwrap();
+    eventually("B stands by behind A", || async {
+        b_red.standing(&beacon()).why
+            == Some(zenkey::model::redundancy::Why::Incumbent(
+                a_svc.instance().clone(),
+            ))
+    })
+    .await;
+    let of_b = |since: Instant| -> Vec<OwnerBeat> {
+        owner_beats_after(&host, since)
+            .into_iter()
+            .filter(|x| x.stamp.run != a_run)
+            .collect()
+    };
+
+    // 5 s standing by: B's class key at its period, pulse.v1's group alone.
+    let standing = Instant::now();
+    until(standing, Duration::from_secs(5)).await;
+    assert_eq!(b_red.role(&beacon()), Role::Standby);
+    let while_standing = of_b(standing);
+    assert_owner_cadence(&while_standing, "B's host key while it stands by");
+    for x in &while_standing {
+        assert_eq!(
+            indices(&x.hb),
+            [1],
+            "pulse.v1's group alone: the standby's is left out"
+        );
+        assert_eq!(
+            group_of(&x.hb, &cat, "pulse.v1")[0]
+                .as_ref()
+                .map(|s| s.members.clone()),
+            Some(Members::One { vouched: true }),
+            "and its member is vouched for all along"
+        );
+    }
+
+    // A closes; B takes over, and the governed interface's group returns.
+    a_svc.close().await.unwrap();
+    tokio::time::timeout(SETTLE, b_red.until(&beacon(), Role::Serving))
+        .await
+        .expect("B takes over");
+    let taken = Instant::now();
+    eventually("B's owner heartbeat holds both groups", || async {
+        of_b(taken).last().is_some_and(|x| indices(&x.hb) == [0, 1])
+    })
+    .await;
+    // One sequence throughout: the group's return opens no gap on the key.
+    let all = of_b(standing);
+    for w in all.windows(2) {
+        assert_eq!(
+            w[1].stamp.seq.get(),
+            w[0].stamp.seq.get() + 1,
+            "the key's own consecutive seqs across the takeover"
+        );
+    }
+    assert_eq!(
+        *per_iface.lock().unwrap(),
+        Vec::<String>::new(),
+        "never a heartbeat of a covered interface"
+    );
+    b_svc.close().await.unwrap();
+}
