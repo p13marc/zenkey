@@ -554,7 +554,26 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   catalog, one line, never re-serialized: 1,184 B, the three of the four
   it states 947 B, a rest of 237 B (1,167 B with no catalog and a 32-bit
   run). §7.5: an implementation MUST NOT allocate from a group's size
-  (`heartbeat/owner.json`'s read 17). 284 rules (owner 88, static 74).
+  (`heartbeat/owner.json`'s read 17). It also answers round 112's F-540
+  to F-544 (`desired.v1` 0.14 F-545, `link.v2` 0.20 F-546): an
+  implementation that reads a heartbeat or an owner heartbeat MUST
+  refuse a put of another form on that key, naming `form`, before it
+  reads a tag or a body (`owner.json`'s `forms`, a mutation or a frame;
+  the reference's readers take only `Read::Heartbeat`, and name no
+  token yet); nothing
+  in a body tells the two layouts apart, CH's tag only 15 times in 16,
+  so the key chooses; a reader of an owner heartbeat holds the catalog
+  its owner names or a successor beside its revision (§8.6 lists it
+  among those provisioned), and without one reads every group
+  `unknown_catalog`; `owner.json`'s `beside` reads every group of one
+  payload, a refused one among them. `forms` (5) and `beside` (9) were
+  written by a reading of the text made for them and checked by zk2py's
+  of round 112; `heartbeat_owner_vectors` reads neither until the
+  round's code half. F-542 needs no change once `freshness.v2` 0.9
+  merges. `desired.v1` §2.10: two instances' reports on one key are one
+  reply after a tool's merge (observer §4.1), where it cited `Latest`;
+  `redundancy.v1` 0.11 repairs the same in §2.10's "A seed" and its
+  scenarios' §9. 285 rules (owner 88, static 75).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
@@ -613,7 +632,12 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   101 and 210 B, where the policies state 222, 224, 117 and 224).
   `frame_over_batch` is unchanged: that it compares the payload alone,
   10 B short of zenoh's message and length on these faces, is an open
-  question.
+  question. Its §2.19 (round 112's F-546) names two layers: the codes
+  are findings over the keys a configuration states
+  (`check_transport`, the fixture's `router`), and a tool that reads the
+  file through zenoh's own loader names zenoh's refusal and asks no
+  question (`zenctl check face` under `zenoh-1.10.1`, exit 2; as data
+  under `zm-1.10.2-r1`).
   zenoh-modem's notes price each face's uplink keep-alives at the fewest
   and the most (SF12 927 s and SBD 144 messages at the most, over their
   budgets), and the fleet's `zenoh_modem_events_fit_each_face_budget`
