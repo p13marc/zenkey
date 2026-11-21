@@ -56,6 +56,17 @@
 //! put does: the kind never decides. Pure: the fixtures in
 //! `spec/conformance/seed/` pin it (`inband.json`, `merge.json`), and a
 //! tool hands its samples' stamps over as values.
+//!
+//! **A conditional read** (core 0.110 §4.2; #986's J1): a reader that holds
+//! a member's value asks for it again and names the mutation it holds
+//! ([`held_stamp`], never anything but that mutation's in-band stamp). Its
+//! GET is an [`Asked`]; a held stamp among its arrivals is the owner's
+//! answer only as [`Asked::read`] says, [`HeldRead::Unchanged`], and any
+//! other is refused `held`. An answer merges nothing: [`unchanged`] says
+//! what it finds the reader holding, the mutation heard again (for
+//! [`apply_snapshot`]'s guard, [`HeldMember::heard_after`]), a later value
+//! that stands, or nothing, where the reader reads again.
+//! `spec/conformance/seed/held.json` pins it.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -365,6 +376,118 @@ pub fn merge(arrivals: &[Option<Stamp>]) -> Vec<bool> {
             kept
         })
         .collect()
+}
+
+/// The held stamp a reader may send for a member (core §4.2, "What a
+/// reader sends"): the in-band stamp of the mutation it holds, as the owner
+/// wrote it, where `holds` is that mutation's mark. That is its put's
+/// envelope's, its delete's attachment's, or its snapshot entry's, the
+/// entry's own run or the header's and the entry's seq
+/// ([`crate::collection::Member::stamp`]). `None` for a reader that holds
+/// nothing for the member, and for a value with no envelope: never a held
+/// stamp made of a Zenoh timestamp, of a snapshot's asof, or of another
+/// key's stamp.
+#[must_use]
+pub fn held_stamp(holds: Option<Mark>) -> Option<wire::HeldStamp> {
+    match holds {
+        Some(Mark::InBand(stamp)) => Some(wire::HeldStamp::new(stamp)),
+        Some(Mark::Zenoh(_)) | None => None,
+    }
+}
+
+/// Whether a GET's selector is one concrete key (core §4.2, "A conditional
+/// read"): no wildcard, so no `*`, no `**` and no `$*` chunk.
+#[must_use]
+pub fn is_concrete(selector: &str) -> bool {
+    !selector.contains('*')
+}
+
+/// A reader's state GET, as it reads a held stamp among its arrivals (core
+/// §4.2, "A held stamp in answer"): its selector, and the held stamp it
+/// carried, `None` for a GET with no payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Asked<'a> {
+    /// The GET's selector, as its reader's session spells the keys it
+    /// hears: base-relative in a namespace, a wire key in none.
+    pub key: &'a str,
+    /// The held stamp the GET carried.
+    pub held: Option<wire::Stamp>,
+}
+
+/// How a held stamp among a reader's arrivals reads ([`Asked::read`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HeldRead {
+    /// The owner's answer: when it answered, the member's last mutation
+    /// was the one the stamp names. It merges nothing ([`unchanged`]).
+    Unchanged,
+    /// No owner's answer: it establishes nothing, merges nothing, counts
+    /// as nothing heard, and is counted undecodable, refused as `held`
+    /// ([`wire::Refusal::Held`]).
+    Refused,
+}
+
+impl HeldRead {
+    /// `unchanged`, or the refusal's token `held`, as
+    /// `spec/conformance/seed/held.json` spells them.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            HeldRead::Unchanged => "unchanged",
+            HeldRead::Refused => "held",
+        }
+    }
+}
+
+impl Asked<'_> {
+    /// Whether the GET is a conditional read as its reader made it: it
+    /// carried a held stamp on one concrete key.
+    #[must_use]
+    pub fn is_conditional(&self) -> bool {
+        self.held.is_some() && is_concrete(self.key)
+    }
+
+    /// A held stamp that arrived on `key` carrying `stamp`, by this GET
+    /// (`by_get`) or on a subscription: the owner's answer only as a reply
+    /// to the GET that carried the same one, on that GET's one concrete
+    /// key. The same one has the same run, in width and value, and the
+    /// same seq. A consumer or a tool MUST NOT read any other as unchanged.
+    #[must_use]
+    pub fn read(&self, by_get: bool, key: &str, stamp: wire::Stamp) -> HeldRead {
+        if by_get && self.is_conditional() && key == self.key && self.held == Some(stamp) {
+            HeldRead::Unchanged
+        } else {
+            HeldRead::Refused
+        }
+    }
+}
+
+/// What an owner's unchanged answer finds its reader holding for the
+/// member ([`unchanged`]). The answer carries no value and merges none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Unchanged {
+    /// The reader still holds the mutation the stamp names: the answer
+    /// counts as that mutation heard again, by the GET. The omission
+    /// rule's guard reads it so ([`HeldMember::heard_after`]): another
+    /// run's snapshot that lists no entry for it then spares it.
+    HeardAgain,
+    /// The reader holds another value by then, heard while its GET was
+    /// out: that value stands. An answer never steps a member back.
+    Stands,
+    /// The reader holds nothing for the member by then: its GET gave it no
+    /// value. It reads again, with no held stamp.
+    ReadAgain,
+}
+
+/// What an unchanged answer naming `answer` finds, where the reader holds
+/// `held` for the member as the answer arrives (core §4.2, "What unchanged
+/// says").
+#[must_use]
+pub fn unchanged(held: Held, answer: wire::Stamp) -> Unchanged {
+    match held {
+        Held::Nothing => Unchanged::ReadAgain,
+        Held::InBand(s) if s == answer => Unchanged::HeardAgain,
+        Held::InBand(_) | Held::Stamped(_) | Held::Unstamped => Unchanged::Stands,
+    }
 }
 
 /// What a late joiner holds of one key as a snapshot completes, for the
