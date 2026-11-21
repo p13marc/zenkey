@@ -1034,7 +1034,8 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "payload with no envelope counted undecodable, form, never delivered (events_live §8 Expected 5, py-py and "
      "zenctl replay's puts beside the owner example's) (round 108, core 0.104); a delete on an events key, heard or "
      "replayed as a reply_del, never delivered either (events_live §8 step 4's third sample) (round 109, core "
-     "0.105)"),
+     "0.105); one with no attachment counted form and one with an empty attachment short, as core 0.106 states the "
+     "count (round 110)"),
 ]
 
 

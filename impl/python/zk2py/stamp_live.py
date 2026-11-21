@@ -1,7 +1,8 @@
-"""``link.v2`` 0.13's ``scenarios-v2.md`` §3, "The near router stamps nothing"
-(§2.18, §2.19; core §8.2; #1106, #609 round 109), on in-process zenoh-python
-routers, and the far end's block beside it: ``python -m zk2py.stamp_live
-[--only near|far]``.
+"""``link.v2``'s ``scenarios-v2.md`` §3, "The near router stamps nothing"
+(§2.18, §2.19; core §8.2; #1106, #609 round 109), as link.v2 0.16 words it
+(round 110: F hears ``fault``, an event no owner stamps), on in-process
+zenoh-python routers, and the far end's block beside it: ``python -m
+zk2py.stamp_live [--only near|far]``.
 
 - **near** is §3 as written. N is a zenoh-python router run from zk2py's
   generated configuration alone: the Conventions' face policy (read from
@@ -9,19 +10,24 @@ routers, and the far end's block beside it: ``python -m zk2py.stamp_live
   (``examples/zk2/link/``), compiled into the ``access_control`` block
   (:func:`zk2py.link.compile_faces`), the plan's ``downsampling`` and
   :func:`zk2py.link_v2.block`'s ``transport``, ``routing`` and
-  ``timestamping`` objects, merged with N's ``usrpwd`` (§2.18: "a JSON5
-  object holds one ``transport`` key"). The owner ``lab/radio-a`` is a zk2py
+  ``timestamping`` objects, merged with N's ``usrpwd`` key by key
+  (:func:`zk2py.link_v2.merge`, §2.18 at 0.16). The owner ``lab/radio-a`` is a zk2py
   owner, a client of N on the near side as ``radio-a``, its session's
   timestamping off. F is a client session as ``ground`` over the face, its
   session the far end's block (:meth:`zk2py.far_side.FarSide.config`). The
   tool is :func:`zk2py.link_v2.check_transport` over N's configuration as
   :func:`zk2py.link_v2.read_config` reads it, and the Rust ``zenctl check
   face`` over the same file (a black box, run).
-- **Beside §3** (not its expected): a second far session F2 reaches the
-  face through :class:`Relay`, which only forwards and splits the stream
-  link's batches by their 2-byte length, so the bytes each ``oper`` put
-  takes toward the far side are counted, with and without N's stamp
-  (§2.18's "Each stamp, 26 bytes, crosses the face").
+- **Beside §3** (not its expected): ``oper``, which the setup's "Why
+  ``fault``" says keeps its owner's own timestamp under the block and in
+  the control alike; and a second far session F2, which reaches the face
+  through :class:`Relay`. The relay only forwards, and splits the stream
+  link's batches by their 2-byte length, so the bytes each occurrence takes
+  toward the far side are counted, with and without N's stamp (§2.18's
+  "Each stamp, 26 bytes, crosses the face").
+
+Working files (N's sockets, its ``usrpwd`` dictionary) go in a directory
+of the run's own, removed at its end (:func:`zk2py.blackbox.workdir`).
 - **far** is §2.18's far end's block, which the brief asks for once: "A far
   router routes onto the face too." N runs the near block's three objects
   (no access control: the far side here is an owner, whose puts the
@@ -43,13 +49,12 @@ import re
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from .blackbox import BLACKBOX
+from .blackbox import BLACKBOX, workdir as _workdir
 
 REPO = Path(__file__).resolve().parents[3]
 SCENARIOS = REPO / "spec" / "profiles" / "link" / "scenarios-v2.md"
@@ -73,18 +78,6 @@ def conventions_policy() -> str:
     return "\n".join(line.removeprefix("  ") for line in m.group(1).splitlines()) + "\n"
 
 
-def _merge(into: dict[str, Any], more: dict[str, Any]) -> dict[str, Any]:
-    """``more`` merged into ``into``, object by object (§2.18: "A router
-    configuration that already holds a ``transport`` object … merges the
-    two")."""
-    for k, v in more.items():
-        if isinstance(v, dict) and isinstance(into.get(k), dict):
-            _merge(into[k], v)
-        else:
-            into[k] = v
-    return into
-
-
 def near_config(policy_text: str, workdir: str, near: str, face: str) -> tuple[dict[str, Any], list[Any]]:
     """N's whole configuration as zk2py's generator writes it, and the
     enrollment's principals. Its ``usrpwd`` dictionary is written into
@@ -96,10 +89,12 @@ def near_config(policy_text: str, workdir: str, near: str, face: str) -> tuple[d
     pol, findings = link_v2.parse_policy(policy_text)
     if pol is None:
         raise RuntimeError(f"the Conventions' policy is refused: {findings}")
-    p = link_v2.plan(policy_text, {"radio-a": [IFACE]}, {IFACE: link.resources_of(contract)})
+    principals, _ = enrollment(contract)
+    # link.v2 0.15 §2.5: the enrollment binds every principal by a user name
+    p = link_v2.plan(policy_text, {"radio-a": [IFACE]}, {IFACE: link.resources_of(contract)},
+                     users=[pr.user for pr in principals])
     if "refused" in p:
         raise RuntimeError(f"the generator refuses the deployment: {p['refused']}")
-    principals, _ = enrollment(contract)
     blk = link.compile_faces(pol.as_v1(), p["faces"], acl.generate(principals, "deny").block)
     users = os.path.join(workdir, "users.txt")
     with open(users, "w") as f:
@@ -111,8 +106,7 @@ def near_config(policy_text: str, workdir: str, near: str, face: str) -> tuple[d
                             "access_control": blk}
     for k, v in link.router_extras(p["faces"][0]).items():
         conf[k] = v
-    _merge(conf, link_v2.block(pol))
-    return conf, principals
+    return link_v2.merge(conf, link_v2.block(pol)), principals
 
 
 def open_router(conf: dict[str, Any]) -> Any:
@@ -272,11 +266,15 @@ def _world(policy_text: str, *, stamped: bool, tag: str) -> dict[str, Any]:
     control, the block's ``timestamping`` object removed), the owner, F
     direct and F2 through the relay, each hearing ``oper`` and ``fault``.
     Returns what was observed."""
+    with _workdir("zk2py-stamp-") as workdir:
+        return _world_in(workdir, policy_text, stamped=stamped, tag=tag)
+
+
+def _world_in(workdir: str, policy_text: str, *, stamped: bool, tag: str) -> dict[str, Any]:
     from . import far_side, link_v2, live
     from .link_scenarios import _contract
     from .owner import Owner, free_loopback_port
 
-    workdir = tempfile.mkdtemp(prefix="zk2py-stamp-", dir="/srv/dev/scratch/zenkey/py")
     face = os.path.join(workdir, "face.sock")
     near = f"tcp/127.0.0.1:{free_loopback_port()}"
     conf, _ = near_config(policy_text, workdir, near, f"unixsock-stream/{face}")
@@ -340,14 +338,11 @@ def run_near() -> list[Result]:
     out.append(("§3 step 2: F, direct and through the relay, receives oper, and fault's occurrences beside it, under "
                 "the block and under the control", heard,
                 f"{[(k, len(blk[k]), len(ctl[k])) for k in blk if isinstance(k, tuple)]}"))
-    out.append(("§3 Expected 2, as written (F-524): F's sample of oper carries a timestamp, the owner's own, its id the "
-                "owner's zid: radio.v1's oper declares freshness.ttl_s and its contract uses freshness.v1, so core "
-                "§4.3's table has the owner set one on each mutation; N adds none (zk2py's reading of the text's "
-                "\"carries no timestamp\")",
-                _ids(blk, "oper") == [blk["owner_zid"]], f"ids {_ids(blk, 'oper')}; owner {blk['owner_zid']}"))
-    out.append(("§3 Expected 2, of what N stamps: F's occurrence of fault, an event that crosses whole and that no "
-                "owner stamps, carries no timestamp",
+    out.append(("§3 Expected 2: F's occurrence of fault, an event the face lets cross whole, carries no timestamp",
                 _ids(blk, "fault") == [None], f"ids {_ids(blk, 'fault')}"))
+    out.append(("beside §3 (its setup's \"Why fault\"): oper, a state core §4.3's table lists, keeps its owner's own "
+                "timestamp under the block, its id the owner's zid",
+                _ids(blk, "oper") == [blk["owner_zid"]], f"ids {_ids(blk, 'oper')}; owner {blk['owner_zid']}"))
     out.append(("§3 Expected 3: the tool reports no finding (zk2py's check over N's configuration)",
                 blk["check"] == [], f"{blk['check']}"))
     code, so, se = blk["zenctl"]
@@ -355,13 +350,13 @@ def run_near() -> list[Result]:
                 "face_timestamping (reported beside: whatever else it says of zk2py's block)",
                 "face_timestamping" not in so + se,
                 f"exit {code}; codes {_codes(so + se)}"))
-    out.append(("§3 Expected 4 (control, the timestamping object removed), as written (F-524): F's sample of oper "
-                "still carries the owner's stamp, not N's: a router stamps only a put that carries none",
+    out.append(("§3 Expected 4 (control, the timestamping object removed): F's occurrence of fault carries a "
+                "timestamp, N's own, its id N's zid",
+                _ids(ctl, "fault") == [ctl["n_zid"]], f"ids {_ids(ctl, 'fault')}; N {ctl['n_zid']}"))
+    out.append(("beside §3 (its setup's \"Why fault\"): in the control oper still carries its owner's stamp, never "
+                "N's: it \"would show nothing of N\"",
                 _ids(ctl, "oper") == [ctl["owner_zid"]], f"ids {_ids(ctl, 'oper')}; owner {ctl['owner_zid']}, "
                 f"N {ctl['n_zid']}"))
-    out.append(("§3 Expected 4 (control), of what N stamps: F's occurrence of fault carries a timestamp, N's own, its "
-                "id N's zid",
-                _ids(ctl, "fault") == [ctl["n_zid"]], f"ids {_ids(ctl, 'fault')}; N {ctl['n_zid']}"))
     out.append(("§3 Expected 4 (control): the tool reports face_timestamping at timestamping, and nothing else",
                 [(f["code"], f["at"], f["severity"]) for f in ctl["check"]]
                 == [("face_timestamping", "timestamping", "warning")], f"{ctl['check']}"))
@@ -396,15 +391,16 @@ def run_far() -> list[Result]:
     got: dict[bool, Any] = {}
     rust: dict[str, Any] = {}
     for stamped in (False, True):
-        workdir = tempfile.mkdtemp(prefix="zk2py-stamp-far-", dir="/srv/dev/scratch/zenkey/py")
+        tmp = _workdir("zk2py-stamp-far-")
+        workdir = tmp.name
         face = os.path.join(workdir, "face.sock")
         near = f"tcp/127.0.0.1:{free_loopback_port()}"
         far = f"tcp/127.0.0.1:{free_loopback_port()}"
-        nconf = _merge({"mode": "router", "listen": {"endpoints": [near, f"unixsock-stream/{face}"]},
-                        "scouting": {"multicast": {"enabled": False}}}, link_v2.block(pol))
-        fconf = _merge({"mode": "router", "listen": {"endpoints": [far]},
-                        "connect": {"endpoints": [f"unixsock-stream/{face}"]},
-                        "scouting": {"multicast": {"enabled": False}}}, link_v2.far_block(pol))
+        nconf = link_v2.merge({"mode": "router", "listen": {"endpoints": [near, f"unixsock-stream/{face}"]},
+                               "scouting": {"multicast": {"enabled": False}}}, link_v2.block(pol))
+        fconf = link_v2.merge({"mode": "router", "listen": {"endpoints": [far]},
+                               "connect": {"endpoints": [f"unixsock-stream/{face}"]},
+                               "scouting": {"multicast": {"enabled": False}}}, link_v2.far_block(pol))
         if stamped:
             del fconf["timestamping"]
         closers: list[Any] = []
@@ -454,6 +450,7 @@ def run_far() -> list[Result]:
             return [("far: the run finished", False, f"{type(e).__name__}: {e}")]
         finally:
             _close_all(closers)
+            tmp.cleanup()
     heard, fr_zid, _, owner_zid, read = got[False]
     out.append(("far: FR, a router run from zk2py's far end's block (the same three objects, timestamping off for a "
                 "router and a peer), routes the far owner's fault occurrences onto the face, and L on the near side "
@@ -471,8 +468,8 @@ def run_far() -> list[Result]:
                 f"FR {fr_zid}, N {n_zid}; ids {sorted({str(ts) for _, ts in heard['fault']})}"))
     ids = sorted({str(ts) for _, ts in rust.get("heard", [])})
     out.append(("far: the owner example (lab/radio-r, a black box) on the far side, under the far block, puts "
-                "radio.v1's oper with a Zenoh timestamp of its own, neither router's: a conforming owner of the "
-                "§3 resource stamps it (F-524; reported)",
+                "radio.v1's oper with a Zenoh timestamp of its own, neither router's: a conforming owner stamps "
+                "it, as §3's \"Why fault\" says (reported)",
                 bool(rust.get("heard")) and all(x.startswith("put ") for x in rust.get("lines", []))
                 and all(ts not in (None, got[False][1], got[False][2]) for _, ts in rust["heard"]),
                 f"ids {ids}; {rust.get('lines', [])[:1]}; at its start {len(rust.get('at_start', []))} heard "

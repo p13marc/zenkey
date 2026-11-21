@@ -657,10 +657,16 @@ def read_delete(key: str, encoding: str, attachment: bytes | None) -> Read:
     """A delete on ``key``, its attachment read as a delete's envelope
     where the key and the Encoding carry one (core §4.3: "each delete of a
     state member")."""
-    if not carries(key, encoding):
+    if not carries(key, encoding) or attachment is None:
+        # core 0.106 §2.6: "A delete carries its envelope in its attachment
+        # (§7.5). One with no attachment carries none"; on a state key it is
+        # §4.2's sample with no envelope, "one that broke S1", ordered by its
+        # Zenoh timestamp and refused for nothing (F-527's answer; until
+        # round 110 zk2py read it `short`). "An empty attachment is still
+        # one ...: the parse finds no byte at all, and refuses it short."
         return Read(False, None)
     try:
-        env = parse(attachment or b"", "delete")
+        env = parse(attachment, "delete")
     except Refused as e:
         return Read(True, None, None, e.token, str(e).split(": ", 1)[1])
     return Read(True, None, env.stamp, form=env.form)

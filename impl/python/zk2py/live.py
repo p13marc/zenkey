@@ -1983,9 +1983,9 @@ def no_event(key: str, read: zk2c.Read | None, deleted: bool = False) -> str | N
     none. Returns the token the consumer counts the sample under, or None
     for an event, or a key that is no zk2 events key. A delete
     (``deleted``) is never an event: its attachment's refusal, else
-    ``form``. A delete with no attachment carries none, ``form``, as core
-    0.105's entry says ("one that reads as a delete, or none, as form";
-    F-527, zk2py's reading)."""
+    ``form``. A delete with no attachment carries none, ``form``, and an
+    empty attachment is still one, refused ``short`` (core 0.106 §2.6, "A
+    delete", F-527's answer)."""
     if zk2c.key_token(key) != "events":
         return None
     if read is None:

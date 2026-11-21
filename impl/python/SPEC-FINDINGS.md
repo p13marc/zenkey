@@ -26675,3 +26675,256 @@ format, and are re-keyed. F-436 is closed.
   - F-524 to F-528.
 
   F-365 stays open as #965's.
+
+## At core 0.106 and link.v2 0.17
+
+Round 110 read link.v2 0.15 (#1107, the end that opens), 0.16 (round
+109's F-524 and F-525 answered) and 0.17 (#1108, keep-alives beside
+data), and core 0.106 (F-526 to F-528 answered), at main 5265cc52. It
+read cold:
+- link.v2 §2.16 and §2.18 whole;
+- the `opens` sections: §2.1's key and its `bad_value`, §2.3's refusal,
+  §2.5's "The end that opens", §2.19's `null`, §5's row, and Appendix
+  B's "Who opens" and "Keep-alives beside frames";
+- `scenarios-v2.md` §3 to §5;
+- core §2.6's "A sample that carries no event", with §7.5's parse,
+  §8.2's posture and Appendix B's fact beside it;
+- `state.md` §8 whole.
+
+zk2py diffed `spec/` and `examples/zk2/` between round 109's 67eac08c
+and 5265cc52. `spec/CLAUDE.md` moved too, and the barrier keeps it
+unread. **No rule changed beyond what the changelogs state:**
+`RULES.md` did not move, 274 rules, consumer 32; `v2/lints.json` gains
+six cases, 75 in all, `v2/plan.json` four, 45, and `v2/transport.json`
+three, 24; under `examples/zk2/` only zenoh-modem's `MIGRATION.md` and
+`link.md` move, in prose.
+
+**The answers hold**, F-524 to F-528. Each is resolved:
+- **F-524** (link.v2 0.16): `scenarios-v2.md` §3 has F hear `fault`,
+  and its setup says why. Run live (`stamp_live`): F's occurrence
+  carries no timestamp under the block, and N's own in the control.
+  `oper` keeps its owner's stamp in both, as "Why `fault`" says.
+- **F-525** (link.v2 0.16): §2.18's block is three objects, merged key
+  by key, the block's value kept. zk2py's merge is `link_v2.merge`,
+  which the live runners build N and F with.
+- **F-526** (core 0.106): §8.2's "What checks it" names link.v2 §2.19's
+  `face_timestamping`, and that nothing checks a router under a
+  link.v1 policy.
+- **F-527** (core 0.106): §2.6's "A delete" says one with no attachment
+  carries no envelope, `form`, and that an empty attachment is refused
+  `short`. Appendix B states the zenoh fact it rests on. zk2py counted
+  so on an events key already, heard and replayed live
+  (`events_live`). The entry's "Deliberately not changed" notes that
+  zk2py's state readers counted a state key's delete with no attachment
+  `short`, where §4.2 reads a sample with no envelope. zk2py now reads
+  it so (`zk2c.read_delete`); the seed family passes whole under it.
+  Not observable in the reference: no black box consumes an event.
+- **F-528** (core 0.106): `state.md` §8 Expected 5 has the subscription
+  count the three and the replay the two puts. zk2py's run counts so,
+  with its own owner and with `zenctl record` and `zenctl replay`.
+
+**The changelogs' claims, checked.**
+- **link.v2 0.15.** The six lints cases, the three plan cases with
+  `users` and the three transport cases with a `null` are the ones the
+  entry names, and `scenarios-v2.md` holds §4. A case's `users` is in
+  no description (F-530).
+- **link.v2 0.16.** No fixture moved, as it says.
+- **link.v2 0.17.** Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23
+  draw `keep_alive_not_suppressed` now, each at its interval, beside
+  6, 15 and 19, which drew it above theirs. Case 44 does not show what
+  the entry says (F-529).
+- **Core 0.106.** `RULES.md` lists 274 rules, consumer 32.
+
+**§2.16's and Appendix B's figures, computed from the text alone, come
+out as printed** (`link_v2.keep_alives_a_gap`, `link_v2.keep_alives`):
+- the table's 2,880, 5,760, 1,440, 640 and 96 keep-alives a day, and
+  0.36, 0.72, 0.18 and 0.08 false closes; 69,120 and 34,560 at zenoh's
+  defaults; scenarios §1's 8 in 4 s and 345,600 a day;
+- LoRa SF7, I 30 s and a frame a minute: 1 to 2 a gap, 1,440 to 2,880
+  a day. The measured 2,160 is one and a half a gap, and 111 s to 74 s
+  is in the same proportion;
+- RF, I 60 s, the cadence: 0 to 1 a gap. The measured 0 and 336 are
+  within, and 336 is 23 % of the day's 1,440 gaps;
+- SF12 at 3,600 s: I 900 s, 192 a day idle, 0.02 false closes. At
+  1,080 s: I 270 s, ⌈900/270⌉ − 1 = 3 a gap, 288 a day;
+- `scenarios-v2.md` §5: the lateness listed is 17 values, 8 of the 16
+  later than the put before, and the counts are 0, 16, 24 and 8.
+
+**Measured** (`link_v2_live --only s5`, zenoh-python, zenoh 1.10.1):
+§5's four steps, N's keep-alives toward F counted by a relay, gave 0,
+16, 24 and 8, in each of three runs.
+
+**The reference, observed** (black boxes of 5265cc52; not findings):
+- `zenctl acl gen` refuses §4's policy with `opens = "near"`:
+  `near_opens_user` at `opens`, exit 2, no block.
+- `zenctl acl gen --far-config` names `ground-router` as
+  `transport.auth.usrpwd.user`, its `password` `"<ground-router's
+  password>"` and its `dictionary_file` `"<the far end's dictionary>"`.
+  The text gives a placeholder no spelling, and zk2py's differ. For two
+  faces of two far principals it names no user, as zk2py does.
+- `zenctl check face` reads a `null` `routing/interests/timeout` as
+  `transport_differs` (F-532).
+
+### F-529 · minor · link.v2 `v2/plan.json` case 44: the case of a cadence below the interval expects a refusal, so it shows nothing of `keep_alive_not_suppressed`
+
+> `CHANGELOG.md`, link.v2 0.17: "`v2/plan.json` gains case 44 (from 0):
+> case 5's face with its frame every 45 s, below the 60-s interval,
+> which draws no `keep_alive_not_suppressed`." The case's note: "below
+> the 60-s keep-alive interval, so each frame comes before a keep-alive
+> falls due and the plan warns no `keep_alive_not_suppressed`". Its
+> policy: `frames = { "probe.v1/frames/link" = { every_s = 45,
+> keyframe_s = 900 } }`. Its `expect`: `{"refused": [{"at":
+> "probe.v1/stream/frames/link", "code": "keyframe_unreachable", …}]}`.
+> §2.3: "A refusal lists the deployment's errors alone … no warning of
+> the policy's or the plan's comes with it."
+
+- **The error.** `probe.v1`'s `frames/link` declares `keyframe_every =
+  15`. At 45 s it reaches a full record every 675 s, under the 900 s
+  the entry keeps from case 5, where 15 × 60 s reached it. So the plan
+  is refused, and the case holds no plan and no warning to be absent
+  from.
+- **What it leaves unpinned.** No other case plans a cadence below the
+  interval: the 16 faces planned with a cadence are at it or above it.
+  A generator that warned of every face with a cadence would pass
+  `plan.json` whole.
+- **What zk2py does:** it expects the refusal, as the fixture does. Its
+  own reading plans case 44's face with `keyframe_s` left out and draws
+  no warning, and at 60 s draws it.
+- **Fix:** `keyframe_s = 675`, or none, in case 44, and the plan as its
+  `expect`.
+- **Changes:** one fixture case.
+
+### F-530 · minor · link.v2 `v2/plan.json`: a case's `users` is in no description
+
+> `v2/plan.json`, `description`: "Each case is a face policy, `policy`,
+> and a deployment as link.v1's plan.json writes it (`implements`,
+> `contracts` loaded from the repository's root, or `interfaces`
+> inline). … A case's own `catalog`, where it gives one, is … `narrow`
+> names principals …". Cases 41 to 43 carry `"users": ["ground-router",
+> "local", "radio-a"]`. `CHANGELOG.md`, link.v2 0.15: "A case may give
+> `users`, the principals the deployment binds by a user name."
+
+- **The error.** The description states every other member a case may
+  carry, and not `users`. A runner that reads the fixture and the text
+  learns it from the changelog alone. Without it, case 41 plans.
+- **What zk2py does:** it passes a case's `users` to the plan, as the
+  entry says, and asks §2.5's refusal only where a deployment gives
+  them.
+- **Fix:** the entry's sentence, in the description.
+- **Changes:** the fixture's description.
+
+### F-531 · minor · link.v2 §2.18: "so the far end runs none of it unfilled", which holds of the dictionary alone
+
+> §2.18, "Its credentials": "Its `password` and `dictionary_file` are
+> placeholders, since both are the deployment's (§2.5). zenoh loads no
+> user without a password, and opens no dictionary it cannot read, so
+> the far end runs none of it unfilled."
+
+- **Measured** (`link_v2_live --only s4`, a zenoh-python router, zenoh
+  1.10.1):
+  - from the block as generated, the router does not start: "Invalid
+    user-password dictionary file";
+  - with its dictionary alone filled in, it starts, under the
+    placeholder password and under no password at all. N then holds no
+    transport to it;
+  - so a far end whose dictionary is filled in and whose password is
+    not runs, attached to nothing, and no file says why.
+- **The error.** Only the unreadable dictionary stops the far end. A
+  user with no password stops nothing: zenoh starts, and presents no
+  credential the near router accepts.
+- **Not measured:** zenohd itself. `bin/current` holds none.
+- **What zk2py does:** it writes both placeholders, as the text says.
+- **Fix:** "zenoh opens no dictionary it cannot read, so the far end
+  does not start from the block unfilled. With its dictionary filled in
+  and its password not, it starts, and the near router refuses its
+  link."
+- **Changes:** wording.
+
+### F-532 · ambiguity · link.v2 §2.19: a `null` `routing/interests/timeout`, left out or stated?
+
+> §2.19: "A `null` reads as left out: as the value, at a mode, or as
+> the `mode`. zenoh 1.10.1 fills each such optional value with its
+> default." And: "A tool reads each of the eight keys the configuration
+> states … and a key it omits at the binding's default". And: "A string
+> or a fraction is no value zenoh runs. It is `transport_differs`".
+
+- **Two readings.** The sentence names three places, all of
+  `timestamping/enabled` and `mode`. By its letter a `null` among the
+  eight keys is a value stated that is not the policy's:
+  `transport_differs`. By its reason, a `null` that zenoh fills with
+  its default reads as left out, at the binding's default.
+- **Measured** (zenoh-python, zenoh 1.10.1): zenoh refuses a `null`
+  lease, `keep_alive`, batch, sequence resolution, `open_timeout`,
+  `accept_timeout` and `wait_before_close` at load. It loads a `null`
+  `routing/interests/timeout`.
+- **What zk2py does:** the letter. A `null` there is
+  `transport_differs` at `transport.interests_timeout_ms`, as the
+  reference's `zenctl check face` reports it. No `transport.json` case
+  states a `null` among the eight keys.
+- **Fix:** say which: "A `null` among the eight keys is a value stated,
+  and `transport_differs`", or add `routing/interests/timeout` to the
+  places a `null` reads as left out.
+- **Changes:** what a tool reports of one file.
+
+### F-533 · minor · `examples/zk2/zenoh-modem/` prices its faces' keep-alives by the rule link.v2 0.17 replaced
+
+> `link.md`: "**Keep-alives.** A batch sent resets its end's keep-alive
+> interval. On RF and SF9 the interval is the frame's cadence, 60 s on
+> RF, 120 s at SF9, 900 s at SF12 and 1,800 s on SBD, so data replaces
+> every keep-alive the uplink would send. … SF7's 30 s is below its
+> frame's minute, so the uplink pays one keep-alive between two frames,
+> 74 s of air a day". Its table's "The plan's warnings" for
+> `zenohd-rf0`: "`frame_unlisted`". `faces/zenohd-lora0-sf7.face.toml`:
+> "the uplink pays one keep-alive between two frames, 1,440 a day and
+> 74 s of air". `MIGRATION.md` §3.1: "on 3.3,
+> `keep_alive_not_suppressed` at SF7"; §3.3: "At four frame intervals a
+> lease, the frames replace every uplink keep-alive."; §6: "neither the
+> policy nor `--far-config`'s block says so yet | #1107", and "2,160 a
+> day, where §2.16 counts 1,440 | … | #1108". link.v2 Appendix B
+> (0.17): "The uplink sent 2,160 keep-alives a day, 111 s of air", and
+> of RF: "a keep-alive goes before each frame later than the one before
+> (`keep_alive_not_suppressed`, §2.16)".
+
+- **The error.** Since 0.17 the plans of the RF, SF9, SF12 and SBD
+  faces draw `keep_alive_not_suppressed` (`plan.json`'s cases 14, 16,
+  17 and 18), and §2.16 counts 1,440 to 2,880 a day at SF7. The
+  mapping's notes still say the frames replace every uplink keep-alive,
+  list those four faces without the warning, and budget SF7 at 74 s.
+  `README.md`'s table adds "302 s + 74 s of keep-alives = 376 s", and
+  the SF9, SF12 and SBD face files say the same of theirs.
+- **`MIGRATION.md` beside itself.** §6 holds #1107 and #1108 as not
+  ready. Its §3.2 says "Since `link.v2` 0.15 (#1107) its `transport`
+  also names the far principal's usrpwd `user`", and §3.4 that the
+  ground opens every face.
+- **What zk2py does:** it plans each face file as its `plan.json`
+  case, whole, with the warning.
+- **Fix:** the notes re-priced by §2.16 as 0.17 states it, the table's
+  warnings as the plans draw them, and §6's two rows closed.
+- **Changes:** the adopter's mapping, in prose.
+
+### F-534 · minor · link.v2 Appendix B: "Their plans are `plan.json`'s last five cases", which are cases 14 to 18 of 45
+
+> Appendix B, "zenoh-modem's faces": "Their plans are `plan.json`'s
+> last five cases."
+
+- **The error.** The five faces' plans are cases 14 to 18, from 0.
+  `plan.json` holds 45 cases, and its last five are 0.12's event case,
+  0.15's three and 0.17's one.
+- **What zk2py does:** it reads the five by their policies' binding and
+  contract, never by position.
+- **Fix:** "Their plans are `plan.json`'s cases 14 to 18."
+- **Changes:** wording.
+
+### Counts at core 0.106 and link.v2 0.17
+
+534 entries.
+- **New: F-529 to F-534:**
+  - an ambiguity: F-532;
+  - five minor errors: F-529, F-530, F-531, F-533 and F-534.
+  None is a blocker.
+- **Answered this round:** F-524 to F-528, each resolved.
+- **Open:**
+  - F-437 to F-441;
+  - F-529 to F-534.
+
+  F-365 stays open as #965's.

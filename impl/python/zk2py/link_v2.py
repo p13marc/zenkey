@@ -1,6 +1,6 @@
-"""``link.v2``, text 0.1 to 0.14 (``spec/profiles/link/v2.md``, draft,
-written against core 0.77 to 0.100; #988 L1 to L4, #1098, #1106): a constrained face, and the transport it
-runs. Read cold by zk2py in round 96 (#609).
+"""``link.v2``, text 0.1 to 0.17 (``spec/profiles/link/v2.md``, draft,
+written against core 0.77 to 0.100; #988 L1 to L4, #1098, #1106, #1107, #1108): a constrained face, and the
+transport it runs. Read cold by zk2py in round 96 (#609).
 
 It restates ``link.v1`` by reference (§0), and :mod:`zk2py.link` keeps those
 rules. This module holds what the text adds:
@@ -50,6 +50,22 @@ three for the far end; :func:`check_transport` reads the router's ``mode``
 at ``timestamping``. :func:`read_config` reads a router's configuration
 file as the fixture's ``router`` states it. Text 0.14 is editorial.
 
+**Text 0.15** (#1107; round 110), the end that opens (§2.1, §2.5, §2.18,
+§2.19): a face's ``opens``, ``"far"`` where it states none, ``"near"`` only
+on a ``south-region`` face; :func:`plan` given ``users``, the principals the
+deployment binds by a user name, refuses a face the near router opens whose
+far principal is one of them (``near_opens_user``); :func:`far_block` given
+them names the far principal the faces other than device faces share, as
+``transport.auth.usrpwd.user``, beside placeholders; :func:`stamps` reads a
+``null`` as left out. Text 0.16 is editorial: the block is three objects,
+merged key by key, the block's value kept (:func:`merge`).
+
+**Text 0.17** (#1108; round 110), §2.16's keep-alives beside data as
+zenoh's timer counts them: :func:`keep_alives_a_gap`, the bounds of what
+an end sends between two batches a cadence apart, :func:`keep_alives`, the
+timer over a schedule of batches, and ``keep_alive_not_suppressed`` at the
+interval or above it (``>=``, where it was ``>``).
+
 The fixtures are ``conformance/v2/`` (``lints.json``, ``plan.json``,
 ``exposure.json``, ``transport.json``).
 """
@@ -97,7 +113,9 @@ DEFAULTS = {
                      "interests_timeout_ms": 10_000},
 }
 FACE_KEYS = ("far", "attach", "region", "select", "class", "expose", "interval_s", "max_outage_s", "link_bps",
-             "loss_ppm", "arq", "reply_timeout_ms", "frames", "events", "horizon_s", "devices")
+             "loss_ppm", "arq", "reply_timeout_ms", "frames", "events", "horizon_s", "devices", "opens")
+#: §2.1 (0.15): ``opens``'s two values, and its default.
+OPENS = ("far", "near")
 #: §2.1 (0.3): an entry of ``frames``'s own keys.
 FRAME_KEYS = ("every_s", "keyframe_s")
 MOVED = ("lease_ms", "batch_bytes")
@@ -128,6 +146,9 @@ class FaceV2:
     #: ``<iface>/events/<template>``; None for a face with no ``events``,
     #: which keeps link.v1's rule. An empty ``events`` lists none.
     events: list[str] | None = None
+    #: §2.1, §2.5 (0.15, #1107): which end opens the face's links, ``"far"``
+    #: where the face states none.
+    opens: str = "far"
 
 
 @dataclass
@@ -325,6 +346,13 @@ def _face(name: str, body: dict[str, Any], protocols_of: list[str] | None, trans
             or any(type(d) is not str or len(d.split("/")) != 2 or not all(is_plain_chunk(c) for c in d.split("/"))
                    for d in devices)):
         bad("devices")
+    # §2.1 (0.15): "opens. A value other than "far" or "near" is bad_value.
+    # So is "near" with attach = "client" or "device". ... It is checked
+    # against attach only when attach is valid."
+    opens = body.get("opens", "far")
+    if "opens" in body and (type(opens) is not str or opens not in OPENS
+                            or (opens == "near" and attach in ("client", "device"))):
+        bad("opens")
     protocols: list[str] | None = None
     if "select" not in body:
         bad("select", "missing_field")
@@ -410,7 +438,7 @@ def _face(name: str, body: dict[str, Any], protocols_of: list[str] | None, trans
     f = link.Face(name, far, attach, region, protocols or [], expose, interval if expose == "link" else None,
                   body["max_outage_s"], t["batch_bytes"], bps, t["lease_ms"])
     return FaceV2(f, loss, body["arq"], rt, frames, horizon, list(devices) if attach == "device" else None,
-                  events), protocols
+                  events, opens), protocols
 
 
 def _events(body: dict[str, Any], expose: Any, bad: Any) -> list[str] | None:
@@ -602,7 +630,10 @@ class FaceReading:
                 warn("horizon_under_face", HEARTBEAT_AT + i)                           # §2.12
             # §2.16: "each crossing heartbeat's period, half its horizon"
             cadences.append(h * 500)
-        if cadences and min(cadences) * self.transport["keep_alive"] > self.transport["lease_ms"]:
+        # §2.16 (0.17): "The plan warns of a face whose shortest crossing
+        # cadence is the keep-alive interval or above it: cadence ×
+        # keep_alive ≥ lease_ms, in milliseconds". 0.3 to 0.16 read >.
+        if cadences and min(cadences) * self.transport["keep_alive"] >= self.transport["lease_ms"]:
             warn("keep_alive_not_suppressed", "transport.keep_alive")                  # §2.16
         if self.f.frames is None:
             return out, {}
@@ -677,14 +708,17 @@ def _catalog(doc: Any) -> Any:
 
 
 def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any],
-         catalog_doc: Any = None) -> dict[str, Any]:
+         catalog_doc: Any = None, users: list[str] | None = None) -> dict[str, Any]:
     """``plan.json``'s ``expect``: the binding, the catalog id, the transport
     (None for a ``link.v1`` policy) and each face's plan, a link.v2 face's
     with its ``reply_timeout_ms`` and, with ``frames``, its listed frames; or
     ``{refused}``: the policy's findings, or the deployment's errors (§2.3's
     refusals: ``packed_required``, ``frame_unknown``,
-    ``keyframe_unreachable``, ``catalog_missing``). ``catalog_doc`` is the
-    core §8.6 catalog the far side holds (§2.18), or None."""
+    ``keyframe_unreachable``, ``catalog_missing``, ``near_opens_user``).
+    ``catalog_doc`` is the core §8.6 catalog the far side holds (§2.18), or
+    None. ``users`` (0.15) is the principals the deployment binds by a user
+    name, or None where no deployment says: §2.5's refusal is then not
+    asked."""
     policy, findings = parse_policy(policy_text)
     if policy is None:
         return {"refused": findings}
@@ -719,6 +753,7 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
                 "faces": [link.plan_face(v1, f.face, implements, interfaces) for f in policy.faces]}
     listed = sorted({i for s in [*policy.services, *devices] for i in implements[s]}, key=link._bytes)
     errors = packed_required(interfaces, listed)
+    errors += near_opens_user(policy, users)
     readings = [FaceReading(f, policy.transport, devices) for f in policy.faces]
     faces = []
     for f, rd in zip(policy.faces, readings):
@@ -745,6 +780,18 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
     if errors:
         return {"refused": link.sort_findings(errors)}
     return {"binding": policy.binding, "catalog": policy.catalog, "transport": policy.transport, "faces": faces}
+
+
+def near_opens_user(policy: PolicyV2, users: list[str] | None) -> list[dict[str, Any]]:
+    """§2.5 (0.15): "A generator MUST refuse a deployment whose face the near
+    router opens, when it binds the face's far principal by a user name
+    (near_opens_user, §2.3)", an error at the face, ``at`` ``opens``. A far
+    principal bound by a CN is not this profile's (§5), and so is not
+    refused."""
+    if not users:
+        return []
+    return [link.finding("near_opens_user", f.face.name, "opens") for f in policy.faces
+            if f.opens == "near" and f.face.far in users]
 
 
 def _lets_cross(rd: FaceReading, r: link.Resource) -> bool:
@@ -868,12 +915,83 @@ def block(policy: PolicyV2) -> dict[str, Any]:
     return out
 
 
-def far_block(policy: PolicyV2) -> dict[str, Any]:
+#: §2.18 (0.15): "Its password and dictionary_file are placeholders, since
+#: both are the deployment's". The text gives a placeholder no spelling;
+#: these are zk2py's. Neither is a password zenoh could present by accident
+#: for a real one, nor a file it can read, so "the far end runs none of it
+#: unfilled".
+PASSWORD_PLACEHOLDER = "<the far principal's password>"
+DICTIONARY_PLACEHOLDER = "<the far end's dictionary_file>"
+
+
+def far_user(policy: PolicyV2, users: list[str] | None) -> str | None:
+    """§2.18 (0.15), "Its credentials": "The faces other than device faces
+    may share one far principal, a user name. Then the block names it". None
+    where they share none, where the one they share is bound by a CN, or
+    where the policy holds device faces alone: "A device's session presents
+    its own principal's user." """
+    fars = {f.face.far for f in policy.faces if f.face.attach != "device"}
+    if len(fars) != 1 or not users:
+        return None
+    far = next(iter(fars))
+    return far if far in users else None
+
+
+def far_block(policy: PolicyV2, users: list[str] | None = None) -> dict[str, Any]:
     """§2.18's far end's block: "On request, a generator writes the same three
     objects for the far end: the far router's configuration, the gateway
     client's session configuration, or each device's. A far router routes
-    onto the face too." The near router's block, whole."""
-    return block(policy)
+    onto the face too." The near router's block, whole; and, given the
+    principals the deployment binds by a user name (0.15), the far
+    principal's user as ``transport.auth.usrpwd.user``, its ``password`` and
+    ``dictionary_file`` placeholders."""
+    out = block(policy)
+    user = far_user(policy, users)
+    if user is not None and out:
+        out["transport"]["auth"] = {"usrpwd": {"user": user, "password": PASSWORD_PLACEHOLDER,
+                                               "dictionary_file": DICTIONARY_PLACEHOLDER}}
+    return out
+
+
+def merge(config: dict[str, Any], blk: dict[str, Any]) -> dict[str, Any]:
+    """§2.18 (0.16): "a router configuration that already holds one of them
+    merges the two, key by key ... Where both state a key, the merged file
+    keeps the block's value." A new document; neither argument is changed."""
+    out = dict(config)
+    for k, v in blk.items():
+        out[k] = merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+# -- §2.16 "Data spares the keep-alives" (0.17) ---------------------------------------------------
+
+def keep_alives_a_gap(cadence_ms: int, lease_ms: int, keep_alive: int) -> tuple[int, int]:
+    """§2.16 (0.17): the least and the most keep-alives an end sends between
+    two batches a cadence C apart, I ``lease_ms`` / ``keep_alive``. "an end
+    sends ⌈C/I⌉ − 1 keep-alives where C is no whole multiple of I"; "When C
+    is a whole multiple of I, the last of them falls due when the next batch
+    does. It goes first when that batch is later on its schedule than the
+    one before. So the end sends between C/I − 1 and C/I keep-alives a gap."
+    In integers: C/I is C × ``keep_alive`` / ``lease_ms``."""
+    n, rest = divmod(cadence_ms * keep_alive, lease_ms)
+    return (n - 1, n) if rest == 0 else (n, n)
+
+
+def keep_alives(sent_ms: list[int], interval_ms: int) -> int:
+    """§2.16 (0.17), the timer itself: "An end sends a keep-alive one
+    interval I after the later of the last batch it sent and its last
+    keep-alive." The keep-alives between the first batch of ``sent_ms`` and
+    the last. One that falls due at the instant a batch is sent is spared,
+    as "A batch spares the keep-alive only when it is no later on its
+    schedule than the one before" says of a cadence equal to the
+    interval."""
+    count = 0
+    for a, b in zip(sent_ms, sent_ms[1:]):
+        due = a + interval_ms
+        while due < b:
+            count += 1
+            due += interval_ms
+    return count
 
 
 def read_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -910,16 +1028,22 @@ def stamps(config: dict[str, Any]) -> bool:
     the three, is no setting zenoh runs (as a string lease is, §2.19); the
     router is then read as stamping, so the warning holds until the file
     shows timestamping off."""
-    mode = config.get("mode", DEFAULT_MODE)
+    # 0.15: "A null reads as left out: as the value, at a mode, or as the
+    # mode. zenoh 1.10.1 fills each such optional value with its default."
+    mode = config.get("mode")
+    if mode is None:
+        mode = DEFAULT_MODE
     if mode not in STAMPS_BY_DEFAULT:
         return True
-    if "timestamping/enabled" not in config:
+    v = config.get("timestamping/enabled")
+    if v is None:
         return STAMPS_BY_DEFAULT[mode]
-    v = config["timestamping/enabled"]
     if isinstance(v, bool):
         return v
-    if isinstance(v, dict) and all(k in STAMPS_BY_DEFAULT and isinstance(x, bool) for k, x in v.items()):
-        return v.get(mode, STAMPS_BY_DEFAULT[mode])
+    if isinstance(v, dict) and all(k in STAMPS_BY_DEFAULT and (x is None or isinstance(x, bool))
+                                   for k, x in v.items()):
+        at_mode = v.get(mode)
+        return STAMPS_BY_DEFAULT[mode] if at_mode is None else at_mode
     return True
 
 
