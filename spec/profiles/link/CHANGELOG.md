@@ -7,6 +7,47 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.20 — 2026-11-21: §2.9, no owner heartbeat crosses a face (#1110)
+
+`freshness.v2` 0.9 lets an owner confirm several interfaces in one put,
+an owner heartbeat, on `…/freshness.v2/stream/heartbeats/<class>`
+([`../freshness/CHANGELOG.md`](../freshness/CHANGELOG.md)). This text's
+plan carved `freshness.v2`'s stream denies from the per-interface
+heartbeats alone. So wherever one heartbeat crossed, no deny named the
+new keys. Under `allow`, both classes' owner heartbeats would have
+crossed, the `host` collections' digests and bits with them.
+
+**Added: §2.9, "No owner heartbeat crosses".**
+- **The rule.** Wherever `freshness.v2` is a listed interface, a
+  generator MUST NOT let an owner heartbeat's key cross a face, whatever
+  its class.
+- **In the denies (§2.7).** `freshness.v2`'s stream carve holds its
+  template `heartbeats/{class}`, which never crosses. Wherever a
+  heartbeat crosses, the plan denies
+  `zk2/*/*/freshness.v2/stream/heartbeats/**`. Where none crosses, the
+  whole deny already covers it.
+- **The owner's side.** An owner whose collections cross a face of this
+  text's policy keeps their interfaces' heartbeats. `freshness.v2` §2.4
+  and §2.9 say so.
+
+**Why a deny, and not `link.v2`'s rule.** `link.v2` 0.18 lets the `link`
+class's key cross where a heartbeat does. This text has no notion of a
+class crossing, and faces are moving to `link.v2`. The deny is the safe
+side: nothing new crosses a `link.v1` face.
+
+**Evidence.** `plan.json`'s cases 12 and 14 gain the deny beside
+`heartbeat/notes.v2`'s. A new case 17 is case 12 without `notes.v2`:
+every heartbeat crosses, and the stream deny of `freshness.v2` holds the
+owner heartbeat keys alone. The three denies were derived twice from the
+text. The rest of case 17's plan is case 12's, less `notes.v2`'s denies.
+
+**Deliberately not changed.**
+- **The heartbeat's crossing.** It crosses exactly where a collection of
+  its interface does, as before.
+- **Liveness evidence and warnings.** An owner heartbeat is none, and
+  draws none.
+- **The header** is still written against core 0.32.
+
 ## link.v2 0.18 — 2026-11-21: §2.19, a `null` among the eight keys; §2.18, the far end's block unfilled; `keep_alive_not_suppressed` pinned below the interval, no keyword changed (#609)
 
 zk2py round 110 read 0.15 to 0.17 cold, beside core 0.106. It filed
