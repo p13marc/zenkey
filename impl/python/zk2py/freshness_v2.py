@@ -230,26 +230,31 @@ class View:
             if c.resource not in self.follows:
                 sections[c.resource] = "not_followed"
                 continue
-            sec = value["sections"].get(c.resource)
-            if sec is None:
-                sections[c.resource] = "absent"
-                self.streak[c.resource] = 0
-                continue
-            keys = self.live_keys(c)
-            mine = self.digest_of(c)
-            if mine is None or mine != int(sec["digest"], 16) or (c.templated and sec["live"] != len(keys)):
-                sections[c.resource] = "diverged"
-                self.streak[c.resource] += 1
-                continue
-            self.streak[c.resource] = 0
-            if c.templated:
-                confirmed = [keys[r] for r in sec["vouched"]]
-            else:
-                confirmed = keys if sec["vouched"] and keys else []
-            for k in confirmed:
-                self.members[k].confirmed = at
-            sections[c.resource] = {"confirmed": confirmed}
+            sections[c.resource] = self.section(c, value["sections"].get(c.resource), at)
         return {"read": {"gap": gap, "sections": sections}}
+
+    def section(self, c: heartbeat.Collection, sec: dict[str, Any] | None, at: int) -> Any:
+        """Step 4 for one collection it follows, ``sec`` its section's value
+        or None for a map bit of 0: ``absent``, ``diverged``, or the members
+        confirmed at ``at``. It moves the collection's count of divergences
+        in a row: "A collection has one count" (text 0.9), whichever form
+        its sections came in."""
+        if sec is None:
+            self.streak[c.resource] = 0
+            return "absent"
+        keys = self.live_keys(c)
+        mine = self.digest_of(c)
+        if mine is None or mine != int(sec["digest"], 16) or (c.templated and sec["live"] != len(keys)):
+            self.streak[c.resource] += 1
+            return "diverged"
+        self.streak[c.resource] = 0
+        if c.templated:
+            confirmed = [keys[r] for r in sec["vouched"]]
+        else:
+            confirmed = keys if sec["vouched"] and keys else []
+        for k in confirmed:
+            self.members[k].confirmed = at
+        return {"confirmed": confirmed}
 
     def reread_due(self) -> list[str]:
         """The collections two heartbeats in a row diverged on, in map
@@ -266,6 +271,229 @@ class View:
         """``apply.json``'s ``check``."""
         return {"reread_due": self.reread_due(), "gap": self.gap,
                 "confirmed": {k: self.confirmed(k) for k in keys}}
+
+
+# -- text 0.9: the owner heartbeat, one put per owner and class (§2.4, §2.5) ---------
+
+#: §2.4 "The class": ``link`` or ``host``, and §3: "Its parameter is `link`
+#: or `host`, and an owner puts on no other."
+CLASSES = ("link", "host")
+
+
+def class_of(token: str, annotations: dict[str, Any]) -> str:
+    """§2.4: "The class of a collection is `link` where its resolved
+    `link.exposure` reads `link`, as link.v1 §2.2 reads it. It is `host`
+    otherwise: absent, or any other value." """
+    from . import link
+
+    return "link" if link.exposure_of(token, annotations) == "link" else "host"
+
+
+def classes_of(canonical: dict[str, Any]) -> dict[str, str]:
+    """Each resource of a revision, ``<kind token>/<template>``, with its
+    class, "as the revision it holds reads it" (§2.5)."""
+    return {f"{r['token']}/{r['template']}": class_of(r["token"], r.get("annotations") or {})
+            for r in canonical["resources"]}
+
+
+def owner_heartbeat_key(system: str, service: str, cls: str) -> str:
+    """§3: ``zk2/<system>/<service>/freshness.v2/stream/heartbeats/<class>``."""
+    if cls not in CLASSES:
+        raise ValueError(f"{cls!r}: an owner heartbeat key's class is link or host")
+    return f"zk2/{system}/{service}/{PROFILE}/stream/heartbeats/{cls}"
+
+
+@dataclass
+class KeySequence:
+    """One owner heartbeat key's sequence, in front of the views (§2.5 "A
+    lost owner heartbeat": "The sequence is the owner heartbeat key's"):
+    the last read owner heartbeat's stamp, whether it followed a lost one,
+    and the interfaces a group on the key has named within the run."""
+
+    last: zk2c.InBand | None = None
+    gap: bool = False
+    named: set[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.named is None:
+            self.named = set()
+
+
+class Reader:
+    """§2.5 "An owner heartbeat" for one provider: a :class:`View` per
+    interface the subscriber follows a collection of, and a
+    :class:`KeySequence` per class key in front of them.
+
+    - ``held``: the catalogs the reader holds (core §8.6);
+    - ``named``: the id of the catalog its owner names (core §3.3), None for
+      an owner that names none, whose every index is ``unknown_catalog``.
+
+    :meth:`follow` adds an interface: the revision the reader holds, and the
+    collections it follows. :meth:`owner_heartbeat` reads one put on a class
+    key in §2.5's three steps. :meth:`heartbeat` reads an interface's own
+    heartbeat through its view, as before. :meth:`lost` is the collections a
+    key covers while its last read owner heartbeat followed a lost one."""
+
+    def __init__(self, held: Iterable[Any] = (), named: str | None = None):
+        self.held = list(held)
+        self.named = named
+        self.views: dict[str, View] = {}
+        self.classes: dict[str, dict[str, str]] = {}
+        self.keys: dict[str, KeySequence] = {c: KeySequence() for c in CLASSES}
+
+    def follow(self, canonical: dict[str, Any], fingerprint: str, follows: Iterable[str] | None = None,
+               address: str | None = None, view: View | None = None) -> View:
+        """Follow collections of one interface, by the revision held."""
+        layout = heartbeat.layout_of(canonical, fingerprint)
+        if view is None:
+            view = View(layout, [c.resource for c in layout.collections] if follows is None else follows, address)
+        self.views[layout.interface] = view
+        self.classes[layout.interface] = classes_of(canonical)
+        return view
+
+    def class_of(self, iface: str, resource: str) -> str:
+        return self.classes[iface][resource]
+
+    def followed_classes(self) -> list[str]:
+        """§2.5 "Both forms": the owner heartbeat keys a subscriber
+        subscribes to, "one for each class that the collections it follows
+        have"."""
+        have = {self.classes[i][r] for i, v in self.views.items() for r in v.follows}
+        return [c for c in CLASSES if c in have]
+
+    # -- one owner heartbeat --------------------------------------------------------------
+
+    def owner_heartbeat_put(self, cls: str, payload: bytes, at: int) -> dict[str, Any]:
+        """A put's payload on the class ``cls``'s key. Step 1 holds the
+        envelope's parse too: "The envelope's parse comes first" (core
+        §7.5)."""
+        from . import owner_heartbeat as oh
+
+        try:
+            put = oh.read(payload)
+        except oh.Refused as e:
+            return {"refused": e.token}
+        return self._read(cls, put.stamp, put.body, at)
+
+    def owner_heartbeat(self, cls: str, tag: int, stamp: zk2c.InBand, body: bytes, at: int) -> dict[str, Any]:
+        """An owner heartbeat as its envelope gave it: CH's tag, the stamp
+        and the body's bytes.
+        1. **Refused**: "Core §7.5 refuses the owner heartbeat, before any
+           group's sections are read: nothing is confirmed."
+        2. **Older**: "Within one run, its seq is not after the last read
+           owner heartbeat's on its key".
+        3. **Read**: each group alone, in order."""
+        from . import owner_heartbeat as oh
+
+        if tag != 0:
+            return {"refused": "tag"}
+        try:
+            value = oh.read_body(body)
+        except oh.Refused as e:
+            return {"refused": e.token}
+        return self._read(cls, stamp, value, at)
+
+    def _read(self, cls: str, stamp: zk2c.InBand, value: Any, at: int) -> dict[str, Any]:
+        if cls not in CLASSES:
+            raise ValueError(f"{cls!r}: no owner heartbeat key")
+        k = self.keys[cls]
+        last = k.last
+        same = last is not None and last.same_run(stamp)
+        if same and not serial_newer(stamp.seq, last.seq):
+            return {"older": True}
+        # "A read owner heartbeat follows a lost one when its seq is not the
+        # last read one's plus 1 on its key, within one run."
+        gap = same and stamp.seq != (last.seq + 1) % SEQ_MOD
+        if not same:
+            # "Another run on a key starts its sequence again, and its
+            # covered collections with it."
+            k.named = set()
+        k.last, k.gap = stamp, gap
+        groups = [self._group(cls, g, at) for g in value.groups]
+        return {"read": {"gap": gap, "groups": groups, "lost": self.lost(cls)}}
+
+    def _group(self, cls: str, g: Any, at: int) -> dict[str, Any]:
+        """One group, read alone: "stops at the first of these that
+        answers"."""
+        from . import catalog as cat
+        from . import owner_heartbeat as oh
+
+        out: dict[str, Any] = {"index": g.index}
+        # No index.
+        try:
+            entry = cat.resolve(self.held, self.named, g.index).entry
+        except cat.Refused as e:
+            return {**out, "refused": e.token}
+        assert entry is not None
+        iface, contract = entry
+        # "A group names an interface once the subscriber has read its
+        # index: any group of a read owner heartbeat that "No index" did not
+        # stop."
+        assert self.keys[cls].named is not None
+        self.keys[cls].named.add(iface)
+        out["iface"] = iface
+        # Not followed.
+        view = self.views.get(iface)
+        if view is None or not view.follows:
+            return {**out, "answer": "not_followed"}
+        # Another revision.
+        if contract != view.layout.fingerprint or g.tag != view.layout.tag:
+            return {**out, "answer": "revision"}
+        # Refused: "The sections are parsed whole, the other class's too."
+        try:
+            sections = oh.read_sections(view.layout, g.bits)
+        except oh.Refused as e:
+            return {**out, "refused": e.token}
+        # Read.
+        read: dict[str, Any] = {}
+        for c in view.layout.collections:
+            if c.resource not in view.follows:
+                read[c.resource] = "not_followed"
+            elif self.classes[iface][c.resource] != cls:
+                # "A followed collection of the other class is not read,
+                # whatever its map bit says."
+                read[c.resource] = "other_class"
+            else:
+                read[c.resource] = view.section(c, sections.get(c.resource), at)
+        return {**out, "sections": read}
+
+    # -- what a gap says ------------------------------------------------------------------
+
+    def lost(self, cls: str) -> list[tuple[str, str]]:
+        """§2.5 "A lost owner heartbeat": while the key's last read owner
+        heartbeat followed a lost one, "The collections a key covers, to a
+        subscriber, are of the key's class, as the revision it holds reads
+        it. They are those of each interface it follows that a group on
+        that key has named within the run." As (interface, resource), the
+        ones it follows; empty while the key is in sequence."""
+        k = self.keys[cls]
+        if not k.gap:
+            return []
+        assert k.named is not None
+        return [(iface, c.resource) for iface in sorted(k.named) if iface in self.views
+                for c in self.views[iface].layout.collections
+                if c.resource in self.views[iface].follows and self.classes[iface][c.resource] == cls]
+
+    def lost_delivery(self, iface: str, resource: str) -> bool:
+        """Whether a member of this collection reads as v1 §2.5 rule 3 reads
+        a lost delivery: its interface's own heartbeat followed a gap, or its
+        class's key did and covers it. "Two keys are two sequences. A gap on
+        one key says nothing of the other class's collections. It says
+        nothing of an interface confirmed by its own heartbeat." """
+        view = self.views.get(iface)
+        if view is None:
+            return False
+        return view.gap or (iface, resource) in self.lost(self.classes[iface][resource])
+
+    def heartbeat(self, iface: str, tag: int, stamp: zk2c.InBand, body: bytes, at: int) -> dict[str, Any]:
+        """An interface's own heartbeat, on its own key: its view's, as
+        before."""
+        return self.views[iface].heartbeat(tag, stamp, body, at)
+
+    def reread_due(self) -> list[tuple[str, str]]:
+        """"The re-read follows two in a row, as above": (interface,
+        resource)."""
+        return [(i, r) for i, v in self.views.items() for r in v.reread_due()]
 
 
 def apply_case(layout: heartbeat.Layout, case: dict[str, Any]) -> list[tuple[str, Any, Any]]:
