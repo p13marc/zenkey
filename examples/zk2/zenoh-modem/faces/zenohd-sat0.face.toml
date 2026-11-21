@@ -11,7 +11,9 @@
 # Across the face: frames/paid alone (modem.v3 3.3, #991), all 73 readings
 # in one paid message (207 B of payload, a full record every frame), once a
 # keep-alive interval, so that it replaces a keep-alive the link pays
-# anyway: 48 messages up and 48 keep-alives down, 96 a day, as idle. Its
+# anyway, unless it is later on its schedule than the one before (v2
+# §2.16, `keep_alive_not_suppressed`): 48 messages up, 48 keep-alives
+# down and none to 48 up, 96 to 144 a day, where idle is 96. Its
 # 3,600 s horizon is the face's `horizon_s`, so liveness across SBD is
 # observable, as it was not under 3.2's frames/message. The plan warns
 # `frame_unlisted` of frames/fast and frames/slow: sat0 does not publish
@@ -19,7 +21,7 @@
 #
 # Events (modem.v3 3.4, #991): the face lists none, `events = []` (link.v2
 # 0.12 §2.7), so the plan denies every event: each occurrence would be a
-# paid message of its own, beside the 96 a day the frames and the
+# paid message of its own, beside the 96 to 144 a day the frames and the
 # keep-alives already take (link.md, "Events").
 profile  = "link.v2"
 system   = "h-71c0e2a9d4b3"

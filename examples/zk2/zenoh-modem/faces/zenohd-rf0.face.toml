@@ -20,7 +20,11 @@
 # whole at one a minute and never downsampled, a full record every 15
 # (modem.v3 3.3, #991): 177 KB a day with every reading present and 24 of
 # them moving, 92 KB for rf0's own. No plain stream crosses (modem.v3 exposes only its
-# frames). Its 300 s horizon is liveness evidence. frames/slow and
+# frames). Its 300 s horizon is liveness evidence. The keep-alive interval,
+# 60 s, is the frame's cadence, so a frame replaces a keep-alive unless it
+# is later on its schedule than the one before (v2 §2.16), and the plan
+# warns `keep_alive_not_suppressed`: none to 1,440 uplink keep-alives a
+# day, 336 measured under the lean stack (v2 Appendix B). frames/slow and
 # frames/paid are LoRa SF12's and SBD's, and draw `frame_unlisted` here: rf0
 # does not publish them. The radio repairs no lost frame, so the linter
 # warns `no_arq`.
@@ -38,7 +42,7 @@ catalog  = "29bf7d47"               # catalog.json, which the ground holds
 
 [transport]
 lease_ms             = 240000
-keep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces
+keep_alive           = 4            # a keep-alive every 60 s, the frame's cadence (v2 §2.16)
 wait_before_close_ms = 240000       # at least the lease
 sequence             = "16bit"
 batch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing
