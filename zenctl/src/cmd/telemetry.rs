@@ -135,8 +135,8 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     }
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let mut spec = TelemetrySpec::new(dep.timeout(), window);
-    spec.lease = ASKING.ask(super::positive_secs("--lease", lease));
-    spec.wait_before_close = ASKING.ask(super::positive_secs(
+    spec.routers.lease = ASKING.ask(super::positive_secs("--lease", lease));
+    spec.routers.wait_before_close = ASKING.ask(super::positive_secs(
         "--wait-before-close",
         wait_before_close,
     ));

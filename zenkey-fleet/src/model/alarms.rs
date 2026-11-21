@@ -236,12 +236,13 @@ pub struct BookSpec {
     /// its owner is watched the longer of a lease and `wait_before_close`,
     /// and it, past its end ([`BookSpec::tail`], observer §5.2).
     pub timeout: Duration,
-    /// The deployment's link lease (core §2.7, 0.25).
-    pub lease: Duration,
-    /// The routers' `wait_before_close`: a router that waits it before it
-    /// closes a transport tells a withdrawal that late, so a window's owner
-    /// is watched for it where it is longer than the lease (observer §5.2).
-    pub wait_before_close: Duration,
+    /// The routers' lease and `wait_before_close` (core §2.7, 0.25): a
+    /// router that waits `wait_before_close` before it closes a transport
+    /// tells a withdrawal that late, so a window's owner is watched for it
+    /// where it is longer than the lease (observer §5.2). The deployment's
+    /// word: a face policy's `[transport]`, its binding's defaults, or
+    /// zenoh 1.10.1's (#1011).
+    pub routers: zenkey_model::budget::Routers,
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1). Without it, a
     /// GET reply's stamp is aged only against a clock measured on a live
@@ -254,13 +255,11 @@ pub struct BookSpec {
 }
 
 impl BookSpec {
-    /// No face, nothing on the operator's word, zenoh 1.10.1's lease and
-    /// `wait_before_close`.
+    /// No face, nothing on the operator's word, zenoh 1.10.1's routers.
     pub fn new(timeout: Duration) -> BookSpec {
         BookSpec {
             timeout,
-            lease: zenkey_model::budget::DEFAULT_LEASE,
-            wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
+            routers: zenkey_model::budget::Routers::default(),
             clocks_synced: false,
             face: None,
         }
@@ -271,7 +270,7 @@ impl BookSpec {
     /// §5.2, `zenkey_model::budget::presence_tail`). Before observer text
     /// 0.6 (zk2py round 85's F-320) it was the lease alone.
     pub fn tail(&self) -> Duration {
-        zenkey_model::budget::presence_tail(self.lease, self.wait_before_close, self.timeout)
+        self.routers.presence_tail(self.timeout)
     }
 }
 
@@ -1672,10 +1671,10 @@ mod tests {
     #[test]
     fn the_tail_takes_the_longer_of_the_lease_and_wait_before_close() {
         let mut s = BookSpec::new(Duration::from_secs(1));
-        s.lease = Duration::from_secs(10);
-        s.wait_before_close = Duration::from_secs(5);
+        s.routers.lease = Duration::from_secs(10);
+        s.routers.wait_before_close = Duration::from_secs(5);
         assert_eq!(s.tail(), Duration::from_secs(11), "the lease is the longer");
-        s.wait_before_close = Duration::from_secs(30);
+        s.routers.wait_before_close = Duration::from_secs(30);
         assert_eq!(
             s.tail(),
             Duration::from_secs(31),

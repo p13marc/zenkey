@@ -255,8 +255,7 @@ async fn conform_dates_a_modem_owners_confirmations() {
         trust_admin: false,
         calls_granted: false,
         clocks_synced: true,
-        lease: zenkey_model::budget::DEFAULT_LEASE,
-        wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
+        routers: zenkey_model::budget::Routers::default(),
         skip: zenkey_fleet::bus::conform::Skipped::default(),
     };
     let observe = |modem: bool| {

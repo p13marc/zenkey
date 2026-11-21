@@ -110,8 +110,8 @@ pub async fn run(cli: TimingArgs) -> Result<()> {
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let mut spec = TimingSpec::new(dep.timeout(), window);
     spec.clock_bound = clock_bound.map(std::time::Duration::from_millis);
-    spec.lease = ASKING.ask(super::positive_secs("--lease", lease));
-    spec.wait_before_close = ASKING.ask(super::positive_secs(
+    spec.routers.lease = ASKING.ask(super::positive_secs("--lease", lease));
+    spec.routers.wait_before_close = ASKING.ask(super::positive_secs(
         "--wait-before-close",
         wait_before_close,
     ));

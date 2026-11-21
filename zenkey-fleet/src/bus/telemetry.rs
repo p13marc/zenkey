@@ -91,11 +91,12 @@ pub struct TelemetrySpec {
     /// How long the window runs, from its opening: the subscriptions
     /// declared and presence seeded (step 4 of the module doc).
     pub window: Duration,
-    /// The deployment's link lease (core §2.7): with `wait_before_close`,
-    /// the longest this reader may stall before it counts a loss.
-    pub lease: Duration,
-    /// The routers' `wait_before_close` (core §2.7, 0.27).
-    pub wait_before_close: Duration,
+    /// The routers' lease, keep-alives and `wait_before_close` (core §2.7):
+    /// the longest this reader may stall before it counts a loss
+    /// ([`zenkey_model::budget::Routers::stall_bound`]). The deployment's
+    /// word: a face policy's `[transport]`, its binding's defaults, or
+    /// zenoh 1.10.1's (#1011).
+    pub routers: zenkey_model::budget::Routers,
     /// Across a constrained face (§2.14), on the deployment's word: no
     /// presence is read, and the metric resources are the contracts' in
     /// hand, of the one owner the scope names.
@@ -113,25 +114,21 @@ pub struct TelemetrySpec {
 pub const DEFAULT_SETTLE: Duration = Duration::from_millis(250);
 
 impl TelemetrySpec {
-    /// A window, zenoh 1.10.1's lease and `wait_before_close`, no face.
+    /// A window, zenoh 1.10.1's routers, no face.
     pub fn new(timeout: Duration, window: Duration) -> TelemetrySpec {
         TelemetrySpec {
             timeout,
             window,
-            lease: zenkey_model::budget::DEFAULT_LEASE,
-            wait_before_close: zenkey_model::budget::DEFAULT_WAIT_BEFORE_CLOSE,
+            routers: zenkey_model::budget::Routers::default(),
             across_face: false,
             settle: DEFAULT_SETTLE,
         }
     }
 
-    /// The longest this reader may stall (core §2.7, 0.27).
+    /// The longest this reader may stall (core §2.7, 0.27), by the
+    /// routers' own keep-alives.
     pub fn stall_bound(&self) -> Duration {
-        zenkey_model::budget::stall_bound(
-            self.wait_before_close,
-            self.lease,
-            zenkey_model::budget::DEFAULT_KEEP_ALIVE,
-        )
+        self.routers.stall_bound()
     }
 }
 

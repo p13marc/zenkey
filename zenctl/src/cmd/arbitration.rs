@@ -57,8 +57,8 @@ pub async fn run(cli: ArbitrationArgs) -> Result<()> {
     let mut spec = ArbitrationSpec::new(dep.timeout());
     spec.listen = std::time::Duration::from_secs_f64(for_secs);
     spec.role = role;
-    spec.lease = ASKING.ask(super::positive_secs("--lease", lease));
-    spec.wait_before_close = ASKING.ask(super::positive_secs(
+    spec.routers.lease = ASKING.ask(super::positive_secs("--lease", lease));
+    spec.routers.wait_before_close = ASKING.ask(super::positive_secs(
         "--wait-before-close",
         wait_before_close,
     ));

@@ -4392,8 +4392,7 @@ mod tests {
                 trust_admin: false,
                 calls_granted: true,
                 clocks_synced: false,
-                lease: Duration::from_secs(10),
-                wait_before_close: Duration::from_secs(5),
+                routers: zenkey_model::budget::Routers::default(),
                 skip: crate::bus::conform::Skipped::default(),
             },
             asked_fp: None,
@@ -5536,7 +5535,7 @@ mod tests {
         // window: wait_before_close's 5 s, longer than the lease, and the
         // 1 s reply timeout (observer §5.2).
         let mut short = o.clone();
-        short.spec.lease = Duration::from_secs(1);
+        short.spec.routers.lease = Duration::from_secs(1);
         assert_eq!(short.spec.presence_tail(), Duration::from_secs(6));
         if let Some(Ok(p)) = &mut short.window_presence {
             p.tail = Duration::from_secs(6);
@@ -5549,6 +5548,18 @@ mod tests {
             verdicts(&short).0,
             Judgement::NotEstablished { .. }
         ));
+        // The keep-alive interval is the routers' own (#1011): with a 10 s
+        // `wait_before_close`, a 10 s lease kept by two keep-alives bounds
+        // a stall at 5 s, the lease less one 5 s interval, where four
+        // would bound it at 7.5 s. A 6 s gap is beyond the first alone.
+        let mut two = o.clone();
+        two.spec.routers.wait_before_close = Duration::from_secs(10);
+        two.reader_stall = seen(6000, 0);
+        assert!(matches!(verdicts(&two).0, Judgement::NotEstablished { .. }));
+        two.spec.routers.keep_alive = 2;
+        let (b, r) = verdicts(&two);
+        unobservable(&b, "stalled 6.00s, longer than the 5.00s");
+        unobservable(&r, "stalled 6.00s, longer than the 5.00s");
         // Not watched, or a watch that could not be made: never lossless.
         o.reader_stall = None;
         unobservable(&verdicts(&o).0, "did not watch its own receive path");
