@@ -94,7 +94,7 @@ use zenoh::sample::Sample;
 use zenoh::time::Timestamp;
 
 use crate::error::{Error, Result, zenoh};
-use crate::state::{Current, StateAnswer, StateGet};
+use crate::state::{ConditionalAnswer, Current, StateAnswer, StateGet};
 use crate::timing::{self, LifespanSample, MemberState, OwnerState, TimingEvent};
 
 /// One bound provider address: a position is `None` for `*`.
@@ -1811,7 +1811,74 @@ impl Consumer {
         values: Option<&Bindings>,
         timeout: Duration,
     ) -> Result<StateAnswer> {
+        self.read_state(resource, values, &BTreeMap::new(), timeout)
+            .await
+            .map(|c| c.answer)
+    }
+
+    /// A conditional read (core 0.110 §4.2, "A conditional read"; #986's
+    /// J1): [`Consumer::get_answer`], where each GET on one concrete key
+    /// that `held` names carries that key's held stamp (§7.5) as its
+    /// payload, under `zenoh/bytes`. An owner whose member is unchanged
+    /// answers with the held stamp alone, 6 or 8 bytes, in place of the
+    /// member's snapshot.
+    ///
+    /// `held` maps a member's key, as this consumer's session hears it, to
+    /// the in-band stamp of the mutation the caller holds for it: a
+    /// previous answer's [`StateAnswer::inband`] is that map, and so is a
+    /// subscription's `Delivery::inband` by key. **Never any other
+    /// stamp** (§4.2's MUST NOT): not a snapshot's asof, not another key's,
+    /// nothing for a value with no envelope
+    /// (`zenkey_model::seed::held_stamp`). A key `held` does not name, and
+    /// a selector with a wildcard, are read with no payload, so a
+    /// collection read is never conditional.
+    ///
+    /// What comes back ([`ConditionalAnswer`]):
+    ///
+    /// - **A held stamp that answers the GET** (the one it carried, on its
+    ///   one concrete key) puts the key in
+    ///   [`ConditionalAnswer::unchanged`]. It merges nothing: the caller
+    ///   keeps what it holds, and `answer.current` holds no value for the
+    ///   key unless another reply of this GET brought one, which stands.
+    /// - **A snapshot in answer** is accepted and merged as any member
+    ///   read's: the owner sends one when the member changed, and an owner
+    ///   built before core 0.110 sends one always.
+    /// - **Any other held stamp** establishes nothing: counted in
+    ///   `answer.undecodable`, refused as `held`
+    ///   ([`zenkey_model::wire::Refusal::Held`]). [`Consumer::get_answer`]
+    ///   counts every held stamp so, since its GETs carry none.
+    /// - **The omission rule** reads the mutation each GET named as held by
+    ///   the caller: heard before the GET, and heard again once its
+    ///   unchanged answer arrives. A complete snapshot that lists no entry
+    ///   for it drops it as it drops any member, in `answer.omitted`; an
+    ///   unchanged answer that arrives after that finds nothing held, and
+    ///   the key is in [`ConditionalAnswer::read_again`].
+    ///
+    /// A held stamp carries no time and no confirmation: a reader that ages
+    /// a member from its GET (`freshness.v2` §2.6) asks with
+    /// [`Consumer::get_answer`].
+    pub async fn get_conditional(
+        &self,
+        resource: &str,
+        values: Option<&Bindings>,
+        held: &BTreeMap<String, zenkey_model::wire::Stamp>,
+        timeout: Duration,
+    ) -> Result<ConditionalAnswer> {
+        self.read_state(resource, values, held, timeout).await
+    }
+
+    /// [`Consumer::get_answer`] and [`Consumer::get_conditional`]: S4's
+    /// GETs, each carrying the held stamp `held` names for its one concrete
+    /// key, and their replies merged.
+    async fn read_state(
+        &self,
+        resource: &str,
+        values: Option<&Bindings>,
+        held: &BTreeMap<String, zenkey_model::wire::Stamp>,
+        timeout: Duration,
+    ) -> Result<ConditionalAnswer> {
         use zenkey_model::collection::{self, Heard, Page};
+        use zenkey_model::seed::{self, Asked, HeldRead, Unchanged};
         let r = self.resource(resource)?.clone();
         if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
             return Err(Error::Contract(format!("{resource:?} is not state")));
@@ -1837,13 +1904,39 @@ impl Consumer {
             collection::collection_at(&self.contract, key, page.coll)
                 .is_some_and(|c| c.token == r.token && c.template == r.template)
         };
+        // A conditional read's books (core 0.110 §4.2): the mutation each
+        // GET named, which the caller holds from before it; the keys whose
+        // owner answered unchanged; those among them whose mutation counts
+        // as heard again; and those the answer found nothing held for.
+        let mut named: BTreeMap<String, zenkey_model::wire::Stamp> = BTreeMap::new();
+        let mut unchanged = std::collections::BTreeSet::new();
+        let mut heard_again = std::collections::BTreeSet::new();
+        let mut read_again = std::collections::BTreeSet::new();
         for ke in selectors {
-            let rx = self
+            // One concrete key alone carries a held stamp: a collection has
+            // no single stamp.
+            let carried = held
+                .get(ke.as_str())
+                .copied()
+                .filter(|_| seed::is_concrete(ke.as_str()));
+            let asked_key = ke.as_str().to_owned();
+            let asked = Asked {
+                key: &asked_key,
+                held: carried,
+            };
+            let mut get = self
                 .session
                 .get(ke)
                 .target(zenoh::query::QueryTarget::All)
                 .consolidation(zenoh::query::ConsolidationMode::None)
-                .timeout(timeout)
+                .timeout(timeout);
+            if let Some(stamp) = carried {
+                named.insert(asked_key.clone(), stamp);
+                get = get
+                    .payload(zenkey_model::wire::HeldStamp::new(stamp).write())
+                    .encoding(zenoh::bytes::Encoding::ZENOH_BYTES);
+            }
+            let rx = get
                 .with(flume::unbounded::<zenoh::query::Reply>())
                 .await
                 .map_err(zenoh)?;
@@ -1854,6 +1947,45 @@ impl Consumer {
                 };
                 let key = sample.key_expr().as_str().to_owned();
                 if key.contains('*') {
+                    continue;
+                }
+                // A held stamp (core §7.5): the owner's answer only as a
+                // reply to the GET that carried the same one, on its one
+                // concrete key. Any other establishes nothing, `held`.
+                // Either way it merges nothing.
+                if let Some(h) = crate::inband::held(&sample) {
+                    if asked.read(true, &key, h.stamp) == HeldRead::Refused {
+                        undecodable.insert(
+                            key,
+                            crate::inband::Undecodable::Envelope(
+                                zenkey_model::wire::Refusal::Held(h.stamp),
+                            ),
+                        );
+                        continue;
+                    }
+                    // What the reader holds for the member by now: a value
+                    // another reply of this GET brought, else the mutation
+                    // it named, unless a snapshot's omission dropped it.
+                    let now = match at.get(&key).and_then(|&i| out[i].as_ref()) {
+                        Some(c) => match StateAnswer::mark_in(&inband, c) {
+                            Some(seed::Mark::InBand(s)) => seed::Held::InBand(s),
+                            Some(seed::Mark::Zenoh(z)) => seed::Held::Stamped(z),
+                            None => seed::Held::Unstamped,
+                        },
+                        None => named
+                            .get(&key)
+                            .map_or(seed::Held::Nothing, |s| seed::Held::InBand(*s)),
+                    };
+                    match seed::unchanged(now, h.stamp) {
+                        Unchanged::HeardAgain => {
+                            heard_again.insert(key.clone());
+                        }
+                        Unchanged::Stands => {}
+                        Unchanged::ReadAgain => {
+                            read_again.insert(key.clone());
+                        }
+                    }
+                    unchanged.insert(key);
                     continue;
                 }
                 // A snapshot's page: each entry read as the per-key reply
@@ -1994,22 +2126,35 @@ impl Consumer {
                 // every reply of this GET came after it was asked, so only a
                 // value of the snapshot's run at or below its asof drops.
                 let Some(i) = completed else { continue };
-                let held: Vec<(String, Option<zenkey_model::seed::Mark>)> = at
+                // And over the mutation a conditional read named, which
+                // its caller holds from before the GET: heard after it only
+                // once its unchanged answer came (core 0.110 §4.2).
+                let held: Vec<(String, Option<zenkey_model::seed::Mark>, bool)> = at
                     .iter()
                     .filter_map(|(k, &j)| {
                         let c = out[j].as_ref()?;
-                        Some((k.clone(), StateAnswer::mark_in(&inband, c)))
+                        Some((k.clone(), StateAnswer::mark_in(&inband, c), true))
                     })
+                    .chain(
+                        named
+                            .iter()
+                            .filter(|(k, _)| !at.contains_key(*k))
+                            .map(|(k, s)| {
+                                let mark = Some(seed::Mark::InBand(*s));
+                                (k.clone(), mark, heard_again.contains(k))
+                            }),
+                    )
                     .collect();
                 let drop: Vec<String> = collection::omit(
                     &self.contract,
                     &snapshots[i].key,
                     &pages[i],
-                    held.iter().map(|(k, m)| zenkey_model::seed::HeldMember {
-                        key: k,
-                        mark: *m,
-                        heard_after: true,
-                    }),
+                    held.iter()
+                        .map(|(k, m, heard_after)| zenkey_model::seed::HeldMember {
+                            key: k,
+                            mark: *m,
+                            heard_after: *heard_after,
+                        }),
                 )
                 .into_iter()
                 .map(str::to_owned)
@@ -2033,6 +2178,7 @@ impl Consumer {
                     inband.remove(k);
                     tags.remove(k);
                     confirmations.remove(k);
+                    named.remove(k);
                 }
                 omitted[i].extend(drop);
             }
@@ -2040,15 +2186,19 @@ impl Consumer {
         // A snapshot held incomplete may lack members: a page lost, or a
         // GET that reached its timeout.
         let complete = complete && snapshots.iter().all(Heard::complete);
-        Ok(StateAnswer {
-            current: out.into_iter().flatten().collect(),
-            complete,
-            inband,
-            tags,
-            undecodable,
-            snapshots,
-            confirmations,
-            omitted,
+        Ok(ConditionalAnswer {
+            answer: StateAnswer {
+                current: out.into_iter().flatten().collect(),
+                complete,
+                inband,
+                tags,
+                undecodable,
+                snapshots,
+                confirmations,
+                omitted,
+            },
+            unchanged,
+            read_again,
         })
     }
 

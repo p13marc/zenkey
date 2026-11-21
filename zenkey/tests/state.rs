@@ -2463,3 +2463,820 @@ async fn s5_an_archive_drops_what_the_owners_complete_snapshot_omits() {
         .expect("a stands");
     assert_eq!(lk.value.as_deref(), Some(&b"pa2"[..]));
 }
+
+// --- §16: a conditional read (core 0.110, #986's J1) ------------------------
+
+/// What a GET's reply carried, as core §7.5 reads a state GET's reply.
+#[derive(Debug, PartialEq, Eq)]
+enum Got {
+    /// A held stamp: the reply's whole payload.
+    Held(InBand),
+    /// A snapshot's page.
+    Page(zenkey::model::collection::Page),
+    /// A per-key resource's reply: the bytes its put carried.
+    Put(InBand, Vec<u8>),
+}
+
+/// P's GET of `selector`, `All` + `None`, carrying `payload` under its
+/// `Encoding` when given: each reply's key and what it carried, with the
+/// replies as they arrived. Asked again until an owner answers (#1028):
+/// nothing the owner holds moves meanwhile, and no step leaves a GET
+/// unanswered.
+async fn get_carrying(
+    p: &zenoh::Session,
+    selector: &str,
+    payload: Option<(Vec<u8>, Encoding)>,
+) -> (Vec<(String, Got)>, Vec<Sample>) {
+    let deadline = tokio::time::Instant::now() + common::SETTLE;
+    loop {
+        let mut get = p
+            .get(selector)
+            .target(QueryTarget::All)
+            .consolidation(ConsolidationMode::None)
+            .timeout(T);
+        if let Some((bytes, encoding)) = payload.clone() {
+            get = get.payload(bytes).encoding(encoding);
+        }
+        let rx = get.await.unwrap();
+        let mut raw = Vec::new();
+        while let Ok(r) = rx.recv_async().await {
+            if let Ok(smp) = r.into_result() {
+                raw.push(smp);
+            }
+        }
+        if raw.is_empty() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no owner answered {selector}"
+            );
+            continue;
+        }
+        let got = raw
+            .iter()
+            .map(|smp| {
+                assert_eq!(smp.encoding().to_string(), "zenoh/bytes");
+                let bytes = smp.payload().to_bytes();
+                let got = match wire::read_get_reply(&bytes).expect("a reply §7.5 reads") {
+                    wire::GetReply::Held(h) => {
+                        assert_eq!(h.write(), &*bytes, "a held stamp is the whole payload");
+                        Got::Held(h.stamp)
+                    }
+                    wire::GetReply::Page(_) => Got::Page(
+                        zenkey::model::collection::Page::parse(&bytes).expect("a page reads"),
+                    ),
+                    wire::GetReply::Other(e) => Got::Put(e.stamp, e.record.to_vec()),
+                };
+                (smp.key_expr().as_str().to_owned(), got)
+            })
+            .collect();
+        return (got, raw);
+    }
+}
+
+/// A held stamp as a GET carries it: its bytes, under `zenoh/bytes`.
+fn held(stamp: InBand) -> Option<(Vec<u8>, Encoding)> {
+    Some((wire::HeldStamp::new(stamp).write(), Encoding::ZENOH_BYTES))
+}
+
+/// One reply on the plan's key: the plan's snapshot, one page under `run`
+/// whose one entry has the empty id, `stamp` and `record` (its own run
+/// stated only where it is not the header's).
+#[track_caller]
+fn assert_plan(got: &[(String, Got)], run: Run, stamp: InBand, record: &str, step: &str) {
+    assert_eq!(got.len(), 1, "{step}: one reply, {got:?}");
+    assert_eq!(got[0].0, ORIGIN, "{step}: on the plan's key");
+    let Got::Page(p) = &got[0].1 else {
+        panic!("{step}: the plan's snapshot, not {:?}", got[0].1);
+    };
+    assert_eq!((p.index, p.more), (0, false), "{step}: one page");
+    assert_eq!(p.run, run, "{step}: the header's run");
+    assert!(p.tombs.is_empty(), "{step}: {p:?}");
+    assert_eq!(p.live.len(), 1, "{step}: one entry, {p:?}");
+    let e = &p.live[0];
+    assert_eq!(e.id, "", "{step}: the empty id");
+    assert_eq!(e.run.unwrap_or(p.run), stamp.run, "{step}: the entry's run");
+    assert_eq!(e.seq, stamp.seq, "{step}: the entry's seq");
+    assert_eq!(e.record, record.as_bytes(), "{step}: the record");
+}
+
+/// One reply on the plan's key: the held stamp `stamp`, and no snapshot.
+#[track_caller]
+fn assert_held(got: &[(String, Got)], stamp: InBand, step: &str) {
+    assert_eq!(got.len(), 1, "{step}: one reply, {got:?}");
+    assert_eq!(got[0].0, ORIGIN, "{step}: on the plan's key");
+    assert_eq!(got[0].1, Got::Held(stamp), "{step}: the held stamp alone");
+}
+
+/// One reply on the plan's key: a snapshot of no entry under `run`.
+#[track_caller]
+fn assert_no_entry(got: &[(String, Got)], run: Run, step: &str) {
+    assert_eq!(got.len(), 1, "{step}: one reply, {got:?}");
+    assert_eq!(got[0].0, ORIGIN, "{step}: on the plan's key");
+    let Got::Page(p) = &got[0].1 else {
+        panic!("{step}: a snapshot, not {:?}", got[0].1);
+    };
+    assert_eq!(p.run, run, "{step}: the header's run");
+    assert!(p.live.is_empty() && p.tombs.is_empty(), "{step}: {p:?}");
+}
+
+/// §16's owner: `plans/vehicle-01` and §1's `status`, a per-key resource,
+/// under a 16-bit run from the record at `path`, with W 2 s.
+async fn conditional_owner(
+    s: &zenoh::Session,
+    path: &std::path::Path,
+) -> (Service, StateWriter, StateWriter) {
+    let mut cfg = config("ground/fleet-mgr");
+    cfg.tombstone_window_s = Some(2);
+    let mut b = ServiceBuilder::new(s, cfg);
+    b.run_store(Arc::new(FileRunStore::new(path))).unwrap();
+    b.implement(imp("mission_plan.v1")).unwrap();
+    b.implement(status_v1()).unwrap();
+    let status = b
+        .declare_state_writer(
+            &"status.v1".parse().unwrap(),
+            "state/status",
+            &Bindings::new(),
+        )
+        .await
+        .unwrap();
+    let plan = b
+        .declare_state_writer(&plan(), "state/plans/{vehicle}", &vehicle("vehicle-01"))
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    (svc, plan, status)
+}
+
+/// §16 steps 1 to 8, the owner's answer (core 0.110 §4.2, "A conditional
+/// read"; §7.5, "The held stamp"), on a real session through a router: a
+/// member read of one concrete key that names the member's last mutation
+/// is answered with the held stamp alone, the 6 bytes P sent; every other
+/// GET whole, never refused and never left unanswered: after a put, for
+/// another seq, run or width, for a payload that is no held stamp (a byte
+/// after it, tag 5, a mutation's envelope, 5 bytes, `application/json`, no
+/// byte), over a wildcard, as a collection read, on a per-key resource,
+/// after a delete (the tombstone's stamp answered alone within W, a
+/// snapshot of no entry after it) and across two restarts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_a_conditional_read_is_answered_by_the_held_stamp_alone() {
+    const W: Duration = Duration::from_secs(2);
+    let (_r1, ep) = router(None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fleet-mgr.run");
+    let p = client(&ep).await;
+    let s = client(&ep).await;
+    let (svc, w, status_w) = conditional_owner(&s, &path).await;
+    let v1 = w.put("v1").await.unwrap();
+    let r = v1.stamp.run;
+    let Run::U16(n) = r else {
+        panic!("a 16-bit run, not {r:?}");
+    };
+    let at = |seq: zenkey::model::wire::Seq| InBand { run: r, seq };
+    let next = |seq: zenkey::model::wire::Seq| {
+        zenkey::model::wire::Seq::new(seq.get() + 1).expect("a seq")
+    };
+
+    // 1. Plain.
+    let (got, _) = get_carrying(&p, ORIGIN, None).await;
+    assert_plan(&got, r, v1.stamp, "v1", "1");
+
+    // 2. Unchanged: the 6 bytes P sent, `0xe0`, R and s1, and no snapshot.
+    let sent = wire::HeldStamp::new(v1.stamp).write();
+    let (got, raw) = get_carrying(&p, ORIGIN, held(v1.stamp)).await;
+    assert_held(&got, v1.stamp, "2");
+    let mut bytes = vec![0xe0];
+    bytes.extend_from_slice(&n.to_be_bytes());
+    bytes.extend_from_slice(&v1.stamp.seq.get().to_be_bytes()[1..]);
+    assert_eq!(sent, bytes, "2: CH, the run and the seq");
+    assert_eq!(
+        &*raw[0].payload().to_bytes(),
+        &bytes[..],
+        "2: the bytes sent"
+    );
+    assert_eq!(raw[0].kind(), SampleKind::Put);
+    assert_eq!(raw[0].timestamp(), None, "2: no Zenoh timestamp");
+
+    // 3. Changed.
+    let v2 = w.put("v2").await.unwrap();
+    let (got, _) = get_carrying(&p, ORIGIN, held(v1.stamp)).await;
+    assert_plan(&got, r, v2.stamp, "v2", "3, with (R, s1)");
+    let (got, _) = get_carrying(&p, ORIGIN, held(v2.stamp)).await;
+    assert_held(&got, v2.stamp, "3, with (R, s2)");
+
+    // 4. Another stamp: another run, R's value at 32 bits, the next seq.
+    for (what, stamp) in [
+        (
+            "another run",
+            InBand {
+                run: Run::U16(n ^ 0x4000),
+                seq: v2.stamp.seq,
+            },
+        ),
+        (
+            "R's value as a 32-bit run",
+            InBand {
+                run: Run::U32(u32::from(n)),
+                seq: v2.stamp.seq,
+            },
+        ),
+        ("(R, s2 + 1)", at(next(v2.stamp.seq))),
+    ] {
+        let (got, _) = get_carrying(&p, ORIGIN, held(stamp)).await;
+        assert_plan(&got, r, v2.stamp, "v2", &format!("4, {what}"));
+    }
+
+    // 5. No held stamp: each answered whole, none refused, none unanswered.
+    let s2 = wire::HeldStamp::new(v2.stamp).write();
+    let trailing = [&s2[..], &[0][..]].concat();
+    let mut tagged = s2.clone();
+    tagged[0] |= 5;
+    let mutation = Envelope::mutation(wire::Tag::NONE, v2.stamp, &[]).write();
+    let bytes = |b: Vec<u8>| Some((b, Encoding::ZENOH_BYTES));
+    for (what, payload) in [
+        ("one byte after it", bytes(trailing)),
+        ("tag 5", bytes(tagged)),
+        ("a mutation's envelope", bytes(mutation)),
+        ("its first 5 bytes", bytes(s2[..5].to_vec())),
+        (
+            "under application/json",
+            Some((s2.clone(), Encoding::APPLICATION_JSON)),
+        ),
+        ("no byte", bytes(Vec::new())),
+    ] {
+        let (got, _) = get_carrying(&p, ORIGIN, payload).await;
+        assert_plan(&got, r, v2.stamp, "v2", &format!("5, {what}"));
+    }
+
+    // 6. Other GETs: no held stamp answers any of the three.
+    let (got, _) = get_carrying(&p, &format!("{PLANS}/*"), held(v2.stamp)).await;
+    assert_plan(&got, r, v2.stamp, "v2", "6, plans/*");
+    let (got, _) = get_carrying(&p, &format!("{PLANS}/**"), held(v2.stamp)).await;
+    assert_eq!(got.len(), 1, "6, plans/**: {got:?}");
+    assert_eq!(got[0].0, PLANS, "6: the collection's snapshot, on its key");
+    let Got::Page(page) = &got[0].1 else {
+        panic!("6: the collection's snapshot, not {:?}", got[0].1);
+    };
+    assert_eq!(page.live.len(), 1, "6: {page:?}");
+    assert_eq!(
+        (page.live[0].id.as_str(), page.live[0].seq),
+        ("vehicle-01", v2.stamp.seq)
+    );
+    let one = status_w.put("one").await.unwrap();
+    let status = "zk2/ground/fleet-mgr/status.v1/state/status";
+    let (got, raw) = get_carrying(&p, status, held(one.stamp)).await;
+    assert_eq!(got.len(), 1, "6, status: {got:?}");
+    assert_eq!(got[0].0, status);
+    assert_eq!(
+        got[0].1,
+        Got::Put(one.stamp, b"one".to_vec()),
+        "6: a per-key resource's reply is the put's bytes"
+    );
+    assert_eq!(
+        raw[0].timestamp().map(|t| t.get_id().to_string()),
+        Some(s.zid().to_string()),
+        "6: with their Zenoh timestamp"
+    );
+
+    // 7. A delete. Within W: the tombstone for (R, s2), the held stamp
+    //    alone for (R, s3). After W: a snapshot of no entry.
+    let del = w.delete().await.unwrap();
+    let deleted = tokio::time::Instant::now();
+    let (got, _) = get_carrying(&p, ORIGIN, held(v2.stamp)).await;
+    let (again, _) = get_carrying(&p, ORIGIN, held(del.stamp)).await;
+    assert!(
+        deleted.elapsed() < W,
+        "7: both GETs within W, or the step judges nothing"
+    );
+    assert_eq!(got.len(), 1, "7, with (R, s2): {got:?}");
+    assert_eq!(got[0].0, ORIGIN);
+    let Got::Page(page) = &got[0].1 else {
+        panic!("7: a snapshot, not {:?}", got[0].1);
+    };
+    assert!(page.live.is_empty(), "7: {page:?}");
+    assert_eq!(page.tombs.len(), 1, "7: one tombstone, {page:?}");
+    assert_eq!(
+        (page.tombs[0].id.as_str(), page.tombs[0].seq),
+        ("", del.stamp.seq),
+        "7: at s3"
+    );
+    assert_held(&again, del.stamp, "7, with (R, s3) within W");
+    let after = common::eventually_some("7: the tombstone leaves the window", || async {
+        let (got, _) = get_carrying(&p, ORIGIN, held(del.stamp)).await;
+        matches!(&got[0].1, Got::Page(_)).then_some(got)
+    })
+    .await;
+    assert!(deleted.elapsed() >= W, "7: never before W");
+    assert_no_entry(&after, r, "7, with (R, s3) after W");
+
+    // 8. A restart. The plan again, v3 at s4; the second instance, under
+    //    R2, puts it again at t1; the third, under R3, puts nothing.
+    let v3 = w.put("v3").await.unwrap();
+    let (got, _) = get_carrying(&p, ORIGIN, None).await;
+    assert_plan(&got, r, v3.stamp, "v3", "8, plain");
+    drop((w, status_w));
+    svc.close().await.unwrap();
+    s.close().await.unwrap();
+
+    let s = client(&ep).await;
+    let (svc, w, status_w) = conditional_owner(&s, &path).await;
+    let again = w.put("v3").await.unwrap();
+    let r2 = again.stamp.run;
+    assert_eq!(r2, Run::U16(n + 1), "8: a new run");
+    let (got, _) = get_carrying(&p, ORIGIN, held(v3.stamp)).await;
+    assert_plan(&got, r2, again.stamp, "v3", "8, with (R, s4)");
+    drop((w, status_w));
+    svc.close().await.unwrap();
+    s.close().await.unwrap();
+
+    let s = client(&ep).await;
+    let (svc, _w, _status_w) = conditional_owner(&s, &path).await;
+    let (got, _) = get_carrying(&p, ORIGIN, held(again.stamp)).await;
+    assert_no_entry(&got, Run::U16(n + 2), "8, with (R2, t1)");
+    svc.close().await.unwrap();
+}
+
+/// What a GET carried: its payload and its `Encoding`, none for a GET
+/// with no payload.
+type Carried = Option<(Vec<u8>, String)>;
+
+/// §16's played owner (steps 9 and 10): a session of the test's own on the
+/// fleet manager's state keys, which answers each GET with the next
+/// payloads of its script, in order, on the GET's key, and keeps what each
+/// GET carried.
+struct Played {
+    _queryable: zenoh::query::Queryable<()>,
+    script: Arc<Mutex<std::collections::VecDeque<Vec<Vec<u8>>>>>,
+    carried: Arc<Mutex<Vec<Carried>>>,
+}
+
+impl Played {
+    async fn new(s: &zenoh::Session) -> Self {
+        let script: Arc<Mutex<std::collections::VecDeque<Vec<Vec<u8>>>>> = Arc::default();
+        let carried: Arc<Mutex<Vec<Carried>>> = Arc::default();
+        let (next, seen) = (Arc::clone(&script), Arc::clone(&carried));
+        let queryable = s
+            .declare_queryable("zk2/ground/fleet-mgr/mission_plan.v1/state/**")
+            .complete(true)
+            .callback(move |q| {
+                let Some(answers) = next.lock().unwrap().pop_front() else {
+                    return;
+                };
+                seen.lock().unwrap().push(q.payload().map(|b| {
+                    (
+                        b.to_bytes().to_vec(),
+                        q.encoding().map(ToString::to_string).unwrap_or_default(),
+                    )
+                }));
+                for answer in answers {
+                    q.reply(q.key_expr().clone(), answer)
+                        .encoding(Encoding::ZENOH_BYTES)
+                        .wait()
+                        .expect("a reply");
+                }
+            })
+            .await
+            .unwrap();
+        Self {
+            _queryable: queryable,
+            script,
+            carried,
+        }
+    }
+
+    /// The next GET is answered with `payloads`, one reply each, in order.
+    fn answers(&self, payloads: Vec<Vec<u8>>) {
+        self.script.lock().unwrap().push_back(payloads);
+    }
+
+    /// What the last GET answered carried: its payload and `Encoding`.
+    fn last(&self) -> Carried {
+        self.carried.lock().unwrap().last().cloned().flatten()
+    }
+}
+
+/// The plan's snapshot as an owner under run `run` answers it: one page,
+/// its one entry `record` at `seq`, as of that seq.
+fn plan_page(run: Run, seq: u32, record: &str) -> Vec<u8> {
+    use zenkey::model::collection::{Confirmation, Entry, Snapshot, Time};
+    let seq = zenkey::model::wire::Seq::new(seq).expect("a seq");
+    let snapshot = Snapshot {
+        tag: wire::Tag::NONE,
+        run,
+        asof: seq,
+        time: Time::Known { s: 3600, ms: 250 },
+        coll: 0,
+        live: vec![Entry {
+            id: String::new(),
+            run: None,
+            seq,
+            confirmation: Confirmation::None,
+            record: record.as_bytes().to_vec(),
+        }],
+        tombs: Vec::new(),
+    };
+    snapshot.paginate(1024).expect("a page")[0]
+        .write()
+        .expect("a page writes")
+}
+
+/// What §16's consumer holds for its plan: each key's record under its
+/// stamp, a value accepted by §4.3's consumer rule ([`ValueOrder`]).
+#[derive(Default)]
+struct Holds {
+    order: ValueOrder,
+    plan: BTreeMap<String, (InBand, Vec<u8>)>,
+}
+
+impl Holds {
+    /// Merges a read's answer: each value the consumer rule accepts. A
+    /// held stamp brought none.
+    fn merge(&mut self, answer: &StateAnswer) {
+        for c in &answer.current {
+            let Current::Value { key, sample } = c else {
+                panic!("no deletion in §16's steps 9 and 10: {c:?}");
+            };
+            let mark = answer.mark(c).expect("an in-band stamp");
+            if self.order.accept_mark(key, mark) {
+                let stamp = answer.inband[key];
+                self.plan
+                    .insert(key.clone(), (stamp, sample.payload().to_bytes().to_vec()));
+            }
+        }
+    }
+
+    /// The held stamp of each member held: what a conditional read sends.
+    fn stamps(&self) -> BTreeMap<String, InBand> {
+        self.plan
+            .iter()
+            .map(|(k, (s, _))| (k.clone(), *s))
+            .collect()
+    }
+
+    #[track_caller]
+    fn assert_plan(&self, stamp: InBand, record: &str, step: &str) {
+        assert_eq!(self.plan.len(), 1, "{step}: its plan, once");
+        assert_eq!(
+            self.plan.get(ORIGIN),
+            Some(&(stamp, record.as_bytes().to_vec())),
+            "{step}"
+        );
+    }
+}
+
+/// One read of the consumer's plan, the played owner answering `payloads`:
+/// with the held stamps `stamps` (a conditional read), or plain with none.
+/// Asked again until a reply arrives (#1028): the played owner's queryable
+/// reaches the consumer's session some time after it is declared, and under
+/// load a GET can end at its timeout before the reply, which is no answer.
+async fn played_read(
+    owner: &Played,
+    c: &Consumer,
+    payloads: Vec<Vec<u8>>,
+    stamps: Option<BTreeMap<String, InBand>>,
+) -> zenkey::state::ConditionalAnswer {
+    let stamps = stamps.unwrap_or_default();
+    common::eventually_some("the played owner's answer arrives", || async {
+        owner.script.lock().unwrap().clear();
+        owner.answers(payloads.clone());
+        let got = c
+            .get_conditional("state/plans/{vehicle}", None, &stamps, T)
+            .await
+            .unwrap();
+        let answered = !(got.unchanged.is_empty()
+            && got.answer.current.is_empty()
+            && got.answer.undecodable.is_empty()
+            && got.answer.snapshots.is_empty());
+        answered.then_some(got)
+    })
+    .await
+}
+
+/// §16 steps 9 and 10, the consumer's merge (core 0.110 §4.2, "A held
+/// stamp in answer", "What unchanged says", "A snapshot in answer"), on a
+/// real session against a played owner. Its conditional read carries the
+/// held stamp of the mutation it holds, 6 bytes under `zenoh/bytes`. The
+/// held stamp it sent, in answer, merges nothing and counts nothing
+/// undecodable; a snapshot in answer is accepted, the mutation it held kept
+/// once, a newer one taken. A held stamp that differs from the one its GET
+/// carried, and one in reply to a GET that carried none, are each counted
+/// undecodable, refused as `held`, and merge nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_a_consumer_reads_a_held_stamp_as_unchanged_only_in_answer() {
+    let (_r1, ep) = router(None).await;
+    let played = client(&ep).await;
+    let owner = Played::new(&played).await;
+    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let r = Run::U16(5);
+    let at = |seq: u32| InBand {
+        run: r,
+        seq: zenkey::model::wire::Seq::new(seq).expect("a seq"),
+    };
+    let stamp_bytes = |seq: u32| wire::HeldStamp::new(at(seq)).write();
+    // One read, the played owner answering `payload`.
+    let read = |payload: Vec<u8>, stamps: Option<BTreeMap<String, InBand>>| {
+        played_read(&owner, &c, vec![payload], stamps)
+    };
+    let mut holds = Holds::default();
+    let seed = read(plan_page(r, 7, "v1"), None).await;
+    assert_eq!(owner.last(), None, "a seed's GET carries no payload");
+    assert!(seed.unchanged.is_empty());
+    holds.merge(&seed.answer);
+    holds.assert_plan(at(7), "v1", "the seed");
+
+    // 9, first read: the held stamp (R, 7) in answer.
+    let got = read(stamp_bytes(7), Some(holds.stamps())).await;
+    assert_eq!(
+        owner.last(),
+        Some((vec![0xe0, 0, 5, 0, 0, 7], "zenoh/bytes".to_owned())),
+        "9: the read carries the held stamp of the mutation held"
+    );
+    assert_eq!(
+        got.unchanged.iter().collect::<Vec<_>>(),
+        [ORIGIN],
+        "9: unchanged"
+    );
+    assert!(got.read_again.is_empty());
+    assert!(
+        got.answer.current.is_empty(),
+        "9: a held stamp merges nothing"
+    );
+    assert!(got.answer.undecodable.is_empty(), "9: nothing undecodable");
+    assert!(got.answer.complete);
+    holds.merge(&got.answer);
+    holds.assert_plan(at(7), "v1", "9, after the first read");
+
+    // 9, second read: the plan's snapshot, v1 at seq 7, as an owner that
+    // reads no payload answers.
+    let got = read(plan_page(r, 7, "v1"), Some(holds.stamps())).await;
+    assert_eq!(owner.last().map(|(b, _)| b), Some(stamp_bytes(7)));
+    assert!(got.unchanged.is_empty(), "9: a snapshot is no held stamp");
+    assert_eq!(got.answer.inband.get(ORIGIN), Some(&at(7)));
+    assert!(got.answer.undecodable.is_empty());
+    assert!(got.answer.omitted.iter().all(Vec::is_empty), "{got:?}");
+    holds.merge(&got.answer);
+    holds.assert_plan(at(7), "v1", "9, after the second read: held once");
+
+    // 9, third read: the plan's snapshot, v2 at seq 9.
+    let got = read(plan_page(r, 9, "v2"), Some(holds.stamps())).await;
+    assert_eq!(owner.last().map(|(b, _)| b), Some(stamp_bytes(7)));
+    assert!(got.unchanged.is_empty());
+    assert!(got.answer.undecodable.is_empty());
+    holds.merge(&got.answer);
+    holds.assert_plan(at(9), "v2", "9, after the third read");
+
+    // 10. A held stamp that differs from the one the GET carried, then one
+    //     in reply to a GET that carried none: each `held`, nothing merged.
+    let got = read(stamp_bytes(8), Some(holds.stamps())).await;
+    assert_eq!(owner.last().map(|(b, _)| b), Some(stamp_bytes(9)));
+    assert!(got.unchanged.is_empty(), "10: (R, 8) answers no (R, 9)");
+    assert!(got.answer.current.is_empty());
+    assert_eq!(
+        got.answer.undecodable.get(ORIGIN).map(|u| u.token()),
+        Some("held"),
+        "10: counted undecodable, refused as held"
+    );
+    holds.merge(&got.answer);
+    holds.assert_plan(at(9), "v2", "10, after (R, 8)");
+
+    let got = read(stamp_bytes(9), None).await;
+    assert_eq!(owner.last(), None, "10: a plain read carries no payload");
+    assert!(
+        got.unchanged.is_empty(),
+        "10: it answers no GET that carried none"
+    );
+    let got = got.answer;
+    assert!(got.current.is_empty());
+    assert_eq!(
+        got.undecodable.get(ORIGIN).map(|u| u.token()),
+        Some("held"),
+        "10: a held stamp answers no GET that carried none"
+    );
+    holds.merge(&got);
+    holds.assert_plan(at(9), "v2", "10, after a held stamp unasked for");
+}
+
+/// A snapshot of no entry on the plan's key, under `run` as of `asof`: an
+/// instance's word that the member had no value.
+fn no_entry_page(run: Run, asof: u32) -> Vec<u8> {
+    use zenkey::model::collection::{Snapshot, Time};
+    let snapshot = Snapshot {
+        tag: wire::Tag::NONE,
+        run,
+        asof: zenkey::model::wire::Seq::new(asof).expect("a seq"),
+        time: Time::Known { s: 3600, ms: 250 },
+        coll: 0,
+        live: Vec::new(),
+        tombs: Vec::new(),
+    };
+    snapshot.paginate(1024).expect("a page")[0]
+        .write()
+        .expect("a page writes")
+}
+
+/// Core 0.110 §4.2, "What unchanged says", where two instances answer one
+/// conditional read (`seed/held.json`'s cases 23 and 24, on a real
+/// session). Unchanged first: the mutation the read named counts as heard
+/// again, so the other run's snapshot of no entry spares it. The snapshot
+/// first: it drops a value held from before the GET, the answer then finds
+/// nothing held, and the consumer is told to read again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_conditional_read_beside_another_instances_snapshot_of_no_entry() {
+    let (_r1, ep) = router(None).await;
+    let played = client(&ep).await;
+    let owner = Played::new(&played).await;
+    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let held = InBand {
+        run: Run::U16(5),
+        seq: zenkey::model::wire::Seq::new(7).expect("a seq"),
+    };
+    let stamps: BTreeMap<String, InBand> = [(ORIGIN.to_owned(), held)].into();
+    let unchanged = wire::HeldStamp::new(held).write();
+    let other = no_entry_page(Run::U16(6), 3);
+
+    let got = played_read(
+        &owner,
+        &c,
+        vec![unchanged.clone(), other.clone()],
+        Some(stamps.clone()),
+    )
+    .await;
+    assert_eq!(got.unchanged.iter().collect::<Vec<_>>(), [ORIGIN]);
+    assert!(got.read_again.is_empty(), "heard again, then spared");
+    assert_eq!(got.answer.snapshots.len(), 1);
+    assert!(got.answer.snapshots[0].complete());
+    assert!(got.answer.omitted.iter().all(Vec::is_empty), "{got:?}");
+    assert!(got.answer.undecodable.is_empty());
+
+    let got = played_read(&owner, &c, vec![other, unchanged], Some(stamps)).await;
+    assert_eq!(got.unchanged.iter().collect::<Vec<_>>(), [ORIGIN]);
+    assert_eq!(
+        got.answer.omitted,
+        [vec![ORIGIN.to_owned()]],
+        "the snapshot of no entry drops what the caller held from before the GET"
+    );
+    assert_eq!(
+        got.read_again.iter().collect::<Vec<_>>(),
+        [ORIGIN],
+        "the answer finds nothing held: read again, with no held stamp"
+    );
+    assert!(got.answer.current.is_empty());
+}
+
+/// An owner black box (`zenkey/examples/owner.rs`, built at any revision)
+/// run as a process, a client of the router at `ep`: its standard output
+/// line by line, and its standard input. Killed when dropped.
+struct BlackBox {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    lines: flume::Receiver<String>,
+}
+
+impl BlackBox {
+    fn spawn(binary: &str, args: &[&str]) -> Self {
+        use std::io::BufRead;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(binary)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap_or_else(|e| panic!("{binary}: {e}"));
+        let stdin = child.stdin.take().expect("its standard input");
+        let stdout = child.stdout.take().expect("its standard output");
+        let (say, lines) = flume::unbounded();
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(stdout)
+                .lines()
+                .map_while(Result::ok)
+            {
+                if say.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            child,
+            stdin,
+            lines,
+        }
+    }
+
+    /// Its next line, within [`common::SETTLE`].
+    async fn line(&self) -> String {
+        tokio::time::timeout(common::SETTLE, self.lines.recv_async())
+            .await
+            .expect("a line from the owner")
+            .expect("the owner is running")
+    }
+
+    /// One command, and its answer.
+    async fn ask(&mut self, command: &str) -> String {
+        use std::io::Write;
+        writeln!(self.stdin, "{command}").expect("the owner reads its standard input");
+        self.line().await
+    }
+}
+
+impl Drop for BlackBox {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Compatibility (core 0.110 §4.2, "An owner built before this version
+/// reads no payload on a state GET. It answers every conditional read
+/// whole."; "A snapshot in answer"): a consumer's conditional read of an
+/// owner that predates the held stamp is answered with the member's
+/// snapshot, and the consumer accepts it, the mutation it held kept once.
+/// So is a raw GET carrying the member's own held stamp, another seq, or
+/// bytes that are no held stamp.
+///
+/// The owner is a black box built before #986's J1, named by
+/// `ZK2_OWNER_BEFORE_0_110` (`zk blackbox` at such a revision; the lane's
+/// is `/srv/dev/scratch/zenkey/bin/547d202a/owner`), so the test runs only
+/// where one is at hand:
+///
+/// ```text
+/// ZK2_OWNER_BEFORE_0_110=<path> cargo nextest run -p zenkey --test state \
+///     --run-ignored only -E 'test(built_before_core_0_110)'
+/// ```
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs an owner black box built before core 0.110: ZK2_OWNER_BEFORE_0_110=<path>"]
+async fn an_owner_built_before_core_0_110_answers_a_conditional_read_whole() {
+    let binary = std::env::var("ZK2_OWNER_BEFORE_0_110")
+        .expect("ZK2_OWNER_BEFORE_0_110 names an owner black box built before core 0.110");
+    let (_r1, ep) = router(None).await;
+    let contract = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/contracts/mission_plan.v1.toml");
+    let mut owner = BlackBox::spawn(
+        &binary,
+        &[
+            "--connect",
+            &ep,
+            "ground/fleet-mgr",
+            &contract.display().to_string(),
+        ],
+    );
+    assert_eq!(owner.line().await, format!("connected {ep}"));
+    assert!(owner.line().await.starts_with("ready "), "the owner is up");
+    assert_eq!(
+        owner
+            .ask("put mission_plan.v1 state/plans/{vehicle} vehicle-01")
+            .await,
+        format!("put {ORIGIN}")
+    );
+
+    // The consumer's seed, then its conditional read with the stamp it
+    // holds: a snapshot in answer, accepted, the same mutation.
+    let (_ex, c) = executor(&client(&ep).await, true).await;
+    let mut holds = Holds::default();
+    let seed = answer(&c, None).await;
+    holds.merge(&seed);
+    let (stamp, record) = holds.plan[ORIGIN].clone();
+    let got = common::eventually_some("the owner answers the conditional read", || async {
+        let got = c
+            .get_conditional("state/plans/{vehicle}", None, &holds.stamps(), T)
+            .await
+            .unwrap();
+        (!got.answer.current.is_empty()).then_some(got)
+    })
+    .await;
+    assert!(got.unchanged.is_empty(), "it sends no held stamp: {got:?}");
+    assert!(got.answer.undecodable.is_empty(), "{got:?}");
+    assert!(got.answer.complete);
+    assert_eq!(got.answer.snapshots.len(), 1, "the member's snapshot");
+    assert!(got.answer.snapshots[0].complete());
+    assert_eq!(got.answer.inband.get(ORIGIN), Some(&stamp));
+    holds.merge(&got.answer);
+    assert_eq!(
+        holds.plan.get(ORIGIN),
+        Some(&(stamp, record.clone())),
+        "the mutation it held, once"
+    );
+
+    // Raw, what the owner sends for each payload: the member's snapshot.
+    let p = client(&ep).await;
+    let its_own = wire::HeldStamp::new(stamp).write();
+    let another = wire::HeldStamp::new(InBand {
+        run: stamp.run,
+        seq: zenkey::model::wire::Seq::new(stamp.seq.get() + 1).expect("a seq"),
+    })
+    .write();
+    for (what, payload) in [
+        ("no payload", None),
+        ("its member's own held stamp", Some(its_own)),
+        ("another seq", Some(another)),
+        ("bytes that are no held stamp", Some(b"junk".to_vec())),
+    ] {
+        let payload = payload.map(|b| (b, Encoding::ZENOH_BYTES));
+        let (got, _) = get_carrying(&p, ORIGIN, payload).await;
+        assert_plan(
+            &got,
+            stamp.run,
+            stamp,
+            std::str::from_utf8(&record).expect("the example's record is text"),
+            what,
+        );
+    }
+}

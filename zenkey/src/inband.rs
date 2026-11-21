@@ -59,6 +59,15 @@
 //! and refused anywhere else ([`Undecodable::Framed`]); a mutation on a
 //! frame resource has no reading ([`Undecodable::Mutation`]).
 //!
+//! **A held stamp** (core 0.110 §7.5, §4.2; #986's J1): a snapshot's
+//! envelope with no byte after its seq is a held stamp, never a page cut
+//! short. [`read`] refuses it as `held` ([`Refusal::Held`], or `tag` where
+//! its tag is not 0): no reader of a subscription, an archive's alignment
+//! or a re-read sent one, so it answers nothing there. The consumer's
+//! conditional read ([`crate::consumer::Consumer::get_conditional`]) takes it
+//! first ([`held`]) and reads it as unchanged only where it answers the GET
+//! that carried the same one.
+//!
 //! **A snapshot's page** (#977's E2): only a GET's reply carries one (core
 //! §7.5), and the parser cannot tell how a put came. So [`read`] reads its
 //! body either way, and a reader of a GET's replies — the consumer's state
@@ -250,6 +259,21 @@ pub fn read(sample: Sample) -> Read {
     };
     if form == wire::Form::Snapshot {
         use zenkey_model::collection::PageRefusal;
+        // A snapshot's envelope with no byte after its seq is a held
+        // stamp, never a page (core 0.110 §7.5): here it answers no GET
+        // this reader knows of, so it is refused `held`, and `tag` where
+        // its tag is not 0. A conditional read's reader takes it first
+        // ([`held`]), and compares it with the one its GET carried.
+        match wire::read_get_reply(&sample.payload().to_bytes()) {
+            Ok(wire::GetReply::Held(h)) => {
+                return Read::Refused {
+                    sample,
+                    refusal: Refusal::Held(h.stamp),
+                };
+            }
+            Err(refusal @ Refusal::HeldTag(_)) => return Read::Refused { sample, refusal },
+            _ => {}
+        }
         // `envelope` parsed this envelope as a snapshot's; a refusal of it
         // here is the envelope's, never a panic on network input
         // (review-bot on #1078).
@@ -608,10 +632,33 @@ pub fn stamp(sample: &Sample) -> Option<wire::Stamp> {
 }
 
 /// Whether a sample is a snapshot's page (core §7.5's form 7), read
-/// without stripping it: no mutation, whatever it carries.
+/// without stripping it: no mutation, whatever it carries. A held stamp is
+/// form 7 too ([`held`]): [`read`] refuses it.
 #[must_use]
 pub fn is_snapshot(sample: &Sample) -> bool {
     matches!(envelope(sample), Some(Ok((_, wire::Form::Snapshot))))
+}
+
+/// The held stamp a sample carries (core 0.110 §7.5, "A held stamp on a
+/// reply"; #986's J1): a put under `zenoh/bytes` on a `state` or `@state`
+/// key whose payload is a snapshot's envelope with no byte after its seq,
+/// and tag 0. `None` for every other sample, a page and a held stamp whose
+/// tag is not 0 among them, which [`read`] reads.
+///
+/// The bytes say what it is, never what it answers: only the reader of the
+/// GET that drew it knows the held stamp that GET carried
+/// (`zenkey_model::seed::Asked::read`). Every other reader, a subscription
+/// among them, gets it from [`read`] refused as `held`
+/// ([`Refusal::Held`]).
+#[must_use]
+pub fn held(sample: &Sample) -> Option<wire::HeldStamp> {
+    if !is_snapshot(sample) {
+        return None;
+    }
+    match wire::read_get_reply(&sample.payload().to_bytes()) {
+        Ok(wire::GetReply::Held(h)) => Some(h),
+        _ => None,
+    }
 }
 
 /// The per-key replies a snapshot's page stands for (#977's E2; core 0.97

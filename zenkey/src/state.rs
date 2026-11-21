@@ -1121,6 +1121,13 @@ impl Store {
     ///   its own key; a concrete key at no member, a snapshot of no entry
     ///   there.
     ///
+    /// - **A conditional read** (core 0.110): a member read of one concrete
+    ///   key whose payload carries a held stamp, where the member's last
+    ///   mutation carries exactly that stamp, is answered with the held
+    ///   stamp alone, one reply on the member's key
+    ///   ([`Store::held_answer`]). Every other GET is answered as one with
+    ///   no payload.
+    ///
     /// A snapshot is under `minter`'s run and asof ([`Minter::as_of`]), at
     /// a time minted as it is built. Each live entry of a collection with a
     /// horizon carries its confirmation: 1 while its bit is set, else 2 with
@@ -1160,6 +1167,16 @@ impl Store {
                 .strip_prefix(root)
                 .is_some_and(|r| r.starts_with('/'))
         };
+        // A conditional read (core 0.110 §4.2): the held stamp alone, where
+        // the member's last mutation carries exactly the stamp the GET
+        // names. Every other GET is answered whole, below.
+        if let Some(held) = Self::held_answer(q, &collections, &map) {
+            let _ = q
+                .reply(qk.to_owned(), held.write())
+                .encoding(Encoding::ZENOH_BYTES)
+                .wait();
+            return;
+        }
         // Per key: a per-key resource's members alone (#977's E4).
         for (key, e) in map.iter() {
             if !under_root(key) || !qk.intersects(key) {
@@ -1210,6 +1227,48 @@ impl Store {
                 self.reply_pages(q, qk.as_str(), &snapshot(qk.as_str(), &[]));
             }
         }
+    }
+
+    /// The held stamp that alone answers `q`, a conditional read (core
+    /// 0.110 §4.2, "A conditional read"; #986's J1), or `None` where the
+    /// owner answers whole: [`zenkey_model::collection::answers_held`] over
+    /// the query's payload and `Encoding`, and the stamp a snapshot would
+    /// list for the member at the query's one concrete key, its last put's
+    /// or its delete's within the window (`map` holds no older tombstone
+    /// by now).
+    ///
+    /// The SHOULD is followed wherever it applies. Whole, as the MUST NOT
+    /// says: a wildcard selector (a collection read among them), a key of a
+    /// per-key resource, a key no exposed collection holds (not answered
+    /// at all), no member held, another stamp, and a payload §7.5 refuses,
+    /// another `Encoding` among them. A live member whose bytes are no
+    /// envelope is listed by no snapshot, so it answers no held stamp.
+    fn held_answer(
+        q: &Query,
+        collections: &[Arc<Answered>],
+        map: &HashMap<OwnedKeyExpr, Entry>,
+    ) -> Option<wire::HeldStamp> {
+        use zenkey_model::collection::{StateRead, answers_held};
+        let payload = q.payload()?.to_bytes();
+        let qk: &zenoh::key_expr::keyexpr = q.key_expr();
+        let read = if qk.is_wild() {
+            StateRead::Wildcard
+        } else if collections.iter().find(|c| c.holds(qk.as_str()))?.per_key {
+            StateRead::PerKey
+        } else {
+            StateRead::Member
+        };
+        let encoding = q
+            .encoding()
+            .map_or_else(|| wire::ENCODING.to_owned(), ToString::to_string);
+        let last = map
+            .get(qk)
+            .filter(|e| match &e.value {
+                Some((bytes, _)) => wire::Envelope::parse(bytes).is_ok(),
+                None => true,
+            })
+            .map(|e| e.stamped.stamp);
+        answers_held(read, &encoding, Some(&payload), last)
     }
 
     /// The snapshot of `c` on `key`, the snapshot key or a member's, of
@@ -2025,6 +2084,33 @@ pub struct StateAnswer {
     /// [`StateAnswer::snapshots`]: members it held, from this GET's other
     /// replies, that the snapshot lists neither live nor as a tombstone.
     pub omitted: Vec<Vec<String>>,
+}
+
+/// A conditional read's answer (core 0.110 §4.2, "A conditional read";
+/// #986's J1): what [`crate::consumer::Consumer::get_conditional`] returns.
+/// Not a [`StateGet`]: an owner that answers unchanged sends no value, so
+/// `answer.current` is empty for the key, which is neither silence nor the
+/// owner's word that the member has no value.
+#[derive(Debug, Clone, Default)]
+pub struct ConditionalAnswer {
+    /// Everything the GETs' replies merged to, as
+    /// [`crate::consumer::Consumer::get_answer`] returns it: each snapshot
+    /// in answer, read as any member read's. A held stamp that answers no
+    /// GET of this read is in its `undecodable`, refused as `held`. Its
+    /// `omitted` also names a member the caller held, by the stamp its GET
+    /// carried, that a complete snapshot of this read dropped.
+    pub answer: StateAnswer,
+    /// Each key whose owner answered the held stamp its GET carried: when
+    /// it answered, the member's last mutation was the one the caller
+    /// named. The caller keeps what it holds, unless `answer.current` holds
+    /// a value for the key, which stands, or [`Self::read_again`] names it.
+    pub unchanged: std::collections::BTreeSet<String>,
+    /// Among [`Self::unchanged`], each key the answer found nothing held
+    /// for: another instance's complete snapshot of no entry had dropped
+    /// the mutation the caller named, before the answer came. The GET gave
+    /// no value: the caller holds nothing for the key, and reads it again
+    /// with no held stamp.
+    pub read_again: std::collections::BTreeSet<String>,
 }
 
 /// A snapshot's live entry's confirmation, as a GET reader reads it
