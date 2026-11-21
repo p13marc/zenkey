@@ -76,7 +76,13 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         );
     }
     let namespace = dep.namespace().to_owned();
-    let face = zk2::FaceScope::of(&across, &contracts, &namespace, zk2::Reads::Samples)?;
+    let face = zk2::FaceScope::of_given(
+        &across,
+        &contracts,
+        &namespace,
+        zk2::Reads::Samples,
+        !catalogs.is_empty(),
+    )?;
     let dep = match &face {
         Some(f) => f.deployment(dep),
         None => dep,
