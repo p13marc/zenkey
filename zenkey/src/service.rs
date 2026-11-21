@@ -995,6 +995,13 @@ impl ServiceBuilder {
                 self.implement(crate::heartbeat::implementation())?;
             }
             self.expose(&fv2, crate::heartbeat::HEARTBEAT)?;
+            // Revision 1.1's owner heartbeat key is optional, and this
+            // owner sends heartbeats alone (v2 §3; #1110's H3 sends one).
+            let owner = crate::heartbeat::OWNER_HEARTBEATS;
+            let hb = find(&self.impls, &fv2)?;
+            if !hb.exposed.contains(owner) && !hb.unavailable.contains_key(owner) {
+                self.unavailable(&fv2, owner, Cause::Build, None)?;
+            }
         }
         Ok(self)
     }
@@ -2091,8 +2098,10 @@ impl Service {
         // timing.v1 §2.6: ε, the binding's.
         .with_clock_bound(b.clock_bound_ms.map(std::time::Duration::from_millis))
         .with_declaring(declaring)
-        // Core §8.6: the deployment's epoch, its catalog's.
-        .with_deployment_epoch(self.deployment_epoch()))
+        // Core §8.6: the deployment's epoch, its catalog's, and the
+        // catalog it reads an owner heartbeat's indices through.
+        .with_deployment_epoch(self.deployment_epoch())
+        .with_catalogs(self.catalog.as_deref().into_iter().cloned()))
     }
 
     fn exposed(&self, iface: &IfaceId, resource: &str) -> Result<zenkey_model::contract::Resource> {

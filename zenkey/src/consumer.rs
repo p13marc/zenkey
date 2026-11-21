@@ -81,7 +81,7 @@ use zenkey_model::authoring::Kind;
 use zenkey_model::contract::{Body, Contract, Resource};
 use zenkey_model::freshness::{
     Applied, ClockMeasure, ClockTrust, Horizon, Judged, Last, Observation, SectionRead, StampAge,
-    View,
+    View, Views,
 };
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, ZkKey, parse};
 use zenkey_model::packed::Layout;
@@ -348,6 +348,10 @@ pub struct Consumer {
     /// The face its providers sit across (core §8.1, §8.5;
     /// [`Consumer::across`]). `None`: no face.
     far: Option<zenkey_model::link::FarSide>,
+    /// The deployment catalogs it holds (core §8.6): what it reads an
+    /// owner heartbeat's indices through. None: every group it hears is
+    /// refused `unknown_catalog`, and confirms nothing.
+    catalogs: Arc<Vec<zenkey_model::catalog::Catalog>>,
 }
 
 /// How long a re-read waits unless [`Consumer::with_reread_timeout`] says
@@ -387,13 +391,20 @@ struct Seen {
     /// reader's clock from.
     clocks: Mutex<BTreeMap<String, ClockMeasure>>,
     /// For a collection, each provider's view as heartbeats confirm it
-    /// (#978's F2).
-    views: Mutex<BTreeMap<Addr, View<Instant>>>,
-    /// Heartbeats folded into a view, and heartbeats heard that could not
-    /// be: another revision's tag, a body refused, a sample on the
-    /// heartbeat key that is no heartbeat.
+    /// (#978's F2), behind a sequence per owner heartbeat key (#1110).
+    views: Mutex<BTreeMap<Addr, Views<Instant>>>,
+    /// Heartbeats folded into a view, a group read for the interface
+    /// among them, and those heard that could not be: another revision's
+    /// tag, a body or a group refused, a sample on a heartbeat key that is
+    /// no heartbeat.
     heartbeats: AtomicU64,
     heartbeats_unread: AtomicU64,
+    /// Owner heartbeats read on a class key, whatever became of their
+    /// groups (`freshness.v2` §2.5).
+    owner_heartbeats: AtomicU64,
+    /// The catalog each provider names, and the owner heartbeats waiting
+    /// for one to be read.
+    named: Mutex<Named>,
     /// The providers whose collection a re-read is running for, and the
     /// re-reads that replaced a view (`freshness.v2` §2.5).
     rereading: Mutex<std::collections::BTreeSet<Addr>>,
@@ -424,10 +435,18 @@ pub struct Confirmation {
 /// a heartbeat was lost before it. Both are the reader's word: a
 /// divergence says the reader's view and the owner's digest differ, no
 /// finding about the owner (§5).
+///
+/// An owner heartbeat is read as one heartbeat per group (#1110): each
+/// group read for the subscription's interface is one of these, `group`
+/// naming it, `heartbeat` the class key's stamp and `lost` that key's gap.
 #[derive(Debug, Clone)]
 pub struct HeartbeatRead {
     pub provider: Addr,
-    /// The heartbeat key's run and seq.
+    /// For a group of an owner heartbeat, the class its key names and the
+    /// group's index in the owner's catalog; `None` for a heartbeat.
+    pub group: Option<OwnerGroup>,
+    /// The heartbeat key's run and seq: the interface's own key's, or the
+    /// owner heartbeat key's.
     pub heartbeat: zenkey_model::wire::Stamp,
     /// Read in the subscriber's callback, on this host's monotonic clock.
     pub arrival: Instant,
@@ -438,6 +457,44 @@ pub struct HeartbeatRead {
     pub lost: bool,
     /// What its section did to the collection.
     pub section: HeartbeatSection,
+}
+
+/// The group of an owner heartbeat a [`HeartbeatRead`] is (core §7.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OwnerGroup {
+    /// The class of the owner heartbeat key it rode.
+    pub class: zenkey_model::heartbeat::Class,
+    /// Its covered revision's index in the owner's catalog.
+    pub index: u16,
+}
+
+/// The catalog each bound provider names in its descriptor, as last read
+/// for a run, and how many owner heartbeats wait behind such a read.
+#[derive(Default)]
+struct Named {
+    by: BTreeMap<
+        Addr,
+        (
+            zenkey_model::wire::Run,
+            Option<zenkey_model::catalog::CatalogId>,
+        ),
+    >,
+    pending: usize,
+}
+
+impl Named {
+    /// What `addr` names under `run`, where a read said: `Some(None)` for
+    /// an owner that names no catalog.
+    fn of(
+        &self,
+        addr: &Addr,
+        run: zenkey_model::wire::Run,
+    ) -> Option<Option<zenkey_model::catalog::CatalogId>> {
+        self.by
+            .get(addr)
+            .filter(|(r, _)| *r == run)
+            .map(|(_, named)| *named)
+    }
 }
 
 /// What a heartbeat's section did to a followed collection
@@ -461,6 +518,30 @@ struct Followed {
     /// Whether it is a per-key resource (core §4.2): only then is a
     /// `reply_del` on its member an owner's answer (#977's E4).
     per_key: bool,
+}
+
+impl Followed {
+    /// The collection's class: the owner heartbeat key that confirms it
+    /// (`freshness.v2` §2.4).
+    fn class(&self) -> zenkey_model::heartbeat::Class {
+        self.layout.collections[self.index].class
+    }
+
+    /// One provider's view of the collection, in `views`, made when it is
+    /// first heard of.
+    fn view_in<'a>(
+        &self,
+        views: &'a mut BTreeMap<Addr, Views<Instant>>,
+        addr: &Addr,
+    ) -> &'a mut View<Instant> {
+        let vs = views.entry(addr.clone()).or_default();
+        if vs.view(&self.layout.iface).is_none() {
+            let mut v = View::new(self.layout.clone());
+            v.follow(self.index);
+            vs.insert(v);
+        }
+        vs.view_mut(&self.layout.iface).expect("just inserted")
+    }
 }
 
 impl Consumer {
@@ -506,6 +587,7 @@ impl Consumer {
             reread_timeout: REREAD_TIMEOUT,
             epoch: zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
             far: None,
+            catalogs: Arc::default(),
         })
     }
 
@@ -576,11 +658,35 @@ impl Consumer {
         self
     }
 
-    /// Reads under `catalog`'s epoch ([`Consumer::with_deployment_epoch`]): a tool's,
-    /// given the deployment's catalog.
+    /// Reads under `catalog`'s epoch ([`Consumer::with_deployment_epoch`]),
+    /// and an owner heartbeat's indices through it
+    /// ([`Consumer::with_catalogs`]): a tool's, given the deployment's
+    /// catalog.
     #[must_use]
     pub fn with_catalog(self, catalog: &zenkey_model::catalog::Catalog) -> Self {
         self.with_deployment_epoch(catalog.epoch())
+            .with_catalogs([catalog.clone()])
+    }
+
+    /// Holds `catalogs` (core §8.6), in place of any held: an owner
+    /// heartbeat's group is read through the one its owner's descriptor
+    /// names among them, or a successor of it (core §7.5; `freshness.v2`
+    /// §2.5). Where no descriptor reaches this consumer, as across a
+    /// constrained face, the last one given is the deployment's word. The
+    /// epoch stays [`Consumer::with_deployment_epoch`]'s.
+    #[must_use]
+    pub fn with_catalogs(
+        mut self,
+        catalogs: impl IntoIterator<Item = zenkey_model::catalog::Catalog>,
+    ) -> Self {
+        self.catalogs = Arc::new(catalogs.into_iter().collect());
+        self
+    }
+
+    /// The catalogs it reads an owner heartbeat's indices through.
+    #[must_use]
+    pub fn catalogs(&self) -> &[zenkey_model::catalog::Catalog] {
+        &self.catalogs
     }
 
     /// The deployment epoch its typed reads count `time` fields from.
@@ -939,8 +1045,15 @@ impl Consumer {
             .and(zenkey_model::link::redeclare_horizon(&self.contract, &r));
         let heartbeats = match &followed {
             Some(f) => {
-                self.heartbeat_subscribers(f, &seen, on_confirm, redeclaring.as_ref())
-                    .await?
+                let on_confirm = Arc::new(on_confirm);
+                let mut subs = self
+                    .heartbeat_subscribers(f, &seen, &on_confirm, redeclaring.as_ref())
+                    .await?;
+                subs.extend(
+                    self.owner_heartbeat_subscribers(f, &seen, &on_confirm, redeclaring.as_ref())
+                        .await?,
+                );
+                subs
             }
             None => Vec::new(),
         };
@@ -1086,11 +1199,7 @@ impl Consumer {
                     .insert(key.to_owned(), (now, deleted));
                 if let Some(f) = &followed {
                     let mut views = seen.views.lock().expect("not poisoned");
-                    let view = views.entry(addr.clone()).or_insert_with(|| {
-                        let mut v = View::new(f.layout.clone());
-                        v.follow(f.index);
-                        v
-                    });
+                    let view = f.view_in(&mut views, &addr);
                     if deleted {
                         view.delete(key, inband, now);
                     } else {
@@ -1172,7 +1281,7 @@ impl Consumer {
         &self,
         f: &Arc<Followed>,
         seen: &Arc<Seen>,
-        on_confirm: F,
+        on_confirm: &Arc<F>,
         redeclaring: Option<&crate::redeclare::Redeclaring>,
     ) -> Result<Vec<Subscriber<()>>>
     where
@@ -1181,7 +1290,6 @@ impl Consumer {
         let horizon = redeclaring.and(zenkey_model::link::redeclare_heartbeat_horizon(
             &self.contract,
         ));
-        let on_confirm = Arc::new(on_confirm);
         let rt = tokio::runtime::Handle::try_current().ok();
         let mut out = Vec::new();
         for p in &self.providers {
@@ -1195,7 +1303,7 @@ impl Consumer {
             let (f, seen, on_confirm, providers) = (
                 Arc::clone(f),
                 Arc::clone(seen),
-                Arc::clone(&on_confirm),
+                Arc::clone(on_confirm),
                 self.providers.clone(),
             );
             let iface = self.contract.iface.clone();
@@ -1222,11 +1330,7 @@ impl Consumer {
                 let body = sample.payload().to_bytes();
                 let (applied, owner_time, due) = {
                     let mut views = seen.views.lock().expect("not poisoned");
-                    let view = views.entry(addr.clone()).or_insert_with(|| {
-                        let mut v = View::new(f.layout.clone());
-                        v.follow(f.index);
-                        v
-                    });
+                    let view = f.view_in(&mut views, &addr);
                     let applied = view.apply(tag, stamp, &body, arrival);
                     (
                         applied,
@@ -1234,24 +1338,8 @@ impl Consumer {
                         view.reread_due().contains(&f.index),
                     )
                 };
-                // freshness.v2 §2.5: two divergences in a row, a
-                // re-read of the provider's collection, one at a
-                // time.
-                if due
-                    && let Some(rt) = &rt
-                    && seen
-                        .rereading
-                        .lock()
-                        .expect("not poisoned")
-                        .insert(addr.clone())
-                {
-                    rt.spawn(reread(
-                        session.clone(),
-                        Arc::clone(&f),
-                        Arc::clone(&seen),
-                        addr.clone(),
-                        timeout,
-                    ));
+                if due {
+                    reread_once(rt.as_ref(), &session, &f, &seen, &addr, timeout);
                 }
                 let (lost, sections) = match applied {
                     Applied::Read { gap, sections } => (gap, sections),
@@ -1271,12 +1359,130 @@ impl Consumer {
                 };
                 on_confirm(HeartbeatRead {
                     provider: addr,
+                    group: None,
                     heartbeat: stamp,
                     arrival,
                     owner_time,
                     lost,
                     section,
                 });
+            });
+            match (redeclaring, horizon) {
+                (Some(rd), Some(h)) => {
+                    rd.declare(ke, h, on_sample).await?;
+                }
+                _ => out.push(
+                    self.session
+                        .declare_subscriber(ke)
+                        .callback(move |sample: Sample| on_sample(sample))
+                        .await
+                        .map_err(zenoh)?,
+                ),
+            }
+        }
+        Ok(out)
+    }
+
+    /// One subscriber per bound provider on its owner heartbeat key of the
+    /// followed collection's class (`freshness.v2` §2.5, "Both forms"): a
+    /// provider confirms an interface by its heartbeat or by its owner
+    /// heartbeats, and a subscriber cannot tell which before it hears one.
+    /// Each owner heartbeat is read through the catalog its owner names
+    /// ([`crate::answer::owner_catalog`], read once a run on a task of the
+    /// subscription's, the owner heartbeats heard meanwhile kept in
+    /// order), and each group read for this interface handed to
+    /// `on_confirm` as one heartbeat.
+    ///
+    /// Through `redeclaring` across a face (core §8.5), each is declared
+    /// again after two of the key's horizons of silence: the shortest
+    /// among this contract's collections of the class.
+    async fn owner_heartbeat_subscribers<F>(
+        &self,
+        f: &Arc<Followed>,
+        seen: &Arc<Seen>,
+        on_confirm: &Arc<F>,
+        redeclaring: Option<&crate::redeclare::Redeclaring>,
+    ) -> Result<Vec<Subscriber<()>>>
+    where
+        F: Fn(HeartbeatRead) + Send + Sync + 'static,
+    {
+        let class = f.class();
+        let horizon = redeclaring.and(zenkey_model::link::redeclare_owner_heartbeat_horizon(
+            &self.contract,
+            class,
+        ));
+        let rt = tokio::runtime::Handle::try_current().ok();
+        let reader = Arc::new(OwnerReader {
+            f: Arc::clone(f),
+            seen: Arc::clone(seen),
+            on_read: Arc::clone(on_confirm),
+            held: Arc::clone(&self.catalogs),
+            session: self.session.clone(),
+            timeout: self.reread_timeout,
+            rt: rt.clone(),
+        });
+        // The owner heartbeats that wait for their owner's descriptor, read
+        // by one task, so they are applied in the order they arrived.
+        let waiting = rt.as_ref().map(|rt| {
+            let (tx, rx) = flume::unbounded::<OwnerBeat>();
+            rt.spawn(Arc::clone(&reader).wait(rx));
+            tx
+        });
+        let mut out = Vec::new();
+        for p in &self.providers {
+            let (sys, svc) = p.chunks();
+            let ke = OwnedKeyExpr::try_from(zenkey_model::heartbeat::owner_key(sys, svc, class))
+                .map_err(zenoh)?;
+            let (reader, waiting, providers) =
+                (Arc::clone(&reader), waiting.clone(), self.providers.clone());
+            let on_sample: crate::redeclare::Callback = Arc::new(move |sample: Sample| {
+                let arrival = Instant::now();
+                let unread = || {
+                    reader
+                        .seen
+                        .heartbeats_unread
+                        .fetch_add(1, Ordering::Relaxed)
+                };
+                // Core §7.5: the key says which layout a put carries.
+                let key = sample.key_expr().as_str().to_owned();
+                let Some((addr, on)) = zenkey_model::heartbeat::owner_class(&key) else {
+                    unread();
+                    return;
+                };
+                if on != class || !providers.iter().any(|p| p.matches(&addr)) {
+                    unread();
+                    return;
+                }
+                let crate::inband::Read::Heartbeat { sample, stamp, tag } =
+                    crate::inband::read(sample)
+                else {
+                    unread();
+                    return;
+                };
+                let beat = OwnerBeat {
+                    addr,
+                    class,
+                    key,
+                    stamp,
+                    tag,
+                    body: sample.payload().to_bytes().into_owned(),
+                    arrival,
+                };
+                let mut named = reader.seen.named.lock().expect("not poisoned");
+                match (named.of(&beat.addr, stamp.run), named.pending, &waiting) {
+                    // Its owner's catalog is known and none waits: read
+                    // here, under the lock that keeps the order.
+                    (Some(through), 0, _) => reader.apply(&beat, through),
+                    (_, _, Some(tx)) => {
+                        named.pending += 1;
+                        if tx.send(beat).is_err() {
+                            named.pending -= 1;
+                        }
+                    }
+                    // No runtime reads a descriptor: no catalog is named,
+                    // and no group is read (core §8.6, never a guess).
+                    (through, _, None) => reader.apply(&beat, through.flatten()),
+                }
             });
             match (redeclaring, horizon) {
                 (Some(rd), Some(h)) => {
@@ -2058,28 +2264,60 @@ impl Subscription {
                     Last::Put(now.saturating_duration_since(*at))
                 }
             });
-        let (heartbeat, gap) = self.view_of(key, |v| {
-            (
-                v.confirmed(key).map(|c| now.saturating_duration_since(c)),
-                v.gap(),
-            )
+        let heartbeat = self.view_of(key, |v| {
+            v.confirmed(key).map(|c| now.saturating_duration_since(c))
         });
         Observation::Subscribed {
             last: zenkey_model::freshness::confirmed_last(delivered, heartbeat),
             listened: self.listened(),
-            complete: !gap,
+            complete: !self.lost(key),
         }
+    }
+
+    /// The provider whose key `key` is.
+    fn provider_of(key: &str) -> Option<Addr> {
+        zenkey_model::heartbeat::base_relative(key).and_then(|k| match parse(k) {
+            Ok(ZkKey::Data { addr, .. }) => Some(addr),
+            _ => None,
+        })
     }
 
     /// `f` over the view of the provider whose key `key` is, or its
     /// defaults with none.
     fn view_of<R: Default>(&self, key: &str, f: impl FnOnce(&View<Instant>) -> R) -> R {
-        let addr = zenkey_model::heartbeat::base_relative(key).and_then(|k| match parse(k) {
-            Ok(ZkKey::Data { addr, .. }) => Some(addr),
-            _ => None,
-        });
         let views = self.seen.views.lock().expect("not poisoned");
-        addr.and_then(|a| views.get(&a)).map(f).unwrap_or_default()
+        let iface = self.followed.as_ref().map(|f| &f.layout.iface);
+        Self::provider_of(key)
+            .zip(iface)
+            .and_then(|(a, i)| views.get(&a)?.view(i))
+            .map(f)
+            .unwrap_or_default()
+    }
+
+    /// Whether `key`'s collection is read as a lost delivery
+    /// (`freshness.v2` §2.5): the last heartbeat on its provider's
+    /// heartbeat key followed a gap in that key's seqs, or the last owner
+    /// heartbeat on the provider's key of the collection's class did, and
+    /// a group on that key named the interface within the run. Until one
+    /// arrives in sequence on that key, or one of another run does.
+    #[must_use]
+    pub fn lost(&self, key: &str) -> bool {
+        let Some(f) = &self.followed else {
+            return false;
+        };
+        let views = self.seen.views.lock().expect("not poisoned");
+        Self::provider_of(key)
+            .and_then(|a| views.get(&a))
+            .is_some_and(|vs| vs.is_lost(&f.layout.iface, f.index))
+    }
+
+    /// Owner heartbeats read on a bound provider's key of the followed
+    /// collection's class, whatever became of their groups
+    /// (`freshness.v2` §2.5; #1110). A group read for this interface
+    /// counts among [`Subscription::heartbeats`].
+    #[must_use]
+    pub fn owner_heartbeats(&self) -> u64 {
+        self.seen.owner_heartbeats.load(Ordering::Relaxed)
     }
 
     /// The last heartbeat of `key`'s provider that vouched for it, with
@@ -2112,7 +2350,7 @@ impl Subscription {
             .lock()
             .expect("not poisoned")
             .get(provider)
-            .is_some_and(|v| !v.reread_due().is_empty())
+            .is_some_and(|vs| vs.iter().any(|v| !v.reread_due().is_empty()))
     }
 
     /// Per stamping clock (a stamp's id), what this subscription measured
@@ -2185,11 +2423,7 @@ impl Subscription {
         }
         let mut views = self.seen.views.lock().expect("not poisoned");
         for (addr, live) in by {
-            let view = views.entry(addr).or_insert_with(|| {
-                let mut v = View::new(f.layout.clone());
-                v.follow(f.index);
-                v
-            });
+            let view = f.view_in(&mut views, &addr);
             view.reread(
                 f.index,
                 live.iter().map(|(k, s)| (k.as_str(), *s)),
@@ -2218,6 +2452,204 @@ impl Subscription {
 fn confirmed_at(c: &crate::state::Confirmed, arrived: Instant) -> Option<Instant> {
     let before = c.before_snapshot()?;
     Some(arrived.checked_sub(before).unwrap_or(arrived))
+}
+
+/// Starts a re-read of `addr`'s collection after two divergences in a row
+/// (`freshness.v2` §2.5), unless one is running for it: one at a time.
+/// Nothing without a runtime to run it on.
+fn reread_once(
+    rt: Option<&tokio::runtime::Handle>,
+    session: &zenoh::Session,
+    f: &Arc<Followed>,
+    seen: &Arc<Seen>,
+    addr: &Addr,
+    timeout: Duration,
+) {
+    if let Some(rt) = rt
+        && seen
+            .rereading
+            .lock()
+            .expect("not poisoned")
+            .insert(addr.clone())
+    {
+        rt.spawn(reread(
+            session.clone(),
+            Arc::clone(f),
+            Arc::clone(seen),
+            addr.clone(),
+            timeout,
+        ));
+    }
+}
+
+/// One owner heartbeat as its subscriber heard it (core §7.5): the class
+/// key's stamp, CH's tag and the body, with its arrival.
+struct OwnerBeat {
+    addr: Addr,
+    class: zenkey_model::heartbeat::Class,
+    /// The key as heard, a namespace in front or none: where its owner's
+    /// descriptors are asked.
+    key: String,
+    stamp: zenkey_model::wire::Stamp,
+    tag: zenkey_model::wire::Tag,
+    body: Vec<u8>,
+    arrival: Instant,
+}
+
+/// What reads a subscription's owner heartbeats (`freshness.v2` §2.5):
+/// the views they confirm, the catalogs held, and the callback each group
+/// read for the interface is handed to.
+struct OwnerReader<F> {
+    f: Arc<Followed>,
+    seen: Arc<Seen>,
+    on_read: Arc<F>,
+    held: Arc<Vec<zenkey_model::catalog::Catalog>>,
+    session: zenoh::Session,
+    timeout: Duration,
+    rt: Option<tokio::runtime::Handle>,
+}
+
+impl<F> OwnerReader<F>
+where
+    F: Fn(HeartbeatRead) + Send + Sync + 'static,
+{
+    /// Reads the owner heartbeats that waited, in order: each through the
+    /// catalog its owner's descriptor names under its run, read once a
+    /// run (core §8.6).
+    /// - **No descriptor reaches the reader**, as across a constrained
+    ///   face: the deployment's word, the last catalog this consumer was
+    ///   given.
+    /// - **A read that failed** names none for this one alone, and the
+    ///   next owner heartbeat asks again: never a guess.
+    async fn wait(self: Arc<Self>, rx: flume::Receiver<OwnerBeat>) {
+        while let Ok(beat) = rx.recv_async().await {
+            let known = self
+                .seen
+                .named
+                .lock()
+                .expect("not poisoned")
+                .of(&beat.addr, beat.stamp.run);
+            let read = match known {
+                Some(_) => None,
+                None => Some(
+                    crate::answer::owner_catalog(
+                        &self.session,
+                        &beat.key,
+                        beat.stamp.run,
+                        self.timeout,
+                    )
+                    .await,
+                ),
+            };
+            let mut named = self.seen.named.lock().expect("not poisoned");
+            let through = match read {
+                None => known.flatten(),
+                Some(crate::answer::OwnerCatalog::Unread) => None,
+                Some(said) => {
+                    let through = match said {
+                        crate::answer::OwnerCatalog::Named(c) => c,
+                        _ => self.held.last().map(zenkey_model::catalog::Catalog::id),
+                    };
+                    named
+                        .by
+                        .insert(beat.addr.clone(), (beat.stamp.run, through));
+                    through
+                }
+            };
+            self.apply(&beat, through);
+            named.pending = named.pending.saturating_sub(1);
+        }
+    }
+
+    /// One owner heartbeat read into its provider's views, through the
+    /// catalog `named` (`None`: its owner names none, or none could be
+    /// read, so every group is refused `unknown_catalog`). Each group read
+    /// for the subscription's interface is handed over as one heartbeat.
+    fn apply(&self, beat: &OwnerBeat, named: Option<zenkey_model::catalog::CatalogId>) {
+        use zenkey_model::freshness::{Catalogs, GroupRead, OwnerApplied};
+        let (f, seen) = (&self.f, &self.seen);
+        let iface = &f.layout.iface;
+        let unread = || seen.heartbeats_unread.fetch_add(1, Ordering::Relaxed);
+        let (applied, owner_time, due) = {
+            let mut views = seen.views.lock().expect("not poisoned");
+            f.view_in(&mut views, &beat.addr);
+            let vs = views.get_mut(&beat.addr).expect("just made");
+            let applied = vs.apply_owner(
+                beat.class,
+                beat.tag,
+                beat.stamp,
+                &beat.body,
+                Catalogs {
+                    held: &self.held,
+                    named,
+                },
+                beat.arrival,
+            );
+            let view = vs.view(iface);
+            (
+                applied,
+                view.and_then(View::owner_time),
+                view.is_some_and(|v| v.reread_due().contains(&f.index)),
+            )
+        };
+        if due {
+            reread_once(
+                self.rt.as_ref(),
+                &self.session,
+                f,
+                seen,
+                &beat.addr,
+                self.timeout,
+            );
+        }
+        let (lost, groups) = match applied {
+            OwnerApplied::Read { gap, groups } => (gap, groups),
+            OwnerApplied::Older => return,
+            OwnerApplied::Refused(_) => {
+                unread();
+                return;
+            }
+        };
+        seen.owner_heartbeats.fetch_add(1, Ordering::Relaxed);
+        for g in groups {
+            let sections = match (&g.iface, g.read) {
+                // Its index was not read: it may have been this
+                // interface's, and confirmed nothing.
+                (None, _) => {
+                    unread();
+                    continue;
+                }
+                (Some(i), _) if i != iface => continue,
+                (_, GroupRead::NotFollowed) => continue,
+                (_, GroupRead::Revision | GroupRead::Refused(_)) => {
+                    unread();
+                    continue;
+                }
+                (_, GroupRead::Read(sections)) => sections,
+            };
+            seen.heartbeats.fetch_add(1, Ordering::Relaxed);
+            let section = match sections.get(f.index) {
+                Some(SectionRead::Confirmed(keys)) => HeartbeatSection::Confirmed(keys.clone()),
+                Some(SectionRead::Diverged) => HeartbeatSection::Diverged,
+                Some(SectionRead::Absent) => HeartbeatSection::Absent,
+                // The key is the followed collection's class's, so its
+                // section is never `OtherClass`.
+                Some(SectionRead::NotFollowed | SectionRead::OtherClass) | None => continue,
+            };
+            (self.on_read)(HeartbeatRead {
+                provider: beat.addr.clone(),
+                group: Some(OwnerGroup {
+                    class: beat.class,
+                    index: g.index,
+                }),
+                heartbeat: beat.stamp,
+                arrival: beat.arrival,
+                owner_time,
+                lost,
+                section,
+            });
+        }
+    }
 }
 
 /// The selector of `addr`'s members of the collection `f` follows: its
@@ -2363,7 +2795,10 @@ async fn reread(
         && !crate::presence::cut_off(&session).await;
     if complete {
         let mut views = seen.views.lock().expect("not poisoned");
-        if let Some(v) = views.get_mut(&addr) {
+        if let Some(v) = views
+            .get_mut(&addr)
+            .and_then(|vs| vs.view_mut(&f.layout.iface))
+        {
             // A member the complete snapshot left out leaves the view (core
             // §4.2's omission rule, freshness.v2 §2.5); what the
             // subscription heard since `asked` stands where newer.
