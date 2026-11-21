@@ -84,7 +84,13 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   fleet's `open_*_across` and floors the timeout at the face's
   `reply_timeout_ms`; the engine runs `zenkey_fleet::watchdog_across` with
   the narrowed selectors (`Engine::across`), so no presence is read for the
-  lens (`tests/refusals.rs`' `across_a_face_a_rule_is_narrowed_to_the_faces_scope_or_refused`). Sinks: `ntfy`,
+  lens (`tests/refusals.rs`' `across_a_face_a_rule_is_narrowed_to_the_faces_scope_or_refused`);
+  since #1110's H2c `across_face` passes whether the top-level `catalog`
+  gives one (`FaceScope::of_given`), so the scope holds the owner
+  heartbeat key that crosses the face (observer 0.34 §7.5;
+  `across_a_face_a_catalog_adds_the_link_owner_heartbeat_key`). zenwatch
+  reads no heartbeat's bytes itself: its alarm readers are the fleet's
+  book. Sinks: `ntfy`,
   `smtp`, `webhook`, `exec` — the one that runs code, deliberately last.
   **Secrets are env-var names or file paths, never inline**: a bare string
   in a secret position fails to parse. **The three states are preserved**

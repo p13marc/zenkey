@@ -81,7 +81,19 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   "diverged from this window's view" or absent at the latest, the reader's
   word; shots scenes `inspector-freshness` (`World::tick_samples`) and
   `inspector-freshness-quiet` (a member ticked before `connect`, then
-  heartbeats alone);
+  heartbeats alone); since #1110's H2c the book reads an owner heartbeat
+  too (`Book::owner_heartbeat`, the key saying the layout): on its class
+  key's own `Sequence` (`ClassKey`, `Book::of_class`: read, lost, unread,
+  the latest one's `GroupSeen`s), each group's index through
+  `Lens::owner_catalogs` and its sections by `Owner::group` on the view
+  of the interface the index names, made through `Lens::revision_held`
+  where none stands; a group it cannot read kept by its index, tag and
+  size with why (`unknown_catalog`, `unknown_index`, `not_held`, `tag`);
+  `HeartbeatRead::group`, `Section::OtherClass`; the Inspector's OWNER
+  HEARTBEATS section for a class key (`InspectorData::owner_heartbeats`,
+  `inspector::group_head`/`group_word`), and `Deployment::face_scope`
+  through `FaceScope::of_given` with whether catalogs are loaded; no
+  scene holds one yet, so no shot moved;
   the routers' zenoh (#1011): `--binding` (`Settings::binding`, launch
   only, `zenkey_model::link::Binding`) gives `Settings::routers`,
   `Routers::of_binding`, which the budget strip (`BudgetInputs::routers`:
