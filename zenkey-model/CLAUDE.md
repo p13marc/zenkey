@@ -417,8 +417,10 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   configuration, which states only its own pushes' wait. #988 L4 (core
   0.91): `budget::Routers` (lease, keep-alives, `wait_before_close`;
   `of(&link::Transport)`, `of_binding(Binding)` for a reader told its
-  binding and no policy, `stall_bound`, `presence_tail`, zenoh 1.10.1's
-  by default) is a window reader's word from the routers' face policy
+  binding and no policy (`Binding` is `Hash` and deserializes by its
+  policy name, for a tool's own configuration, any other string refused
+  with the names it could have been), `stall_bound`, `presence_tail`,
+  zenoh 1.10.1's by default) is a window reader's word from the routers' face policy
   (#1011's item 3); `link::FacePolicy::far_side(face)` → `FarSide`
   (`reply_timeout`, `at_least`, `redeclares` = `!arq`, `session_keys`,
   `silence` = `SILENT_HORIZONS` × horizon; `FarSideRefusal::{NotV2,
