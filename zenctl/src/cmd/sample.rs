@@ -98,13 +98,18 @@ impl Line {
             // sniffed, a refused one never is.
             use zenkey_fleet::model::inband;
             let read = inband::payload(key, encoding, &bytes);
-            let checked = (!delete).then(|| match read {
-                inband::Payload::Refused(refusal) => {
+            // Another form on a heartbeat's key, or no envelope there
+            // (core §7.5): refused `form`, never sniffed.
+            let no_heartbeat = inband::no_heartbeat(key, encoding, &read)
+                .map(|reason| inband::no_heartbeat_check(key, bytes.len(), reason));
+            let checked = (!delete).then(|| match (no_heartbeat, read) {
+                (Some(refused), _) => refused,
+                (None, inband::Payload::Refused(refusal)) => {
                     let r = inband::refused_rendering(key, bytes.len(), None, None, refusal);
                     let c = inband::refused_conformance(&r, refusal);
                     (r, c)
                 }
-                inband::Payload::Heartbeat { body, .. } => {
+                (None, inband::Payload::Heartbeat { body, .. }) => {
                     let r = PayloadRendering {
                         key: key.to_owned(),
                         size: body.len(),
@@ -126,7 +131,7 @@ impl Line {
                 }
                 // A snapshot's page (#977's E2): its header and counts,
                 // its body never sniffed.
-                inband::Payload::Snapshot { body, header, tag } => (
+                (None, inband::Payload::Snapshot { body, header, tag }) => (
                     PayloadRendering {
                         key: key.to_owned(),
                         size: body.len(),
@@ -143,7 +148,7 @@ impl Line {
                 ),
                 // A frame's body is never sniffed (observer §7.6): its
                 // envelope and size.
-                inband::Payload::Frame { body, stamp, .. } => (
+                (None, inband::Payload::Frame { body, stamp, .. }) => (
                     zenkey_fleet::model::frame::unread_rendering(
                         key,
                         Unresolved::DecodeNotAsked,
@@ -154,21 +159,23 @@ impl Line {
                         reason: Unresolved::DecodeNotAsked.words(),
                     },
                 ),
-                inband::Payload::Plain(record) | inband::Payload::Record { record, .. } => (
-                    PayloadRendering {
-                        key: key.to_owned(),
-                        size: record.len(),
-                        resource: None,
-                        rendered: Rendered::Structural {
-                            why: Unresolved::DecodeNotAsked,
-                            value: zenkey_fleet::structural_value(record),
-                            text: zenkey_fleet::structural(record),
+                (None, inband::Payload::Plain(record) | inband::Payload::Record { record, .. }) => {
+                    (
+                        PayloadRendering {
+                            key: key.to_owned(),
+                            size: record.len(),
+                            resource: None,
+                            rendered: Rendered::Structural {
+                                why: Unresolved::DecodeNotAsked,
+                                value: zenkey_fleet::structural_value(record),
+                                text: zenkey_fleet::structural(record),
+                            },
                         },
-                    },
-                    Conformance::NotChecked {
-                        reason: Unresolved::DecodeNotAsked.words(),
-                    },
-                ),
+                        Conformance::NotChecked {
+                            reason: Unresolved::DecodeNotAsked.words(),
+                        },
+                    )
+                }
             });
             return Line {
                 identity: lens.identity(key),
