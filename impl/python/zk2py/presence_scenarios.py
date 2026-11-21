@@ -89,6 +89,8 @@ EPOCH = REPO / "impl/python/interop/zk2py_epoch.v1.toml"
 THRUSTER = REPO / "examples/zk2/walkthrough/thruster.v1.toml"
 NAV = REPO / "examples/zk2/walkthrough/nav.v2.toml"
 HEALTH = REPO / "spec/profiles/health/health.v1.toml"
+FRESHNESS_V2 = REPO / "spec/profiles/freshness/freshness.v2.toml"
+BRINGUP_1 = REPO / "impl/python/interop/rev/zk2py_bringup.v1.toml"
 
 
 @dataclass
@@ -164,7 +166,10 @@ class Holder:
 
     def __init__(self, endpoint: str, address: str = "lab/owner", *, contracts: list[Path] | None = None,
                  namespace: str | None = None, remint: bool = False, tokenless: set[str] | None = None,
-                 flags: list[str] | None = None) -> None:
+                 flags: list[str] | None = None, held: list[Any] | None = None) -> None:
+        """``held``: zk2py's owner only, the contracts as it holds them
+        (:class:`zk2py.contract.Contract`), in place of ``contracts``' files:
+        a revision held as its bundle alone (:func:`zk2py.bundle.held`)."""
         from .contract import load_contract
         from .live_interop import Owner as RustOwner
         from .owner import Owner as PyOwner
@@ -178,6 +183,9 @@ class Holder:
         if self.kind == "rust":
             if namespace is not None:
                 raise NotPairable("the owner example takes no namespace option")
+            if held is not None:
+                raise NotPairable("the owner example takes contract files and its embedded bundles, never a "
+                                  "contract zk2py holds")
             extra = list(flags or [])
             if remint:
                 extra.append("--telemetry")
@@ -194,7 +202,8 @@ class Holder:
                 raise RuntimeError(f"the owner example did not start: {err}")
             self.key = ready.strip()
         else:
-            self.owner = PyOwner(self.system, self.service, [load_contract(p) for p in paths], connect=endpoint,
+            self.owner = PyOwner(self.system, self.service,
+                                 [load_contract(p) for p in paths] if held is None else held, connect=endpoint,
                                  namespace=namespace, tokenless=tokenless)
             self.owner.start()
             self.key = self.owner.instance_key
@@ -613,7 +622,9 @@ def _pure_consumer(endpoint: str, address: str) -> Holder | None:
 
 def section2(report: Report) -> None:
     """§2 steps 1, 3 and 4: the descriptor GET, and an owner whose required
-    role is bound to nothing, watched through R1, with its control."""
+    role is bound to nothing, watched through R1, with its control; step 8
+    (core 0.107, round 111): an owner implementing a revision from its
+    bundle alone (:func:`_section2_step8`)."""
     import zenoh
 
     from . import live
@@ -649,6 +660,7 @@ def section2(report: Report) -> None:
                              f"{len(d)} replies, {d[0].encoding if d else ''}, codes {codes}")
         finally:
             h.close()
+        _section2_step8(report, sec, ep, tool)
         # steps 3 and 4: thruster.v1's required role `cmd`, bound to nothing
         heard: list[str] = []
         sub, _ = live.watch_or_beside(tool, "zk2/vehicle-01/thrusters/@zk/**",
@@ -688,6 +700,210 @@ def section2(report: Report) -> None:
     finally:
         live.close(tool)
         r1.close()
+
+
+def _served(ep: str, tool: Any, h: "Holder", system: str) -> tuple[dict[str, Any] | None, bytes, str]:
+    """The descriptor ``h`` serves, as the reader under test reads it: the
+    document, its bytes as zk2py's GET took them (``b""`` for zenctl, which
+    prints the document, never its bytes), and what the read said."""
+    from . import live
+
+    if P.reader == "zenctl":
+        _wait(lambda: h.instance in _rows(_zenctl_list(ep, system=system)[1]), 5.0, 0.2)
+        rc, doc, err, _ = _zenctl_list(ep, system=system)
+        served = _rows(doc).get(h.instance, {}).get("descriptor", {})
+        d = served.get("descriptor")
+        return (d if isinstance(d, dict) else None), b"", f"zenctl rc {rc}, {served.get('answer')}; {err}"
+    _wait(lambda: bool(live.list_presence(tool, f"zk2/{h.address}/@zk/**").instances), 5.0)
+    d = live.get_descriptor(tool, h.key)
+    if len(d) != 1 or not d[0].ok:
+        return None, b"", f"{len(d)} replies"
+    return json.loads(d[0].payload), d[0].payload, f"one reply, {d[0].encoding}, {len(d[0].payload)} B"
+
+
+def _section2_step8(report: Report, sec: str, ep: str, tool: Any) -> None:
+    """§2 step 8 (core 0.107, §3.3): an owner implementing a revision from
+    its bundle alone states no ``minor``, and step 1's entries, from
+    authoring files, state each file's; the descriptor may leave out each
+    member that holds nothing, and a reader reads each as empty.
+
+    - **zk2py's owner** holds :data:`ECHO`'s revision as the bundle zk2py
+      builds from its file (:func:`zk2py.bundle.held`): the bytes it then
+      serves on the contract key.
+    - **The owner example** takes contract files. With ``--health`` and
+      no file it implements ``health.v1``, and ``freshness.v2``'s standard
+      interface beside it, at the fingerprints of the spec's files: it is
+      given no authoring file of either, so it is taken here as step 8's
+      owner, one that holds each revision as its build embeds it (a black
+      box: its usage names no file for them, and nothing here reads how it
+      holds them). Neither owner holds a capability or requires a role.
+
+    Beside it, core §9.8 at 0.107: that owner's revision next to a provider
+    of another revision of the interface, which states its file's minor, is
+    ordered by no minor."""
+    from . import bundle, live
+    from . import descriptor as dsc
+    from .compat import classify_pair
+    from .contract import load_contract
+
+    spec = REPO / "spec"
+    if P.owner == "rust":
+        files = [load_contract(HEALTH, spec_dir=spec), load_contract(FRESHNESS_V2, spec_dir=spec)]
+        h = Holder(ep, "lab/bundled", contracts=[], flags=["--health"])
+        what = "the owner example's --health, no contract file given"
+    else:
+        files = [load_contract(ECHO, spec_dir=spec)]
+        h = Holder(ep, "lab/bundled", held=[bundle.held(bundle.build(files[0]), files[0].fingerprint)])
+        what = "zk2py's owner, the bundle built from zk2py_echo.v1's file"
+    by_iface = {c.interface: c for c in files}
+    try:
+        doc, raw, how = _served(ep, tool, h, "lab")
+        entries = {e.get("iface"): e for e in (doc or {}).get("interfaces", [])}
+        report.check(sec, f"8. an owner implementing a revision from its bundle alone ({what}): its descriptor is "
+                          "read, valid for zk2py's checker against the files of the same revisions, and lists "
+                          f"{sorted(by_iface)}",
+                     doc is not None and sorted(entries) == sorted(by_iface)
+                     and dsc.check_descriptor(json.dumps(doc).encode(), files, spec) == []
+                     and all(entries[i].get("contract") == by_iface[i].fingerprint for i in by_iface),
+                     f"{how}; {sorted(entries)}; codes "
+                     f"{dsc.check_descriptor(json.dumps(doc).encode(), files, spec) if doc is not None else None}")
+        report.check(sec, "8. its entries state no `minor`, where each revision's authoring file states one "
+                          f"({', '.join(f'{i} {c.minor}' for i, c in sorted(by_iface.items()))}): a bundle keeps "
+                          "none (core §3.3, §9.5)",
+                     bool(entries) and not any("minor" in e for e in entries.values())
+                     and all(c.minor is not None for c in files),
+                     str({i: e.get("minor", "none") for i, e in entries.items()}))
+        left_out = [m for m in ("capabilities", "requires") if m not in (doc or {})] \
+            + sorted({m for e in entries.values() for m in ("unavailable", "cardinality") if m not in e})
+        empty = (doc or {}).get("capabilities", []) == [] and (doc or {}).get("requires", []) == [] \
+            and all(e.get("unavailable", []) == [] and e.get("cardinality", {}) == {} for e in entries.values())
+        report.check(sec, "8. it holds no capability and requires no role: `capabilities`, `requires`, and each "
+                          "entry's `unavailable` and `cardinality` read as empty, each left out (which the text "
+                          "lets an owner do, and does not ask of one within 1 KB)",
+                     doc is not None and empty and left_out == ["capabilities", "requires", "cardinality",
+                                                                "unavailable"],
+                     f"left out {left_out}; members {sorted(doc or {})}")
+        if raw:
+            z = dsc.size(raw)
+            report.check(sec, "8. its descriptor as served writes no empty member, and is within 1 KB",
+                         z.empty == [] and not z.over, f"{z.total} B, empty {z.empty}, members {z.members}")
+            # core §8.4: the bundle it serves is its revision's, and keeps no minor
+            got = {i: live.retrieve_bundle(tool, i, c.fingerprint) for i, c in by_iface.items()}
+            report.check(sec, "8. each revision's bundle is retrieved by the descriptor's fingerprint and verifies, "
+                              "and its contract holds no `minor` member (core §9.5)",
+                         all(g is not None and g.verified is not None and "minor" not in g.verified.contract
+                             for g in got.values()),
+                         str({i: (g is not None and g.verified is not None) for i, g in got.items()}))
+    finally:
+        h.close()
+    # step 1's entries, from authoring files: each file's minor, 1 among them
+    # so that a 0 written for want of one would show
+    paths = [ECHO, BRINGUP_1]
+    want = {c.interface: c.minor for c in (load_contract(q, spec_dir=spec) for q in paths)}
+    h = Holder(ep, "lab/filed", contracts=paths)
+    try:
+        doc, _, how = _served(ep, tool, h, "lab")
+        got_minors = {e.get("iface"): e.get("minor", "none") for e in (doc or {}).get("interfaces", [])}
+        report.check(sec, f"8. step 1's entries, from authoring files, state each file's `minor` ({want})",
+                     got_minors == want, f"{how}; {got_minors}")
+    finally:
+        h.close()
+    if P.reader == "zenctl":
+        _section2_step8_zenctl(report, sec, ep)
+        return
+    # core §9.8 (0.107): two providers, two revisions of zk2py_bringup.v1; one
+    # holds its revision's bundle alone and states no minor, the other its
+    # file's 1. zk2py's owner is the first in both pairings: the owner example
+    # holds no bundle of an interface it is not built with.
+    from .owner import Owner as PyOwner
+
+    r0, r1 = load_contract(BRINGUP, spec_dir=spec), load_contract(BRINGUP_1, spec_dir=spec)
+    a = PyOwner("lab", "rev-bundle", [bundle.held(bundle.build(r0), r0.fingerprint)], connect=ep)
+    a.start()
+    b = Holder(ep, "lab/rev-file", contracts=[BRINGUP_1])
+    try:
+        seen = "zk2/lab/*/@zk/alive/zk2py_bringup.v1/**"
+        _wait(lambda: len(live.list_presence(tool, seen).alive) == 2, 5.0)
+        revs = []
+        for tok in sorted(live.list_presence(tool, seen).alive, key=lambda t: t["service"]):
+            d = live.get_descriptor(tool, f"zk2/{tok['system']}/{tok['service']}/@zk/instance/{tok['instance']}")
+            ddoc = json.loads(d[0].payload) if len(d) == 1 and d[0].ok else {}
+            fp = live.fingerprint_of(ddoc, "zk2py_bringup.v1", tok["fp16"])
+            got = live.retrieve_bundle(tool, "zk2py_bringup.v1", fp) if fp else None
+            minor = next((e.get("minor") for e in ddoc.get("interfaces", [])
+                          if e.get("iface") == "zk2py_bringup.v1"), None)
+            if got is not None and got.verified is not None:
+                revs.append((tok["service"], minor, bundle.revision(got.verified)))
+        ok = len(revs) == 2 and [m for _, m, _ in revs] == [None, 1]
+        report.check(sec, "§9.8: two providers serve two revisions of zk2py_bringup.v1, the one from its bundle "
+                          "alone stating no minor and the other its file's 1",
+                     ok, str([(n, m) for n, m, _ in revs]))
+        if ok:
+            (_, ma, ra), (_, mb, rb) = revs
+            how2 = classify_pair(ra, rb, ma, mb)
+            report.check(sec, "§9.8: one states no minor, so the tool takes no order and classifies both ways: "
+                              "compatible one way and breaking the other, undecided; a 0 read for the missing "
+                              "minor would have ordered them 0 → 1, compatible",
+                         how2[0] == "undecided" and how2[1].startswith("both ways")
+                         and classify_pair(ra, rb, 0, mb) == ("compatible", "ordered by minor 0 → 1"),
+                         f"{how2}; with a 0: {classify_pair(ra, rb, 0, mb)}")
+    finally:
+        b.close()
+        a.close()
+
+
+def _section2_step8_zenctl(report: Report, sec: str, ep: str) -> None:
+    """What zenctl shows of a `minor` no descriptor states (core 0.107's
+    migration: "A tool that showed `minor` shows none for an owner that
+    states none, never 0"), on zk2py's or the owner example's descriptor of
+    step 8: ``service show`` as text and as JSON. Notes only where the
+    output's shape is the tool's own."""
+    from . import bundle
+    from .contract import load_contract
+
+    spec = REPO / "spec"
+    if P.owner == "rust":
+        h = Holder(ep, "lab/shown", contracts=[ECHO], flags=["--health"])
+        stated, unstated = {"zk2py_echo.v1": 0}, ["freshness.v2", "health.v1"]
+    else:
+        c, c1 = load_contract(ECHO, spec_dir=spec), load_contract(BRINGUP_1, spec_dir=spec)
+        h = Holder(ep, "lab/shown", held=[bundle.held(bundle.build(c), c.fingerprint), c1])
+        stated, unstated = {"zk2py_bringup.v1": 1}, ["zk2py_echo.v1"]
+    try:
+        _wait(lambda: h.instance in _rows(_zenctl_list(ep, system="lab")[1]), 5.0, 0.2)
+        rc, out, err = _zenctl(["service", "show", "lab/shown", "-c", ep, "--format", "json", "--timeout", "1"])
+        try:
+            shown = json.loads(out)
+        except ValueError:
+            shown = None
+        text = json.dumps(shown)
+        rc2, plain, err2 = _zenctl(["service", "show", "lab/shown", "-c", ep, "--timeout", "1", "--format", "table",
+                                    "--color", "never"])
+        report.note(sec, f"8. zenctl service show lab/shown --format table (rc {rc2}), its lines that name an "
+                         "interface or a minor: "
+                         + " | ".join(" ".join(ln.split()) for ln in plain.splitlines()
+                                      if "minor" in ln or ".v" in ln)[:900])
+        rows = [o for o in _walk(shown) if isinstance(o, dict) and o.get("iface") in (set(stated) | set(unstated))
+                and "contract" in o]
+        minors = {o["iface"]: o.get("minor", "none") for o in rows}
+        report.check(sec, "8. zenctl service show --format json: an entry that states a minor shows it, and one that "
+                          f"states none shows none, never 0 (stated {stated}, none for {unstated})",
+                     shown is not None and all(minors.get(i) == m for i, m in stated.items())
+                     and all(minors.get(i) in ("none", None) for i in unstated) and bool(rows),
+                     f"rc {rc}; {minors}; {err.strip()[-200:]}; {text[:300]}")
+    finally:
+        h.close()
+
+
+def _walk(o: Any) -> Any:
+    """Every object and list inside a JSON value, itself first."""
+    yield o
+    if isinstance(o, dict):
+        for v in o.values():
+            yield from _walk(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _walk(v)
 
 
 def section3(report: Report) -> None:
@@ -752,9 +968,12 @@ def section3(report: Report) -> None:
 # -- §5, §6 ----------------------------------------------------------------------------------------
 
 def section5(report: Report, n: int | None = None) -> None:
-    """§5 A tokenless set: services implementing nav.v2 with health.v1 in
-    their tokenless set; a tool finds every health.v1 provider from instance
-    tokens and descriptors."""
+    """§5 A tokenless set: services implementing nav.v2 with health.v1 and
+    freshness.v2 in their tokenless set ("Every health.v1 owner implements
+    freshness.v2 beside it"); a tool finds every health.v1 provider from
+    instance tokens and descriptors. Until round 111 this runner's set held
+    health.v1 alone, as the section's setup read before freshness.v2: each
+    instance then held an alive/freshness.v2 token, and the count failed."""
     from . import live
     from .live_interop import _r1
 
@@ -765,12 +984,13 @@ def section5(report: Report, n: int | None = None) -> None:
     owners: list[Holder] = []
     try:
         for i in range(n):
-            owners.append(Holder(ep, f"fleet/s{i:03d}", contracts=[NAV, HEALTH], tokenless={"health.v1"}))
+            owners.append(Holder(ep, f"fleet/s{i:03d}", contracts=[NAV, HEALTH],
+                                 tokenless={"health.v1", "freshness.v2"}))
         _wait(lambda: len(live.list_presence(tool, "zk2/fleet/*/@zk/instance/*").instances) == n, 10.0)
         p = live.list_presence(tool, "zk2/fleet/*/@zk/**", timeout=5.0)
         ifaces = sorted({a["iface"] for a in p.alive})
         report.check(sec, f"each instance holds an instance token and an alive/nav.v2 token, and no "
-                          f"alive/health.v1 token: {2 * n} tokens, not {3 * n}",
+                          f"alive/health.v1 or alive/freshness.v2 token: {2 * n} tokens, not {4 * n}",
                      len(p.instances) == n and len(p.alive) == n and ifaces == ["nav.v2"] and p.complete,
                      f"{len(p.instances)} instances, {len(p.alive)} alive {ifaces}; {p.reading}")
         if P.reader == "zenctl":

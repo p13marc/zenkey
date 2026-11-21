@@ -742,8 +742,11 @@ def section8(ctx: Ctx) -> None:
         d = bus.descriptor(target.instance or "")
         got, _ = bus.get_json(RP)
         req = [] if d is None else d.get("requires", [])
-        rp.check(sec, "1. the descriptor lists task with \"bindings\": [] and \"params\": {}",
-                 [(r.get("role"), r.get("bindings"), r.get("params")) for r in req] == [("task", [], {})], str(req))
+        # core §3.2 (0.107): "with "bindings": [] and no parameter bound":
+        # `params` absent or empty, which read the same (§3.3)
+        rp.check(sec, "1. the descriptor lists task with \"bindings\": [] and no parameter bound",
+                 [(r.get("role"), r.get("bindings"), r.get("params", {})) for r in req] == [("task", [], {})],
+                 str(req))
         rp.check(sec, "1. Rp holds {source: baseline}, with no key", got == {"source": "baseline"}, str(got))
         t1 = time.monotonic()
         time.sleep(3.0)
@@ -1373,7 +1376,9 @@ def section_tool_shapes(ctx: Ctx) -> None:
     # names and the tool does not hold is unread, never every resource
     def unread_doc(iface: str, declared: str, fp: str, role: str = "task", bindings: list[str] | None = None,
                    own: Any = None) -> dict[str, Any]:
-        entries = [{"iface": declared, "contract": fp, "minor": 0}]
+        # core §3.3 (0.107): a minor only where the revision has one. `nobody`
+        # is a fingerprint no file has, so its entry states none.
+        entries = [{"iface": declared, "contract": fp, **({"minor": 0} if fp != nobody else {})}]
         if own is not None:
             entries.append({"iface": own.interface, "contract": own.fingerprint, "minor": 0})
         return {"format": "zk2-descriptor/0.1", "service": TARGET, "instance": "7" * 16, "interfaces": entries,
