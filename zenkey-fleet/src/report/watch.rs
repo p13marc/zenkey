@@ -81,8 +81,13 @@ pub enum WatchEvent {
 pub struct WatchConfirmation {
     /// `<system>/<service>` whose heartbeat it was.
     pub provider: String,
-    /// The heartbeat's key, base-relative.
+    /// The heartbeat's key, base-relative: the covered interface's, or
+    /// for an owner heartbeat's group its class's key (core §7.5).
     pub key: String,
+    /// For a group of an owner heartbeat, its index in the owner's
+    /// catalog (core §7.5, §8.6). Omitted for a heartbeat.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<u16>,
     /// The heartbeat key's run and seq.
     pub heartbeat: InbandStamp,
     /// The members confirmed, base-relative, in key order: none where it
@@ -169,6 +174,7 @@ mod tests {
         let c = WatchConfirmation {
             provider: "lab/n1".into(),
             key: "zk2/lab/n1/freshness.v2/stream/heartbeat/hb.v1".into(),
+            group: None,
             heartbeat: crate::report::InbandStamp {
                 run: "0007".into(),
                 seq: 3,

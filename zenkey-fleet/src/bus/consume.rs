@@ -564,7 +564,17 @@ pub async fn watch_in(
     values: &Bindings,
     epoch: impl Into<Dating>,
 ) -> Result<Watch> {
-    watch_across(session, revision, target, r, values, epoch, None).await
+    watch_across(
+        session,
+        revision,
+        target,
+        r,
+        values,
+        epoch,
+        None,
+        &crate::model::deployment::Catalogs::default(),
+    )
+    .await
 }
 
 /// [`watch_in`] across `far`, the face the target sits across (#990 V8):
@@ -572,6 +582,16 @@ pub async fn watch_in(
 /// face says `arq = false` each subscriber with a horizon declared again
 /// after two horizons of silence (`zenkey::consumer::Consumer::across`,
 /// core §8.5). `None`: no face.
+///
+/// A watched collection's confirmations come from its provider's heartbeat
+/// and from its owner heartbeats alike (`freshness.v2` §2.5, "Both forms";
+/// #1110): each group read for the interface is one
+/// [`crate::report::WatchConfirmation`], its key the class key and its
+/// `group` the group's index. A group is read through `catalogs`, the ones
+/// the tool was given (core §8.6): with none, no group is read, and a
+/// collection its owner confirms by owner heartbeats alone goes
+/// unconfirmed.
+#[allow(clippy::too_many_arguments)]
 pub async fn watch_across(
     session: &Session,
     revision: &Revision,
@@ -580,6 +600,7 @@ pub async fn watch_across(
     values: &Bindings,
     epoch: impl Into<Dating>,
     far: Option<&zenkey_model::link::FarSide>,
+    catalogs: &crate::model::deployment::Catalogs,
 ) -> Result<Watch> {
     // The epoch in force and its catalog, which a date names (O8).
     let epoch: Dating = epoch.into();
@@ -612,7 +633,8 @@ pub async fn watch_across(
         &params,
     )
     .map_err(|e| runtime("subscribe", address, e))?
-    .with_refused(on_refused);
+    .with_refused(on_refused)
+    .with_catalogs(catalogs.held().iter().cloned());
     let consumer = match far {
         Some(f) => consumer.across(f),
         None => consumer,
@@ -633,12 +655,14 @@ pub async fn watch_across(
             HeartbeatSection::Diverged => (Vec::new(), true, false),
             HeartbeatSection::Absent => (Vec::new(), false, true),
         };
+        let (system, service) = (h.provider.system.as_str(), h.provider.service.as_str());
         let _ = ctx.try_send(crate::report::WatchConfirmation {
-            key: zenkey_model::heartbeat::key(
-                h.provider.system.as_str(),
-                h.provider.service.as_str(),
-                &covered,
-            ),
+            // An owner heartbeat's group rode its class's key (core §7.5).
+            key: match h.group {
+                Some(g) => zenkey_model::heartbeat::owner_key(system, service, g.class),
+                None => zenkey_model::heartbeat::key(system, service, &covered),
+            },
+            group: h.group.map(|g| g.index),
             provider: h.provider.to_string(),
             heartbeat: InbandStamp::from(h.heartbeat),
             confirmed,

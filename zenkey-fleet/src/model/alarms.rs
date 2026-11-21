@@ -61,7 +61,8 @@ use zenkey_model::alarms::{
     Window,
 };
 use zenkey_model::freshness::{
-    Applied, ClockMeasure, Last, Observation, Reply, StampAge, View, confirmed_last,
+    Applied, ClockMeasure, GroupRead, Last, Observation, OwnerApplied, Reply, StampAge, View,
+    Views, confirmed_last,
 };
 use zenkey_model::grammar::{Addr, InstanceId, ZkKey};
 use zenkey_model::seed::Held;
@@ -189,6 +190,18 @@ impl AlarmScope {
             self.system.as_deref().unwrap_or("*"),
             self.service.as_deref().unwrap_or("*"),
             &alarms_layout().iface,
+        )
+    }
+
+    /// The owner heartbeat key that may confirm alarms.v1 of the owners in
+    /// scope in place of that heartbeat (`freshness.v2` §2.4, §2.5, "Both
+    /// forms"; #1110): its collection's class's,
+    /// `zk2/<system>/<service>/freshness.v2/stream/heartbeats/<class>`.
+    pub fn owner_heartbeat_selector(&self) -> String {
+        zenkey_model::heartbeat::owner_key(
+            self.system.as_deref().unwrap_or("*"),
+            self.service.as_deref().unwrap_or("*"),
+            alarms_class(),
         )
     }
 
@@ -378,6 +391,9 @@ struct InstanceSeen {
     /// heartbeats with, which uses `freshness.v2` (text 0.11): its alarms
     /// are confirmed by heartbeat, never re-put.
     heartbeats: bool,
+    /// The catalog it names (core §3.3, §8.6): what an index its owner
+    /// heartbeats write is read through. `None` when it names none.
+    catalog: Option<zenkey_model::catalog::CatalogId>,
 }
 
 /// One owner, as this reader knows it.
@@ -495,8 +511,12 @@ pub struct AlarmBook {
     archived: BTreeMap<String, ArchivedAlarm>,
     /// Each owner's alarms as its heartbeats confirm them (core §7.5's
     /// form 6, #978's F2): fed by every sample the merge admits, and
-    /// re-read from each complete GET that answers the owner (#978's F4).
-    views: BTreeMap<Addr, View<Instant>>,
+    /// re-read from each complete GET that answers the owner (#978's F4),
+    /// behind a sequence per owner heartbeat key (#1110).
+    views: BTreeMap<Addr, Views<Instant>>,
+    /// The deployment catalogs the reader was given (core §8.6): what an
+    /// owner heartbeat's group is read through. None: no group is read.
+    catalogs: Vec<zenkey_model::catalog::Catalog>,
     /// Each owner's latest heartbeat read, when it arrived, and whether its
     /// alarms' section was in step with the view (§2.15, text 0.11).
     beats: BTreeMap<Addr, (Instant, bool)>,
@@ -522,11 +542,33 @@ fn alarms_index() -> usize {
         .expect("alarms.v1's one collection")
 }
 
-/// A view of one owner's alarms, following its one collection.
-fn alarms_view() -> View<Instant> {
+/// The class of alarms.v1's collection: the owner heartbeat key that may
+/// confirm it (`freshness.v2` §2.4).
+fn alarms_class() -> zenkey_model::heartbeat::Class {
+    alarms_layout().collections[alarms_index()].class
+}
+
+/// One owner's views: its alarms', following its one collection.
+fn alarms_views() -> Views<Instant> {
     let mut v = View::new(alarms_layout().clone());
     v.follow_resource(zenkey::alarms::ALARMS);
-    v
+    let mut views = Views::new();
+    views.insert(v);
+    views
+}
+
+/// The alarms' view among one owner's.
+fn alarms_of(views: &Views<Instant>) -> &View<Instant> {
+    views
+        .view(&alarms_layout().iface)
+        .expect("an owner's views hold its alarms'")
+}
+
+/// The alarms' view among one owner's, to change it.
+fn alarms_of_mut(views: &mut Views<Instant>) -> &mut View<Instant> {
+    views
+        .view_mut(&alarms_layout().iface)
+        .expect("an owner's views hold its alarms'")
 }
 
 impl AlarmBook {
@@ -561,9 +603,23 @@ impl AlarmBook {
             clocks: BTreeMap::new(),
             archived: BTreeMap::new(),
             views: BTreeMap::new(),
+            catalogs: Vec::new(),
             beats: BTreeMap::new(),
             pending_live: BTreeMap::new(),
         }
+    }
+
+    /// Holds the deployment catalogs the reader was given (core §8.6), in
+    /// place of any held: an owner heartbeat's group is read through the
+    /// one its owner's descriptor names among them, or a successor of it
+    /// ([`AlarmBook::owner_heartbeat`]). With none, no group is read.
+    #[must_use]
+    pub fn with_catalogs(
+        mut self,
+        catalogs: impl IntoIterator<Item = zenkey_model::catalog::Catalog>,
+    ) -> Self {
+        self.catalogs = catalogs.into_iter().collect();
+        self
     }
 
     pub fn scope(&self) -> &AlarmScope {
@@ -691,6 +747,7 @@ impl AlarmBook {
                                     e.contract.strip_prefix("sha256:")
                                         == Some(zenkey::alarms::FINGERPRINT)
                                 }),
+                                catalog: d.stated_catalog(),
                             }
                         }
                         None => InstanceSeen {
@@ -698,6 +755,7 @@ impl AlarmBook {
                             zid: None,
                             run: None,
                             heartbeats: false,
+                            catalog: None,
                         },
                     });
                 held.entry(addr.clone())
@@ -863,10 +921,11 @@ impl AlarmBook {
                 Some(Ok(stamp)) => Some(stamp),
                 _ => None,
             };
-            let view = self
-                .views
-                .entry(entry.owner.clone())
-                .or_insert_with(alarms_view);
+            let view = alarms_of_mut(
+                self.views
+                    .entry(entry.owner.clone())
+                    .or_insert_with(alarms_views),
+            );
             if s.delete {
                 view.delete(&s.key, inband, s.at);
             } else {
@@ -914,7 +973,7 @@ impl AlarmBook {
         if iface != alarms_layout().iface || !self.scope.selects_owner(&owner) {
             return None;
         }
-        let view = self.views.entry(owner.clone()).or_insert_with(alarms_view);
+        let view = alarms_of_mut(self.views.entry(owner.clone()).or_insert_with(alarms_views));
         let applied = view.apply(tag, stamp, body, at);
         // §2.15 (text 0.11): a heartbeat read is in step when its alarms'
         // section confirmed, its digest and live count the view's; one of
@@ -929,17 +988,106 @@ impl AlarmBook {
         Some(applied)
     }
 
+    /// An owner heartbeat heard on `key` at `at` (core §7.5's second
+    /// layout of form 6; `freshness.v2` §2.5; #1110): its envelope's stamp
+    /// and tag, and its body. On the key of alarms.v1's collection's class,
+    /// from an owner in scope, it is read into that owner's views: older
+    /// and lost are its key's, and the group whose index names alarms.v1
+    /// is read as its heartbeat is, confirming each alarm it vouches for
+    /// at `at`. `None` for an owner heartbeat of anything else.
+    ///
+    /// **The catalog** a group's index is read through (core §8.6) is the
+    /// one the owner's descriptor stating the put's run names, among those
+    /// the book holds ([`AlarmBook::with_catalogs`]). With no descriptor of
+    /// the owner in hand, as across a face, it is the last one held, the
+    /// deployment's word. A descriptor in hand that names none, or none
+    /// stating the run, reads no group (`unknown_catalog`): never a guess.
+    pub fn owner_heartbeat(
+        &mut self,
+        key: &str,
+        stamp: zenkey_model::wire::Stamp,
+        tag: zenkey_model::wire::Tag,
+        body: &[u8],
+        at: Instant,
+    ) -> Option<OwnerApplied> {
+        let (owner, class) = zenkey_model::heartbeat::owner_class(key)?;
+        if class != alarms_class() || !self.scope.selects_owner(&owner) {
+            return None;
+        }
+        let named = self.named_catalog(&owner, stamp.run);
+        let views = self.views.entry(owner.clone()).or_insert_with(alarms_views);
+        let applied = views.apply_owner(
+            class,
+            tag,
+            stamp,
+            body,
+            zenkey_model::freshness::Catalogs {
+                held: &self.catalogs,
+                named,
+            },
+            at,
+        );
+        // §2.15 (text 0.11), as a heartbeat's: a group read for alarms.v1
+        // is in step when its section confirmed and none was lost before
+        // it on its key. An owner heartbeat with no group read for it says
+        // nothing of the view.
+        if let OwnerApplied::Read { gap, groups } = &applied {
+            let iface = &alarms_layout().iface;
+            for g in groups {
+                if let (Some(i), GroupRead::Read(sections)) = (&g.iface, &g.read)
+                    && i == iface
+                {
+                    let in_step = !gap
+                        && sections.iter().any(|s| {
+                            matches!(s, zenkey_model::freshness::SectionRead::Confirmed(_))
+                        });
+                    self.beats.insert(owner.clone(), (at, in_step));
+                }
+            }
+        }
+        Some(applied)
+    }
+
+    /// The catalog `owner` writes under `run`, as this reader knows it
+    /// ([`AlarmBook::owner_heartbeat`]).
+    fn named_catalog(
+        &self,
+        owner: &Addr,
+        run: zenkey_model::wire::Run,
+    ) -> Option<zenkey_model::catalog::CatalogId> {
+        let instances = self.owners.get(owner).map(|o| &o.instances);
+        let Some(instances) = instances.filter(|i| !i.is_empty()) else {
+            // No instance of it in hand, as across a face: the
+            // deployment's word.
+            return self.catalogs.last().map(zenkey_model::catalog::Catalog::id);
+        };
+        // A descriptor not read says nothing, and neither does one that
+        // states another run.
+        let run = run.to_string();
+        instances
+            .values()
+            .flatten()
+            .find(|i| i.run.as_deref() == Some(run.as_str()))
+            .and_then(|i| i.catalog)
+    }
+
     /// Whether a view is due a re-read: two heartbeats in a row out of
     /// step with it (`freshness.v2` §2.5). The next complete GET re-reads
     /// it ([`AlarmBook::seeded`]).
     pub fn reread_due(&self) -> bool {
-        self.views.values().any(|v| !v.reread_due().is_empty())
+        self.views
+            .values()
+            .any(|vs| !alarms_of(vs).reread_due().is_empty())
     }
 
-    /// How many heartbeats the book read, every owner's: a reader that
-    /// re-reads when one leaves a view due asks once per heartbeat at most.
+    /// How many heartbeats the book read, every owner's, a group read for
+    /// alarms.v1 among them: a reader that re-reads when one leaves a view
+    /// due asks once per heartbeat at most.
     pub fn heartbeats_read(&self) -> u64 {
-        self.views.values().map(View::heartbeats).sum()
+        self.views
+            .values()
+            .map(|vs| alarms_of(vs).heartbeats())
+            .sum()
     }
 
     /// A GET was asked at `asked_at`: its replies follow as samples
@@ -967,13 +1115,13 @@ impl AlarmBook {
         // confirms less, and the next two heartbeats out of step ask again,
         // so a re-read comes at most once every two heartbeats.
         if end.complete {
-            for (owner, view) in &self.views {
-                if !view.reread_due().is_empty() {
+            for (owner, views) in &self.views {
+                if !alarms_of(views).reread_due().is_empty() {
                     live.entry(owner.clone()).or_default();
                 }
             }
             for (owner, keys) in live {
-                let view = self.views.entry(owner).or_insert_with(alarms_view);
+                let view = alarms_of_mut(self.views.entry(owner).or_insert_with(alarms_views));
                 view.reread(
                     alarms_index(),
                     keys.iter().map(|(k, s)| (k.as_str(), *s)),
@@ -1314,10 +1462,14 @@ impl AlarmBook {
         if let Some(declared) = self.declared {
             // A confirmation is the subscription's last delivery, or its
             // owner's last heartbeat that vouched for it (#978's F2).
-            let view = self.views.get(&e.owner);
-            let heartbeat = view
-                .and_then(|v| v.confirmed(key))
+            let views = self.views.get(&e.owner);
+            let heartbeat = views
+                .and_then(|vs| alarms_of(vs).confirmed(key))
                 .map(|c| now.saturating_duration_since(c));
+            // `freshness.v2` §2.5: a heartbeat lost on the interface's
+            // key, or an owner heartbeat lost on its class's key once a
+            // group there named alarms.v1, reads as a lost delivery.
+            let lost = views.is_some_and(|vs| vs.is_lost(&alarms_layout().iface, alarms_index()));
             observations.push(Observation::Subscribed {
                 last: confirmed_last(
                     e.sub_last.map(|(t, delete)| {
@@ -1331,7 +1483,7 @@ impl AlarmBook {
                     heartbeat,
                 ),
                 listened: now.saturating_duration_since(declared),
-                complete: self.loss.is_none() && !view.is_some_and(View::gap),
+                complete: self.loss.is_none() && !lost,
             });
         }
         if let Some(g) = e.got.filter(|g| healed_by(g.asked_at)) {
@@ -1776,6 +1928,156 @@ mod tests {
             AlarmScope::parse("zk2/lab/*/alarms.v1/state/alarms/*").unwrap(),
             spec,
         )
+    }
+
+    /// An owner heartbeat on the `host` key (core §7.5; `freshness.v2`
+    /// §2.5; #1110) confirms the alarm the book holds through the group
+    /// whose index names alarms.v1 in the catalog the reader was given:
+    /// with no instance of the owner in hand, the deployment's word. One
+    /// lost on the key leaves the observation incomplete. A reader given
+    /// no catalog, and one whose owner's descriptor names none, read no
+    /// group, and the alarm ages from its put.
+    #[test]
+    fn an_owner_heartbeat_confirms_an_alarm_by_its_group() {
+        use zenkey_model::catalog::Catalog;
+        use zenkey_model::freshness::{GroupRead, OwnerApplied, SectionRead};
+        use zenkey_model::heartbeat::{
+            Digest, Group, GroupRefusal, Members, OwnerHeartbeat, Section, Time,
+        };
+        use zenkey_model::wire::{Run, Seq, Stamp, Tag};
+        let layout = alarms_layout();
+        let mut catalog = Catalog::new(0).unwrap();
+        catalog
+            .push(layout.iface.clone(), layout.fingerprint.clone())
+            .unwrap();
+        let inband = Stamp {
+            run: Run::U32(0xdead_beef),
+            seq: Seq::new(4).unwrap(),
+        };
+        let t0 = Instant::now();
+        let held = |b: &mut AlarmBook| {
+            b.subscribed(t0);
+            b.sample_enveloped(
+                put(t0, 10, doc("warning", "firing", 1), AlarmVia::Subscription),
+                Some(Ok(inband)),
+            )
+            .unwrap();
+        };
+        let body = || {
+            let group = Group::of(
+                0,
+                layout,
+                &[Some(Section {
+                    digest: Digest::of([(A, inband)]),
+                    members: Members::templated(1, [0]),
+                })],
+            )
+            .unwrap();
+            OwnerHeartbeat {
+                time: Time::Unknown,
+                groups: vec![group],
+            }
+            .write()
+            .unwrap()
+        };
+        let seq = |n| Stamp {
+            run: Run::U16(1),
+            seq: Seq::new(n).unwrap(),
+        };
+        let scope = AlarmScope::of(&"lab/svc".parse().unwrap());
+        let key = scope.owner_heartbeat_selector();
+        assert_eq!(key, "zk2/lab/svc/freshness.v2/stream/heartbeats/host");
+        let zero = Tag::new(0).unwrap();
+        let at = t0 + Duration::from_secs(600);
+        let now = t0 + Duration::from_secs(1000);
+        let subscribed = |b: &AlarmBook| {
+            b.reading(A, now, wall())
+                .unwrap()
+                .observations
+                .into_iter()
+                .find_map(|o| match o {
+                    Observation::Subscribed { last, complete, .. } => Some((last, complete)),
+                    _ => None,
+                })
+                .expect("the subscription's observation")
+        };
+
+        // Given the catalog, no instance in hand: read through it.
+        let mut b = book(true).with_catalogs([catalog.clone()]);
+        held(&mut b);
+        let applied = b
+            .owner_heartbeat(&key, seq(0), zero, &body(), at)
+            .expect("this book's");
+        assert!(
+            matches!(&applied, OwnerApplied::Read { gap: false, groups }
+                if groups[0].read == GroupRead::Read(vec![SectionRead::Confirmed(vec![A.into()])])),
+            "{applied:?}"
+        );
+        assert_eq!(b.heartbeats_read(), 1);
+        // 1000 s after the put, 400 s after the owner heartbeat.
+        assert_eq!(
+            subscribed(&b),
+            (Some(Last::Put(Duration::from_secs(400))), true)
+        );
+        // Seq 2: one was lost on the key, with every group it held.
+        b.owner_heartbeat(&key, seq(2), zero, &body(), at).unwrap();
+        assert!(!subscribed(&b).1, "read as a lost delivery");
+        b.owner_heartbeat(&key, seq(3), zero, &body(), at).unwrap();
+        assert!(subscribed(&b).1, "one in sequence ends it");
+        assert_eq!(
+            b.owner_heartbeat(
+                "zk2/lab/svc/freshness.v2/stream/heartbeats/link",
+                seq(4),
+                zero,
+                &body(),
+                at
+            ),
+            None,
+            "the other class's key covers no alarm"
+        );
+        assert_eq!(
+            b.owner_heartbeat(
+                "zk2/far/svc/freshness.v2/stream/heartbeats/host",
+                seq(4),
+                zero,
+                &body(),
+                at
+            ),
+            None,
+            "an owner out of scope"
+        );
+
+        // Given no catalog: no group is read, and nothing is confirmed.
+        let refused = |applied: OwnerApplied| {
+            assert!(
+                matches!(&applied, OwnerApplied::Read { groups, .. }
+                    if groups[0].read == GroupRead::Refused(GroupRefusal::UnknownCatalog)),
+                "{applied:?}"
+            );
+        };
+        let mut none = book(true);
+        held(&mut none);
+        refused(
+            none.owner_heartbeat(&key, seq(0), zero, &body(), at)
+                .unwrap(),
+        );
+        assert_eq!(
+            subscribed(&none).0,
+            Some(Last::Put(Duration::from_secs(1000))),
+            "aged from its put: never fresh by a group it could not read"
+        );
+        assert_eq!(none.heartbeats_read(), 0);
+
+        // An owner in hand whose descriptor names no catalog writes no
+        // index: refused all the same, never read through the reader's own.
+        let mut named = book(true).with_catalogs([catalog]);
+        held(&mut named);
+        named.presence_read(&presence(true, Some(ZID)), t0);
+        refused(
+            named
+                .owner_heartbeat(&key, seq(0), zero, &body(), at)
+                .unwrap(),
+        );
     }
 
     /// A hand-written heartbeat covering alarms.v1 (#978's F2): its
