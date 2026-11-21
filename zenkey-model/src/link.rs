@@ -1098,11 +1098,12 @@ pub enum Code {
     /// A listed frame whose `keyframe_s` its contract's `keyframe_every`
     /// cannot reach at the face's `every_s` (v2 §2.7).
     KeyframeUnreachable,
-    /// A crossing heartbeat or frame resource whose horizon is below the
-    /// face's `horizon_s` (v2 §2.12).
+    /// A crossing heartbeat, owner heartbeat or frame resource whose
+    /// horizon is below the face's `horizon_s` (v2 §2.9, §2.12).
     HorizonUnderFace,
-    /// A crossing `block` resource whose longest put is above the batch
-    /// (v2 §2.16).
+    /// A crossing `block` resource whose longest put is above the batch,
+    /// or a crossing owner heartbeat's, `at`
+    /// `freshness.v2/stream/heartbeats/link` (v2 §2.16).
     BlockOverBatch,
     /// A face whose shortest crossing cadence is the keep-alive interval
     /// or above it (v2 §2.16).
@@ -2809,13 +2810,19 @@ pub struct Res {
     /// is a parameter, which has no snapshot key. [`tombstone_only`] reads
     /// it; across revisions, where any one is.
     pub tombstone_only: bool,
+    /// A templated resource's cardinality (core §2.2), which an owner
+    /// heartbeat's longest put reads of a collection (v2 §2.16): `None`
+    /// for a template with no parameter, and for a templated one that
+    /// states none, read there as no ceiling. Across revisions, the
+    /// largest any one states.
+    pub cardinality: Option<u64>,
 }
 
 impl Res {
     /// A resource of `token` at `template`, with resolved `annotations`, and
     /// nothing else stated: no history, no frame, a type that is not packed,
-    /// `drop`, in a revision that does not list `link.v2` and uses no
-    /// profile ([`tombstone_only`]).
+    /// `drop`, no cardinality, in a revision that does not list `link.v2`
+    /// and uses no profile ([`tombstone_only`]).
     #[must_use]
     pub fn new(template: Template, token: KindToken, annotations: BTreeMap<String, Value>) -> Self {
         Res {
@@ -2827,6 +2834,7 @@ impl Res {
             link_v2: false,
             epoch: None,
             tombstone_only: tombstone_only(token, &template, &annotations, |_| false),
+            cardinality: None,
             template,
             token,
             annotations,
@@ -2901,6 +2909,7 @@ impl Res {
             tombstone_only: tombstone_only(r.token, &r.template, &r.annotations, |p| {
                 c.uses.iter().any(|u| u.to_string() == p)
             }),
+            cardinality: r.cardinality.filter(|_| r.template.has_params()),
         }
     }
 }
@@ -3070,6 +3079,13 @@ fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
         let block = rs.iter().any(|r| r.block);
         out[i].block = block;
         out[i].tombstone_only = rs.iter().any(|r| r.tombstone_only);
+        // An owner heartbeat's longest put (v2 §2.16) is the longest any
+        // revision writes: no ceiling where one states none.
+        out[i].cardinality = if rs.iter().any(|r| r.cardinality.is_none()) {
+            None
+        } else {
+            rs.iter().filter_map(|r| r.cardinality).max()
+        };
         out[i].longest_bytes = rs
             .iter()
             .filter(|r| r.block || !block)
@@ -3198,9 +3214,11 @@ pub struct FacePlan {
     pub frames: Option<Vec<ListedFrame>>,
     pub findings: Vec<Finding>,
     /// What crosses the face, by name (§0): each resource of a listed
-    /// interface whose pushes cross, overlapped ones set aside, and each
+    /// interface whose pushes cross, overlapped ones set aside, each
     /// crossing heartbeat as `freshness.v2/stream/heartbeat/<iface>`
-    /// (§2.9). A tool's scope across the face is read from it (observer
+    /// (§2.9), and, on a link.v2 face, the `link` class's owner heartbeat
+    /// key as `freshness.v2/stream/heartbeats/link` where it crosses (v2
+    /// §2.9). A tool's scope across the face is read from it (observer
     /// §7.5). No router block carries it, so it is never serialized.
     #[serde(skip)]
     pub crossing: BTreeSet<String>,
@@ -3219,11 +3237,27 @@ impl FacePlan {
     pub fn heartbeat_crosses(&self, iface: &str) -> bool {
         self.crossing.contains(&heartbeat_name(iface))
     }
+
+    /// Whether the owner heartbeat key of `class` crosses the face: the
+    /// `link` class's on a link.v2 face a listed interface's heartbeat
+    /// crosses (v2 §2.9), the `host` class's never, and neither on a
+    /// `link.v1` face (§2.9).
+    #[must_use]
+    pub fn owner_heartbeat_crosses(&self, class: crate::heartbeat::Class) -> bool {
+        self.crossing.contains(&owner_heartbeat_name(class))
+    }
 }
 
 /// A heartbeat's name in a plan, `freshness.v2/stream/heartbeat/<iface>`.
 fn heartbeat_name(iface: &str) -> String {
     format!("{}/stream/heartbeat/{iface}", freshness::PROFILE_V2)
+}
+
+/// An owner heartbeat key's name in a plan,
+/// `freshness.v2/stream/heartbeats/<class>` (v2 §2.9).
+#[must_use]
+pub fn owner_heartbeat_name(class: crate::heartbeat::Class) -> String {
+    format!("{}/stream/heartbeats/{class}", freshness::PROFILE_V2)
 }
 
 /// A listed frame that crosses, as the plan carries it (v2 §2.18).
@@ -3499,7 +3533,7 @@ fn plan_face(
         // Each template with its own heartbeat's crossing, paired as one:
         // an interface id is a plain chunk, so every one parses, and one
         // that did not would drop out whole, never shift a pairing.
-        let pseudo: Vec<(Template, bool)> = if token == KindToken::Stream {
+        let mut pseudo: Vec<(Template, bool)> = if token == KindToken::Stream {
             heartbeat_crosses
                 .iter()
                 .filter_map(|(i, crosses)| {
@@ -3511,6 +3545,33 @@ fn plan_face(
         } else {
             Vec::new()
         };
+        // The owner heartbeat keys with them (§2.9, v2 §2.9), whichever
+        // revision of `freshness.v2`'s contract is given, and where none
+        // is. A `link.v1` face lets neither class's cross, so the carve
+        // holds the template `heartbeats/{class}`. A link.v2 face holds
+        // the two keys: the `link` class's crosses exactly when a listed
+        // interface's heartbeat does, the `host` class's never.
+        if !pseudo.is_empty() {
+            let link = heartbeat_crosses.values().any(|c| *c);
+            let owner: Vec<(String, bool)> = if v2 {
+                crate::heartbeat::Class::ALL
+                    .into_iter()
+                    .map(|c| {
+                        (
+                            format!("heartbeats/{c}"),
+                            link && c == crate::heartbeat::Class::Link,
+                        )
+                    })
+                    .collect()
+            } else {
+                vec![(crate::heartbeat::OWNER_RESOURCE.to_owned(), false)]
+            };
+            pseudo.extend(
+                owner
+                    .into_iter()
+                    .filter_map(|(t, crosses)| Template::parse(&t).ok().map(|t| (t, crosses))),
+            );
+        }
         let mut groups: BTreeMap<String, Vec<Item<'_>>> = BTreeMap::new();
         for iface in listed {
             if !pseudo.is_empty() && *iface == freshness::PROFILE_V2 {
@@ -3696,6 +3757,13 @@ fn plan_face(
             .filter(|(_, c)| **c)
             .map(|(i, _)| heartbeat_name(i)),
     );
+    // The `link` class's owner heartbeat key crosses a link.v2 face exactly
+    // when a listed interface's heartbeat does (v2 §2.9).
+    let owner_link = v2 && heartbeat_crosses.values().any(|c| *c);
+    let owner_at = || owner_heartbeat_name(crate::heartbeat::Class::Link);
+    if owner_link {
+        crossing.insert(owner_at());
+    }
     // What else link.v2 weighs of each crossing resource (v2 §2.3, §2.16).
     if v2 {
         for iface in listed {
@@ -3735,6 +3803,37 @@ fn plan_face(
                     Some(name),
                     heartbeat_name(iface),
                 ));
+            }
+        }
+        // The `link` owner heartbeat, where it crosses (v2 §2.9, §2.16):
+        // one finding of each code for the face, whichever service draws
+        // it, since every service's rides the one key.
+        if owner_link {
+            let (mut under, mut over) = (false, false);
+            for s in services {
+                let ifaces = &deployment.implements[s.key];
+                // A heartbeat of each listed service that implements an
+                // interface whose heartbeat crosses: its horizon, the
+                // shortest of the service's `link` collections, and its
+                // period, half that.
+                if ifaces
+                    .iter()
+                    .any(|i| heartbeat_crosses.get(i.as_str()) == Some(&true))
+                    && let Some(ttl) = owner_heartbeat_horizon(view, &heartbeat_crosses, ifaces)
+                {
+                    cadences.push(ttl.as_secs() * 500);
+                    under |= face.horizon_s.is_some_and(|h| ttl.as_secs() < h);
+                }
+                // Its put is `drop`, and fragments the same: any listed
+                // service's longest one against the batch.
+                over |= owner_heartbeat_longest(view, &heartbeat_crosses, ifaces)
+                    .is_some_and(|b| b > u128::from(face.batch_bytes));
+            }
+            if under {
+                findings.push(Finding::new(Code::HorizonUnderFace, Some(name), owner_at()));
+            }
+            if over {
+                findings.push(Finding::new(Code::BlockOverBatch, Some(name), owner_at()));
             }
         }
         // Data more often than the keep-alive interval spares the uplink
@@ -3791,6 +3890,16 @@ fn plan_face(
                 .filter(|i| heartbeat_crosses.get(i.as_str()) == Some(&true))
                 .map(|i| heartbeat_name(i)),
         );
+        // Whichever form the service sends (v2 §2.9): where the `link`
+        // key crosses, it is evidence of each service that implements an
+        // interface whose heartbeat crosses.
+        if owner_link
+            && ifaces
+                .iter()
+                .any(|i| heartbeat_crosses.get(i.as_str()) == Some(&true))
+        {
+            evidence.push(owner_at());
+        }
         evidence.sort();
         evidence.dedup();
         liveness.push(Liveness {
@@ -3838,6 +3947,93 @@ fn heartbeat_horizon(view: &View, iface: &str) -> Option<std::time::Duration> {
         .filter(|r| is_state(r.token))
         .filter_map(|r| horizon(r).ttl())
         .min()
+}
+
+/// A resource the plan reads as a collection (core §7.5): a state with a
+/// horizon above 0, the revisions read together (§2.3).
+fn is_collection(r: &Res) -> bool {
+    is_state(r.token) && horizon(r).ttl().is_some()
+}
+
+/// Whether the plan reads a collection's class as `link` (`freshness.v2`
+/// §2.4): its exposure, the revisions read together (§2.3), so one they
+/// disagree on is `host`.
+fn is_link(r: &Res) -> bool {
+    exposure(kind_of(r.token), &r.annotations) == Exposure::Link
+}
+
+/// The interfaces among `ifaces`, one service's, that a `link` owner
+/// heartbeat of that service holds a group for (v2 §2.9, §2.16): each one
+/// with a heartbeat (`heartbeats`, [`heartbeats_of`]'s) that has a `link`
+/// collection, whether or not that collection crosses the face. An owner
+/// covers an interface in place of its heartbeat (`freshness.v2` §2.4), so
+/// one with no heartbeat has no group.
+fn owner_heartbeat_groups<'a>(
+    view: &'a View,
+    heartbeats: &'a BTreeMap<String, bool>,
+    ifaces: &'a [String],
+) -> impl Iterator<Item = &'a [Res]> {
+    let mut seen = BTreeSet::new();
+    ifaces
+        .iter()
+        .filter(move |i| heartbeats.contains_key(i.as_str()) && seen.insert(i.as_str()))
+        .filter_map(|i| view.get(i.as_str()))
+        .map(|(resources, _)| resources.as_slice())
+        .filter(|rs| rs.iter().any(|r| is_collection(r) && is_link(r)))
+}
+
+/// A service's `link` owner heartbeat's horizon (v2 §2.9): the shortest
+/// among the `link` collections of its listed interfaces.
+fn owner_heartbeat_horizon(
+    view: &View,
+    heartbeats: &BTreeMap<String, bool>,
+    ifaces: &[String],
+) -> Option<std::time::Duration> {
+    owner_heartbeat_groups(view, heartbeats, ifaces)
+        .flatten()
+        .filter(|r| is_collection(r) && is_link(r))
+        .filter_map(|r| horizon(r).ttl())
+        .min()
+}
+
+/// A service's longest `link` owner heartbeat, a put's payload in bytes
+/// (v2 §2.16): [`ENVELOPE_BYTES`] of envelope, then its body's bits
+/// rounded up to whole bytes. `None` for a service with no group.
+///
+/// ```text
+/// body      46 bits (the time, the count of groups), then each group
+/// group     14 bits (index, tag) · size · a map bit per collection of the
+///           interface · each `link` collection's longest section
+/// section   one member: 33 bits; templated, of cardinality c:
+///           33 + ⌈log₂(c + 1)⌉ + c, every member live, and the bitmap
+/// size      core §7.5's integer over the bits after it: 8 bits below
+///           128, 16 below 16,384, and so on
+/// ```
+fn owner_heartbeat_longest(
+    view: &View,
+    heartbeats: &BTreeMap<String, bool>,
+    ifaces: &[String],
+) -> Option<u128> {
+    use crate::heartbeat::{GROUPS_BITS, INDEX_BITS, TIME_BITS};
+    let mut body = u128::from(TIME_BITS + GROUPS_BITS);
+    let mut groups = 0;
+    for resources in owner_heartbeat_groups(view, heartbeats, ifaces) {
+        let collections = || resources.iter().filter(|r| is_collection(r));
+        let sections: u128 = collections().count() as u128
+            + collections()
+                .filter(|r| is_link(r))
+                .map(|r| {
+                    crate::heartbeat::longest_section_bits(
+                        r.template
+                            .has_params()
+                            .then(|| r.cardinality.unwrap_or(u64::from(u32::MAX))),
+                    )
+                })
+                .sum::<u128>();
+        body += u128::from(INDEX_BITS + 4) + crate::heartbeat::size_bits(sections) + sections;
+        groups += 1;
+    }
+    (groups > 0).then(|| u128::from(ENVELOPE_BYTES) + body.div_ceil(8))
 }
 
 /// Each listed interface whose owners send a heartbeat covering it

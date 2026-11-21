@@ -32,9 +32,13 @@
 //! reads it (v2 §2.5, `spec/profiles/freshness/conformance/apply.json`).
 //! The refusals' tokens are `spec/conformance/heartbeat/bodies.json`'s.
 //!
-//! **The owner heartbeat** (core 0.108; #1110's H1, adopted by no rule
-//! yet) is form 6's second layout: one put for several interfaces an
-//! owner serves, a [`Group`] for each.
+//! **The owner heartbeat** (core 0.108; #1110's H1) is form 6's second
+//! layout: one put for several interfaces an owner serves, a [`Group`]
+//! for each. `freshness.v2` 0.9 adopts it (#1110's H2a): an owner under a
+//! catalog may send one for each [`Class`] of collection it holds, on
+//! [`owner_key`], in place of its interfaces' heartbeats (v2 §2.4), and a
+//! reader confirms by it as [`crate::freshness::Views`] reads it (v2
+//! §2.5).
 //!
 //! ```text
 //! owner heartbeat, a put's payload   CH · run · seq · body      CH: form 6 · run width · tag 0
@@ -78,9 +82,58 @@ pub const PROFILE: &str = "freshness.v2";
 /// parameter the covered interface's id (v2 §3).
 pub const RESOURCE: &str = "heartbeat/{iface}";
 
+/// The resource `freshness.v2`'s standard contract declares for the owner
+/// heartbeat since its revision 1.1, its parameter the class (v2 §3).
+pub const OWNER_RESOURCE: &str = "heartbeats/{class}";
+
 /// The width of a heartbeat's time: 32 bits of seconds, then 10 of
 /// milliseconds, as core §7.6's `time` field with `ms`.
 pub const TIME_BITS: u32 = 42;
+
+/// A collection's class (`freshness.v2` §2.4): `link` where its resolved
+/// `link.exposure` reads `link`, as `link.v1` §2.2 reads it, and `host`
+/// otherwise, absent or any other value. An owner heartbeat key is one
+/// class's, and its groups cover the collections of that class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Class {
+    Link,
+    Host,
+}
+
+impl Class {
+    /// Both classes: an owner puts on no other key (v2 §3).
+    pub const ALL: [Class; 2] = [Class::Link, Class::Host];
+
+    /// `link` or `host`, the owner heartbeat key's last chunk.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Class::Link => "link",
+            Class::Host => "host",
+        }
+    }
+
+    /// The class a key's last chunk names, `None` for any other chunk.
+    #[must_use]
+    pub fn from_chunk(chunk: &str) -> Option<Class> {
+        Class::ALL.into_iter().find(|c| c.as_str() == chunk)
+    }
+
+    /// The class of a resource, from its resolved `link.exposure`.
+    #[must_use]
+    pub fn of(r: &crate::contract::Resource) -> Class {
+        match crate::link::exposure_of(r) {
+            crate::link::Exposure::Link => Class::Link,
+            _ => Class::Host,
+        }
+    }
+}
+
+impl std::fmt::Display for Class {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 /// The base-relative key a heartbeat covering `iface` travels on from the
 /// service at `system/service`: `zk2/<system>/<service>/freshness.v2/stream/heartbeat/<iface>`
@@ -91,10 +144,19 @@ pub fn key(system: &str, service: &str, iface: &IfaceId) -> String {
     format!("zk2/{system}/{service}/{PROFILE}/stream/heartbeat/{iface}")
 }
 
-/// The covered interface a heartbeat key names, read from a key with a
-/// namespace in front or none: `None` for any other key.
+/// The base-relative key an owner heartbeat of `class` travels on from the
+/// service at `system/service`:
+/// `zk2/<system>/<service>/freshness.v2/stream/heartbeats/<class>`
+/// (`freshness.v2` §3, the standard contract's revision 1.1).
 #[must_use]
-pub fn covered(key: &str) -> Option<(crate::grammar::Addr, IfaceId)> {
+pub fn owner_key(system: &str, service: &str, class: Class) -> String {
+    format!("zk2/{system}/{service}/{PROFILE}/stream/heartbeats/{class}")
+}
+
+/// The chunks of a `freshness.v2` stream key after its kind token, with
+/// the address it is put from, read from a key with a namespace in front
+/// or none: `None` for any other key.
+fn profile_stream(key: &str) -> Option<(crate::grammar::Addr, Vec<String>)> {
     let mut rest = Some(key);
     while let Some(k) = rest {
         if k.starts_with("zk2/")
@@ -105,21 +167,42 @@ pub fn covered(key: &str) -> Option<(crate::grammar::Addr, IfaceId)> {
                 resource,
             }) = parse(k)
         {
-            if iface.to_string() != PROFILE {
-                return None;
-            }
-            let [h, covered] = resource.as_slice() else {
-                return None;
-            };
-            if h != "heartbeat" {
-                return None;
-            }
-            let (name, major) = covered.rsplit_once(".v")?;
-            return Some((addr, IfaceId::new(name, major.parse().ok()?).ok()?));
+            return (iface.to_string() == PROFILE).then_some((addr, resource));
         }
         rest = k.split_once('/').map(|(_, r)| r);
     }
     None
+}
+
+/// The covered interface a heartbeat key names, read from a key with a
+/// namespace in front or none: `None` for any other key.
+#[must_use]
+pub fn covered(key: &str) -> Option<(crate::grammar::Addr, IfaceId)> {
+    let (addr, resource) = profile_stream(key)?;
+    let [h, covered] = resource.as_slice() else {
+        return None;
+    };
+    if h != "heartbeat" {
+        return None;
+    }
+    let (name, major) = covered.rsplit_once(".v")?;
+    Some((addr, IfaceId::new(name, major.parse().ok()?).ok()?))
+}
+
+/// The class an owner heartbeat key names, read from a key with a
+/// namespace in front or none: `None` for any other key, one whose last
+/// chunk is no class among them. A reader tells an owner heartbeat from a
+/// heartbeat by this, never by its bytes (core §7.5).
+#[must_use]
+pub fn owner_class(key: &str) -> Option<(crate::grammar::Addr, Class)> {
+    let (addr, resource) = profile_stream(key)?;
+    let [h, class] = resource.as_slice() else {
+        return None;
+    };
+    if h != "heartbeats" {
+        return None;
+    }
+    Some((addr, Class::from_chunk(class)?))
 }
 
 /// ⌈log₂ n⌉ for n ≥ 1, 0 for n ≤ 1: the fewest bits that hold n codes.
@@ -142,6 +225,9 @@ pub struct Collection {
     pub cardinality: Option<u64>,
     /// Its horizon, `freshness.ttl_s`.
     pub ttl: Duration,
+    /// Its class, which of its owner's owner heartbeats covers it
+    /// (`freshness.v2` §2.4).
+    pub class: Class,
 }
 
 impl Collection {
@@ -202,6 +288,7 @@ impl Layout {
                             .has_params()
                             .then(|| r.cardinality.unwrap_or(u64::from(u32::MAX))),
                         ttl,
+                        class: Class::of(r),
                     });
                     Some(collections.len() - 1)
                 }
@@ -233,6 +320,28 @@ impl Layout {
     #[must_use]
     pub fn horizon(&self) -> Option<Duration> {
         self.collections.iter().map(|c| c.ttl).min()
+    }
+
+    /// The shortest horizon among the collections of `class`, `None` with
+    /// none: what the revision asks of the period of that class's owner
+    /// heartbeats (`freshness.v2` §2.4).
+    #[must_use]
+    pub fn class_horizon(&self, class: Class) -> Option<Duration> {
+        self.collections
+            .iter()
+            .filter(|c| c.class == class)
+            .map(|c| c.ttl)
+            .min()
+    }
+
+    /// The classes the revision's collections have, `link` first: the
+    /// owner heartbeat keys a group covering it may ride.
+    #[must_use]
+    pub fn classes(&self) -> Vec<Class> {
+        Class::ALL
+            .into_iter()
+            .filter(|c| self.collections.iter().any(|x| x.class == *c))
+            .collect()
     }
 
     /// The collection named `<kind token>/<template>`.
@@ -758,6 +867,32 @@ pub const INDEX_BITS: u32 = 10;
 
 /// The highest index a group names.
 pub const MAX_INDEX: u16 = (1 << INDEX_BITS) - 1;
+
+/// The bits of a collection's longest section (core §7.5): a digest and a
+/// vouched bit for one member (`None`), 33 bits; for a templated one of
+/// cardinality c, the digest, the live count, `sel` and the bitmap with
+/// every member live, 33 + ⌈log₂(c + 1)⌉ + c. The bitmap is the longer
+/// form: a writer writes the list only where it is shorter.
+#[must_use]
+pub fn longest_section_bits(cardinality: Option<u64>) -> u128 {
+    match cardinality {
+        None => 33,
+        Some(c) => 33 + u128::from(bits_for(u128::from(c) + 1)) + u128::from(c),
+    }
+}
+
+/// The bits of a group's size, core §7.5's integer over the `bits` after
+/// it: unsigned LEB128, 8 bits below 128, 16 below 16,384, and so on.
+#[must_use]
+pub fn size_bits(bits: u128) -> u128 {
+    let mut bytes = 1;
+    let mut rest = bits >> 7;
+    while rest > 0 {
+        bytes += 1;
+        rest >>= 7;
+    }
+    bytes * 8
+}
 
 /// One covered interface's part of an owner heartbeat (core §7.5): the
 /// covered revision's index in the catalog its owner names, the tag the
@@ -1297,6 +1432,86 @@ annotations = { "freshness.ttl_s" = 60 }
         fn below(&mut self, n: u64) -> u64 {
             self.next() % n
         }
+    }
+
+    /// link.v2 §2.16 counts an owner heartbeat's longest put by
+    /// [`longest_section_bits`] and [`size_bits`]: the writer's own bits,
+    /// with every member live and vouched for.
+    #[test]
+    fn the_longest_section_and_the_size_are_the_writers() {
+        let c = crate::contract::load_str(
+            r#"
+[interface]
+name = "mixed"
+major = 1
+minor = 0
+uses = ["freshness.v2", "link.v1"]
+[resources."peer/{peer}"]
+kind = "state"
+type = { raw = "text/plain" }
+params = { peer = "string" }
+cardinality = 200
+annotations = { "freshness.ttl_s" = 120, "link.exposure" = "link" }
+[resources.status]
+kind = "state"
+type = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 60 }
+"#,
+            std::path::Path::new("."),
+            None,
+        )
+        .contract
+        .unwrap();
+        let l = Layout::of(&c);
+        assert_eq!(
+            l.collections.iter().map(|c| c.class).collect::<Vec<_>>(),
+            vec![Class::Link, Class::Host]
+        );
+        let peers = Section {
+            digest: Digest::EMPTY,
+            members: Members::templated(200, 0..200),
+        };
+        assert!(matches!(peers.members, Members::Bitmap(_)));
+        let one = Section {
+            digest: Digest::EMPTY,
+            members: Members::One { vouched: true },
+        };
+        // A `link` group: both map bits, and the `link` collection's section.
+        let g = Group::of(7, &l, &[Some(peers.clone()), None]).unwrap();
+        assert_eq!(longest_section_bits(Some(200)), 33 + 8 + 200);
+        assert_eq!(u128::from(g.size()), 2 + longest_section_bits(Some(200)));
+        // One member's section.
+        let h = Group::of(7, &l, &[None, Some(one)]).unwrap();
+        assert_eq!(u128::from(h.size()), 2 + longest_section_bits(None));
+        // The size's own bits, as the body holds them.
+        let body = OwnerHeartbeat {
+            time: Time::Unknown,
+            groups: vec![g.clone()],
+        }
+        .record()
+        .unwrap();
+        let after = u128::from(g.size());
+        assert_eq!(size_bits(after), 16, "243 bits take two bytes");
+        assert_eq!(u128::from(body.bits), 46 + 14 + size_bits(after) + after);
+        for n in [
+            0u32,
+            1,
+            127,
+            128,
+            16_383,
+            16_384,
+            (1 << 21) - 1,
+            1 << 21,
+            u32::MAX,
+        ] {
+            assert_eq!(
+                size_bits(u128::from(n)),
+                8 * crate::collection::integer_bytes(n) as u128,
+                "{n}"
+            );
+        }
+        // Past what a size can state, the count still grows.
+        assert_eq!(size_bits(1 << 35), 48);
     }
 
     #[test]

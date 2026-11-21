@@ -422,7 +422,11 @@ impl Owner {
                                 SectionRead::Confirmed(keys) => Section::Vouched(keys.len()),
                                 SectionRead::Diverged => Section::Diverged,
                                 SectionRead::Absent => Section::Absent,
-                                SectionRead::NotFollowed => Section::NotFollowed,
+                                // `OtherClass` is a group's reading alone,
+                                // never a heartbeat's.
+                                SectionRead::NotFollowed | SectionRead::OtherClass => {
+                                    Section::NotFollowed
+                                }
                             },
                         )
                     })

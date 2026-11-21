@@ -1850,8 +1850,10 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
             // Inline resources hold no `history` and no `frame` table, and
             // no layout: a case about any of them loads a contract. One may
             // state its type's kind, `packed` or another (link.v2 §2.17),
-            // and the parameter its template declares as its `epoch`
-            // (link.v2 §2.5, `epoch_on_device`).
+            // the parameter its template declares as its `epoch` (link.v2
+            // §2.5, `epoch_on_device`), and a templated one its
+            // `cardinality` (link.v2 §2.16, an owner heartbeat's longest
+            // put).
             let mut res = link::Res::new(
                 Template::parse(r["template"].as_str().expect("template")).expect("a template"),
                 link_token(&r["token"]),
@@ -1861,6 +1863,9 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
             res.epoch = r
                 .get("epoch")
                 .map(|e| e.as_str().expect("epoch").to_owned());
+            res.cardinality = r
+                .get("cardinality")
+                .map(|c| c.as_u64().expect("cardinality"));
             res
         })
         .collect()
@@ -5351,10 +5356,18 @@ fn apply_stamp(v: &Value) -> Option<zenkey_model::wire::Stamp> {
 /// subscriber's view over the core's heartbeat layouts, its puts, deletes,
 /// reads and heartbeats in order → what each heartbeat confirmed, and the
 /// collections due a read, the gap and each key's last confirmation.
+/// Since text 0.9 (#1110's H2a) a case with a `catalog` is one provider's
+/// views of several interfaces behind its owner heartbeat keys
+/// (`freshness::Views`): each owner heartbeat → refused whole, older, or
+/// each group's reading, then by layout the collections due a read and
+/// those read as lost deliveries, and each key's gap.
 /// Written by an independent reading of the text, checked, never blessed.
 #[test]
 fn freshness_v2_apply() {
-    use zenkey_model::freshness::{Applied, SectionRead, View};
+    use zenkey_model::freshness::{
+        Applied, Catalogs, GroupRead, OwnerApplied, SectionRead, View, Views,
+    };
+    use zenkey_model::heartbeat::Class;
     let layouts: BTreeMap<String, zenkey_model::heartbeat::Layout> = {
         let doc = read_json(&repo_root().join("spec/conformance/heartbeat/layouts.json"));
         doc["contracts"]
@@ -5376,8 +5389,54 @@ fn freshness_v2_apply() {
     };
     let doc = read_json(&profiles().join("freshness/conformance/apply.json"));
     let ms = |v: &Value| Mono::after(Duration::from_millis(v.as_u64().expect("at")));
-    for case in doc["cases"].as_array().expect("cases") {
+    let hex = |text: &str| -> Vec<u8> {
+        (0..text.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("hex"))
+            .collect()
+    };
+    let section = |s: SectionRead| match s {
+        SectionRead::Confirmed(keys) => json!({"confirmed": keys}),
+        other => json!(other.as_str()),
+    };
+    let sections = |l: &zenkey_model::heartbeat::Layout, read: Vec<SectionRead>| -> Value {
+        assert_eq!(l.collections.len(), read.len(), "a reading per collection");
+        Value::Object(
+            l.collections
+                .iter()
+                .zip(read)
+                .map(|(c, s)| (c.resource(), section(s)))
+                .collect(),
+        )
+    };
+    let heartbeat = |l: &zenkey_model::heartbeat::Layout, applied: Applied| match applied {
+        Applied::Revision => json!({"revision": true}),
+        Applied::Refused(r) => json!({"refused": r.token()}),
+        Applied::Older => json!({"older": true}),
+        Applied::Read { gap, sections: s } => {
+            json!({"read": {"gap": gap, "sections": sections(l, s)}})
+        }
+    };
+    let live_of = |r: &Value| -> Vec<(String, Option<zenkey_model::wire::Stamp>)> {
+        r["live"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| {
+                (
+                    m["key"].as_str().unwrap().to_owned(),
+                    apply_stamp(&m["stamp"]),
+                )
+            })
+            .collect()
+    };
+    let (mut heartbeats, mut owner_heartbeats) = (0, 0);
+    let cases = doc["cases"].as_array().expect("cases");
+    for case in cases {
         let note = case["note"].as_str().expect("note");
+        if case.get("catalog").is_some() {
+            continue;
+        }
         let layout = layouts[case["layout"].as_str().expect("layout")].clone();
         let mut view: View<Mono> = View::new(layout.clone());
         for f in case["follows"].as_array().expect("follows") {
@@ -5401,17 +5460,7 @@ fn freshness_v2_apply() {
                 let index = layout
                     .index_of(r["collection"].as_str().unwrap())
                     .expect("a collection");
-                let live: Vec<(String, Option<zenkey_model::wire::Stamp>)> = r["live"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|m| {
-                        (
-                            m["key"].as_str().unwrap().to_owned(),
-                            apply_stamp(&m["stamp"]),
-                        )
-                    })
-                    .collect();
+                let live = live_of(r);
                 view.reread(
                     index,
                     live.iter().map(|(k, s)| (k.as_str(), *s)),
@@ -5421,34 +5470,10 @@ fn freshness_v2_apply() {
             } else if let Some(h) = step.get("heartbeat") {
                 let tag = zenkey_model::wire::Tag::new(h["tag"].as_u64().unwrap() as u8).unwrap();
                 let stamp = apply_stamp(&h["stamp"]).expect("a heartbeat's stamp");
-                let text = h["body"].as_str().unwrap();
-                let body: Vec<u8> = (0..text.len())
-                    .step_by(2)
-                    .map(|i| u8::from_str_radix(&text[i..i + 2], 16).expect("hex"))
-                    .collect();
-                let got = match view.apply(tag, stamp, &body, ms(&step["at"])) {
-                    Applied::Revision => json!({"revision": true}),
-                    Applied::Refused(r) => json!({"refused": r.token()}),
-                    Applied::Older => json!({"older": true}),
-                    Applied::Read { gap, sections } => {
-                        let by: serde_json::Map<String, Value> = layout
-                            .collections
-                            .iter()
-                            .zip(sections)
-                            .map(|(c, s)| {
-                                (
-                                    c.resource(),
-                                    match s {
-                                        SectionRead::Confirmed(keys) => json!({"confirmed": keys}),
-                                        other => json!(other.as_str()),
-                                    },
-                                )
-                            })
-                            .collect();
-                        json!({"read": {"gap": gap, "sections": by}})
-                    }
-                };
+                let body = hex(h["body"].as_str().unwrap());
+                let got = heartbeat(&layout, view.apply(tag, stamp, &body, ms(&step["at"])));
                 assert_eq!(step["expect"], got, "{what}");
+                heartbeats += 1;
             } else if let Some(c) = step.get("check") {
                 let due: Vec<String> = view
                     .reread_due()
@@ -5468,4 +5493,189 @@ fn freshness_v2_apply() {
             }
         }
     }
+    // §2.5's rule for an owner heartbeat: one provider's views behind its
+    // owner heartbeat keys.
+    for case in cases {
+        let note = case["note"].as_str().expect("note");
+        let Some(catalog) = case.get("catalog") else {
+            continue;
+        };
+        // The catalog the owner names, which the subscriber holds: each
+        // entry a layout's revision, or a revision that is no layout's.
+        let held: Vec<zenkey_model::catalog::Catalog> = catalog
+            .as_array()
+            .map(|entries| {
+                let entries: Vec<Value> = entries
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| match e.as_str() {
+                        Some(name) => json!({
+                            "index": i,
+                            "iface": layouts[name].iface.to_string(),
+                            "contract": layouts[name].fingerprint.to_string(),
+                        }),
+                        None => json!({
+                            "index": i, "iface": e["iface"], "contract": e["contract"],
+                        }),
+                    })
+                    .collect();
+                let text = json!({"format": "zk2-catalog/1", "epoch": 0, "entries": entries});
+                zenkey_model::catalog::Catalog::parse(&text.to_string())
+                    .unwrap_or_else(|e| panic!("{note}: its catalog: {e}"))
+            })
+            .into_iter()
+            .collect();
+        let named = held.first().map(zenkey_model::catalog::Catalog::id);
+        assert_eq!(
+            catalog.is_null(),
+            named.is_none(),
+            "{note}: a catalog or null"
+        );
+        // It holds the revisions of the layouts it follows, and those alone.
+        let mut views: Views<Mono> = Views::new();
+        for (name, follows) in case["follows"].as_object().expect("follows by layout") {
+            let mut view = View::new(layouts[name].clone());
+            for f in follows.as_array().expect("follows") {
+                assert!(view.follow_resource(f.as_str().unwrap()), "{note}: {f}");
+            }
+            assert!(views.insert(view).is_none(), "{note}: {name} twice");
+        }
+        let by_iface: BTreeMap<String, &str> = layouts
+            .iter()
+            .map(|(name, l)| (l.iface.to_string(), name.as_str()))
+            .collect();
+        for (i, step) in case["steps"].as_array().expect("steps").iter().enumerate() {
+            let what = format!("{note}, step {i}");
+            if let Some(p) = step.get("put") {
+                let key = p["key"].as_str().unwrap();
+                views.view_of_mut(key).expect("a view").put(
+                    key,
+                    apply_stamp(&p["stamp"]),
+                    ms(&step["at"]),
+                );
+            } else if let Some(d) = step.get("delete") {
+                let key = d["key"].as_str().unwrap();
+                views.view_of_mut(key).expect("a view").delete(
+                    key,
+                    apply_stamp(&d["stamp"]),
+                    ms(&step["at"]),
+                );
+            } else if let Some(r) = step.get("read") {
+                let layout = &layouts[r["layout"].as_str().expect("a read's layout")];
+                let index = layout
+                    .index_of(r["collection"].as_str().unwrap())
+                    .expect("a collection");
+                let live = live_of(r);
+                views.view_mut(&layout.iface).expect("a view").reread(
+                    index,
+                    live.iter().map(|(k, s)| (k.as_str(), *s)),
+                    ms(&r["asked"]),
+                    ms(&step["at"]),
+                );
+            } else if let Some(h) = step.get("heartbeat") {
+                let layout = &layouts[h["layout"].as_str().expect("a heartbeat's layout")];
+                let tag = zenkey_model::wire::Tag::new(h["tag"].as_u64().unwrap() as u8).unwrap();
+                let stamp = apply_stamp(&h["stamp"]).expect("a heartbeat's stamp");
+                let body = hex(h["body"].as_str().unwrap());
+                let applied = views.view_mut(&layout.iface).expect("a view").apply(
+                    tag,
+                    stamp,
+                    &body,
+                    ms(&step["at"]),
+                );
+                assert_eq!(step["expect"], heartbeat(layout, applied), "{what}");
+                heartbeats += 1;
+            } else if let Some(h) = step.get("owner_heartbeat") {
+                let class = Class::from_chunk(h["class"].as_str().unwrap()).expect("a class");
+                let tag = zenkey_model::wire::Tag::new(h["tag"].as_u64().unwrap() as u8).unwrap();
+                let stamp = apply_stamp(&h["stamp"]).expect("an owner heartbeat's stamp");
+                let body = hex(h["body"].as_str().unwrap());
+                let got = match views.apply_owner(
+                    class,
+                    tag,
+                    stamp,
+                    &body,
+                    Catalogs { held: &held, named },
+                    ms(&step["at"]),
+                ) {
+                    OwnerApplied::Refused(r) => json!({"refused": r.token()}),
+                    OwnerApplied::Older => json!({"older": true}),
+                    OwnerApplied::Read { gap, groups } => {
+                        let groups: Vec<Value> = groups
+                            .into_iter()
+                            .map(|g| match g.read {
+                                GroupRead::Refused(r) => {
+                                    json!({"index": g.index, "refused": r.token()})
+                                }
+                                GroupRead::NotFollowed => {
+                                    json!({"index": g.index, "not_followed": true})
+                                }
+                                GroupRead::Revision => json!({"index": g.index, "revision": true}),
+                                GroupRead::Read(s) => {
+                                    let iface = g.iface.expect("a read group's interface");
+                                    let l = &layouts[by_iface[&iface.to_string()]];
+                                    json!({"index": g.index, "sections": sections(l, s)})
+                                }
+                            })
+                            .collect();
+                        json!({"read": {"gap": gap, "groups": groups}})
+                    }
+                };
+                assert_eq!(step["expect"], got, "{what}");
+                owner_heartbeats += 1;
+            } else if let Some(c) = step.get("check") {
+                // By layout, a layout with none left out.
+                let mut due = serde_json::Map::new();
+                let mut gap = serde_json::Map::new();
+                for v in views.iter() {
+                    let name = by_iface[&v.layout().iface.to_string()];
+                    let d: Vec<String> = v
+                        .reread_due()
+                        .into_iter()
+                        .map(|i| v.layout().collections[i].resource())
+                        .collect();
+                    if !d.is_empty() {
+                        due.insert(name.to_owned(), json!(d));
+                    }
+                    // A key one has been read on: the interface's own.
+                    if v.last_heartbeat().is_some() {
+                        gap.insert(name.to_owned(), json!(v.gap()));
+                    }
+                }
+                for class in Class::ALL {
+                    if let Some(g) = views.gap(class) {
+                        gap.insert(class.as_str().to_owned(), json!(g));
+                    }
+                }
+                let mut lost: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+                for (iface, i) in views.lost() {
+                    let name = by_iface[&iface.to_string()];
+                    lost.entry(name)
+                        .or_default()
+                        .push(layouts[name].collections[i].resource());
+                }
+                assert_eq!(c["reread_due"], Value::Object(due), "{what}: reread_due");
+                assert_eq!(c["gap"], Value::Object(gap), "{what}: gap");
+                assert_eq!(c["lost"], json!(lost), "{what}: lost");
+                for (k, at) in c["confirmed"].as_object().unwrap() {
+                    let got = views
+                        .view_of(k)
+                        .and_then(|v| v.confirmed(k))
+                        .map(|m| m.since_origin().as_millis() as u64);
+                    assert_eq!(*at, json!(got), "{what}: {k}'s confirmation");
+                }
+            } else {
+                panic!("{what}: an unknown step {step}");
+            }
+        }
+    }
+    // A count that moves is a fixture that moved: the text's 15 cases for a
+    // heartbeat and its 17 for an owner heartbeat.
+    assert_eq!(cases.len(), 32, "apply.json's cases");
+    assert_eq!(
+        cases.iter().filter(|c| c.get("catalog").is_some()).count(),
+        17,
+        "the owner heartbeat's cases"
+    );
+    assert!(heartbeats > 0 && owner_heartbeats > 0);
 }

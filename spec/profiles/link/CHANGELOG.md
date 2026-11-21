@@ -41,12 +41,34 @@ its faces. This text lets the `link` class's cross.
 **The header** restates `link.v1` text 0.20, and is written against core
 0.108, whose §7.5 defines the owner heartbeat.
 
-**Evidence owed.** `conformance/v2/plan.json` is blessed from the
-reference, and this version does not touch it. Twelve of its faces let
-`probe.v1`'s heartbeat cross (cases 5, 6, 8, 9, 10, 12, 19, 20, 22 and
-23). Each plan gains the `host` key's deny and the `link` key's
-evidence. Case 6 gains its `horizon_under_face`. A case for
-`block_over_batch` over an owner heartbeat is owed too.
+**Evidence.** `conformance/v2/plan.json`, 48 cases.
+- **Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8,
+  9, 10, 12, 19, 20, 22, 23, 44 and 45. Under a `link.v2` policy each
+  plan gains `stream:freshness.v2`, the `host` key's deny, and the `link`
+  key among `probe-a`'s evidence. Case 6 gains its `horizon_under_face`.
+  Case 10 is a `link.v1` policy: it gains `link.v1` 0.20's deny of both
+  classes, and no evidence.
+- **How they were checked.** Cases 5 and 6 were written by hand from
+  §2.9 before the reference derived them, and the two agree. The ten
+  others differ from their plans before by those keys alone.
+- **Cases 46 and 47 are new, written by hand** from §2.9 and §2.16, and
+  the reference derives the same plans. One service's `link` owner
+  heartbeat holds two groups, one with a collection of cardinality
+  1,000: 1,211 bits, a put of 160 bytes. Case 46's batch is 159 bytes,
+  and it warns `block_over_batch`. Case 47's is 160, and it does not.
+  An interface whose one collection is `host` has no group there.
+- **An inline resource may state `cardinality`,** which the longest put
+  reads. A templated one that states none is read as no ceiling.
+- **Cases 14 to 18** carry zenoh-modem's catalog, which appends
+  `freshness.v2`'s revision 1.1: `8982cc41`. Their plans name it, and
+  nothing else in them moves, since no heartbeat crosses those faces.
+
+**Read where the text does not say.** A group is counted, for the
+horizon and for the longest put, for an interface that has a heartbeat:
+one a revision of which uses `freshness.v2`. An owner covers an
+interface in place of its heartbeat (`freshness.v2` §2.4), so an
+interface with none has no group. §2.9 and §2.16 say "listed interface"
+alone. No case pins the difference.
 
 **Deliberately not changed.**
 - **The heartbeat's crossing.** `link.v1` §2.9's rule holds.
