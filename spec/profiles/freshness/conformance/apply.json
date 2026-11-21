@@ -1,5 +1,5 @@
 {
-  "description": "freshness.v2 §2.5, a subscriber's rule for a heartbeat. Written by an independent reading of the text (Python, standard library), checked, never blessed. Each case names a layout of the core's `spec/conformance/heartbeat/layouts.json` and the collections the subscriber `follows`, by resource, then its `steps` in order, each at `at`, the subscriber's monotonic clock in milliseconds. `put` and `delete`: a mutation of `key` it heard, with its in-band `stamp` (`run_width` 16 or 32, `run`, `seq`) or `null` for none; a put older than the one held within one run is not taken. `read`: a complete read's answer of `collection`, asked at `asked` and arrived at `at`, its `live` members each with its stamp: it replaces the collection, merged with what was heard from `asked` on (within one run the higher seq kept, across two runs the answer's). `heartbeat`: CH's `tag`, the heartbeat key's `stamp` and the `body` in hex, then `expect`: `{revision: true}` (the tag is not the layout's), `{refused: token}` (core §7.5's body refusals), `{older: true}` (within one run, a seq not after the last read heartbeat's by serial order), or `{read: {gap, sections}}`, `gap` true when the seq is not the last read one's plus 1 within one run, and each collection, by resource, `not_followed`, `absent` (its map bit 0), `diverged` (its digest or live count not the view's), or `{confirmed: [keys]}`, the members vouched for, in key order. A heartbeat expected `revision`, `refused` or `older` is not counted: it moves neither the sequence nor a count of divergences in a row. `check`: the collections due a read (`reread_due`, two divergences in a row, in map order), whether the last heartbeat read followed a gap (`gap`), and each named key's last heartbeat confirmation (`confirmed`, its `at`, or `null`: none since its last mutation, or not held).",
+  "description": "freshness.v2 §2.5, a subscriber's rule for a heartbeat. Written by an independent reading of the text (Python, standard library), checked, never blessed. Each case names a layout of the core's `spec/conformance/heartbeat/layouts.json` and the collections the subscriber `follows`, by resource, then its `steps` in order, each at `at`, the subscriber's monotonic clock in milliseconds. `put` and `delete`: a mutation of `key` it heard, with its in-band `stamp` (`run_width` 16 or 32, `run`, `seq`) or `null` for none; a put older than the one held within one run is not taken. `read`: a complete read's answer of `collection`, asked at `asked` and arrived at `at`, its `live` members each with its stamp: it replaces the collection, merged with what was heard from `asked` on (within one run the higher seq kept, across two runs the answer's). `heartbeat`: CH's `tag`, the heartbeat key's `stamp` and the `body` in hex, then `expect`: `{revision: true}` (the tag is not the layout's), `{refused: token}` (core §7.5's body refusals), `{older: true}` (within one run, a seq not after the last read heartbeat's by serial order), or `{read: {gap, sections}}`, `gap` true when the seq is not the last read one's plus 1 within one run, and each collection, by resource, `not_followed`, `absent` (its map bit 0), `diverged` (its digest or live count not the view's), or `{confirmed: [keys]}`, the members vouched for, in key order. A heartbeat expected `revision`, `refused` or `older` is not counted: it moves neither the sequence nor a count of divergences in a row. `check`: the collections due a read (`reread_due`, two divergences in a row, in map order), whether the last heartbeat read followed a gap (`gap`), and each named key's last heartbeat confirmation (`confirmed`, its `at`, or `null`: none since its last mutation, or not held). Cases with a `catalog` are §2.5's rule for an owner heartbeat, written by an independent reading of the text and checked by a second, never blessed. `catalog` is the catalog the owner names, which the subscriber holds: the layouts its entries name, in index order, an entry `{iface, contract}` naming a revision of `iface` that is no layout's; or `null` where the owner names none. `follows` gives, per layout, the collections the subscriber follows of that interface, and it holds those layouts' revisions alone. A collection's class is `link` where its resolved `link.exposure` reads `link` in the layout's contract, and `host` otherwise. A `read` names its `layout`, and a `heartbeat` the `layout` it covers. `owner_heartbeat`: the key's `class`, CH's `tag`, the key's `stamp` and the `body` in hex, then `expect`: `{refused: token}` (core §7.5 refuses it whole: `tag`, `short`, `code`, `order`, `leb128`, `trailing`, `pad`), `{older: true}`, or `{read: {gap, groups}}`: `gap` true when the seq is not the last read owner heartbeat's plus 1 on that key within one run, and each group in order, its `index` and one of `refused` (`unknown_catalog` or `unknown_index`, or core §7.5's token for its sections), `not_followed: true`, `revision: true`, or `sections`: each collection of its interface, by resource, `not_followed`, `other_class` (not of the key's class, whatever its map bit), `absent`, `diverged` or `{confirmed: [keys]}`. An owner heartbeat expected `refused` or `older` is not counted; a group that is `refused`, `not_followed` or `revision` moves no count of divergences. `check`: `reread_due` by layout, a layout with none left out; `gap` by key, the class or the covered interface's layout, for each key one has been read on: whether the last one read on that key followed a gap; `lost`, by layout, the followed collections read as lost deliveries, a layout with none left out; and `confirmed`, as above.",
   "cases": [
     {
       "note": "a section whose digest is the view's confirms each member vouched for, at the heartbeat's arrival; a cleared bit confirms nothing of its member, which keeps its last confirmation",
@@ -2050,6 +2050,3657 @@
             "gap": false,
             "confirmed": {
               "zk2/lab/n1/hb.v1/state/link": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "W2's three interfaces in one owner heartbeat of the class `host`: a group per interface, each read as a heartbeat covering its interface would be, its members confirmed at the owner heartbeat's arrival; in the next, a cleared bit in vital.v1's group and one in alert.v1's confirm nothing of their members, which keep their last confirmation",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 100,
+              "zk2/lab/n1/knob.v1/state/config": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 1
+            },
+            "body": "00000e103e8c0042ee37b971a80d402522f837a83e4048228bbb02f900"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": []
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 100,
+              "zk2/lab/n1/knob.v1/state/config": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "a gap in the owner heartbeat key's seqs is an owner heartbeat lost for every interface it covers at once: every collection of the key's class, in each interface a group on the key has named, is read as a lost delivery until an owner heartbeat arrives in sequence; the one after the gap still confirms; another run starts the sequence again",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 2
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": true,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": true
+            },
+            "lost": {
+              "alert.v1": [
+                "state/alarms/{alert_key}"
+              ],
+              "knob.v1": [
+                "state/config"
+              ],
+              "vital.v1": [
+                "state/status"
+              ]
+            },
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 200,
+              "zk2/lab/n1/knob.v1/state/config": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 200
+            }
+          }
+        },
+        {
+          "at": 300,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 3
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 300,
+              "zk2/lab/n1/knob.v1/state/config": 300,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 300,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 300,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 300
+            }
+          }
+        },
+        {
+          "at": 400,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 10,
+              "seq": 9
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 400,
+              "zk2/lab/n1/knob.v1/state/config": 400,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 400,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 400,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 400
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "within one run, an owner heartbeat whose seq is not after the last read one's on its key confirms nothing, for any group, and is not counted: the same seq, an earlier one, and one 2^23 ahead, unordered; the next in sequence follows no gap",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 5
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 5
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "older": true
+          }
+        },
+        {
+          "at": 300,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 4
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "older": true
+          }
+        },
+        {
+          "at": 400,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 8388613
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "older": true
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 100,
+              "zk2/lab/n1/knob.v1/state/config": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
+            }
+          }
+        },
+        {
+          "at": 500,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 6
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 500,
+              "zk2/lab/n1/knob.v1/state/config": 500,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 500,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 500,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 500
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "an unknown index beside known ones: the catalog holds indices 0 to 2 and 4 is past it, so with a catalog of five entries a group of index 7 is refused, and that group alone: the groups before it are read, and so would one after it be",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e900042ee37b971a80dc02522f837a83e4048228bbb02f9407305b0"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 7,
+                  "refused": "unknown_index"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 100,
+              "zk2/lab/n1/knob.v1/state/config": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "the catalog the owner names holds three entries, and the last group's index is 4: refused, so vital.v1's member is not confirmed, and the two groups before it are; the owner heartbeat is read, and counted",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "refused": "unknown_index"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": null,
+              "zk2/lab/n1/knob.v1/state/config": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "the owner names no catalog: every group's index is refused, `unknown_catalog`, and nothing is confirmed; the owner heartbeat is still a read one, so the next follows no gap",
+      "catalog": null,
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "refused": "unknown_catalog"
+                },
+                {
+                  "index": 2,
+                  "refused": "unknown_catalog"
+                },
+                {
+                  "index": 4,
+                  "refused": "unknown_catalog"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": null,
+              "zk2/lab/n1/knob.v1/state/config": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": null
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 1
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "refused": "unknown_catalog"
+                },
+                {
+                  "index": 2,
+                  "refused": "unknown_catalog"
+                },
+                {
+                  "index": 4,
+                  "refused": "unknown_catalog"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "a divergence in one group: the reader missed knob.v1's second put, so that group's section diverges and confirms nothing, and the groups beside it confirm; two in a row make that collection alone due a read, whose answer replaces it, and the next owner heartbeat confirms it",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc0252294ba422a4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": "diverged"
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 100,
+              "zk2/lab/n1/knob.v1/state/config": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 1
+            },
+            "body": "00000e103e8c0042ee37b971a80dc0252294ba422a4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": "diverged"
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {
+              "knob.v1": [
+                "state/config"
+              ]
+            },
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 200,
+              "zk2/lab/n1/knob.v1/state/config": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 200
+            }
+          }
+        },
+        {
+          "at": 300,
+          "read": {
+            "layout": "knob.v1",
+            "collection": "state/config",
+            "asked": 250,
+            "live": [
+              {
+                "key": "zk2/lab/n1/knob.v1/state/config",
+                "stamp": {
+                  "run_width": 16,
+                  "run": 1,
+                  "seq": 8
+                }
+              }
+            ]
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 200,
+              "zk2/lab/n1/knob.v1/state/config": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 200
+            }
+          }
+        },
+        {
+          "at": 400,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 2
+            },
+            "body": "00000e103e8c0042ee37b971a80dc0252294ba422a4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 400,
+              "zk2/lab/n1/knob.v1/state/config": 400,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 400,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 400,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 400
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "a group stopped before its sections are read is not counted, and takes nothing from the groups beside it: knob.v1's group diverges, then carries another revision's tag, then a bit after its last field, and no read is due; then it diverges again, two read in a row for that collection, so a read is due, while alert.v1's group, a live count above its cardinality, is refused alone; every owner heartbeat here is a read one, so none follows a gap",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc0252294ba422a4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": "diverged"
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 1
+            },
+            "body": "00000e103e8c0042ee37b971a80dc0262294ba422a4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "revision": true
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 300,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 2
+            },
+            "body": "00000e103e8c0042ee37b971a80dc0252394ba422a40241145dd817ca0"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "refused": "trailing"
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 300,
+              "zk2/lab/n1/knob.v1/state/config": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 300,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 300,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 300
+            }
+          }
+        },
+        {
+          "at": 400,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 3
+            },
+            "body": "00000e103e8c0042bd0d961ea404012914a5d211520241145dd817ca"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "refused": "code"
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": "diverged"
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {
+              "knob.v1": [
+                "state/config"
+              ]
+            },
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 400,
+              "zk2/lab/n1/knob.v1/state/config": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 300,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 300,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 300
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "an owner heartbeat that core §7.5 refuses whole confirms nothing for any group and is not counted: an index twice, CH's tag not 0, a pad bit set; none moves the sequence, so seq 4 after seq 0 follows a gap",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 1
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e402522f837a83e40"
+          },
+          "expect": {
+            "refused": "order"
+          }
+        },
+        {
+          "at": 300,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 5,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 2
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "refused": "tag"
+          }
+        },
+        {
+          "at": 400,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 3
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f941"
+          },
+          "expect": {
+            "refused": "pad"
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 100,
+              "zk2/lab/n1/knob.v1/state/config": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
+            }
+          }
+        },
+        {
+          "at": 500,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 4
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": true,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": true
+            },
+            "lost": {
+              "alert.v1": [
+                "state/alarms/{alert_key}"
+              ],
+              "knob.v1": [
+                "state/config"
+              ],
+              "vital.v1": [
+                "state/status"
+              ]
+            },
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 500,
+              "zk2/lab/n1/knob.v1/state/config": 500,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 500,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 500,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 500
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "two classes, two keys, two sequences: mixed.v1's `link` collections ride the `link` key's group and its `host` collection the `host` key's, beside vital.v1's; each key counts its own seqs, so a gap on the `link` key reads mixed.v1's two `link` collections as lost deliveries and says nothing of the `host` key's",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "mixed.v1": [
+          "state/peer/{peer}",
+          "state/status",
+          "state/uplink"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/mixed.v1/state/peer/p1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 10
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/mixed.v1/state/peer/p2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 11
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/mixed.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 12
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/mixed.v1/state/uplink",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 13
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "link",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 40
+            },
+            "body": "00000e103e84037457f2a29dab32e54af080"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 3,
+                  "sections": {
+                    "state/peer/{peer}": "other_class",
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/status"
+                      ]
+                    },
+                    "state/uplink": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/uplink"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 7
+            },
+            "body": "00000e103e880372a86487b5e84c048228bbb02f94"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 3,
+                  "sections": {
+                    "state/peer/{peer}": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/peer/p1",
+                        "zk2/lab/n1/mixed.v1/state/peer/p2"
+                      ]
+                    },
+                    "state/status": "other_class",
+                    "state/uplink": "other_class"
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "link",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 42
+            },
+            "body": "00000e103e84037457f2a29dab32e54af080"
+          },
+          "expect": {
+            "read": {
+              "gap": true,
+              "groups": [
+                {
+                  "index": 3,
+                  "sections": {
+                    "state/peer/{peer}": "other_class",
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/status"
+                      ]
+                    },
+                    "state/uplink": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/uplink"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 300,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 8
+            },
+            "body": "00000e103e880372a86487b5e84c048228bbb02f94"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 3,
+                  "sections": {
+                    "state/peer/{peer}": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/peer/p1",
+                        "zk2/lab/n1/mixed.v1/state/peer/p2"
+                      ]
+                    },
+                    "state/status": "other_class",
+                    "state/uplink": "other_class"
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "link": true,
+              "host": false
+            },
+            "lost": {
+              "mixed.v1": [
+                "state/status",
+                "state/uplink"
+              ]
+            },
+            "confirmed": {
+              "zk2/lab/n1/mixed.v1/state/peer/p1": 300,
+              "zk2/lab/n1/mixed.v1/state/peer/p2": 300,
+              "zk2/lab/n1/mixed.v1/state/status": 200,
+              "zk2/lab/n1/mixed.v1/state/uplink": 200,
+              "zk2/lab/n1/vital.v1/state/status": 300
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "a collection of the other class is not read on a key, whatever its map bit says: a `link` owner heartbeat whose group marks mixed.v1's `host` collection, its digest the view's, confirms none of its members; a divergence there is not counted either; `uplink`'s map bit is 0, absent",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "mixed.v1": [
+          "state/peer/{peer}",
+          "state/status",
+          "state/uplink"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/mixed.v1/state/peer/p1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 10
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/mixed.v1/state/peer/p2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 11
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/mixed.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 12
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/mixed.v1/state/uplink",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 13
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "link",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e840374bc6487b5e84fe5453b56"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 3,
+                  "sections": {
+                    "state/peer/{peer}": "other_class",
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/status"
+                      ]
+                    },
+                    "state/uplink": "absent"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "link": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/mixed.v1/state/peer/p1": null,
+              "zk2/lab/n1/mixed.v1/state/peer/p2": null,
+              "zk2/lab/n1/mixed.v1/state/status": 100,
+              "zk2/lab/n1/mixed.v1/state/uplink": null,
+              "zk2/lab/n1/vital.v1/state/status": null
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "link",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 1
+            },
+            "body": "00000e103e840374acc79e9a2e2fca8a76ac"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 3,
+                  "sections": {
+                    "state/peer/{peer}": "other_class",
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/status"
+                      ]
+                    },
+                    "state/uplink": "absent"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 300,
+          "owner_heartbeat": {
+            "class": "link",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 2
+            },
+            "body": "00000e103e840374acc79e9a2e2fca8a76ac"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 3,
+                  "sections": {
+                    "state/peer/{peer}": "other_class",
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/mixed.v1/state/status"
+                      ]
+                    },
+                    "state/uplink": "absent"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "link": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/mixed.v1/state/peer/p1": null,
+              "zk2/lab/n1/mixed.v1/state/peer/p2": null,
+              "zk2/lab/n1/mixed.v1/state/status": 300,
+              "zk2/lab/n1/mixed.v1/state/uplink": null,
+              "zk2/lab/n1/vital.v1/state/status": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "a reader bound to one interface holds its revision alone: it skips the groups of the others by their sizes, their sections unread, here bits no revision would accept, and reads its own",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e900042efffffffffffc02103e0241145dd817ca029852aa0"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "not_followed": true
+                },
+                {
+                  "index": 2,
+                  "not_followed": true
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 5,
+                  "not_followed": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "both forms from one owner, an interface on each: hb.v1 by its own heartbeat, vital.v1 by the `host` owner heartbeat; each key is a sequence of its own, so a gap in hb.v1's heartbeats says nothing of vital.v1",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "hb.v1": [
+          "state/link"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/hb.v1/state/link",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 20
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 100,
+          "heartbeat": {
+            "layout": "hb.v1",
+            "tag": 14,
+            "stamp": {
+              "run_width": 16,
+              "run": 30,
+              "seq": 0
+            },
+            "body": "00000e103e90fdc9ecfa"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "sections": {
+                "@state/route/{dest}": "not_followed",
+                "state/link": {
+                  "confirmed": [
+                    "zk2/lab/n1/hb.v1/state/link"
+                  ]
+                },
+                "state/peer/{peer}": "not_followed",
+                "state/sdu/{sdu}": "not_followed"
+              }
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e84048228bbb02f94"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 300,
+          "heartbeat": {
+            "layout": "hb.v1",
+            "tag": 14,
+            "stamp": {
+              "run_width": 16,
+              "run": 30,
+              "seq": 2
+            },
+            "body": "00000e103e90fdc9ecfa"
+          },
+          "expect": {
+            "read": {
+              "gap": true,
+              "sections": {
+                "@state/route/{dest}": "not_followed",
+                "state/link": {
+                  "confirmed": [
+                    "zk2/lab/n1/hb.v1/state/link"
+                  ]
+                },
+                "state/peer/{peer}": "not_followed",
+                "state/sdu/{sdu}": "not_followed"
+              }
+            }
+          }
+        },
+        {
+          "at": 400,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 1
+            },
+            "body": "00000e103e84048228bbb02f94"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "hb.v1": true,
+              "host": false
+            },
+            "lost": {
+              "hb.v1": [
+                "state/link"
+              ]
+            },
+            "confirmed": {
+              "zk2/lab/n1/hb.v1/state/link": 300,
+              "zk2/lab/n1/vital.v1/state/status": 400
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "an owner heartbeat with no group for an interface, as a standby's is left out, confirms nothing of it, loses nothing, and is not counted for its collections: knob.v1's group diverges, is left out twice, and diverges again: two in a row, so a read is due",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc0252294ba422a4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": "diverged"
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 1
+            },
+            "body": "00000e103e880042ee37b971a80dc048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 300,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 2
+            },
+            "body": "00000e103e880042ee37b971a80dc048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "at": 400,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 3
+            },
+            "body": "00000e103e8c0042ee37b971a80dc0252294ba422a4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": "diverged"
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {
+              "knob.v1": [
+                "state/config"
+              ]
+            },
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 400,
+              "zk2/lab/n1/knob.v1/state/config": null,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 400,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 400,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 400
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "the collections a key covers are those of each interface a group on it has named within the run, the group read after the gap among them: vital.v1's group first comes in the owner heartbeat that follows the gap, and its collection is read as a lost delivery with the others",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e880042ee37b971a80dc02522f837a83e40"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": null,
+              "zk2/lab/n1/knob.v1/state/config": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
+            }
+          }
+        },
+        {
+          "at": 200,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 2
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": true,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": true
+            },
+            "lost": {
+              "alert.v1": [
+                "state/alarms/{alert_key}"
+              ],
+              "knob.v1": [
+                "state/config"
+              ],
+              "vital.v1": [
+                "state/status"
+              ]
+            },
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 200,
+              "zk2/lab/n1/knob.v1/state/config": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 200,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 200
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "another revision by the catalog's word: the group's index names a revision of vital.v1 that is not the one the reader holds, though its tag is the same, 8: the group confirms nothing, and the groups before it do",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1",
+        {
+          "iface": "vital.v1",
+          "contract": "sha256:0000000000000000000000000000000000000000000000000000000000000008"
+        }
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 16,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "00000e103e8c0042ee37b971a80dc02522f837a83e4068228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 6,
+                  "revision": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": null,
+              "zk2/lab/n1/knob.v1/state/config": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
+            }
+          }
+        }
+      ]
+    },
+    {
+      "note": "the time unknown, all 42 bits set, under a 32-bit run: read as any other owner heartbeat",
+      "catalog": [
+        "alert.v1",
+        "hb.v1",
+        "knob.v1",
+        "mixed.v1",
+        "vital.v1",
+        "bare.v1"
+      ],
+      "follows": {
+        "alert.v1": [
+          "state/alarms/{alert_key}"
+        ],
+        "knob.v1": [
+          "state/config"
+        ],
+        "vital.v1": [
+          "state/status"
+        ]
+      },
+      "steps": [
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/vital.v1/state/status",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 1
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/knob.v1/state/config",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 2
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a1",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 3
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a2",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 4
+            }
+          }
+        },
+        {
+          "at": 0,
+          "put": {
+            "key": "zk2/lab/n1/alert.v1/state/alarms/a3",
+            "stamp": {
+              "run_width": 16,
+              "run": 1,
+              "seq": 5
+            }
+          }
+        },
+        {
+          "at": 100,
+          "owner_heartbeat": {
+            "class": "host",
+            "tag": 0,
+            "stamp": {
+              "run_width": 32,
+              "run": 9,
+              "seq": 0
+            },
+            "body": "ffffffffffcc0042ee37b971a80dc02522f837a83e4048228bbb02f940"
+          },
+          "expect": {
+            "read": {
+              "gap": false,
+              "groups": [
+                {
+                  "index": 0,
+                  "sections": {
+                    "state/alarms/{alert_key}": {
+                      "confirmed": [
+                        "zk2/lab/n1/alert.v1/state/alarms/a1",
+                        "zk2/lab/n1/alert.v1/state/alarms/a2",
+                        "zk2/lab/n1/alert.v1/state/alarms/a3"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 2,
+                  "sections": {
+                    "state/config": {
+                      "confirmed": [
+                        "zk2/lab/n1/knob.v1/state/config"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "index": 4,
+                  "sections": {
+                    "state/status": {
+                      "confirmed": [
+                        "zk2/lab/n1/vital.v1/state/status"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "check": {
+            "reread_due": {},
+            "gap": {
+              "host": false
+            },
+            "lost": {},
+            "confirmed": {
+              "zk2/lab/n1/vital.v1/state/status": 100,
+              "zk2/lab/n1/knob.v1/state/config": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a1": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a2": 100,
+              "zk2/lab/n1/alert.v1/state/alarms/a3": 100
             }
           }
         }
