@@ -594,7 +594,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   its owner wrote it, and 1 KB is 1,024 B. An owner MAY exceed 1 KB while
   the rest is within 512 B: the rest is the size less each of the four
   members stated, a member counted from its name's opening quote to its
-  value's last byte with one comma (`Descriptor::size` counts so). The
+  value's last byte with one comma (`Descriptor::size_of` counts so, over
+  the bytes served, and nothing in it can fail: `encode_checked` hands it
+  the document it serves; `size()` serializes first and returns the
+  error). The
   512 B SHOULD went into that MAY (`EXCEPTED_BY`'s phrase moved with it).
   Over 1 KB an owner SHOULD leave out every member that holds nothing and
   whose schema default is empty, the seven "Empty members" lists, never
@@ -603,14 +606,21 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   ok-over-1kb` is zenoh-modem's node as `zenctl gen` served it under the
   catalog, one line, never re-serialized: 1,184 B, the three of the four
   it states 947 B, a rest of 237 B (1,167 B with no catalog and a 32-bit
-  run). §7.5: an implementation MUST NOT allocate from a group's size
+  run), which `tests/conformance.rs`'s
+  `the_descriptor_over_1_kb_counts_as_the_text_says` pins beside its
+  round trip. It is the node as recorded before #1110's H2b, whose owner
+  also lists `freshness.v2`'s optional `stream/heartbeats/{class}`
+  unavailable and serves a longer one; `mock_owner.rs` asserts the rule
+  on today's, and no figure. §7.5: an implementation MUST NOT allocate from a group's size
   (`heartbeat/owner.json`'s read 17). It also answers round 112's F-540
   to F-544 (`desired.v1` 0.14 F-545, `link.v2` 0.20 F-546): an
   implementation that reads a heartbeat or an owner heartbeat MUST
   refuse a put of another form on that key, naming `form`, before it
   reads a tag or a body (`owner.json`'s `forms`, a mutation or a frame;
-  the reference's readers take only `Read::Heartbeat`, and name no
-  token yet); nothing
+  the model's gate is `heartbeat::body_of(&Envelope)`, `FormRefusal`, and
+  `OwnerHeartbeat::of(&Envelope)` reads through it, `OwnerRefusal::Form`
+  first; the reference's live readers take only `Read::Heartbeat`, as
+  before, and read no body from another form); nothing
   in a body tells the two layouts apart, CH's tag only 15 times in 16,
   so the key chooses; a reader of an owner heartbeat holds the catalog
   its owner names or a successor beside its revision (§8.6 lists it
@@ -618,12 +628,15 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `unknown_catalog`; `owner.json`'s `beside` reads every group of one
   payload, a refused one among them. `forms` (5) and `beside` (9) were
   written by a reading of the text made for them and checked by zk2py's
-  of round 112; `heartbeat_owner_vectors` reads neither until the
-  round's code half. F-542 needs no change once `freshness.v2` 0.9
-  merges. `desired.v1` §2.10: two instances' reports on one key are one
-  reply after a tool's merge (observer §4.1), where it cited `Latest`;
+  of round 112, never blessed; `heartbeat_owner_vectors` runs both as
+  written, each `forms` case on both keys, and all 14 pass. F-542 needs
+  no change: `freshness.v2` 0.9 names both keys. `desired.v1` §2.10: two
+  instances' reports on one key are one reply after a tool's merge
+  (observer §4.1), where it cited `Latest`, and the fleet's `reports_get`
+  merges so (`bus::desired::report_replies`, a delete skipped after the
+  merge), where it answered `two_differ`;
   `redundancy.v1` 0.11 repairs the same in §2.10's "A seed" and its
-  scenarios' §9. 286 rules (owner 88, static 75).
+  scenarios' §9. 286 rules (owner 88, implementation 75).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

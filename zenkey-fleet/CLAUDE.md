@@ -211,7 +211,12 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   with no contract of the author's in hand, from the target's requirement
   and binding (`slice_from`; two reports that claim the slice and differ
   are the row's `unreadable`, `two_differ` naming both keys, never no
-  report, #840 DF), projects a reading into the model's
+  report, #840 DF; since desired.v1 0.14, zk2py round 112's F-545,
+  `reports_get` merges a report resource's replies per key first,
+  `bus::desired::report_replies` over `bus::query::merged`, a delete
+  skipped after the merge, so two instances' reports on one key are one
+  reply, within one run the higher seq and across two runs the later
+  arrival, and `two_differ` binds two report resources alone), projects a reading into the model's
   `TargetReading`, and follows how long a target is behind (`Behind`:
   readings a window apart, or a trusted clock dating a version at its
   slice GET's answer). `judge::desired` hands each
@@ -716,4 +721,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   where none is stated, and the doctor's `contract-drift` orders two
   revisions only by minors stated. `tests/mock_owner.rs`'
   `gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors`
-  runs zenoh-modem's node shape (1,344 B before, 1,184 B now).
+  runs zenoh-modem's node shape (1,344 B before, 1,184 B now). Since
+  core 0.109 it asserts the rule and no figure: over 1 KB, `meets()`
+  over the bytes served (`Descriptor::size_of`), no empty member, and
+  the descriptor writing back byte for byte. The fixture
+  `descriptors/ok-over-1kb` is that node as recorded before #1110's H2b
+  (1,184 B), whose owner also lists `freshness.v2`'s optional
+  `stream/heartbeats/{class}` unavailable and serves a longer one.
