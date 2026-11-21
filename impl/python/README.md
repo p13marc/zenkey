@@ -66,7 +66,7 @@ case name. It exits with:
 | sets | §9.2 | `sets` | E035, E036 |
 | bundles | §9.6 | `bundle` | the twelve verification steps and their tags. `seed.toml` also **builds** to `valid.bundle.json` byte for byte, and `contracts/ok-packed.toml` to `packed.bundle.json` (0.75). |
 | history | §9.7 | `history` | `[at, tag]` per history root |
-| descriptors | §3.3 | `descriptor` | the D codes (D012, a standby marked tokenless, since 0.39), against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
+| descriptors | §3.3 | `descriptor` | the D codes (D012, a standby marked tokenless, since 0.39; `minor` optional and `null` D000 since 0.107, 60 cases), against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2, §7.5 | `zk2c` | `forms.json`: the error form's 256 bytes, its writes and its reads by Encoding, an earlier core's three envelopes `encoding`. `cases.json`, the bare wire's envelope, went with core 0.99 (round 104). An unknown file there fails. |
 | envelope | §7.5, §5.1, §5.2 (0.72 to 0.94) | `zk2c`, `calls` | `vectors.json` (each header and case, accepted ones written back), `carries.json`, and `calls.json` (round 101): an operation's forms by its types' tags, its writes and its reads, a packed record under CH's tag |
 | budget | core §2.7, observer §5 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
@@ -7353,6 +7353,195 @@ none of it unfilled"; zenoh-modem's notes on the old keep-alive rule;
 Appendix B's "last five cases"). None is a blocker. F-524 to F-528 are
 answered. See "At core 0.106 and link.v2 0.17" in `SPEC-FINDINGS.md`.
 
+## Core 0.107: a descriptor's `minor` where its revision has one, its empty members and what may exceed 1 KB (round 111)
+
+Round 111 read the head of the spec PR's branch, e46b040b, which takes
+**core 0.107** (#1126, #1127), all in §3.3 and its neighbours:
+- a descriptor's `minor` is the minor its revision's authoring file
+  states; an owner that holds only the revision's bundle leaves the
+  member out, and an owner MUST NOT state a minor its revision does not
+  have;
+- a checker reads `minor` as optional, and `null` is D000;
+- a member whose schema default is an empty list or object MAY be left
+  out;
+- what an owner may exceed 1 KB with, and two SHOULDs over 1 KB;
+- §9.8: a tool orders two revisions by `minor` only when both state
+  one;
+- `descriptor.schema.json`, `conformance/descriptors/` (60 cases),
+  `scenarios/presence.md` §2 step 8, and `RULES.md`.
+
+The branch left zk2py behind on purpose: its owner wrote `"minor": 0`
+for a revision that has none, and its walk had three rows without a
+verdict.
+
+### Its walk of `RULES.md` at 0.107
+
+| Class | Entries | Met | Not met | Not applicable |
+|---|---|---|---|---|
+| owner | 93 | 82 | 2 | 9 |
+| consumer | 33 | 29 | 0 | 4 |
+| caller | 18 | 18 | 0 | 0 |
+| observer | 104 | 99 | 3 | 2 |
+| static, in every class | 68 | 66 | 0 | 2 |
+
+- **287 rows walked of 287, none without a verdict.** 29 verdicts are
+  beyond the index. `RULES.md` lists 277 rules, 274 before, the owner
+  88.
+- **The three new owner rows are met:** the MUST NOT on `minor`, and
+  the two SHOULDs of a descriptor over 1 KB.
+- **The 1 KB SHOULD moved from not met to met:** the owner measures
+  each descriptor it writes, and zk2py reads the SHOULD's MAY as
+  excepting a descriptor whose other members are within 512 B (F-535).
+- **The re-key went with core 0.107,** in one commit: the new rows are
+  verdicts on the owner that commit changes, so the re-key could not
+  stand alone.
+
+### What round 111 changed in zk2py
+
+- **`owner`** (§3.3):
+  - an entry states `minor` only where its contract has one, the
+    authoring file's. None for a file that states none (W104), and none
+    for a revision held as its bundle alone. It wrote 0 for both;
+  - **empty members are left out, at every size:** `capabilities`,
+    `requires`, `profiles` and `meta`, an entry's `unavailable` and
+    `cardinality`, and a requirement's `params`. The text allows it:
+    "A member whose schema default is an empty list or object reads as
+    that default when absent. So an owner MAY leave it out when it
+    holds nothing". Left out always, the first SHOULD of "Over 1 KB"
+    holds without measuring first;
+  - `token` stays written, its default `true` being no empty list or
+    object, and so does an unbound role's `bindings`, which the schema
+    requires;
+  - it measures each descriptor (`Owner.descriptor_size`). Over 1 KB
+    with its other members beyond 512 B it leaves `meta.host` out and
+    says so on stderr (`Owner.size_note`).
+- **`bundle.held`,** new: a revision held as its bundle alone, "as
+  generated code embeds one". Its fingerprint is the bundle's, it keeps
+  the bytes to serve on the contract key, and it has no `minor`. It
+  builds no schema resolver, so an owner of such a revision writes no
+  packed record and declares no frame of it.
+- **`descriptor.size`,** new: §3.3's "Size", the whole, each member
+  with its name, the empty members written, and what "Over 1 KB" asks.
+- **The checker** did not move. It reads `descriptor.schema.json` at
+  run time, where `minor` left `required`: 60 of 60.
+- **`compat.classify_pair`** already took an order only from two
+  integers. Its text is §9.8's at 0.107.
+- **Readers of a descriptor in zk2py's runners** read an absent
+  `profiles`, `unavailable` or `params` as empty (`live_interop`,
+  `desired_scenarios` §8), where two compared with `[]` or `{}` as
+  written.
+- **`presence_scenarios` §2 step 8,** new, with either owner and either
+  reader, and §9.8's order beside it.
+- **The mend** (`py-carry-r110.md`):
+  1. **A Rust event consumer:** `events_live --only watch`. `zenctl
+     watch`'s help says it subscribes an event resource "through the
+     runtime's consumer". It is the one black box that reads zk2py's
+     occurrences and `state.md` §8 step 4's three samples so;
+  2. **The reference's generated pair on routers:** `link_v2_live
+     --only s4ref` and `--only s1ref`, N from `zenctl acl gen
+     --json5`'s fragment and the far end from `--far-config`'s;
+  3. **`scenarios-v2.md` §1 and §2 on routers:** `link_v2_live --only
+     s1`, over a relay that holds both directions
+     (`link_v2_live.HoldRelay`), and `link_v2_frames_live`, new, on
+     zk2py's block and on the reference's.
+
+**`just py-conformance`: 6678 of 6678** on e46b040b. Of them,
+`descriptors` 60 and `readings` 1035, 13 new.
+
+### The size rule, computed
+
+zenoh-modem's node shape from §3.3 as worded: `modem.v3`, `config.v1`
+and `health.v1`, `freshness.v2`'s standard interface beside them, and
+the 30 capabilities `modem.v3` gates on.
+
+| | zk2py's owner | `zenctl gen` |
+|---|---|---|
+| The descriptor | 1,116 B | 1,167 B |
+| The four members, each with its name | 954 B | 944 B |
+| The others | 153 B | 214 B |
+| Commas and braces | 9 B | 9 B |
+
+- Both are over 1 KB, write no empty member and keep the others within
+  512 B.
+- zk2py's four are 10 B more: it holds `freshness.v2`'s authoring file
+  and states its minor 0, where the reference holds its bundle.
+- **"Over 1 KB" can be decided from the text alone,** but for a few
+  bytes at each bound (F-536).
+- **"What an owner cannot shorten" cannot:** the four members of either
+  descriptor are within 1 KB (F-535).
+
+### Live
+
+On the black boxes of e46b040b. Every router is zenoh-python's, zenoh
+1.10.1: `bin/current` holds no zenohd.
+
+| Runner | What | Result |
+|---|---|---|
+| `presence_scenarios --only 2` | `presence.md` §2 with step 8, in four pairings. **The Rust `owner`,** `--health` and no contract file: no `minor` for `health.v1` or `freshness.v2`, whose files state 1 and 0; `capabilities`, `requires`, `unavailable` and `cardinality` left out; each bundle retrieved by the descriptor's fingerprint holds no `minor`. **zk2py's owner,** `zk2py_echo.v1` held as its bundle alone, read by zk2py and by `zenctl service list` and `service show`: no `minor`, never 0. Step 1's entries, from files, state 0 and 1. §9.8: one provider from its bundle alone beside one stating 1, classified both ways, undecided | 11/11 with zk2py's reader and either owner, 8/8 with zenctl and either owner |
+| `presence_scenarios`, whole | §1 to §10 in the four pairings, over the owner's new descriptor. §5's runner re-keyed to its setup, `health.v1` and `freshness.v2` both tokenless (stale since `freshness.v2`: it failed before this round's change too) | 103/103, 97/97, 38/38 and 37/37; 1, 2, 6 and 7 not run, as their lines say |
+| `live_interop` | whole, over the owner's new descriptor | 490/490 |
+| `events_live` | whole, with `--only watch`, the mend: `zenctl watch` receives zk2py's three occurrences and shows each event's time, run and seq as zk2py wrote them, and rows step 4's two puts and its delete `undecodable`, three of six | 27/27, 3 of them `watch` |
+| `link_v2_live --only s1`, `--only s1ref` | the mend: `scenarios-v2.md` §1 whole, on zk2py's pair and on `zenctl acl gen`'s. The eight keys as zenoh holds them; no finding by zk2py's check and by `zenctl check face --peer-config`; 8 keep-alives each way in 4 s idle; the transport kept across a 1 s silence; each end closing 1.9 s into a 4 s silence; `wait_under_lease` and `transport_differs` on the edited file | 8/8 and 7/7 |
+| `link_v2_live --only s4ref` | the mend: `scenarios-v2.md` §4 on `zenctl acl gen`'s pair. A far router from `--far-config`'s block opens the face as `ground-router` and G receives `oper`; it refuses a session with no user; N opening to it is let in and G receives nothing of 20 puts | 4/4 |
+| `link_v2_frames_live` | the mend: `scenarios-v2.md` §2 on zk2py's block and on `zenctl acl gen`'s. L receives every put; G all 100 of `frames/link` and all 10 heartbeats, 5 of `level`, none of `frames/detail` or `setpoint` | 6/6 and 5/5 |
+| `link_v2_live --only s4`, `--only s5`, `stamp_live` | as in round 110 | 11/11, 5/5, 15/15 |
+| `config_v2_scenarios` | whole, its event reader mended: it parsed an event with no key, as before core 0.103's keys, and 64 checks stopped there | 172/172, 1 not run |
+| `observer_scenarios` | whole, one check mended: it asked the same members of every NDJSON row, and an event's row holds `event` since round 107 | 50/50 |
+| `desired_scenarios` | zk2py's parties: every section but two checks of the tool's shapes (below); the Rust target | 191 of 193; 86/86, 1 not run |
+| `timing_interop`, `freshness_v2_scenarios` | whole. Each failed on a timing bound in its first run beside the measurement on the same cores (4 checks, a period not kept and an owner not seen in a 3 s window; 1 check, a re-read's count), and passed whole when run again | 194/194, 112/112 |
+| `state_pairings`, `arbitration_scenarios`, `redundancy_scenarios`, `hostid_scenarios`, `health_scenarios`, `config_scenarios`, `alarms_scenarios`, `telemetry_scenarios`, `telemetry_v2_scenarios`, `link_scenarios` | whole, over the owner's new descriptor | 118/118, 83/83, 105/105, 35/35, 31/31, 52/52, 80/80, 163/163, 95/95, 89/89 |
+| `forms_live`, `snapshot_live`, `packed_live`, `first_hop_live`, `far_side_live`, `constrained_live`, `archive_live`, `across_live`, `stray_live` | whole | 128/128, 40/40, 27/27, 22/22, 16/16, 14/14, 11/11, 8/8, 7/7 |
+
+**Two checks of `desired_scenarios`' tool shapes fail, and are not this
+round's.** `zenctl desired` of e46b040b reads two differing reports on
+one key as `report_invalid`, where zk2py reads the later one, as
+`desired.v1` §2.10 says of two instances' reports. Round 110's zk2py,
+run as a control against the same `zenctl`, fails the same two. Round
+105 ran the section 29 of 29, so the reference moved since. Not
+analysed here: it is for the next round.
+
+**The reference, observed (not findings):**
+- **The owner example** given a file that states no minor (W104)
+  states none, as zk2py does. With `--health` and no file it states
+  none for `health.v1` and `freshness.v2`, and leaves out
+  `capabilities`, `requires`, `unavailable` and `cardinality`.
+- **`zenctl service show`** prints `minor 1` beside an entry that
+  states it, and nothing beside one that states none.
+- **`zenctl doctor --check contract-drift`** over two revisions, one
+  stating no minor, is unobservable: "their minors do not say". With
+  both stated it is not established, the pair compatible.
+- **`zenctl gen`** at `h-c2a95e41d7f0/rf0`, from the three authoring
+  files, serves 1,167 B. The entry's 1,184 B is not reproduced: it
+  names no address, run width or catalog.
+- **`zenctl watch`** on an events key rows `state.md` §8 step 4's
+  delete with `"kind": "put"`, a payload of 0 B and its 6-byte
+  attachment, and each of the three samples `undecodable`.
+- **`zenctl check face --peer-config`** exits 0 over the reference's
+  own generated pair, and 1 over zk2py's N, for its access-control
+  rows, as in round 109.
+
+**Not run:**
+- a zenohd black box, none being in `bin/current`;
+- the live runners not named in the table: none reads a descriptor
+  member this round moved in a way the suites above do not;
+- a Rust consumer that delivers events to an application and counts
+  the rest: `zenctl watch` prints every sample it receives;
+- §2 Expected 1 on the reference's block, whose plan is the tool's own:
+  its block is judged by what crosses;
+- the reference's warning of a descriptor whose other members exceed
+  512 B, which no run drew;
+- a revision with a packed type or a frame held as its bundle alone:
+  `bundle.held` builds no resolver.
+
+Round 111 found F-535 to F-539: three ambiguities (what "MAY exceed
+1 KB with" the four members means, where the entry's own node holds
+947 B in them; what 1 KB and a member's count hold; whether an owner
+that holds the authoring file states its minor) and two minor errors
+("every empty member" beside a required `bindings`; `desired.v1`'s
+scenario §8 still asking `"params": {}`). None is a blocker. F-529 to
+F-534 stay open: their answers are not on this branch. See "At core
+0.107" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -7392,8 +7581,9 @@ answered. See "At core 0.106 and link.v2 0.17" in `SPEC-FINDINGS.md`.
     it is given (0.16), and there is no protobuf or JSON Schema decoder
     field by field and no renderer by declared type. So
     `types.md` §1 to §3 are not run, and §2.4's reliability and §7.2's
-    encodings rest on readings (F-379, F-397). Three owner SHOULDs too,
-    §1.4's canonical form, §1.5's new session at a re-mint and §3.3's 1 KB.
+    encodings rest on readings (F-379, F-397). Two owner SHOULDs too,
+    §1.4's canonical form and §1.5's new session at a re-mint. §3.3's 1 KB
+    is met since round 111, as zk2py reads its MAY (F-535).
     S7's consumer rule is kept from the first value since round 91. The
     deployment class is not claimed.
   - a packed record's deployment epoch other than 0, live: the catalog
@@ -7490,9 +7680,10 @@ impl/python/
     schemas.py        §7.3 §9.4 artifacts (JSON Schema, protobuf, packed), the subset, $ref, type references
     contract.py       §9.1–§9.5 lints, defaults, canonical form, fingerprint
     sets.py           §9.2      E035, E036
-    bundle.py         §9.6      build, verify
+    bundle.py         §9.6      build, verify; a revision held as its bundle alone (core §3.3, 0.107; round 111)
     history.py        §9.7      the history check
-    descriptor.py     §3.3      the D codes
+    descriptor.py     §3.3      the D codes; "Size" as core 0.107 words it: the whole, each member with its name,
+                                the empty members written, what "Over 1 KB" asks (round 111)
     catalog.py        §8.6      the deployment catalog: its reading, id, succession and a reader's resolution (round 95)
     cbor.py                     CBOR read and written (cbor's writer, round 101); envelope.py, the bare wire's
                                 error envelope, went with core 0.99 (round 104)
@@ -7517,7 +7708,8 @@ impl/python/
     classes.py        §12       the classes zk2py claims, and its walk of spec/RULES.md (round 89)
     live.py           §3.3 §4 §5 §8 presence, descriptor GET, retrieval, state GET, calls; observer §3, §4,
                                 §7.2, and §7.4's and §8.2's notes (blind_spots, memlock_note)
-    owner.py          §3.3 §4 §5 §6 §8 a minimal owner, a standby (0.39), member tokens (§8.1)
+    owner.py          §3.3 §4 §5 §6 §8 a minimal owner, a standby (0.39), member tokens (§8.1); a minor only where
+                                its revision has one, empty members left out, its descriptor measured (0.107)
     live_interop.py             the live runner, with the Rust owner and consume examples
     acl.py            §11       the grant generator: a deployment → zenoh's access_control block
     acl_interop.py    §11       the access-control run (`--only acl`)
@@ -7594,7 +7786,8 @@ impl/python/
     presence.py       observer §3 what a complete presence read is (0.37, 0.41): the view (a withdrawal unconfirmed until a
                                 read, a read unordered while no round trip stands, a transport's move) and the follower
                                 on a watch session
-    presence_scenarios.py observer §3 scenarios/presence.md §1–§10 (0.41) with either owner and either reader under test
+    presence_scenarios.py observer §3 scenarios/presence.md §1–§10 (0.41) with either owner and either reader under test;
+                                §2 step 8, a revision from its bundle alone, and §9.8's order beside it (round 111)
     redundancy.py     redundancy.v1 the declaration, an entry's mark, the election, the heal, the state machine,
                                 what a runtime gives back, §5's questions
     redundancy_live.py redundancy.v1 a candidate on a bus, the following consumer, a tool's two reads
@@ -7642,13 +7835,17 @@ impl/python/
                                 zenctl echo and get, over a union storage stand-in (round 107); step 4's two puts
                                 that carry no event, from zk2py and replayed by zenctl replay (round 108); step 4's
                                 delete, and deletes and reply_dels by their attachments (round 109); Expected 5's
-                                count as core 0.106 states it (round 110)
+                                count as core 0.106 states it (round 110); zenctl watch, the reference's consumer
+                                as a black box (--only watch, round 111)
     stamp_live.py     link.v2   scenarios-v2.md §3 on a zenoh-python N run from zk2py's generated configuration,
                                 zenctl check face over it, and a far router from the far end's block (round 109);
                                 §3 as 0.16 words it, F hearing `fault` (round 110)
     link_v2_live.py   link.v2   scenarios-v2.md §4, the far end opening a face bound by a user name, with zenctl
                                 acl gen beside zk2py's generator, and §5, N's keep-alives beside puts counted by a
-                                relay (round 110)
+                                relay (round 110); §1 over a relay that holds both directions, and §1 and §4
+                                on the reference's generated pair (--only s1, s1ref, s4ref; round 111)
+    link_v2_frames_live.py link.v2 scenarios-v2.md §2, frames per face, on zk2py's block and on zenctl acl gen's
+                                (round 111)
     stray_live.py     §4.2      scenarios/state.md §15, a stray reply_del and an owner on an earlier revision
                                 (round 107); the readers given the owner's revision (step 3, round 108)
     archive_live.py   §4.4 S5   scenarios/state.md §4 to §6: the Rust archive aligning from zk2py's owner

@@ -165,6 +165,11 @@ class Contract:
     fingerprint: str | None = None
     #: template -> resolved type objects, for resources that resolved
     types: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: the revision's bundle bytes, where this is a revision held as its
+    #: bundle alone (:func:`zk2py.bundle.held`): no authoring file, so no
+    #: ``minor`` ("A bundle keeps no minor", core §3.3, §9.5), no ``raw`` and
+    #: no ``schemas``
+    bundle: bytes | None = None
 
     @property
     def codes(self) -> list[str]:

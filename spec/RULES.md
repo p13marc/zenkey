@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 85 |
+| [Owner](#owner) | 88 |
 | [Consumer](#consumer) | 32 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 83, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 67 |
-| Every rule, once | 274 |
+| Every rule, once | 277 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -122,13 +122,16 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
+| [§3.3](core.md#33-the-descriptor-record) | An owner MUST NOT state a minor its revision does not have. | `[F: descriptors/ok-no-minor]` `[Sc: presence.md §2]` |
 | [§3.3](core.md#33-the-descriptor-record) | The owner's descriptor MUST NOT raise it [a template's bound]. | `[F: descriptors/d007-*]` |
 | [§3.3](core.md#33-the-descriptor-record) | An owner MUST state its run there, and MUST put its descriptor again when the run changes, before it writes under the new run. | `[F: descriptors/ok-run, d002-run-*]` `[Sc: state.md §1, §7]` |
 | [§3.3](core.md#33-the-descriptor-record) | An owner given a catalog MUST state its id there. | `[F: descriptors/ok-catalog, d002-catalog-*]` `[Sc: presence.md §2]` |
 | [§3.3](core.md#33-the-descriptor-record) | One member is used: an owner SHOULD state its session's zid as `meta.zid`, as the reference does. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | An owner SHOULD write `meta.zid` as zenoh writes it. | none cited |
-| [§3.3](core.md#33-the-descriptor-record) | An owner's descriptor SHOULD stay within 1 KB. | `[Sc: constrained.md §5]` |
+| [§3.3](core.md#33-the-descriptor-record) | An owner's descriptor SHOULD stay within 1 KB. *Except:* So an owner MAY exceed 1 KB with `interfaces`, `capabilities`, `requires` and `profiles`. | `[Sc: constrained.md §5]` |
 | [§3.3](core.md#33-the-descriptor-record) | **Size.** … At the constrained level (§12), it [an owner's descriptor] MUST fit one fragment. | `[Sc: constrained.md §5]` |
+| [§3.3](core.md#33-the-descriptor-record) | An owner whose descriptor exceeds 1 KB SHOULD leave out every empty member. | none cited |
+| [§3.3](core.md#33-the-descriptor-record) | **Over 1 KB.** … That owner SHOULD also keep every member but `interfaces`, `capabilities`, `requires` and `profiles` within 512 B together, each counted with its name. | none cited |
 | [§3.3](core.md#33-the-descriptor-record) | The owner MUST put the descriptor on its instance key whenever it changes, and MUST answer a GET there with the current one. | `[Sc: presence.md §2]` |
 
 ### [core §4.2 Rules for owners and consumers](core.md#42-rules-for-owners-and-consumers)

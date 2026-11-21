@@ -2282,14 +2282,14 @@ fn iface_rows(inst: &Instance) -> Vec<IfaceSighting> {
         match merged {
             Some(r) => {
                 r.contract = Some(e.contract.clone());
-                r.minor = Some(e.minor);
+                r.minor = e.minor;
                 r.tokenless = !e.token;
             }
             None => rows.push(IfaceSighting {
                 iface: e.iface.clone(),
                 token: None,
                 contract: Some(e.contract.clone()),
-                minor: Some(e.minor),
+                minor: e.minor,
                 tokenless: !e.token,
             }),
         }

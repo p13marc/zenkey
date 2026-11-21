@@ -1363,14 +1363,9 @@ async fn a_templated_service_needs_nothing_beyond_its_contract() {
         let entry = &d["interfaces"][0];
         assert_eq!(entry["iface"], "sensors.v1");
         assert_eq!(entry["token"], true, "no tokenless set: {d}");
-        // The descriptor always writes the map (`InterfaceEntry::cardinality`,
-        // `#[serde(default)]`): empty is no lower bound stated (review-bot on
-        // PR #946).
-        assert_eq!(
-            entry["cardinality"],
-            serde_json::json!({}),
-            "no bound stated: {d}"
-        );
+        // The descriptor leaves an empty map out (core §3.3's empty
+        // members): absent is no lower bound stated.
+        assert!(entry.get("cardinality").is_none(), "no bound stated: {d}");
 
         // A stream put before the reader's subscription reaches the owner
         // is dropped at its source: put again until one is heard. Putting

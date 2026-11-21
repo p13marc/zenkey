@@ -446,8 +446,14 @@ def _step5(report: Report, sec: str, owner: GuardOwner, ep: str, procs: Procs) -
                  # observer 0.14, 0.15 (round 93): each row's envelope, a run
                  # and a seq, and undecodable for a refused one (the mend
                  # after round 93)
-                 and all(set(x) == {"key", "zk2", "kind", "delete", "bytes", "encoding", "declared_type",
-                                    "envelope", "undecodable", "sniffed"} for x in rows)
+                 # observer 0.30 §7.3 (round 107): an event's row holds its
+                 # time, run and seq beside them, `event`. Until round 111
+                 # this check asked the same members of every row, and failed
+                 # on the event's.
+                 and all(set(x) - {"event"} == {"key", "zk2", "kind", "delete", "bytes", "encoding", "declared_type",
+                                                "envelope", "undecodable", "sniffed"} for x in rows)
+                 and [("event" in x) for x in rows if _kind(x["key"]) == "events"] == [True]
+                 and not any("event" in x for x in rows if _kind(x["key"]) != "events")
                  and all(x["envelope"] is not None and x["undecodable"] is None for x in rows)
                  and len(rows) == len(n.lines()), f"exit {ncode}, {nkeys}, {len(n.lines())} lines")
     report.check(sec, "step 5, zk2py's echo tool --format ndjson: the scope's exclusion stated on stderr, a stream "

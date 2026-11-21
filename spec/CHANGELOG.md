@@ -3,6 +3,126 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.107 — 2026-11-21: a descriptor's `minor` where its revision has one, its empty members left out, and what may exceed 1 KB (#980, #1126, #1127)
+
+#980's C5 memo measured the descriptor a near-side reader GETs from an
+owner of zenoh-modem's node shape: `modem.v3`, `config.v1` and
+`health.v1`, with `freshness.v2`'s standard interface beside them and
+the 30 capabilities `modem.v3` gates on. It was 1,344 B, over §3.3's
+1 KB, and it stated `"minor": 0` for `modem.v3` 3.4. This version
+answers both. `observer.md` stays 0.33.
+
+**Changed: §3.3, `minor` (#1127).**
+- **Before:** the schema required `minor`, and no rule said whose it
+  was. A bundle keeps none (§9.5). So an owner that holds only its
+  revision's bundle, as generated code does, had no minor to state and
+  had to state one. The reference stated 0, and a tool showed
+  `modem.v3` 3.4 as minor 0.
+- **Now:** `minor` is the minor of the revision the entry names, as its
+  authoring file states it. An owner that holds only the bundle leaves
+  the member out, and an owner MUST NOT state a minor its revision does
+  not have. A checker reads `minor` as optional, and `null` is D000.
+  `[F: descriptors/ok-no-minor, d000-minor-null]` `[Sc: presence.md §2]`
+- **Why.** #1127 offered two cures: the build embeds the file's minor
+  beside the bundle, or an owner with no minor states none. The second
+  is taken. A bundle is what a holder serves and what a fingerprint
+  names, and a minor carried beside it could disagree with the file's.
+  No check reads `minor`, and §9.8 already classifies both ways where
+  it gives no order.
+- **§9.8** follows: a tool MAY take the order from the minors two
+  descriptors state "when both state one and the two differ".
+- **§3.3's checks** say that no check reads `minor`, "nor whether it is
+  stated".
+- **The reference** states a revision's minor where it holds the
+  authoring file's contract, and none where it holds the bundle alone
+  (`InterfaceEntry::minor` is optional). Its mock owner keeps the
+  contract it was given, so `zenctl gen` over `modem.v3`'s file states
+  minor 4. Its listings show a minor only where one is stated, and its
+  doctor's `contract-drift` orders two revisions only by minors stated.
+
+**Changed: §3.3, size (#1126).**
+- **Before:** "An owner's descriptor SHOULD stay within 1 KB", with no
+  word for an owner that cannot. The reference wrote every member, an
+  empty one included: `"requires": []`, and `"unavailable": []` and
+  `"cardinality": {}` in each entry.
+- **Now, three things.**
+  - **Empty members.** A member whose schema default is an empty list
+    or object reads as that default when absent, so an owner MAY leave
+    it out when it holds nothing.
+  - **What an owner cannot shorten.** An owner MAY exceed 1 KB with
+    `interfaces`, `capabilities`, `requires` and `profiles`.
+  - **Over 1 KB.** An owner whose descriptor exceeds 1 KB SHOULD leave
+    out every empty member, and SHOULD keep every other member than
+    those four within 512 B together, each counted with its name.
+- **Why those four.** They state what the instance implements, holds,
+  requires and follows, and §3.3's checks read each of them. An owner
+  cannot shorten one and stay truthful. An entry alone is at least
+  100 B, 71 of them its fingerprint.
+- **Why 512 B.** What is left is the header (`format`, `service`,
+  `instance`, `run`, `catalog`), about 130 B, and `meta`, the one member
+  an owner fills as it likes. Half of 1 KB leaves `meta` its zid, a
+  host name and a tool's marker, and stops a descriptor growing by what
+  nothing reads.
+- **Measured** on the reference, the same owner, from authoring files:
+  1,344 B before and 1,184 B now. The four members hold 947 B
+  (`interfaces` 513, `capabilities` 351, `profiles` 41, and their
+  names), and the others 237 B, 61 of them `zenctl gen`'s marker. So
+  zenoh-modem's node exceeds 1 KB with the four members alone, and
+  meets the rule as now worded.
+- **The reference** leaves out every empty member the schema defaults
+  (`capabilities`, `requires`, `profiles`, `meta`, an entry's
+  `unavailable` and `cardinality`, a requirement's `params`). It warns
+  of a descriptor over 1 KB only where its other members exceed 512 B
+  (`zenkey_model::descriptor::Descriptor::size`).
+- **§3.2** follows: an unbound optional role is listed with
+  `"bindings": []` "and no parameter bound", where it said
+  `"params": {}`.
+
+**The evidence.**
+- **Fixtures:** `descriptors/ok-no-minor`, an entry that states no
+  minor and no member whose default is empty, and
+  `descriptors/d000-minor-null`. `expect.json` lists 60 cases, 58
+  before.
+- **`descriptor.schema.json`:** `minor` leaves an entry's `required`.
+  Each default is as it was.
+- **`scenarios/presence.md` §2** gains step 8: an owner implementing a
+  revision from its bundle alone states no `minor`, and may leave out
+  each member that holds nothing. The reference runs it in
+  `s2_the_descriptor`.
+- **The reference's own:** `mock_owner.rs` brings up the node measured
+  above and checks its minors, its size and that it writes no empty
+  member.
+
+**Migration.**
+- **A checker of 0.106** requires `minor`. It reports D000 for the
+  descriptor of an owner of this version that holds only a bundle, and
+  D000 stops its check. A reader that only parsed the member loses
+  nothing: no check read it.
+- **A reader that took an absent `requires`, `unavailable` or
+  `cardinality` for an error** was wrong already: the schema required
+  none of them, and `descriptors/ok-minimal` states none.
+- **A tool that showed `minor`** shows none for an owner that states
+  none, never 0.
+
+**Deliberately not changed.**
+- **The 1 KB SHOULD** and the constrained level's MUST to fit one
+  fragment (§12) are as they were. No compact form is defined: that is
+  #980's C5.
+- **The build embeds no minor.** Generated code holds a bundle, so its
+  owners state none.
+- **`token`.** Its default is `true`, and the reference still writes it
+  in every entry: 13 B an entry, which would not bring the node measured
+  within 1 KB.
+- **A requirement's `bindings`** stays required, so an unbound role
+  still states `[]`.
+- **No D code.** No check reads a descriptor's size, nor its `minor`.
+- **The format tag** stays `zk2-descriptor/0.1`.
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 277 rules, 274 in 0.106 (owner 88,
+85 before): the MUST NOT on `minor` and the two SHOULDs of a descriptor
+over 1 KB. The 1 KB SHOULD's entry shows the MAY that excepts it.
+
 ## 0.106 — 2026-11-08: editorial: a delete with no attachment on an events key, `state.md` §8's replay count, and §8.2's posture checked, no rule changed (#609, #980, #1106)
 
 zk2py round 109 read 0.105 cold, beside `link.v2` 0.13 and 0.14. It

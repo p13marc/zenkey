@@ -405,12 +405,13 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
     listed_roles = {(r.get("declared_by"), r["role"], r["interface"]) for r in doc.get("requires", [])}
     report.check(run, "R3: every contract-declared role is listed in requires",
                  declared <= listed_roles, f"declared {sorted(declared)}, listed {sorted(listed_roles)}")
-    # §3.2 (0.5): "An unbound optional role is listed in the descriptor all
-    # the same, with "bindings": [] and "params": {}". The owner example has
-    # no binding configuration, so every role here is unbound.
+    # §3.2 (0.107): "An unbound optional role is listed in the descriptor all
+    # the same, with "bindings": [] and no parameter bound": `params` absent
+    # or empty, which read the same (§3.3, "Empty members"). The owner example
+    # has no binding configuration, so every role here is unbound.
     unbound_ok = all(r.get("bindings") == [] and r.get("params", {}) == {}
                      for r in doc.get("requires", []))
-    report.check(run, "unbound roles are listed with bindings [] and params {} (§3.2)", unbound_ok,
+    report.check(run, "unbound roles are listed with bindings [] and no parameter bound (§3.2)", unbound_ok,
                  str([(r["role"], r.get("bindings"), r.get("params")) for r in doc.get("requires", [])]))
     _roles_optional(report, run, doc, by_iface)
     _meta_zid(report, run, doc)
@@ -424,7 +425,7 @@ def _checks(report: Report, run: str, session, endpoint: str, owner: Owner, syst
                       | ({"hostid.v1"} if minted else set()))
     report.check(run, "profiles is the union of the contracts' uses and, for a minted system, hostid.v1 "
                       f"(§3.3, 0.19; this system is {'minted' if minted else 'literal'})",
-                 doc.get("profiles") == profiles, f"{doc.get('profiles')} vs {profiles}")
+                 doc.get("profiles", []) == profiles, f"{doc.get('profiles', [])} vs {profiles}")
 
     # -- retrieval (§8.4) -------------------------------------------------
     # 0.8 "From a token to a fingerprint": the token's fp16 is not enough to
@@ -1039,8 +1040,9 @@ def run_python_bringup(report: Report) -> None:
             doc = json.loads(owner.descriptor)
             mine = [k for k in tokens if f"zk2/{system}/{svc}/" in k]
             report.check(run, "the templated state is claimed, not listed, and no member token appears",
-                         doc["interfaces"][0]["unavailable"] == [] and not any("/@zk/member/" in k for k in mine),
-                         f"unavailable {doc['interfaces'][0]['unavailable']}, tokens {mine}")
+                         doc["interfaces"][0].get("unavailable", []) == []
+                         and not any("/@zk/member/" in k for k in mine),
+                         f"unavailable {doc['interfaces'][0].get('unavailable', [])}, tokens {mine}")
             report.check(run, "the owner holds an instance token and one interface token",
                          sorted(k.split("/@zk/")[1].split("/")[0] for k in mine) == ["alive", "instance"],
                          str(mine))

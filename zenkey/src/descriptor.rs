@@ -80,7 +80,10 @@ pub(crate) fn build(
             InterfaceEntry {
                 iface: s.imp.iface().to_string(),
                 contract: s.imp.fingerprint().to_string(),
-                minor: u64::from(s.imp.contract().minor.unwrap_or(0)),
+                // §3.3: the authoring file's minor where the owner holds
+                // it; none where it holds only the bundle, which keeps no
+                // minor (§9.5), never a 0 the revision does not have.
+                minor: s.imp.contract().minor.map(u64::from),
                 // redundancy.v1 §2.4 (#841): a governed interface is marked
                 // until its takeover's step 3, and again from its
                 // step-down's.
@@ -147,11 +150,24 @@ pub(crate) fn encode_checked(desc: &Descriptor, impls: &[ImplState]) -> Result<V
             .collect();
         return Err(Error::Descriptor(codes.join("; ")));
     }
-    if bytes.len() > 1024 {
+    // §3.3's size rule: over 1 KB only with the four members an owner
+    // cannot shorten, the others within 512 B together.
+    let size = desc.size();
+    if !size.meets() {
         tracing::warn!(
             service = desc.service,
-            bytes = bytes.len(),
-            "the descriptor is over the 1 KB it SHOULD stay within (spec §3.3)"
+            bytes = size.bytes,
+            other = size.other,
+            "the descriptor is over the 1 KB it SHOULD stay within, with more than 512 B \
+             beside its interfaces, capabilities, requires and profiles (spec §3.3)"
+        );
+    } else if size.bytes > d::SIZE_BYTES {
+        tracing::debug!(
+            service = desc.service,
+            bytes = size.bytes,
+            other = size.other,
+            "the descriptor is over 1 KB with its interfaces, capabilities, requires and \
+             profiles, which it may be (spec §3.3)"
         );
     }
     Ok(bytes)

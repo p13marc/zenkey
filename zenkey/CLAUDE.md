@@ -18,7 +18,13 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   FE): `ServiceBuilder` → `start()` in spec §8.2's order (exposure checked,
   descriptor D-checked and served, bundles on `complete` queryables, the
   instance token, then the interface tokens), and the running `Service`
-  (capabilities, make-before-break `new_epoch`, member tokens). `presence`
+  (capabilities, make-before-break `new_epoch`, member tokens). Its
+  descriptor (core 0.107, #1126, #1127) states an entry's `minor` only
+  where the implementation's contract has one (an authoring file's,
+  through `Implementation::new` or `with_bundle`; `from_bundle`, what
+  generated code embeds, has none), leaves out every empty member, and
+  warns over 1 KB only where `Descriptor::size` does not meet §3.3
+  (`tests/presence.rs`' §2 step 8). `presence`
   reads liveliness on an unbounded flume handler (zenoh#2678), and
   `retrieval` is §8.4. `writer` puts with the contract's QoS, every
   `stream`, `state` and `@state` sample sealed in §7.5's envelope under

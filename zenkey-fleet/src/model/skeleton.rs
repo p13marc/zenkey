@@ -775,7 +775,7 @@ response = { raw = "text/plain" }
                 .map(|(r, token)| zenkey_model::descriptor::InterfaceEntry {
                     iface: r.iface().to_string(),
                     contract: r.fingerprint().to_string(),
-                    minor: 0,
+                    minor: Some(0),
                     standby: false,
                     token: *token,
                     unavailable: Vec::new(),

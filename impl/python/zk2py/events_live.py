@@ -4,7 +4,7 @@ it (#980 C2c, C2d; #609, round 107) and core 0.104 and 0.105 extended it
 form 4 with its time, a replay filtered by each event's time and ordered by
 it, and step 4's three samples that carry no event, two puts and a delete,
 never delivered. ``python -m zk2py.events_live
-[--only py|rust|zenctl|replayed]``.
+[--only py|rust|zenctl|replayed|watch]``.
 
 **The union storage.** zenoh-python's router loads no plugin, so no storage
 manager runs here. :class:`UnionStorage` stands in for one on
@@ -44,7 +44,12 @@ at ``lab/journal``):
 
 The Rust ``consume`` example reads one state and calls one operation: it
 refuses an event (``"events/entries" is not state``), so it is not a reader
-here, and no Rust consumer of an event runs against zk2py's step 4.
+here. Since round 111 ``zenctl watch`` is (``--only watch``): its help says
+it subscribes an event resource "through the runtime's consumer", so it is
+the one black box that reads zk2py's step 4 as the reference's consumer
+does. It prints every sample it receives, an event or not, so what it
+shows of step 4's three is a tool's row, ``undecodable``; no black box
+delivers events to an application and counts the rest.
 
 Exit 0 when every check passes, 1 when any fails.
 """
@@ -599,6 +604,81 @@ def run_zenctl_no_event() -> list[Result]:
     return out
 
 
+def run_watch() -> list[Result]:
+    """``zenctl watch lab/journal journal.v1 events/entries``, the Rust
+    runtime's consumer as a black box (its help: "subscribed through the
+    runtime's consumer"), beside zk2py's owner: three occurrences (one dated
+    by ``at_ms``, one of an unknown time, one now) and, between them, §8
+    step 4's two puts and its delete from another session. By core §2.6 the
+    three occurrences are events, each with its time, run and seq, and the
+    other three carry no event."""
+    from . import live
+    from .contract import load_contract
+    from .live_interop import _r1
+    from .owner import Owner
+
+    out: list[Result] = []
+    r, ep, _ = _r1(timestamping=True)
+    o = Owner("lab", "journal", [load_contract(JOURNAL)], connect=ep)
+    o.start()
+    other = live.open_client(ep)
+    try:
+        holder: dict[str, Any] = {}
+
+        def watch() -> None:
+            holder["rows"] = _zenctl(["watch", "-c", ep, "--format", "ndjson", "--contracts", str(JOURNAL), "--for",
+                                      "10", "lab/journal", "journal.v1", "events/entries"], window=40)
+
+        th = threading.Thread(target=watch, daemon=True)
+        th.start()
+        time.sleep(5.0)
+        t = int(time.time() * 1000)
+        written = [(o.occur(MEMBER, b"dated", at_ms=t - 1500), f"{(t - 1500) / 1000:.3f} s from the deployment epoch"),
+                   (o.occur(MEMBER, b"unknown", unknown=True), "time unknown")]
+        intruders = _no_events(16, 7)
+        _put_no_events(other, intruders)
+        deleted = _delete_third(other, 16, 7)
+        now_key = o.occur(MEMBER, b"now")
+        th.join(60)
+        so, se, code = holder.get("rows", ("", "no watch", None))
+        rows = [json.loads(x) for x in so.splitlines() if x.strip().startswith("{")]
+        by_key = {x.get("key"): x for x in rows if x.get("row") == "sample"}
+        summary = next((x for x in rows if x.get("row") == "summary"), {})
+        run = o.run_hex()
+        want = {k: f"{when}, run {run}, seq {n}" for n, (k, when) in enumerate(written)}
+        got = {k: by_key.get(k, {}).get("occurred") for k in want}
+        last = by_key.get(now_key, {}).get("occurred", "")
+        out.append(("zenctl watch, the reference's consumer as a black box, receives zk2py's three occurrences and "
+                    "shows each as an event: its time in seconds from the deployment epoch as zk2py wrote it, or "
+                    "that the owner's clock was unknown, with its run and its seq (core §2.6, §7.5)",
+                    code == 0 and got == want and last.endswith(f"run {run}, seq 2") and " s from the deployment "
+                    "epoch" in last,
+                    f"exit {code}; zenctl {got}, then {last!r}; zk2py {want}; {se.strip()[-200:]}"))
+        none = [intruders[0][0], intruders[1][0], deleted]
+        shown = {k.rsplit("/", 1)[1]: ("occurred" in by_key.get(k, {}), by_key.get(k, {}).get("conformance", {})
+                                       .get("state")) for k in none}
+        out.append(("zenctl watch shows step 4's two puts and its delete as no event: each undecodable, with no "
+                    "time, and its summary counts three samples of six that failed their declared type (core §2.6, "
+                    "\"A sample that carries no event\")",
+                    all(v == (False, "undecodable") for v in shown.values()) and len(shown) == 3
+                    and (summary.get("received"), summary.get("nonconforming")) == (6, 3),
+                    f"{shown}; summary received {summary.get('received')}, nonconforming "
+                    f"{summary.get('nonconforming')}, discarded {summary.get('discarded')}"))
+        out.append(("zenctl watch's row of the delete states `kind` put, a payload of 0 B and its 6-byte attachment "
+                    "(reported: the reference's rendering, which no text of the spec gives)",
+                    by_key.get(deleted, {}).get("kind") in ("put", "delete"),
+                    f"kind {by_key.get(deleted, {}).get('kind')!r}, payload "
+                    f"{by_key.get(deleted, {}).get('payload', {}).get('size')} B, attachment "
+                    f"{by_key.get(deleted, {}).get('attachment', {}).get('size')} B"))
+    except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+        out.append(("zenctl watch: the run finished", False, f"{type(e).__name__}: {e}"))
+    finally:
+        other.close()
+        o.close()
+        r.close()
+    return out
+
+
 def run_replayed() -> list[Result]:
     """§8 step 4 with a Rust writer of its three samples (core 0.104 §2.6, "put
     by an owner of an earlier core or by a broken writer"; core 0.105, "A
@@ -809,11 +889,11 @@ def run_rust() -> list[Result]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.events_live", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=("py", "zenctl", "rust", "replayed"))
+    ap.add_argument("--only", action="append", choices=("py", "zenctl", "rust", "replayed", "watch"))
     args = ap.parse_args(argv)
     runs = {"py": lambda: run_py() + run_delete(), "zenctl": lambda: run_zenctl() + run_zenctl_no_event(),
             "rust": run_rust,
-            "replayed": run_replayed}
+            "replayed": run_replayed, "watch": run_watch}
     failed = 0
     for name in args.only or list(runs):
         for what, ok, detail in runs[name]():

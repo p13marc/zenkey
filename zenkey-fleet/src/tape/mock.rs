@@ -208,11 +208,13 @@ pub(crate) fn builder(
     Ok(b)
 }
 
-/// The implementation of `revision`, from its bundle's bytes: what the
+/// The implementation of `revision`, with its bundle's bytes: what the
 /// mock serves on the contract key is the bundle a holder served or the
-/// file built (§9.6).
+/// file built (§9.6). The contract is the revision's own, so one loaded
+/// from its authoring file keeps its minor, which the descriptor states,
+/// and one read from a bundle has none, which it leaves out (§3.3, #1127).
 pub(crate) fn implementation(revision: &Revision) -> Result<Implementation> {
-    Implementation::from_bundle(&revision.bundle().to_bytes())
+    Implementation::with_bundle(revision.contract().clone(), revision.bundle().to_bytes())
         .map_err(|e| Error::malformed(revision.iface().to_string(), e.to_string()))
 }
 

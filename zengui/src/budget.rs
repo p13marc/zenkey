@@ -525,7 +525,7 @@ congestion = "block"
                 interfaces: vec![InterfaceEntry {
                     iface: iface.to_string(),
                     contract: revision.fingerprint().to_string(),
-                    minor: 0,
+                    minor: Some(0),
                     standby: false,
                     token: true,
                     unavailable: Vec::new(),

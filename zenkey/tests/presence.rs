@@ -262,7 +262,8 @@ async fn s1_bring_up_order_and_tokens() {
 
 /// §2: the descriptor validates; losing a capability puts a new one in
 /// which the gated resource's absence is implied, not listed; each of step
-/// 2's refusals keeps the owner down.
+/// 2's refusals keeps the owner down; an owner given a catalog states it;
+/// and one implementing a revision from its bundle alone states no `minor`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s2_the_descriptor() {
     let (_r1, ep) = router(None).await;
@@ -430,6 +431,21 @@ async fn s2_the_descriptor() {
     //    lowercase hex digits, and one given none leaves the member out
     //    (core §3.3, §8.6; #980 C1c).
     assert_eq!(d.catalog, None, "step 1's owner was given none");
+    // Step 8's control: step 1's entries, from authoring files, state each
+    // file's `minor`.
+    let stated: BTreeMap<&str, Option<u64>> = d
+        .interfaces
+        .iter()
+        .map(|e| (e.iface.as_str(), e.minor))
+        .collect();
+    assert_eq!(
+        stated,
+        BTreeMap::from([
+            ("nav.v2", nav_c.minor.map(u64::from)),
+            ("mission_plan.v1", plan_c.minor.map(u64::from)),
+        ])
+    );
+    assert_eq!((nav_c.minor, plan_c.minor), (Some(1), Some(0)));
     let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../examples/zk2/zenoh-modem/catalog.json");
     let catalog =
@@ -454,6 +470,53 @@ async fn s2_the_descriptor() {
     let d = d.unwrap();
     assert_eq!(d.catalog.as_deref(), Some(catalog.id().hex().as_str()));
     assert_eq!(d.stated_catalog(), Some(catalog.id()));
+
+    // 8. An owner implementing a revision from its bundle alone, as
+    //    generated code embeds one, states no `minor`: a bundle keeps none,
+    //    and an owner never states one its revision does not have (core
+    //    §3.3, §9.5; #1127). Holding no capability and requiring no role,
+    //    it leaves out every member that holds nothing (#1126).
+    let bundled = zenkey::Implementation::from_bundle(imp("nav.v2").bundle_bytes()).unwrap();
+    assert_eq!(bundled.contract().minor, None, "a bundle keeps no minor");
+    let mut b = ServiceBuilder::new(&owner, config("p2/bundle"));
+    b.implement(bundled).unwrap();
+    for res in ["state/pose", "@op/goto", "state/tracks/{track}"] {
+        b.expose(&nav(), res).unwrap();
+    }
+    let from_bundle = b.start().await.unwrap();
+    seen(&tool, &from_bundle).await;
+    let Found::Descriptor(_, bytes) =
+        presence::descriptor(&tool, from_bundle.address(), from_bundle.instance(), T)
+            .await
+            .unwrap()
+    else {
+        panic!("no descriptor")
+    };
+    let text = std::str::from_utf8(&bytes).unwrap();
+    let (d, report) = check(text, &[&nav_c]);
+    assert!(report.0.is_empty(), "{report}");
+    let d = d.unwrap();
+    assert_eq!(d.interfaces.len(), 1);
+    assert_eq!(d.interfaces[0].minor, None, "{text}");
+    let doc: serde_json::Value = serde_json::from_str(text).unwrap();
+    let entry = doc["interfaces"][0].as_object().unwrap();
+    assert_eq!(
+        entry.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+        BTreeSet::from(["iface", "contract", "token"]),
+        "no `minor`, `unavailable` or `cardinality`: {text}"
+    );
+    assert_eq!(
+        doc.as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["format", "service", "instance", "run", "interfaces", "meta"]),
+        "no `capabilities`, `requires` or `profiles`: {text}"
+    );
+    // A reader reads each one absent as empty.
+    assert!(d.capabilities.is_empty() && d.requires.is_empty() && d.profiles.is_empty());
+    assert!(d.interfaces[0].unavailable.is_empty() && d.interfaces[0].cardinality.is_empty());
 }
 
 /// A liveliness subscriber to `address`'s tokens through R1, up and known
