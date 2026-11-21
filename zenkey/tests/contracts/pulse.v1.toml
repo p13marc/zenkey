@@ -1,0 +1,15 @@
+# freshness.v2's scenarios §8 (#1110's H3), as
+# `spec/profiles/freshness/scenarios-v2.md` states the contract: the
+# second interface of one collection that `lab/w2` implements beside
+# `beacon.v2`, and the one P is bound to alone. Its collection is of the
+# `host` class.
+[interface]
+name  = "pulse"
+major = 1
+minor = 0
+uses  = ["freshness.v2"]
+
+[resources.status]                         # one member
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }

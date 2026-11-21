@@ -1,0 +1,14 @@
+# freshness.v2's scenarios §8 (#1110's H3), as
+# `spec/profiles/freshness/scenarios-v2.md` states the contract: one of
+# the two interfaces of one collection each that `lab/w2` implements
+# beside `beacon.v2`, W2's shape. Its collection is of the `host` class.
+[interface]
+name  = "dial"
+major = 1
+minor = 0
+uses  = ["freshness.v2"]
+
+[resources.config]                         # one member
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
