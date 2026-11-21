@@ -133,8 +133,8 @@ def network(r):
     if mid == 0x1D:  # PUSH: N, M
         scope, suffix = wire_expr(r, h & 0x20)
         exts(r, z)
-        kind, _ = zenoh_body(r)
-        return ("push-" + kind, scope, suffix, bool(h & 0x40), None)
+        kind, n = zenoh_body(r)
+        return ("push-" + kind, scope, suffix, bool(h & 0x40), n)
     if mid == 0x1C:  # REQUEST
         rid = r.vle()
         scope, suffix = wire_expr(r, h & 0x20)
@@ -239,12 +239,18 @@ def resolve(sender, receiver, scope, suffix, msender):
     return table.get(scope, f"<{scope}>") + suffix
 
 
-def decode(rows, t0=None, t1=None, dump=False, listing=None):
+def decode(rows, t0=None, t1=None, dump=False, listing=None, pushes=None):
     """Each element's bytes, messages and share of SDUs per direction in [t0, t1).
 
     With `listing` (a list), every message in the window is appended to it:
     {t, dir, element, kind, key, bytes, sdus}, its bytes and SDUs its share of
     the SDUs that carried it.
+
+    With `pushes` (a list), every put and delete of the capture is appended to
+    it as it was written, whatever the window: {t, dir, element, key, payload
+    (its bytes), message (the push's own bytes, no frame), sdu (the SDU's
+    bytes), drop (the relay dropped it)}. A fragmented one has its last
+    fragment's SDU.
     """
     dirs = {"ab": Direction(), "ba": Direction()}
     other = {"ab": "ba", "ba": "ab"}
@@ -283,6 +289,10 @@ def decode(rows, t0=None, t1=None, dump=False, listing=None):
             else:
                 el = element(key, kind)
             out.append((el, r.i - start, kind, key))
+            if pushes is not None and kind.startswith("push-"):
+                pushes.append({"t": row["t"], "dir": d, "element": el, "key": key,
+                               "payload": extra, "message": r.i - start, "sdu": row["n"],
+                               "drop": row["drop"]})
             if dump:
                 print(f"    {kind:22s} {key[:100]!s:100s} -> {el} ({r.i - start} B)")
         return out

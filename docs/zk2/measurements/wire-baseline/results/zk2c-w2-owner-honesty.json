@@ -1,0 +1,1125 @@
+[
+ {
+  "run": "zk2c-w2-owner-honesty-1",
+  "complete": true,
+  "marks_s": {
+   "device_ready": -129.6,
+   "gen_start": -129.6,
+   "loss_on": -60.0,
+   "steady_start": 0.0,
+   "steady_end": 1200.0,
+   "acts_end": 1329.0,
+   "probe-health-crossing": 1349.0,
+   "cut": 1409.0,
+   "probe-health": 1509.0,
+   "probe-doctor": 1526.0,
+   "probe-health-across": 1536.0,
+   "restore": 1654.0,
+   "reconnected": 1744.0,
+   "end": 1899.0
+  },
+  "telemetry": {},
+  "probes": {
+   "probe-health-crossing": {
+    "exit": 0,
+    "judgement": {
+     "answer": "not_established",
+     "reason": "1 service(s) asked, every one healthy, its status fresh and agreeing with its checks"
+    },
+    "rollup": {
+     "healthy": 1,
+     "not_asked": 0,
+     "stale": 0,
+     "unhealthy": 0,
+     "unobservable": 0,
+     "worst": "ok"
+    }
+   },
+   "probe-health": {
+    "exit": 2,
+    "judgement": {
+     "answer": "unobservable",
+     "reason": "no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (no_descriptor)"
+    },
+    "rollup": {
+     "healthy": 0,
+     "not_asked": 0,
+     "stale": 0,
+     "unhealthy": 0,
+     "unobservable": 1,
+     "worst": null
+    }
+   },
+   "probe-doctor": {
+    "exit": 2,
+    "checks": {
+     "health-stale": {
+      "answer": "unobservable",
+      "reason": "h-3fa9c2d41b7e/rf0: no descriptor of it read: whether it implements health.v1 cannot be told, and its interface token says nothing (health.v1 \u00a72.7)"
+     }
+    },
+    "notes": [
+     "read the bus root through `zk2/*/*/@zk/**`, twice, 2.0s apart: 2 service(s), 3 instance(s), 10 token(s), 2 instance(s) with no readable descriptor; 1 of 1 revision(s) named retrieved and verified",
+     "read health.v1 through `zk2/*/*/health.v1/state/**`, with each presence read: 0 service(s) list it; a status's age is read against this host's clock, on the deployment's word (--clocks-synced)"
+    ]
+   },
+   "probe-health-across": {
+    "exit": 2,
+    "judgement": {
+     "answer": "unobservable",
+     "reason": "no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent)"
+    },
+    "rollup": {
+     "healthy": 0,
+     "not_asked": 0,
+     "stale": 0,
+     "unhealthy": 0,
+     "unobservable": 1,
+     "worst": null
+    }
+   }
+  },
+  "owner_heartbeats": {
+   "put": 61,
+   "dropped_by_loss": 4,
+   "dropped_by_loss_seqs": [
+    18,
+    20,
+    42,
+    48
+   ],
+   "dropped_in_the_cut_seqs": [
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60
+   ],
+   "rows": [
+    {
+     "t": -119.7,
+     "seq": null,
+     "payload": 36,
+     "sdu": 153,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": -101.0,
+     "seq": 1,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": -72.5,
+     "seq": 2,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": -44.0,
+     "seq": 3,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": -15.5,
+     "seq": 4,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 13.0,
+     "seq": 5,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 41.5,
+     "seq": 6,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 70.0,
+     "seq": 7,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 98.5,
+     "seq": 8,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 127.0,
+     "seq": 9,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 155.5,
+     "seq": 10,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 184.0,
+     "seq": 11,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 212.5,
+     "seq": 12,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 241.0,
+     "seq": 13,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 269.5,
+     "seq": 14,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 298.0,
+     "seq": 15,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 326.5,
+     "seq": 16,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 355.0,
+     "seq": 17,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 383.5,
+     "seq": 18,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": false
+    },
+    {
+     "t": 412.1,
+     "seq": 19,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 440.6,
+     "seq": 20,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": false
+    },
+    {
+     "t": 469.1,
+     "seq": 21,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 497.6,
+     "seq": 22,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 526.1,
+     "seq": 23,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 554.6,
+     "seq": 24,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 583.1,
+     "seq": 25,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 611.6,
+     "seq": 26,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 640.1,
+     "seq": 27,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 668.6,
+     "seq": 28,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 697.1,
+     "seq": 29,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 725.6,
+     "seq": 30,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 754.1,
+     "seq": 31,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 782.6,
+     "seq": 32,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 811.1,
+     "seq": 33,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 839.6,
+     "seq": 34,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 868.1,
+     "seq": 35,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 896.6,
+     "seq": 36,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 925.1,
+     "seq": 37,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 953.6,
+     "seq": 38,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 982.1,
+     "seq": 39,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1010.6,
+     "seq": 40,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1039.1,
+     "seq": 41,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1067.6,
+     "seq": 42,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": false
+    },
+    {
+     "t": 1096.1,
+     "seq": 43,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1124.6,
+     "seq": 44,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1153.1,
+     "seq": 45,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1181.6,
+     "seq": 46,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1210.1,
+     "seq": 47,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1238.6,
+     "seq": 48,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": false
+    },
+    {
+     "t": 1267.1,
+     "seq": 49,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1295.6,
+     "seq": 50,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1324.1,
+     "seq": 51,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1353.2,
+     "seq": 52,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1381.1,
+     "seq": 53,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": false,
+     "cut": false
+    },
+    {
+     "t": 1409.6,
+     "seq": 54,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": true
+    },
+    {
+     "t": 1438.1,
+     "seq": 55,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": true
+    },
+    {
+     "t": 1466.6,
+     "seq": 56,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": true
+    },
+    {
+     "t": 1495.1,
+     "seq": 57,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": true
+    },
+    {
+     "t": 1523.6,
+     "seq": 58,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": true
+    },
+    {
+     "t": 1552.1,
+     "seq": 59,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": true
+    },
+    {
+     "t": 1580.6,
+     "seq": 60,
+     "payload": 37,
+     "sdu": 44,
+     "dropped": true,
+     "cut": true
+    }
+   ]
+  },
+  "descriptor_reads": [
+   {
+    "t": -118.8,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/*",
+    "reply_bytes": 1649,
+    "reply_sdus": 10.0,
+    "reply_done_s": 5.6
+   },
+   {
+    "t": -72.1,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/*",
+    "reply_bytes": 1649,
+    "reply_sdus": 10.0,
+    "reply_done_s": 5.6
+   },
+   {
+    "t": -15.1,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/*",
+    "reply_bytes": 1649,
+    "reply_sdus": 10.0,
+    "reply_done_s": 5.6
+   },
+   {
+    "t": 41.9,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/*",
+    "reply_bytes": 1649,
+    "reply_sdus": 10.0,
+    "reply_done_s": 5.7
+   },
+   {
+    "t": 98.8,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/*",
+    "reply_bytes": 1649,
+    "reply_sdus": 9.07,
+    "reply_done_s": 6.1
+   },
+   {
+    "t": 155.8,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/*",
+    "reply_bytes": 1649,
+    "reply_sdus": 10.0,
+    "reply_done_s": 5.7
+   },
+   {
+    "t": 1509.1,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/d907d8339683656a",
+    "reply_bytes": 0,
+    "reply_sdus": 0.0,
+    "reply_done_s": null
+   },
+   {
+    "t": 1509.1,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/e80d3a6f645c807c",
+    "reply_bytes": 0,
+    "reply_sdus": 0.0,
+    "reply_done_s": null
+   },
+   {
+    "t": 1526.1,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/d907d8339683656a",
+    "reply_bytes": 0,
+    "reply_sdus": 0.0,
+    "reply_done_s": null
+   },
+   {
+    "t": 1526.1,
+    "key": "zk2/h-3fa9c2d41b7e/rf0/@zk/instance/e80d3a6f645c807c",
+    "reply_bytes": 0,
+    "reply_sdus": 0.0,
+    "reply_done_s": null
+   }
+  ],
+  "watch_status": {
+   "watch-catalog": {
+    "samples": [
+     {
+      "t": -126.5,
+      "kind": "put",
+      "seq": 3,
+      "value": {
+       "reason": "starting",
+       "sinceNs": "1795300285371674035"
+      }
+     },
+     {
+      "t": 1209.3,
+      "kind": "put",
+      "seq": 9,
+      "value": {
+       "level": "LEVEL_DEGRADED",
+       "reason": "battery low",
+       "sinceNs": "1795301624011430720"
+      }
+     },
+     {
+      "t": 1239.3,
+      "kind": "put",
+      "seq": 10,
+      "value": {
+       "level": "LEVEL_OK",
+       "sinceNs": "1795301654000222440"
+      }
+     }
+    ],
+    "confirmations": 40,
+    "lost": 4,
+    "diverged": 0,
+    "first_confirmation_s": 160.7,
+    "last_confirmation_s": 1381.3,
+    "get_timeouts": [
+     "Timeout(5s)",
+     "Timeout(5s)",
+     "Timeout(5s)",
+     "Timeout(5s)",
+     "Timeout(5s)"
+    ],
+    "rows": [
+     {
+      "t": 160.7,
+      "seq": 10,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 184.2,
+      "seq": 11,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 212.7,
+      "seq": 12,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 241.2,
+      "seq": 13,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 269.7,
+      "seq": 14,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 298.2,
+      "seq": 15,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 326.7,
+      "seq": 16,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 355.2,
+      "seq": 17,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 412.2,
+      "seq": 19,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": true,
+      "diverged": false
+     },
+     {
+      "t": 469.2,
+      "seq": 21,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": true,
+      "diverged": false
+     },
+     {
+      "t": 497.7,
+      "seq": 22,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 526.2,
+      "seq": 23,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 554.7,
+      "seq": 24,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 583.2,
+      "seq": 25,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 611.7,
+      "seq": 26,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 640.2,
+      "seq": 27,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 668.7,
+      "seq": 28,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 697.2,
+      "seq": 29,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 725.7,
+      "seq": 30,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 754.2,
+      "seq": 31,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 782.7,
+      "seq": 32,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 811.2,
+      "seq": 33,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 839.7,
+      "seq": 34,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 868.2,
+      "seq": 35,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 896.7,
+      "seq": 36,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 925.2,
+      "seq": 37,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 953.7,
+      "seq": 38,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 982.2,
+      "seq": 39,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1010.7,
+      "seq": 40,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1039.2,
+      "seq": 41,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1096.2,
+      "seq": 43,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": true,
+      "diverged": false
+     },
+     {
+      "t": 1124.7,
+      "seq": 44,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1153.2,
+      "seq": 45,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1181.7,
+      "seq": 46,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1210.3,
+      "seq": 47,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1267.3,
+      "seq": 49,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": true,
+      "diverged": false
+     },
+     {
+      "t": 1295.7,
+      "seq": 50,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1324.2,
+      "seq": 51,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1353.3,
+      "seq": 52,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     },
+     {
+      "t": 1381.3,
+      "seq": 53,
+      "group": 0,
+      "key": "stream/heartbeats/host",
+      "confirmed": 1,
+      "lost": false,
+      "diverged": false
+     }
+    ]
+   },
+   "watch-none": {
+    "samples": [
+     {
+      "t": -126.5,
+      "kind": "put",
+      "seq": 3,
+      "value": {
+       "reason": "starting",
+       "sinceNs": "1795300285371674035"
+      }
+     },
+     {
+      "t": 1209.3,
+      "kind": "put",
+      "seq": 9,
+      "value": {
+       "level": "LEVEL_DEGRADED",
+       "reason": "battery low",
+       "sinceNs": "1795301624011430720"
+      }
+     },
+     {
+      "t": 1239.3,
+      "kind": "put",
+      "seq": 10,
+      "value": {
+       "level": "LEVEL_OK",
+       "sinceNs": "1795301654000222440"
+      }
+     }
+    ],
+    "confirmations": 0,
+    "lost": 0,
+    "diverged": 0,
+    "first_confirmation_s": null,
+    "last_confirmation_s": null,
+    "get_timeouts": [],
+    "rows": []
+   }
+  },
+  "relay": [
+   {
+    "t": -60.0,
+    "event": "loss 0.05"
+   },
+   {
+    "t": 1409.0,
+    "event": "cut"
+   },
+   {
+    "t": 1654.0,
+    "event": "restore"
+   }
+  ]
+ }
+]
