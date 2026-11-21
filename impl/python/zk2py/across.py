@@ -65,9 +65,36 @@ def heartbeat_key(address: str, iface: str) -> str:
     return f"zk2/{address}/{HEARTBEAT_IFACE}/stream/heartbeat/{iface}"
 
 
-def all_scopes(contracts: list[Any], addresses: list[str], reads: str = "samples") -> list[str]:
+def owner_heartbeat_key(address: str, cls: str) -> str:
+    return f"zk2/{address}/{HEARTBEAT_IFACE}/stream/heartbeats/{cls}"
+
+
+def owner_heartbeat_classes(contracts: list[Any]) -> list[str]:
+    """Observer 0.34 §7.5 "The owner heartbeat": "for each class that a
+    collection has. The collections are core §7.5's, of each contract in
+    hand that uses freshness.v2." A collection's class is freshness.v2
+    §2.4's: ``link`` where its resolved ``link.exposure`` reads ``link``,
+    ``host`` otherwise."""
+    from . import freshness_v2
+
+    have: set[str] = set()
+    for c in contracts:
+        if c.interface == HEARTBEAT_IFACE or HEARTBEAT_IFACE not in c.canonical["uses"]:
+            continue
+        for r in c.canonical["resources"]:
+            if r["token"] in ("state", "@state") \
+                    and freshness.horizon("state", r["annotations"]).horizon == "within":
+                have.add(freshness_v2.class_of(r["token"], r["annotations"]))
+    return [c for c in freshness_v2.CLASSES if c in have]
+
+
+def all_scopes(contracts: list[Any], addresses: list[str], reads: str = "samples",
+               catalog_given: bool = False) -> list[str]:
     """"Without a face policy the scopes are those of every resource of the
-    contracts in hand, and of each heartbeat"; to GET, each state resource."""
+    contracts in hand, and of each heartbeat"; to GET, each state resource.
+    Observer 0.34: "A tool given a catalog adds each owner heartbeat key
+    above", "the key's exact form under each address"; "Given no catalog a
+    tool could read no group (core §8.6). It has no such scope." """
     out: list[str] = []
     for address in addresses:
         for c in contracts:
@@ -85,6 +112,8 @@ def all_scopes(contracts: list[Any], addresses: list[str], reads: str = "samples
                 hb = heartbeat_key(address, c.interface)
                 if hb not in out:
                     out.append(hb)
+        if reads == "samples" and catalog_given:
+            out += [owner_heartbeat_key(address, cls) for cls in owner_heartbeat_classes(contracts)]
     return out
 
 
@@ -97,14 +126,18 @@ class Scopes:
 
 
 def scopes(contracts: list[Any], addresses: list[str], reads: str = "samples", policy_text: str | None = None,
-           face_name: str | None = None, catalog_doc: Any = None) -> Scopes:
+           face_name: str | None = None, catalog_doc: Any = None, catalog_given: bool = False) -> Scopes:
     """The scopes observer §7.5 gives, with a face policy and its face or
-    without."""
+    without. ``catalog_given``: whether the tool was given a catalog (core
+    §8.6), which adds the owner heartbeat keys' scopes and nothing else
+    (0.34: "The catalog adds that scope alone. A plan is derived as it is
+    without one"); ``catalog_doc`` is the far side's catalog a caller may
+    still hand the plan (link.v2 §2.18), which no scope reads."""
     import zenoh
 
     from . import link, link_v2
 
-    every = all_scopes(contracts, addresses, reads)
+    every = all_scopes(contracts, addresses, reads, catalog_given)
     if policy_text is None:
         return Scopes(every)
     policy, findings = link_v2.parse_policy(policy_text)
@@ -136,7 +169,14 @@ def scopes(contracts: list[Any], addresses: list[str], reads: str = "samples", p
     if fp is None:
         return Scopes([], ["face_unknown"])
     denies = [zenoh.KeyExpr(k) for rule in fp["deny"] if "put" in rule["messages"] for k in rule["key_exprs"]]
-    return Scopes([s for s in every if not any(d.includes(zenoh.KeyExpr(s)) for d in denies)])
+    # 0.34: "to subscribe, given a catalog, the link class's owner heartbeat
+    # key too, where the plan lets it cross (link.v2 §2.9). It is never the
+    # host class's, and neither under a link.v1 policy (link.v1 §2.9)". The
+    # plan's denies say the first; the two "never" are held here too, by
+    # name, whatever a plan's denies reach.
+    never = [owner_heartbeat_key(a, cls) for a in addresses
+             for cls in (("host",) if policy.v1 is None else ("link", "host"))]
+    return Scopes([s for s in every if s not in never and not any(d.includes(zenoh.KeyExpr(s)) for d in denies)])
 
 
 @dataclass
