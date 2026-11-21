@@ -604,6 +604,48 @@ fn descriptors() {
     }
 }
 
+/// `spec/conformance/descriptors/ok-over-1kb.json` (core §3.3, 0.109):
+/// one owner's descriptor byte for byte as it served it, on one line. Its
+/// size is the 1,184 B before the file's newline and its rest 237 B, the
+/// count every implementation must reach: the three of the four members
+/// it states are 526 B, 366 B and 52 B with a comma each. The reference
+/// wrote it, so it writes it back unchanged. Never blessed.
+#[test]
+fn the_descriptor_over_1_kb_counts_as_the_text_says() {
+    use zenkey_model::descriptor::{Descriptor, SIZE_BYTES, Size};
+    let path = spec().join("conformance/descriptors/ok-over-1kb.json");
+    let file = std::fs::read_to_string(&path).unwrap();
+    let line = file.strip_suffix('\n').expect("one line and its newline");
+    assert!(!line.contains('\n'), "one line");
+    let d: Descriptor = serde_json::from_str(line).unwrap();
+    let size = d.size_of(line.as_bytes());
+    assert_eq!(
+        size,
+        Size {
+            bytes: 1184,
+            other: 237
+        }
+    );
+    assert!(size.bytes > SIZE_BYTES && size.meets());
+    assert_eq!(serde_json::to_string(&d).unwrap(), line, "it round-trips");
+    assert_eq!(d.size().unwrap(), size, "as it serializes here");
+    // A member from its name's opening quote to its value's last byte:
+    // 526 B, 366 B and 52 B, and one comma with each, 947 B.
+    let member = |name: &str, value: String| name.len() + 3 + value.len();
+    let stated = [
+        member("interfaces", serde_json::to_string(&d.interfaces).unwrap()),
+        member(
+            "capabilities",
+            serde_json::to_string(&d.capabilities).unwrap(),
+        ),
+        member("profiles", serde_json::to_string(&d.profiles).unwrap()),
+    ];
+    assert_eq!(stated, [526, 366, 52]);
+    assert!(d.requires.is_empty(), "three of the four");
+    assert_eq!(stated.iter().sum::<usize>() + 3, 947);
+    assert_eq!(size.bytes - 947, size.other);
+}
+
 /// `spec/descriptor.schema.json` is generated from the descriptor types.
 #[test]
 fn descriptor_schema_is_current() {
@@ -2014,12 +2056,16 @@ fn owner_value(hb: &zenkey_model::heartbeat::OwnerHeartbeat) -> Value {
 /// tag is that revision's and its sections, or the refusal of that group
 /// alone; and one body read as an owner heartbeat's and as a heartbeat's.
 /// Every value read writes back to its payload, and every sections read to
-/// the group's bits. Computed twice, by two readings of the text that
-/// shared no code, never blessed.
+/// the group's bits. Since core 0.109: `forms`, a put of another form on
+/// either key, refused `form` before its tag or its body is read; and
+/// `beside`, every group of one payload read in order, a refused one
+/// changing nothing of the groups beside it. Computed twice, by two
+/// readings of the text that shared no code, never blessed.
 #[test]
 fn heartbeat_owner_vectors() {
     use zenkey_model::catalog::{Catalog, CatalogId};
-    use zenkey_model::heartbeat::{Group, Heartbeat, OwnerHeartbeat};
+    use zenkey_model::grammar::KindToken;
+    use zenkey_model::heartbeat::{Group, Heartbeat, OwnerHeartbeat, OwnerRefusal};
     use zenkey_model::wire::{Envelope, Form, Run, Tag};
     let doc = read_json(&spec().join("conformance/heartbeat/owner.json"));
     let layouts = heartbeat_layouts();
@@ -2082,7 +2128,12 @@ fn heartbeat_owner_vectors() {
         // form 6: the body is the owner heartbeat's to read.
         let env = Envelope::parse(&bytes).unwrap_or_else(|e| panic!("{note}: envelope {e}"));
         assert_eq!(env.form, Form::Heartbeat, "{note}: form 6");
-        let got = match OwnerHeartbeat::parse(env.tag, env.record) {
+        assert_eq!(
+            OwnerHeartbeat::of(&env),
+            OwnerHeartbeat::parse(env.tag, env.record),
+            "{note}: form 6 is read by its tag and body"
+        );
+        let got = match OwnerHeartbeat::of(&env) {
             Ok(hb) => {
                 accepted += 1;
                 assert_eq!(
@@ -2114,20 +2165,58 @@ fn heartbeat_owner_vectors() {
         "every refusal of the first reading pinned"
     );
 
-    let groups = doc["groups"].as_array().expect("groups");
-    assert_eq!(groups.len(), 32, "groups");
-    let mut refused = std::collections::BTreeSet::new();
-    for case in groups {
+    // Another form on a heartbeat's key or an owner heartbeat's (core
+    // §7.5): both are `stream` keys, so the parse accepts a mutation or a
+    // frame there, and the reader refuses it `form` before its tag or its
+    // body.
+    let forms = doc["forms"].as_array().expect("forms");
+    assert_eq!(forms.len(), 5, "forms");
+    let mut carried = std::collections::BTreeSet::new();
+    let mut read_past = 0;
+    for case in forms {
         let note = &case["note"];
-        let named: Option<CatalogId> = case["names"].as_str().map(|n| catalogs[n].id());
-        let held: Vec<Catalog> = case["holds"]
-            .as_array()
-            .expect("holds")
-            .iter()
-            .map(|n| catalogs[n.as_str().expect("a catalog's name")].clone())
-            .collect();
-        let group = owner_group(&case["group"]);
-        let read = group.entry(&held, named).and_then(|e| {
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let env = Envelope::parse_on(&bytes, KindToken::Stream)
+            .unwrap_or_else(|e| panic!("{note}: the parse on a stream key: {e}"));
+        assert_eq!(Envelope::parse(&bytes), Ok(env), "{note}: with no key");
+        assert_ne!(env.form, Form::Heartbeat, "{note}: another form than 6");
+        carried.insert(env.form.as_str());
+        // On an owner heartbeat's key.
+        let got = match OwnerHeartbeat::of(&env) {
+            Ok(hb) => owner_value(&hb),
+            Err(r) => json!({"refused": r.token()}),
+        };
+        assert_eq!(
+            case["expect"], got,
+            "form, an owner heartbeat's key: {note}"
+        );
+        // On a heartbeat's key: the same gate, before the reader compares
+        // CH's tag with its revision's.
+        let got = match zenkey_model::heartbeat::body_of(&env) {
+            Ok((tag, _)) => json!({"tag": tag.get()}),
+            Err(r) => json!({"refused": r.token()}),
+        };
+        assert_eq!(case["expect"], got, "form, a heartbeat's key: {note}");
+        // What the refusal comes before: the tag's and the body's own.
+        match OwnerHeartbeat::parse(env.tag, env.record) {
+            Ok(_) => read_past += 1,
+            Err(r) => assert_ne!(r, OwnerRefusal::Form, "{note}: parse names no form"),
+        }
+    }
+    assert_eq!(
+        carried.into_iter().collect::<Vec<_>>(),
+        [Form::Frame.as_str(), Form::Mutation.as_str()],
+        "a mutation and a frame pinned"
+    );
+    assert!(
+        read_past >= 1,
+        "a case whose record would read as an owner heartbeat's body, past its form"
+    );
+
+    // One group: the layout its index names through the catalogs, whether
+    // its tag is that revision's, and its sections, or its refusal.
+    let read_group = |group: &Group, held: &[Catalog], named: Option<CatalogId>, note: &Value| {
+        group.entry(held, named).and_then(|e| {
             let (name, l) = layout_of(e);
             let sections = group.read(l)?;
             // Every sections read write back to the group's bits, in the
@@ -2146,8 +2235,27 @@ fn heartbeat_owner_vectors() {
                 "tag": group.tag_is(l),
                 "sections": value["sections"],
             }))
-        });
-        let got = read.unwrap_or_else(|r| {
+        })
+    };
+    let catalogs_of = |case: &Value| -> (Option<CatalogId>, Vec<Catalog>) {
+        let named = case["names"].as_str().map(|n| catalogs[n].id());
+        let held = case["holds"]
+            .as_array()
+            .expect("holds")
+            .iter()
+            .map(|n| catalogs[n.as_str().expect("a catalog's name")].clone())
+            .collect();
+        (named, held)
+    };
+
+    let groups = doc["groups"].as_array().expect("groups");
+    assert_eq!(groups.len(), 32, "groups");
+    let mut refused = std::collections::BTreeSet::new();
+    for case in groups {
+        let note = &case["note"];
+        let (named, held) = catalogs_of(case);
+        let group = owner_group(&case["group"]);
+        let got = read_group(&group, &held, named, note).unwrap_or_else(|r| {
             refused.insert(r.token());
             json!({"refused": r.token()})
         });
@@ -2165,8 +2273,56 @@ fn heartbeat_owner_vectors() {
         "every refusal of a group pinned"
     );
 
-    // One body, two readings, each accepted: the key says which layout a
-    // put carries, never the bytes.
+    // Every group of one payload, in order: a refused group changes
+    // nothing of the groups beside it, before it or after it.
+    let beside = doc["beside"].as_array().expect("beside");
+    assert_eq!(beside.len(), 9, "beside");
+    let mut refused = std::collections::BTreeSet::new();
+    let (mut read, mut mixed) = (0, 0);
+    for case in beside {
+        let note = &case["note"];
+        let (named, held) = catalogs_of(case);
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let env = Envelope::parse_on(&bytes, KindToken::Stream)
+            .unwrap_or_else(|e| panic!("{note}: envelope {e}"));
+        let hb = OwnerHeartbeat::of(&env)
+            .unwrap_or_else(|e| panic!("{note}: the first reading accepts it: {e}"));
+        let got: Vec<Value> = hb
+            .groups
+            .iter()
+            .map(|group| {
+                let mut v = read_group(group, &held, named, note).unwrap_or_else(|r| {
+                    refused.insert(r.token());
+                    json!({"refused": r.token()})
+                });
+                v["index"] = json!(group.index);
+                v
+            })
+            .collect();
+        assert_eq!(case["expect"], json!(got), "beside: {note}");
+        let n = got.iter().filter(|g| g.get("refused").is_none()).count();
+        read += n;
+        mixed += usize::from(n > 0 && n < got.len());
+    }
+    assert_eq!(
+        refused.into_iter().collect::<Vec<_>>(),
+        [
+            "code",
+            "short",
+            "trailing",
+            "unknown_catalog",
+            "unknown_index"
+        ],
+        "every refusal of a group pinned beside a group"
+    );
+    assert!(
+        read >= 1 && mixed >= 1,
+        "a group read beside a refused one: {read} read, {mixed} payloads of both"
+    );
+
+    // One body, two readings, each accepted. Nothing in a body tells the
+    // two layouts apart, and CH's tag does only 15 times in 16: the key
+    // says which layout a put carries.
     let either = doc["either"].as_array().expect("either");
     assert_eq!(either.len(), 1, "either");
     for case in either {

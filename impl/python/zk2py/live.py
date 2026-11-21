@@ -2230,9 +2230,16 @@ class StateReading:
     entries among them; ``snapshots`` each snapshot the GET brought, with
     its pages and whether it is complete (§7.5); ``arrivals`` every reply as
     it came, ``(key, what, stamp)``, ``what`` ``put``, ``delete``, ``page``
-    or ``refused``, ``stamp`` its Zenoh timestamp's text or None."""
+    or ``refused``, ``stamp`` its Zenoh timestamp's text or None; ``every``
+    each reply the parse accepts, a snapshot's entries among them (which
+    carry no Zenoh timestamp: ``stamp_id`` None), as it came and before the
+    merge:
+    "Under consolidation None each one's reply arrives, two on one key"
+    (``redundancy.v1`` 0.11 §2.10), which a reader that follows one writer
+    tells apart by their stamps' ids."""
 
     replies: list[StateReply] = field(default_factory=list)
+    every: list[StateReply] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     snapshots: list[Any] = field(default_factory=list)
     arrivals: list[tuple[str, str, str | None]] = field(default_factory=list)
@@ -2329,9 +2336,11 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
             tracker.add(key, page)
             head = zk2c.InBand(page["run_width"], page["run"], page["asof"])
             for m in ss.members_of(key, page):
-                merge(StateReply(m.key, m.deleted, m.record, zk2c.ENCODING, None, None, None, m.inband, None,
-                                 m.put_bytes() if not m.deleted else b"", m.put_bytes() if m.deleted else None,
-                                 key, m.confirmation, m.conf, m.time, head), sd.Mark(m.inband, None))
+                entry = StateReply(m.key, m.deleted, m.record, zk2c.ENCODING, None, None, None, m.inband, None,
+                                   m.put_bytes() if not m.deleted else b"", m.put_bytes() if m.deleted else None,
+                                   key, m.confirmation, m.conf, m.time, head)
+                out.every.append(entry)
+                merge(entry, sd.Mark(m.inband, None))
             continue
         out.arrivals.append((key, "delete" if deleted else "put", None if ts is None else str(ts)))
         r = StateReply(
@@ -2352,6 +2361,7 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
             r.refusal = "form"
             out.replies.append(r)
             continue
+        out.every.append(r)
         merge(r, sd.Mark(read.stamp, sd.Stamp.of(ts)))
     out.replies.extend(held.values())
     out.snapshots = list(tracker.heard)

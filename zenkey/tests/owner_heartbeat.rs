@@ -472,6 +472,134 @@ async fn a_failed_descriptor_read_is_not_asked_again_at_each_owner_heartbeat() {
     );
 }
 
+/// Core §7.5, "Another form on a heartbeat's key": a put of another form
+/// on a class key or on a heartbeat's key is refused before its tag or
+/// its body is read. A mutation and a frame whose bytes after the seq are
+/// an owner heartbeat's body, under tag 0, and the same bytes with no
+/// envelope, are each counted unread: none is read as an owner heartbeat,
+/// none asks for the owner's catalog, and nothing is confirmed. The same
+/// on the interface's heartbeat key, under its revision's tag. The owner
+/// heartbeat itself, put after them, is read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn another_form_on_a_heartbeats_key_is_refused_and_never_read() {
+    use zenkey::model::heartbeat::Heartbeat;
+    use zenoh::bytes::Encoding;
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    let asked = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let n = Arc::clone(&asked);
+    let _descriptor = os
+        .declare_queryable("zk2/lab/trio/@zk/instance/*")
+        .callback(move |q| {
+            n.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let _ = zenoh::Wait::wait(q.reply_err("no descriptor here"));
+        })
+        .await
+        .unwrap();
+    let read: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
+    let seen = Arc::clone(&read);
+    let sub = bare_consumer(&rs)
+        .subscribe_heartbeats(
+            STATUS,
+            |_: Delivery| {},
+            move |h: HeartbeatRead| seen.lock().unwrap().push(h),
+        )
+        .await
+        .unwrap();
+    let class_key = owner_key("lab", "trio", Class::Host);
+    let own_key = zenkey::model::heartbeat::key("lab", "trio", &iface("alpha.v1"));
+    let on_class = os.declare_publisher(class_key).await.unwrap();
+    let on_own = os.declare_publisher(own_key).await.unwrap();
+    eventually("both heartbeat keys are matched", || async {
+        on_class.matching_status().await.unwrap().matching()
+            && on_own.matching_status().await.unwrap().matching()
+    })
+    .await;
+
+    // CH's form bits, the top three: 0 a mutation, 5 a frame, 6 a
+    // heartbeat. The run's width and the tag stay as written.
+    let as_form = |payload: &[u8], form: u8| -> Vec<u8> {
+        let mut bytes = payload.to_vec();
+        bytes[0] = (bytes[0] & 0x1f) | (form << 5);
+        bytes
+    };
+    let mut unread = 0;
+    // On the class key: an owner heartbeat's bytes under tag 0, as a
+    // mutation, as a frame, and with no envelope.
+    let owner_beat = bare_heartbeat(0);
+    assert_eq!(owner_beat[0], 0xc0, "form 6, a 16-bit run, tag 0");
+    for (what, payload, encoding) in [
+        ("a mutation", as_form(&owner_beat, 0), Encoding::ZENOH_BYTES),
+        ("a frame", as_form(&owner_beat, 5), Encoding::ZENOH_BYTES),
+        (
+            "no envelope",
+            owner_beat.clone(),
+            Encoding::APPLICATION_OCTET_STREAM,
+        ),
+    ] {
+        on_class.put(payload).encoding(encoding).await.unwrap();
+        unread += 1;
+        eventually(what, || async { sub.heartbeats_unread() == unread }).await;
+    }
+    // On the interface's heartbeat key: a heartbeat's bytes under its
+    // revision's tag, the same three ways.
+    let layout = Layout::of(&contract(&trio("alpha.v1")));
+    let beat = Heartbeat {
+        time: Time::Unknown,
+        sections: vec![None; layout.collections.len()],
+    }
+    .envelope(
+        &layout,
+        Stamp {
+            run: zenkey::model::wire::Run::U16(7),
+            seq: Seq::new(0).unwrap(),
+        },
+    )
+    .unwrap();
+    for (what, payload, encoding) in [
+        ("a mutation", as_form(&beat, 0), Encoding::ZENOH_BYTES),
+        ("a frame", as_form(&beat, 5), Encoding::ZENOH_BYTES),
+        (
+            "no envelope",
+            beat.clone(),
+            Encoding::APPLICATION_OCTET_STREAM,
+        ),
+    ] {
+        on_own.put(payload).encoding(encoding).await.unwrap();
+        unread += 1;
+        eventually(what, || async { sub.heartbeats_unread() == unread }).await;
+    }
+    assert_eq!(unread, 6);
+    assert_eq!(
+        (sub.owner_heartbeats(), sub.heartbeats()),
+        (0, 0),
+        "none read as an owner heartbeat or as a heartbeat"
+    );
+    assert_eq!(
+        (
+            sub.owner_catalog_reads(),
+            asked.load(std::sync::atomic::Ordering::Relaxed)
+        ),
+        (0, 0),
+        "refused before its owner's catalog is asked for"
+    );
+    assert!(read.lock().unwrap().is_empty(), "nothing told the reader");
+
+    // The reader is live: the owner heartbeat itself is read on its key.
+    on_class.put(owner_beat).await.unwrap();
+    eventually("the owner heartbeat is read on its key", || async {
+        sub.owner_heartbeats() == 1
+    })
+    .await;
+    // And the heartbeat itself on its own: folded into the view.
+    on_own.put(beat).await.unwrap();
+    eventually("the heartbeat is read on its key", || async {
+        sub.heartbeats() == 1
+    })
+    .await;
+}
+
 /// Behind a descriptor read that is slow to answer, at most `OWNER_QUEUE`
 /// owner heartbeats wait: each one past it is read at once with no
 /// catalog, counted, and confirms nothing.

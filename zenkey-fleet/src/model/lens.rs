@@ -607,6 +607,20 @@ impl<'a> Lens<'a> {
             _ => Heard::Nothing,
         };
         let resolution = self.resolve_heard(wire, heard);
+        // Core §7.5: a heartbeat's key and an owner heartbeat's carry form
+        // 6 and no other. A put of another form on one, or with no
+        // envelope, is refused `form` before its tag or its body is read,
+        // and is never shown as a record of the key's raw type.
+        if member == Member::Type
+            && let Some(reason) = inband::no_heartbeat(wire, encoding, &payload)
+        {
+            let (rendering, conformance) = inband::no_heartbeat_check(key, bytes.len(), reason);
+            return Checked {
+                rendering,
+                conformance,
+                identity: resolution.identity,
+            };
+        }
         // Core §7.7: a frame resource's put is a frame, applied by the
         // key's reader; a frame elsewhere, and a mutation on a frame
         // resource, have no reading.

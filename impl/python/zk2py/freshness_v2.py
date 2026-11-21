@@ -359,14 +359,17 @@ class Reader:
 
     # -- one owner heartbeat --------------------------------------------------------------
 
-    def owner_heartbeat_put(self, cls: str, payload: bytes, at: int) -> dict[str, Any]:
+    def owner_heartbeat_put(self, cls: str, payload: bytes, at: int, enveloped: bool = True) -> dict[str, Any]:
         """A put's payload on the class ``cls``'s key. Step 1 holds the
-        envelope's parse too: "The envelope's parse comes first" (core
-        §7.5)."""
+        envelope's parse too, and the put's form: "The envelope's parse
+        comes first (above), then the put's form (``form``, below)" (core
+        §7.5, 0.109). ``enveloped`` False is a put whose Encoding carries no
+        envelope, refused ``form`` too. "A subscriber confirms nothing by a
+        put refused so"."""
         from . import owner_heartbeat as oh
 
         try:
-            put = oh.read(payload)
+            put = oh.read(payload, enveloped=enveloped)
         except oh.Refused as e:
             return {"refused": e.token}
         return self._read(cls, put.stamp, put.body, at)
@@ -736,15 +739,17 @@ class Subscriber:
     def _beat(self, sample: Any) -> None:
         at = time.monotonic_ns()
         try:
-            env = zk2c.parse(sample.payload.to_bytes(), "put")
-        except zk2c.Refused as e:
+            # core §7.5 (0.109), "Another form on a heartbeat's key": the
+            # parse, then the put's form, "before it reads a tag or a body";
+            # "A put with no envelope on either key is refused the same way".
+            # An envelope's Encoding is `zenoh/bytes` whole, a schema suffix
+            # being another Encoding (core §7.2, `envelope/carries.json`):
+            # :func:`zk2py.zk2c.envelope_encoding` holds the sentences
+            env = heartbeat.put_of(sample.payload.to_bytes(),
+                                   enveloped=zk2c.envelope_encoding(sample.encoding))
+        except heartbeat.Refused as e:
             with self.lock:
                 self.heartbeats.append(HeartbeatRecord(at, None, None, None, {"refused": e.token}, refusal=e.token))
-            return
-        if env.form != "heartbeat":
-            with self.lock:
-                self.heartbeats.append(HeartbeatRecord(at, env.stamp, env.tag, env.record,
-                                                       {"refused": "form"}, refusal=f"a {env.form}"))
             return
         due: list[str] = []
         with self.lock:
@@ -954,7 +959,8 @@ class Provider:
             for lk in locks:
                 lk.acquire()
             try:
-                answer = self.reader.owner_heartbeat_put(cls, payload, at)
+                answer = self.reader.owner_heartbeat_put(cls, payload, at,
+                                                         enveloped=zk2c.envelope_encoding(sample.encoding))
             finally:
                 for lk in reversed(locks):
                     lk.release()

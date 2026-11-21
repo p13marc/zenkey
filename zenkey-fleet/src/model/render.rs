@@ -252,7 +252,14 @@ fn read<'a>(key: &str, member: Member, encoding: Option<&str>, bytes: &'a [u8]) 
         },
         _ => Payload::Plain(bytes),
     };
-    Read::of(payload)
+    let no_heartbeat = match member {
+        Member::Type => inband::no_heartbeat(key, encoding, &payload),
+        _ => None,
+    };
+    Read {
+        no_heartbeat,
+        ..Read::of(payload)
+    }
 }
 
 /// A payload read ([`read`]); a request form's CH tag, since a request
@@ -264,6 +271,10 @@ struct Read<'a> {
     payload: Payload<'a>,
     request_tag: Option<wire::Tag>,
     no_form: Option<String>,
+    /// Why a put on a heartbeat's key or an owner heartbeat's is no
+    /// heartbeat (core §7.5, [`inband::no_heartbeat`]): `form`, so no
+    /// body and no record.
+    no_heartbeat: Option<String>,
 }
 
 impl<'a> Read<'a> {
@@ -272,6 +283,7 @@ impl<'a> Read<'a> {
             payload,
             request_tag: None,
             no_form: None,
+            no_heartbeat: None,
         }
     }
 
@@ -299,6 +311,9 @@ fn fallback_rendering(
     read: &Read<'_>,
     size: usize,
 ) -> PayloadRendering {
+    if let Some(reason) = &read.no_heartbeat {
+        return inband::no_heartbeat_check(key, size, reason.clone()).0;
+    }
     if let Some(encoding) = &read.no_form {
         return PayloadRendering {
             key: key.to_owned(),
@@ -362,6 +377,12 @@ fn render_read(
     size: usize,
     epoch: Dating,
 ) -> PayloadRendering {
+    // Core §7.5: another form on a heartbeat's key, refused `form` before
+    // anything of it is read, whatever the revision in hand says of the
+    // key's resource.
+    if let Some(reason) = &read.no_heartbeat {
+        return inband::no_heartbeat_check(key, size, reason.clone()).0;
+    }
     let fingerprint = revision.fingerprint().to_string();
     let fallback = |why| fallback_rendering(key, why, &read, size);
     let (payload, request_tag) = (read.payload, read.request_tag);

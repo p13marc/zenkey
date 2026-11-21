@@ -459,6 +459,50 @@ pub fn admit_event(
     }
 }
 
+/// Why a sample on a heartbeat's key or an owner heartbeat's is no
+/// heartbeat (core §7.5, "Another form on a heartbeat's key"). Such a
+/// sample confirms nothing, and neither its tag nor its body is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoHeartbeat {
+    /// §7.5's parse refused its envelope: the refusal names it, such as
+    /// `short` or `key_kind`.
+    Envelope(Refusal),
+    /// Any other sample that is not form 6: a mutation, a frame, a put
+    /// with no envelope, or a delete. Refused as `form`.
+    Form,
+}
+
+impl NoHeartbeat {
+    /// The fixtures' token: the parse's refusal's, or `form`
+    /// (`heartbeat/owner.json`'s `forms`).
+    #[must_use]
+    pub fn token(&self) -> &'static str {
+        match self {
+            NoHeartbeat::Envelope(r) => r.token(),
+            NoHeartbeat::Form => zenkey_model::heartbeat::FormRefusal::TOKEN,
+        }
+    }
+}
+
+/// Admits a read sample on a heartbeat's key or an owner heartbeat's
+/// (core §7.5): its sample, the body its payload, with its key's stamp
+/// and CH's tag where its envelope is form 6. Where the parse refuses its
+/// envelope, the refusal names it. Any other is [`NoHeartbeat::Form`],
+/// `form`, before its tag or its body is read: a mutation, whose record
+/// under tag 0 could read as an owner heartbeat's body, a frame, a put
+/// with no envelope, or a delete. The consumer's heartbeat reader and its
+/// owner heartbeat reader both ask it.
+///
+/// # Errors
+/// The [`NoHeartbeat`] refusal.
+pub fn admit_heartbeat(read: Read) -> Result<(Sample, wire::Stamp, Tag), NoHeartbeat> {
+    match read {
+        Read::Heartbeat { sample, stamp, tag } => Ok((sample, stamp, tag)),
+        Read::Refused { refusal, .. } => Err(NoHeartbeat::Envelope(refusal)),
+        _ => Err(NoHeartbeat::Form),
+    }
+}
+
 /// The refusal of §7.5's parse of a delete's attachment, where it carries
 /// one the parse refuses: `None` for a put, a delete with no attachment,
 /// and one whose attachment is a delete's envelope.
@@ -685,7 +729,7 @@ pub fn refusal(sample: &Sample) -> Option<Refusal> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Read, Undecodable, admit, admit_event, event_time, read};
+    use super::{Read, Undecodable, admit, admit_event, admit_heartbeat, event_time, read};
     use zenkey_model::wire::{self, Run, Seq, Stamp, Tag};
     use zenoh::bytes::Encoding;
     use zenoh::sample::{Sample, SampleBuilder};
@@ -819,6 +863,89 @@ mod tests {
         for (attachment, token) in [(Some(deleted), "form"), (None, "form")] {
             let refused = admit_event(&read(delete(attachment)), Some(&l), false).err();
             assert_eq!(refused.map(|u| u.token()), Some(token));
+        }
+    }
+
+    /// Core §7.5, "Another form on a heartbeat's key": on a heartbeat's
+    /// key and on an owner heartbeat's, form 6 alone is admitted, with its
+    /// stamp, CH's tag and its body. A mutation or a frame whose bytes
+    /// after the seq are an owner heartbeat's body, a put with no
+    /// envelope and a delete are `form`; an envelope the parse refuses
+    /// keeps the parse's refusal.
+    #[test]
+    fn another_form_on_a_heartbeats_key_is_no_heartbeat() {
+        use zenkey_model::heartbeat::{Class, Group, OwnerHeartbeat, Time, key, owner_key};
+        let ke = |k: &str| zenoh::key_expr::KeyExpr::try_from(k.to_owned()).unwrap();
+        let hb = OwnerHeartbeat {
+            time: Time::Unknown,
+            groups: vec![Group {
+                index: 0,
+                tag: Tag::new(4).unwrap(),
+                sections: zenkey_model::packed::BitWriter::new().finish(),
+            }],
+        };
+        let body = hb.write().unwrap();
+        let payload = hb.envelope(stamp()).unwrap();
+        let keys = [
+            owner_key("lab", "trio", Class::Host),
+            owner_key("lab", "trio", Class::Link),
+            key("lab", "trio", &"alpha.v1".parse().unwrap()),
+        ];
+        for k in &keys {
+            let put = |payload: Vec<u8>, enc: Encoding| -> Sample {
+                SampleBuilder::put(ke(k), payload).encoding(enc).into()
+            };
+            let refused = |s: Sample| admit_heartbeat(read(s)).err().map(|r| r.token());
+            // Form 6: its key's stamp, CH's tag and its body, unread.
+            let (sample, at, tag) =
+                admit_heartbeat(read(put(payload.clone(), Encoding::ZENOH_BYTES))).unwrap();
+            assert_eq!((at, tag), (stamp(), Tag::NONE), "{k}");
+            assert_eq!(sample.payload().to_bytes().as_ref(), &body[..], "{k}");
+            // A mutation and a frame under tag 0 whose record is that
+            // body, a mutation under another tag, and one with no record.
+            let mutation = wire::Envelope::mutation(Tag::NONE, stamp(), &body).write();
+            let frame = wire::Envelope::frame(Tag::NONE, stamp(), &body).write();
+            let tagged = wire::Envelope::mutation(Tag::new(8).unwrap(), stamp(), &body).write();
+            let bare = wire::Envelope::mutation(Tag::NONE, stamp(), &[]).write();
+            for other in [mutation, frame, tagged, bare] {
+                assert_eq!(
+                    refused(put(other.clone(), Encoding::ZENOH_BYTES)),
+                    Some("form"),
+                    "{k}: {other:02x?}"
+                );
+            }
+            // No envelope: the same bytes under another Encoding.
+            assert_eq!(
+                refused(put(payload.clone(), Encoding::APPLICATION_OCTET_STREAM)),
+                Some("form"),
+                "{k}"
+            );
+            assert_eq!(
+                refused(put(b"{}".to_vec(), Encoding::APPLICATION_JSON)),
+                Some("form"),
+                "{k}"
+            );
+            // A delete, with a delete's envelope or none.
+            let deleted = wire::DeleteStamp { stamp: stamp() }.write();
+            assert_eq!(
+                refused(SampleBuilder::delete(ke(k)).attachment(deleted).into()),
+                Some("form"),
+                "{k}"
+            );
+            assert_eq!(refused(SampleBuilder::delete(ke(k)).into()), Some("form"));
+            // An envelope the parse refuses: its own refusal, first.
+            assert_eq!(
+                refused(put(vec![0xc0, 0x00], Encoding::ZENOH_BYTES)),
+                Some("short"),
+                "{k}"
+            );
+            // A snapshot on a `stream` key: the parse's `key_kind`.
+            let page = wire::Envelope::snapshot(Tag::NONE, stamp().run, stamp().seq, &body).write();
+            assert_eq!(
+                refused(put(page, Encoding::ZENOH_BYTES)),
+                Some("key_kind"),
+                "{k}"
+            );
         }
     }
 

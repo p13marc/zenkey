@@ -33,6 +33,16 @@ back to the same bytes."
 ``short`` and ``code`` as the fields are read, then ``trailing``, then
 ``pad`` (:class:`Refused`).
 
+**Another form on a heartbeat's key** (core 0.109, F-540's answer;
+:func:`put_of`): "A heartbeat's key and an owner heartbeat's carry form 6,
+and no other form. Both are ``stream`` keys, and the parse reads a key's
+kind token alone. So it accepts a mutation or a frame on either. ... An
+implementation that reads a heartbeat or an owner heartbeat MUST refuse a
+put of another form on that key, naming ``form``, before it reads a tag or a
+body." "A put with no envelope on either key is refused the same way."
+:func:`put_of` is the gate of both readings: zk2py's heartbeat subscribers
+and :func:`zk2py.owner_heartbeat.read` go through it.
+
 **The digest** (:func:`digest`): the XOR over the live members of the first
 4 bytes, big-endian, of the sha256 of "its base-relative key, in UTF-8; a
 zero byte; a byte holding its run's width bit …; its run, then its seq,
@@ -61,7 +71,8 @@ RESOURCE = "stream/heartbeat/{iface}"
 
 class Refused(ValueError):
     """A body core §7.5 refuses, with its token: ``short``, ``code``,
-    ``trailing`` or ``pad``."""
+    ``trailing`` or ``pad``; or a put on a heartbeat's key that
+    :func:`put_of` refuses: the parse's token, or ``form``."""
 
     def __init__(self, token: str, why: str):
         super().__init__(f"{token}: {why}")
@@ -338,6 +349,48 @@ def read(layout: Layout, data: bytes) -> dict[str, Any]:
     if b.pos % 8 and b.data[-1] & ((1 << (8 - b.pos % 8)) - 1):
         raise Refused("pad", "a pad bit is 1")
     return out
+
+
+def put_of(payload: bytes, key_token: str | None = None, enveloped: bool = True) -> Any:
+    """A put on a heartbeat's key or on an owner heartbeat's, read as far as
+    its form (core §7.5, 0.109): the envelope form 6 carries, or
+    :class:`Refused`.
+
+    1. "A put with no envelope on either key is refused the same way":
+       ``enveloped`` False, a put whose Encoding carries none, is ``form``.
+       Its bytes are never parsed as an envelope.
+    2. "The envelope's parse comes first": its refusal is the parse's token
+       (``short`` for no byte at all, ``sample_kind``, ``key_kind`` ...).
+    3. "then the put's form (``form``)": a mutation or a frame, which the
+       parse accepts on a ``stream`` key, "is no heartbeat, and no owner
+       heartbeat". It is refused "before it reads a tag or a body": a
+       mutation whose tag is not 0 is ``form`` on an owner heartbeat's key,
+       never ``tag``.
+
+    Nothing here chooses a layout: the caller holds the key, and reads the
+    body it returns as a heartbeat's or as an owner heartbeat's. ``key_token``
+    is the key's kind token where the caller gives the parse one."""
+    from . import zk2c
+
+    if not enveloped:
+        raise Refused("form", "a put with no envelope on a heartbeat's key carries no heartbeat")
+    try:
+        env = zk2c.parse(bytes(payload), "put", key_token)
+    except zk2c.Refused as e:
+        raise Refused(e.token, str(e).split(": ", 1)[1]) from None
+    if env.form != "heartbeat":
+        raise Refused("form", f"a {env.form} on a heartbeat's key: it carries form 6, and no other form")
+    return env
+
+
+def read_put(layout: Layout, payload: bytes, key_token: str | None = None, enveloped: bool = True) -> dict[str, Any]:
+    """A put on a heartbeat's key read whole: :func:`put_of`, then its body
+    with the covered revision's layout. The value is the body's, with CH's
+    ``tag`` and whether it is the layout's (``tag_matches``): "The tag is a
+    check", and what a reader concludes from another tag is
+    ``freshness.v2``'s (§2.5), which reads no body under one."""
+    env = put_of(payload, key_token, enveloped)
+    return {**read(layout, env.record or b""), "tag": env.tag, "tag_matches": env.tag == layout.tag}
 
 
 def instant_of(time: dict[str, int] | None, epoch_s: int) -> int | None:

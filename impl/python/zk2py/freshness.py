@@ -565,16 +565,19 @@ class Subscriber:
 
     def _beat(self, k: tuple[str, str], sample: Any) -> None:
         arrival, utc = time.monotonic_ns(), time.time_ns()
+        from . import heartbeat as _hb
+
         try:
-            env = zk2c.parse(sample.payload.to_bytes(), "put")
-        except zk2c.Refused as e:
+            # core §7.5 (0.109), "Another form on a heartbeat's key": the
+            # gate of both readings, a put with no envelope refused too
+            env = _hb.put_of(sample.payload.to_bytes(), enveloped=zk2c.envelope_encoding(sample.encoding))
+        except _hb.Refused as e:
             answer: dict[str, Any] = {"refused": e.token}
             env = None
         with self.lock:
             view = self.views[k]
             if env is not None:
-                answer = {"refused": "form"} if env.form != "heartbeat" else \
-                    view.heartbeat(env.tag, env.stamp, env.record or b"", arrival)
+                answer = view.heartbeat(env.tag, env.stamp, env.record or b"", arrival)
                 if "read" in answer:
                     # health.v1 §2.5 (0.9): the clock question reads "the
                     # time of each heartbeat", all ones while the guard

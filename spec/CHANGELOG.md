@@ -3,6 +3,252 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.109 — 2026-11-21: what §3.3's size counts, an owner's `minor` from its file, a group's size never allocated from, and on a heartbeat's key another form refused and the catalog a reader needs (#609, #1110, #1126, #1127)
+
+zk2py round 111 read 0.107 cold and filed F-535 to F-539, none a
+blocker. This version answers the core's four, F-535 to F-538.
+`desired.v1` 0.14 answers F-539
+([`profiles/desired/CHANGELOG.md`](profiles/desired/CHANGELOG.md)), and
+`observer.md` stays 0.33. One sentence of §7.5 comes with them, from the
+review of 0.108.
+
+zk2py round 112 (PR #1138) then read 0.108's owner heartbeat cold. It
+passed `heartbeat/owner.json` 90 of 90 on its first run, and filed F-540
+to F-546 at the form's edges, none a blocker. This version answers the
+core's five, F-540 to F-544, in §7.5 and §8.6. `desired.v1` 0.14 answers
+F-545, and `link.v2` 0.20 answers F-546
+([`profiles/link/CHANGELOG.md`](profiles/link/CHANGELOG.md)).
+`redundancy.v1` 0.11 repairs the sentence that F-545's has a twin of.
+
+**Changed: §3.3, what an owner may exceed 1 KB with (F-535, an
+ambiguity).**
+- **Before:** "an owner MAY exceed 1 KB with `interfaces`,
+  `capabilities`, `requires` and `profiles`". It read two ways: those
+  four alone hold more than 1 KB, or the descriptor does while its other
+  members stay small. A second rule asked the second: over 1 KB, the
+  other members SHOULD stay within 512 B together.
+- **Now:** an owner MAY exceed 1 KB while the rest of its descriptor is
+  within 512 B. The rest is the size less the four members.
+  `[F: descriptors/ok-over-1kb]`
+- **One rule where there were two.** The 512 B SHOULD is the MAY's
+  condition now, and is no rule of its own. A descriptor over 1 KB whose
+  rest is over 512 B is not excepted, so it misses the 1 KB SHOULD. What
+  an owner is asked is as it was: within 1 KB, or the rest within 512 B.
+- **The reference** computes exactly this, and did:
+  `zenkey_model::descriptor::Size::meets`.
+- **0.107's entry is corrected.** It said zenoh-modem's node "exceeds
+  1 KB with the four members alone". Its four members hold 947 B, within
+  1 KB. The node exceeds 1 KB with a rest of 237 B. That sentence now
+  says so, and says that it was corrected.
+
+**Stated: §3.3, what is counted (F-536, an ambiguity).**
+- **Before:** "1 KB" had no figure, and "each counted with its name" no
+  word on a member's comma.
+- **Now, three things.**
+  - **The size** is the count of bytes of the document its owner puts
+    and answers, as the owner wrote it.
+  - **1 KB is 1,024 B,** as the reference's `SIZE_BYTES` already was.
+  - **A member** is counted from the opening quote of its name to the
+    last byte of its value, and one comma with it. So the rest is the
+    size of the same document with the four taken out.
+- **Why the comma.** A member taken out of an object takes one comma
+  with it, since `format`, `service` and `instance` are always there.
+  The rest is then a document's size, and needs no count of its own for
+  braces and commas. The reference counted so already. It now counts
+  the bytes it serves (`Descriptor::size_of`).
+- **Two counts of one node, explained.** 0.107's entry says 1,184 B, and
+  round 111 measured 1,167 B. Both are right, of two runs of `zenctl
+  gen` over the same three files.
+  - Given no catalog and no run file, it draws a 32-bit run: 1,167 B.
+  - Given zenoh-modem's catalog and a run file, it states `catalog`,
+    21 B with its comma, and a 16-bit run, 4 digits fewer: 1,184 B.
+  - 0.107's entry measured the second, and did not say so.
+  - Both runs were repeated for this version, on the black boxes of
+    e46b040b.
+- **The four members' two counts** were 944 B and 947 B. The first
+  counts each name and value, as round 111 did. The second adds a comma
+  each, as 0.107's entry did and as the text now says.
+- **The rule is about an owner's own bytes.** The same members written
+  with other spacing are another size. No checker reads a size, so no
+  two implementations need agree on a document neither wrote.
+
+**Stated: §3.3, `minor` from the authoring file (F-537, an ambiguity).**
+- **Before:** the bullet said what `minor` is, when an owner leaves it
+  out, and what it must never state. No sentence asked an owner that
+  holds the file to state it, though `presence.md` §2 expects it.
+- **Now:** an owner that holds the revision's authoring file SHOULD
+  state the file's minor, where it states one. `[Sc: presence.md §2]`
+- **Why a SHOULD, not a MUST.** No check reads `minor`. A tool that
+  finds none classifies both ways (§9.8). That can leave a pair
+  undecided, and is never wrong.
+- **A file that states none** (W104) gives its revision no minor. Its
+  owner leaves the member out, which the MUST NOT already asked.
+- **The reference** already does both. An implementation built from an
+  authoring file states the file's minor, and one built from a bundle
+  states none (`zenkey/src/descriptor.rs`, `build`).
+
+**Changed: §3.3, "Over 1 KB" (F-538, minor).**
+- **Before:** "SHOULD leave out every empty member". By its letter that
+  held `interfaces` and a requirement's `bindings`, which the schema
+  requires. A descriptor that left either out would be D000.
+- **Now:** every member that holds nothing and whose schema default is
+  empty. "Empty members" lists the seven, and says that `interfaces`
+  and `bindings` have no default and stay.
+  `[F: descriptors/ok-over-1kb]`
+
+**Added: §7.5, "The body bounds the sections, never the size".**
+- A group's size can claim up to 2^32 − 1 bits. An implementation MUST
+  NOT allocate from a size. It takes a group's bits only as the body
+  holds them, and a size above the bits left is `short`.
+  `[F: heartbeat/owner.json]`
+- **The evidence** was there: `owner.json`'s read 17, counted from 0, is
+  a size of 2^32 − 1 over a body of a few bytes, refused `short`.
+- **The reference** copies a group's bits as the body gives them, and
+  allocates nothing from the size (`OwnerHeartbeat::parse`).
+
+**Added: §7.5, "Another form on a heartbeat's key" (F-540, a gap).**
+- **Before:** the parse accepts a mutation or a frame on any `stream`
+  key, and an owner heartbeat's refusals started at CH's tag. So a
+  mutation whose tag is 0 passed them, and its record read as groups.
+  The same held of a heartbeat's key since 0.81.
+- **Now:** an implementation that reads a heartbeat or an owner
+  heartbeat MUST refuse a put of another form on that key, naming
+  `form`, before it reads a tag or a body. `[F: heartbeat/owner.json]`
+- **It binds a reader of the form,** as the lists above it do. What a
+  tool shows of such a put is `observer.md`'s, and unchanged.
+- **The name** is the one §2.6 gives a put on an events key that carries
+  no event, and §4.2 a stray `reply_del`. A put with no envelope on
+  either key is refused the same way, as §2.6's is.
+- **A heartbeat on an owner heartbeat's key** needed no new refusal. It
+  is form 6, refused `tag` 15 times in 16, as `owner.json`'s read 18 is.
+  Under tag 0 it is read as the body it is. The text now says so, and
+  says the reverse of an owner heartbeat on a heartbeat's key.
+- **The reference reads no body from such a put.** Its readers take a
+  put on a heartbeat's key only where it reads as form 6
+  (`zenkey::inband::Read::Heartbeat`), and count any other unread.
+  Its model names the refusal: `heartbeat::body_of` is the gate of both
+  readings, and `OwnerHeartbeat::of` reads an owner heartbeat's put
+  through it (`OwnerRefusal::Form`).
+- **The reference's tools did show such a put,** as bytes of the key's
+  raw type. They now show it undecodable, `form`, a put with no envelope
+  too.
+
+**Changed: §7.5, what tells the two layouts apart (F-541, minor).**
+- **Before:** "Nothing in the bytes tells the two apart." That is true
+  of a body, and not of a put: an owner heartbeat's CH carries tag 0,
+  and a heartbeat's its covered revision's.
+- **Now:** nothing in a body tells them apart. CH's tag does only most
+  of the time, since a revision's tag is 0 for 1 revision in 16. So the
+  key chooses.
+- **The MUST NOT** names CH's tag among the bytes an implementation does
+  not choose by. It asked that already: the tag is a payload's byte.
+- **`owner.json`'s description** says "nothing in a body" too.
+
+**Not changed: §7.5 cites `freshness.v2` §3 for both keys (F-542, a
+gap).**
+- **The finding is right of main at fc16a564.** `freshness.v2` is 0.8
+  there, and its §3 names the heartbeat's key alone.
+- **`freshness.v2` 0.9 names both** (#1110's H2a, PR #1137):
+  `heartbeat/{iface}` and `heartbeats/{class}`, the class `link` or
+  `host`. It was read on its branch for this entry.
+- **It answers the finding's list.** Its §2.4 says who sends one, which
+  interfaces get a group, what a group covers, and what a sixteenth
+  interface does. Its §2.5 says what a reader concludes, and its §2.9
+  what crosses a face. Core §11.1's Consume names the owner heartbeat's
+  key with it.
+- **What a tool shows** is `observer.md`'s, which stays 0.33 here.
+- **So the sentence stands,** and is true once that text merges.
+
+**Stated: §7.5, "A reader needs the catalog too", and §8.6's first
+sentence (F-543, an ambiguity).**
+- **Before:** "A reader bound to one interface holds that interface's
+  revision alone." It reads a group's index through a catalog, which
+  §8.6 said a deployment provisions to owners and to a face's far side.
+- **Now:** that reader holds the catalog its owner names, or a
+  successor, beside its revision. §8.6 lists each reader of an owner
+  heartbeat among those a deployment provisions.
+- **Without one it reads no group.** §8.6 refuses each index
+  (`unknown_catalog`), its own interface's among them, and the tag finds
+  none. To that reader the owner heartbeat confirms nothing, so its
+  members go stale: the safe side (`freshness.v2` §2.5).
+- **No keyword.** §8.6's "Never a guess" already is the MUST.
+- **The reference** refuses so: `Group::entry` with no catalog held.
+
+**Evidence added: `heartbeat/owner.json`'s `beside` and `forms` (F-544,
+minor, and F-540).**
+- **Before:** "That group alone" cited a file whose `groups` cases each
+  read one group. An implementation that stopped at the first refused
+  group passed it whole.
+- **`beside`, nine cases:** the catalogs and one payload, then every
+  group's reading or refusal.
+  - W2's three groups with the middle one refused `trailing`, and the
+    same owner heartbeat with that group left out. The two others read
+    the same in both.
+  - The first group refused (`short`), the middle one (`code`), the
+    last one (`unknown_index`, read through a successor), and two
+    refused around one read.
+  - A tag that is not its revision's, which refuses nothing.
+  - W2's owner heartbeat to a reader with no catalog, and to one with an
+    unrelated catalog: `unknown_catalog` three times each. That is
+    F-543's reader.
+- **`forms`, five cases:** a mutation and a frame whose bytes after the
+  seq are W2's body, under each run width, a mutation whose tag is not
+  0, and one with no record. Each is `form`.
+- **How they were written.** A reading of this text was written for
+  them, in Python with the standard library. It first reproduced the
+  file's 89 cases of `writes`, `reads` and `groups`. zk2py's reader of
+  round 112, which read §7.5 cold, then read the 14 new cases, and the
+  two agree on each. Each group's expectation in `beside` is the one
+  its `groups` case gives it alone. Never blessed.
+- **The reference's runner reads both lists as written**
+  (`heartbeat_owner_vectors`), and all 14 cases pass. It reads each
+  group of `beside` from its own bits (`Group::entry`, `Group::read`).
+  It runs each `forms` case on both keys, through the gate above.
+
+**The evidence.**
+- **`descriptors/ok-over-1kb`** is new: zenoh-modem's node as `zenctl
+  gen` served it under the catalog, byte for byte, on one line.
+  - It is 1,184 B before the file's newline.
+  - It states three of the four members, in 526 B, 366 B and 52 B. With
+    a comma each they are 947 B, and its rest is 237 B.
+  - It states no `requires`, and no entry of it states `unavailable` or
+    `cardinality`.
+  - It draws no D code. `expect.json` lists 61 cases, 60 before.
+- **§3.3's checks** list the size among what no check reads.
+
+**Migration.**
+- **An owner that met 0.107** meets this version, but for a few bytes at
+  one bound. 0.107 counted the other members with their names alone.
+  The rest also holds the two braces and the commas between them, 7 B on
+  the fixture. So other members that 0.107 counted just within 512 B
+  can be a rest over it.
+- **An owner between 1,001 B and 1,024 B** is within 1 KB.
+- **An owner that holds its file and states no `minor`** now misses a
+  SHOULD.
+- **A reader of an owner heartbeat** that refused `short` already
+  changes nothing.
+- **A reader that took any put on a heartbeat's key as form 6** now
+  refuses a mutation or a frame there as `form`.
+- **A deployment that turns the owner heartbeat on** provisions its
+  catalog to the readers too.
+
+**Deliberately not changed.**
+- **The four members and the 512 B** are 0.107's, and the maintainer's
+  to overrule.
+- **A rule with one figure** would be shorter: the rest within 512 B at
+  any size, and no 1 KB. It would fault a descriptor of 900 B whose
+  `meta` holds 600 B, which this rule allows. It is not taken here.
+- **No D code** reads a size, and no D code reads `minor`.
+- **`token`.** Its default is `true`, no empty list or object, so the
+  seven do not hold it.
+- **The constrained level's MUST** to fit one fragment (§12).
+- **No section number** and no fingerprint moves.
+
+**The figures.** `RULES.md` lists 285 rules, 283 in 0.108. The owner
+keeps 88: the SHOULD on `minor` comes, and the 512 B SHOULD goes into
+its MAY. The static rules are 75, 73 before, with §7.5's two: the MUST
+NOT on a size, and the MUST on another form.
+
 ## 0.108 — 2026-11-21: §7.5, the owner heartbeat: form 6 with a group per interface (#1110)
 
 `freshness.v2` sends one heartbeat per interface. On W2's RF link its
@@ -146,8 +392,12 @@ answers both. `observer.md` stays 0.33.
   1,344 B before and 1,184 B now. The four members hold 947 B
   (`interfaces` 513, `capabilities` 351, `profiles` 41, and their
   names), and the others 237 B, 61 of them `zenctl gen`'s marker. So
-  zenoh-modem's node exceeds 1 KB with the four members alone, and
-  meets the rule as now worded.
+  zenoh-modem's node exceeds 1 KB with its other members within 512 B,
+  and meets the rule as now worded.
+  - **Corrected in 0.109 (F-535).** This said "with the four members
+    alone", which 947 B is not.
+  - **The run** was given zenoh-modem's catalog and a run file. Given
+    neither, the same owner serves 1,167 B (0.109).
 - **The reference** leaves out every empty member the schema defaults
   (`capabilities`, `requires`, `profiles`, `meta`, an entry's
   `unavailable` and `cardinality`, a requirement's `params`). It warns

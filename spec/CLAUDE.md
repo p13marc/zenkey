@@ -589,6 +589,58 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `apply.json`'s unknown-index case had its note reworded (review of
   #1137): the catalog holds five entries and index 7 is past it. No
   vector moved.
+  Core 0.109 answers zk2py round 111's F-535 to F-538 (`desired.v1` 0.14
+  F-539, its scenarios' §8). §3.3's size is the bytes of the document as
+  its owner wrote it, and 1 KB is 1,024 B. An owner MAY exceed 1 KB while
+  the rest is within 512 B: the rest is the size less each of the four
+  members stated, a member counted from its name's opening quote to its
+  value's last byte with one comma (`Descriptor::size_of` counts so, over
+  the bytes served, and nothing in it can fail: `encode_checked` hands it
+  the document it serves; `size()` serializes first and returns the
+  error). The
+  512 B SHOULD went into that MAY (`EXCEPTED_BY`'s phrase moved with it).
+  Over 1 KB an owner SHOULD leave out every member that holds nothing and
+  whose schema default is empty, the seven "Empty members" lists, never
+  `interfaces` or `bindings`. An owner that holds the authoring file
+  SHOULD state its `minor` where the file states one. `descriptors/
+  ok-over-1kb` is zenoh-modem's node as `zenctl gen` served it under the
+  catalog, one line, never re-serialized: 1,184 B, the three of the four
+  it states 947 B, a rest of 237 B (1,167 B with no catalog and a 32-bit
+  run), which `tests/conformance.rs`'s
+  `the_descriptor_over_1_kb_counts_as_the_text_says` pins beside its
+  round trip. It is the node as recorded before #1110's H2b, whose owner
+  also lists `freshness.v2`'s optional `stream/heartbeats/{class}`
+  unavailable and serves a longer one; `mock_owner.rs` asserts the rule
+  on today's, and no figure. §7.5: an implementation MUST NOT allocate from a group's size
+  (`heartbeat/owner.json`'s read 17). It also answers round 112's F-540
+  to F-544 (`desired.v1` 0.14 F-545, `link.v2` 0.20 F-546): an
+  implementation that reads a heartbeat or an owner heartbeat MUST
+  refuse a put of another form on that key, naming `form`, before it
+  reads a tag or a body (`owner.json`'s `forms`, a mutation or a frame;
+  the model's gate is `heartbeat::body_of(&Envelope)`, `FormRefusal`, and
+  `OwnerHeartbeat::of(&Envelope)` reads through it, `OwnerRefusal::Form`
+  first; every reader refuses so: the runtime's two heartbeat readers
+  and the alarm feed through `zenkey::inband::admit_heartbeat`
+  (`NoHeartbeat::Form`, counted unread), and the tools' lens, renderer
+  and structural sniff through `model::inband::no_heartbeat`, which shows
+  such a put undecodable, `form`, where it showed a raw record's bytes;
+  a put with no envelope is refused the same way, as the text says); nothing
+  in a body tells the two layouts apart, CH's tag only 15 times in 16,
+  so the key chooses; a reader of an owner heartbeat holds the catalog
+  its owner names or a successor beside its revision (§8.6 lists it
+  among those provisioned), and without one reads every group
+  `unknown_catalog`; `owner.json`'s `beside` reads every group of one
+  payload, a refused one among them. `forms` (5) and `beside` (9) were
+  written by a reading of the text made for them and checked by zk2py's
+  of round 112, never blessed; `heartbeat_owner_vectors` runs both as
+  written, each `forms` case on both keys, and all 14 pass. F-542 needs
+  no change: `freshness.v2` 0.9 names both keys. `desired.v1` §2.10: two
+  instances' reports on one key are one reply after a tool's merge
+  (observer §4.1), where it cited `Latest`, and the fleet's `reports_get`
+  merges so (`bus::desired::report_replies`, a delete skipped after the
+  merge), where it answered `two_differ`;
+  `redundancy.v1` 0.11 repairs the same in §2.10's "A seed" and its
+  scenarios' §9. 286 rules (owner 88, implementation 75).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
@@ -640,6 +692,19 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   case 44 holds its plan (45 s, `keyframe_s` 675) and case 45 pins the
   inequality one millisecond below the lease, both written by hand; its
   description names `users`; Appendix B names cases 14 to 18.
+  Text 0.20 (#988, editorial; 0.19 is #1110's) puts #989's SF9 and SF12
+  runs in Appendix B: 624 and 72 uplink keep-alives a day beside the
+  frames, inside §2.16's ranges, idle 720 and 96 each way. It also
+  states the batch zenoh ran under zenoh-modem's lean stack (206, 208,
+  101 and 210 B, where the policies state 222, 224, 117 and 224).
+  `frame_over_batch` is unchanged: that it compares the payload alone,
+  10 B short of zenoh's message and length on these faces, is an open
+  question. Its §2.19 (round 112's F-546) names two layers: the codes
+  are findings over the keys a configuration states
+  (`check_transport`, the fixture's `router`), and a tool that reads the
+  file through zenoh's own loader names zenoh's refusal and asks no
+  question (`zenctl check face` under `zenoh-1.10.1`, exit 2; as data
+  under `zm-1.10.2-r1`).
   zenoh-modem's notes price each face's uplink keep-alives at the fewest
   and the most (SF12 927 s and SBD 144 messages at the most, over their
   budgets), and the fleet's `zenoh_modem_events_fit_each_face_budget`

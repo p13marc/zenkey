@@ -179,13 +179,15 @@ async fn gen_brings_up_a_visible_owner_publishing_through_its_contract() {
 ///
 /// - **The size rule.** Its descriptor is over 1 KB with the four members
 ///   an owner cannot shorten, so it leaves out every empty member and keeps
-///   its other members within 512 B.
+///   its rest within 512 B (core §3.3). This test asserts the rule and
+///   no figure: `descriptors/ok-over-1kb` is this node as it was recorded
+///   before #1110's H2b, and the changelog holds the counts.
 /// - **The minor.** Each entry states the minor its revision has: the
 ///   authoring file's for a revision loaded from one, and none for one read
 ///   from a bundle, never a 0 the revision does not have.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
-    use zenkey_model::descriptor::{OTHER_BYTES, SIZE_BYTES};
+    use zenkey_model::descriptor::SIZE_BYTES;
 
     let (_router, ep) = router(None).await;
     let owners = client(&ep).await;
@@ -267,23 +269,27 @@ async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
     );
 
     // The size rule. 1,344 B before core 0.107, which wrote every empty
-    // member and a `minor` of 0 for each revision; 1,184 B after it. Since
-    // #1110's H2b the runtime embeds `freshness.v2`'s revision 1.1, whose
-    // optional `stream/heartbeats/{class}` an owner that sends heartbeats
-    // alone lists `unavailable` (core §3.3): 76 B more, 1,260 B.
-    let size = d.size();
-    assert_eq!(size.bytes, bytes.len(), "the reference writes it compact");
+    // member and a `minor` of 0 for each revision. Since #1110's H2b the
+    // runtime embeds `freshness.v2`'s revision 1.1, whose optional
+    // `stream/heartbeats/{class}` an owner that sends heartbeats alone
+    // lists `unavailable` (core §3.3), so the node is longer than the
+    // fixture's record of it. The rule is asserted, and no figure.
+    let size = d.size_of(&bytes);
+    assert_eq!(
+        serde_json::to_string(&d).unwrap(),
+        text,
+        "the reference writes it compact"
+    );
     assert_eq!(
         d.capabilities.len(),
         30,
         "every capability modem.v3 gates on"
     );
     assert!(
-        size.bytes > SIZE_BYTES && size.bytes < 1_280,
+        size.bytes > SIZE_BYTES,
         "over 1 KB with four entries and 30 capabilities: {size:?}"
     );
-    assert!(size.other <= OTHER_BYTES / 2, "{size:?}: {text}");
-    assert!(size.meets(), "{size:?}");
+    assert!(size.meets(), "{size:?}: {text}");
     // No empty member, at any depth.
     fn empties(at: &str, v: &serde_json::Value, found: &mut Vec<String>) {
         match v {

@@ -24,7 +24,11 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   through `Implementation::new` or `with_bundle`; `from_bundle`, what
   generated code embeds, has none), leaves out every empty member, and
   warns over 1 KB only where `Descriptor::size` does not meet §3.3
-  (`tests/presence.rs`' §2 step 8). `presence`
+  (`tests/presence.rs`' §2 step 8). Since core 0.109 `encode_checked`
+  serializes once and counts the bytes it serves (`Descriptor::size_of`),
+  with no panicking path: a descriptor that does not serialize is
+  `Error::Descriptor`. Its warning names the rest, over the 512 B that
+  lets a descriptor exceed 1 KB. `presence`
   reads liveliness on an unbounded flume handler (zenoh#2678), and
   `retrieval` is §8.4. `writer` puts with the contract's QoS, every
   `stream`, `state` and `@state` sample sealed in §7.5's envelope under
@@ -579,3 +583,13 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   keep-alive (stream-link framing), for `constrained.rs`'s §9; §8 is a 1.5 s raw queryable against
   `tests/contracts/faced.v1.toml`'s 1 s `timeout_ms`. v1's `zenkey` 0.11.x stays
   on crates.io, from the `v1` branch; no member of `main` links it.
+  Core 0.109 §7.5, "Another form on a heartbeat's key" (review-bot on
+  #1143): `inband::admit_heartbeat(Read)` is the gate of the consumer's
+  heartbeat reader and of its owner heartbeat reader: form 6 alone gives
+  its sample, stamp and tag; an envelope the parse refused keeps its
+  refusal (`NoHeartbeat::Envelope`); any other sample is
+  `NoHeartbeat::Form`, `form`: a mutation, a frame, a put with no
+  envelope, a delete. Both readers count it in `heartbeats_unread`, as
+  they did, before a tag or a body is read and before the owner's
+  catalog is asked for (`tests/owner_heartbeat.rs`'
+  `another_form_on_a_heartbeats_key_is_refused_and_never_read`).

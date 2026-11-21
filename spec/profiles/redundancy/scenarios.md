@@ -316,7 +316,8 @@ alone.
    value under its id since the other's (core S7), the flapping §2.10
    ends. K's value moves to A's values only, in A's order, and K discards
    every sample stamped with B's `meta.zid`.
-2. K's seed holds A's reply, or, where `Latest` kept B's later stamp, no
+2. K's seed takes A's reply and discards B's: under S4's `None` both
+   arrive (core S4). Where A's reply did not arrive, K holds no
    value for `balance` until A's next put: never B's (§2.10).
 3. K's value stays A's. A sample of B's that was in flight when B stepped
    down, arriving after, is discarded by K.

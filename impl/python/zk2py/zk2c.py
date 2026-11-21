@@ -559,13 +559,28 @@ def data_key(key: str) -> dict[str, Any] | None:
     return None
 
 
+def envelope_encoding(encoding: Any) -> bool:
+    """Whether ``encoding`` is the Encoding of a sample that carries an
+    envelope: exactly ``zenoh/bytes``, and nothing after it. Core §7.2: "An
+    envelope's sample, and a form's, has the Encoding ``zenoh/bytes``", and
+    of that Encoding an owner "MUST NOT add a schema suffix to it".
+    ``envelope/carries.json`` reads it so from the other side: no envelope
+    in "a sample under any other Encoding, a schema suffix on
+    ``zenoh/bytes`` included" (its case ``zenoh/bytes;zk2c``: "a schema
+    suffix is another Encoding"). So a reader compares the whole Encoding,
+    never its part before ``;``: a heartbeat sent under a suffix is a put
+    with no envelope, refused ``form`` (core §7.5), and it is its owner that
+    broke §7.2's MUST NOT."""
+    return str(encoding) == ENCODING
+
+
 def carries(key: str, encoding: str) -> bool:
     """Observer §7.3 (text 0.14): whether a sample on ``key`` under
     ``encoding`` carries an envelope: "a zk2 data key whose kind is a
     stream, state or an event, and whose ``Encoding`` is ``zenoh/bytes``",
     told "by its key and its ``Encoding`` alone, with no contract". A schema
     suffix is another Encoding."""
-    if str(encoding) != ENCODING:
+    if not envelope_encoding(encoding):
         return False
     parsed = data_key(key)
     return parsed is not None and parsed.get("form") == "data" and parsed.get("token") in CARRYING

@@ -4,6 +4,57 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.14 — 2026-11-21: editorial: `scenarios.md` §8's unbound role states no parameter bound, and §2.10's two reports on one key are merged, not consolidated, no rule changed (#609)
+
+zk2py round 111 (PR #1129) found §8's Expected 1 quoting a sentence core
+0.107 replaced (F-539).
+
+**Expected 1** said the descriptor lists `task` with `"bindings": []`
+and `"params": {}`, citing core §3.2. Since core 0.107, §3.2 says "with
+`"bindings": []` and no parameter bound", and an owner may leave out a
+`params` that holds nothing (core §3.3, "Empty members"). Read by its
+letter, the old sentence failed on the reference and on zk2py, which
+both leave `params` out. It now reads "no parameter bound", and says
+that its `params` is absent or `{}`.
+
+**§2.10, two instances' reports on one key (F-545, an ambiguity).**
+zk2py round 112 (PR #1138) found the sentence resting on a consolidation
+that core 0.100 removed.
+- **Before:** "S4's GET answers the later (core §4.1)". That was
+  `Latest`, which kept one reply a key. Since core 0.100, S4's GET runs
+  under consolidation `None`, and both instances' replies arrive.
+- **Now:** a tool merges the GET's replies per key, as observer §4.1
+  asks of every state GET. One reply is left on a key: within one run
+  the higher seq, and across two runs the later arrival. That reply is
+  the resource's, and the rule on two report resources reads it.
+- **No rule of this text changed.** The merge is observer §4.1's MUST,
+  and its evidence is the core's (`seed/inband.json`, `state.md` §14).
+  The rule on two differing reports still binds two report resources
+  alone.
+- **The fixture says whose replies it gives.** `slices.json`'s
+  description reads "as a tool's merge leaves them, one a key", and its
+  case 13's note names the merge where it named `Latest`'s later reply.
+  No case's reading and no expectation moved.
+- **The reference's tool did not merge.** `zenctl desired` of fc16a564
+  read every reply, so two differing reports on one key answered
+  `report_invalid`, `two_differ`, in each shape round 112 ran. Its
+  `reports_get` now merges first, as its read of the author's version
+  does, and skips a delete after the merge. Its target is unchanged: a
+  report is a put of its own state, under its run and seq.
+- **Not added:** a `slices.json` case that gives a tool two replies on
+  one key. The fixture states no stamp, and the merge is not this
+  profile's to pin.
+
+**Deliberately not changed.** No rule, section number or label, and no
+fixture's case beyond the wording above.
+`conformance/bindings.json` and `slices.json` keep the descriptors that
+write `"params": {}`: both spellings are valid. The reference's `s8_the_kill_switch` reads
+the role's `params` as empty, absent or not, as it did.
+- **Written against core 0.73**, still. Other sentences of this text
+  cite a stamp where core 0.73 put a run and a seq. A document's own
+  stamp is a Zenoh timestamp still (core §4.3's table), and this
+  version restates none of them.
+
 ## 0.13 — 2026-11-01: editorial: 0.12's scenario change said, and §6's Expected 1 holds no setup, no rule changed (#976)
 
 zk2py round 93 (PR #1005) found 0.12's entry incomplete (F-421).

@@ -211,7 +211,12 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   with no contract of the author's in hand, from the target's requirement
   and binding (`slice_from`; two reports that claim the slice and differ
   are the row's `unreadable`, `two_differ` naming both keys, never no
-  report, #840 DF), projects a reading into the model's
+  report, #840 DF; since desired.v1 0.14, zk2py round 112's F-545,
+  `reports_get` merges a report resource's replies per key first,
+  `bus::desired::report_replies` over `bus::query::merged`, a delete
+  skipped after the merge, so two instances' reports on one key are one
+  reply, within one run the higher seq and across two runs the later
+  arrival, and `two_differ` binds two report resources alone), projects a reading into the model's
   `TargetReading`, and follows how long a target is behind (`Behind`:
   readings a window apart, or a trusted clock dating a version at its
   slice GET's answer). `judge::desired` hands each
@@ -716,4 +721,26 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   where none is stated, and the doctor's `contract-drift` orders two
   revisions only by minors stated. `tests/mock_owner.rs`'
   `gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors`
-  runs zenoh-modem's node shape (1,344 B before, 1,184 B now).
+  runs zenoh-modem's node shape (1,344 B before, 1,184 B now). Since
+  core 0.109 it asserts the rule and no figure: over 1 KB, `meets()`
+  over the bytes served (`Descriptor::size_of`), no empty member, and
+  the descriptor writing back byte for byte. The fixture
+  `descriptors/ok-over-1kb` is that node as recorded before #1110's H2b
+  (1,184 B), whose owner also lists `freshness.v2`'s optional
+  `stream/heartbeats/{class}` unavailable and serves a longer one.
+  Core 0.109 §7.5, "Another form on a heartbeat's key" (review-bot on
+  #1143): `model::inband::no_heartbeat(key, encoding, &Payload)` is the
+  tools' gate, the reason naming `form`, and `no_heartbeat_check` its
+  rendering, undecodable as the heartbeat its key declares. On a
+  heartbeat's key or an owner heartbeat's (`heartbeat::is_key`) a
+  mutation, a frame and a put with no envelope are refused so by the lens
+  (`check_read`, before the frame and record paths), by `render` and
+  `render_with` (`Read::no_heartbeat`), and by `structural_text` and
+  `structural_value`, where each showed the record's bytes as the key's
+  raw type, or sniffed them. A heartbeat is its key's reader's, an
+  envelope the parse refused keeps its refusal, and a put whose Encoding
+  the caller does not know (`None`) is not judged. The alarm feed's two
+  heartbeat subscribers go through `zenkey::inband::admit_heartbeat`, and
+  still drop any other sample uncounted. `tests/owner_heartbeat.rs`'
+  `another_form_on_a_heartbeats_key_is_refused_form_by_the_lens` runs
+  both keys through the lens and one revision in hand.

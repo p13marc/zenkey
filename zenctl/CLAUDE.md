@@ -500,3 +500,7 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   verdict verb (`exit::asked`). Verdicts exit through
   `zenkey_fleet::judgement_exit_code` over observer §1's `Judgement`, never
   a hand-rolled match. `zenctl/CHANGELOG.md` carries the old→new table.
+  A sample read structurally (`cmd/sample.rs`, decode not asked) on a
+  heartbeat's key or an owner heartbeat's that is no heartbeat is shown
+  undecodable, `form`, never sniffed (core 0.109 §7.5,
+  `zenkey_fleet::model::inband::no_heartbeat`).

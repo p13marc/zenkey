@@ -6,6 +6,14 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — another form on a heartbeat's key (zk2py round 112)
+
+Core 0.109 §7.5, "Another form on a heartbeat's key".
+
+| Before | Now | Notes |
+|---|---|---|
+| `echo`, `get`, `record`, `timeline` over a put on `…/freshness.v2/stream/heartbeat/<iface>` or `…/stream/heartbeats/<class>` that is no heartbeat (a mutation, a frame, or no envelope): its bytes shown as the key's raw type, or sniffed | undecodable as `zk2c heartbeat (<iface>)` or `zk2c owner heartbeat (<class>)`, reason `refused: form, <what> on <whose> key, which carries form 6 and no other` | A heartbeat reads as before, and an envelope the parse refuses keeps its own refusal. No owner of the reference writes such a put |
+
 ## Unreleased (`main`, zk2) — an owner heartbeat's groups (#1110)
 
 Core §7.5; `freshness.v2` §2.5; observer 0.34 §7.3, §7.5. No owner sends

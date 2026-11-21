@@ -676,6 +676,62 @@ pub fn owner_heartbeat_check(
     }
 }
 
+/// Core §7.5, "Another form on a heartbeat's key": why a put on a
+/// heartbeat's key or an owner heartbeat's is refused, given what its
+/// envelope read as, naming `form`. Those two keys carry form 6 and no
+/// other, so a mutation's record, a frame's body and a put with no
+/// envelope are no heartbeat: never read as a body, and never decoded as a
+/// record of the key's resource either, whose type is raw bytes.
+///
+/// `None` for a heartbeat, which its key's reader reads; for an envelope
+/// §7.5's parse refused, whose own refusal stands; on any other key; and
+/// under no `encoding`, where the caller does not know the put's and
+/// nothing is read as an envelope.
+pub fn no_heartbeat(key: &str, encoding: Option<&str>, payload: &Payload<'_>) -> Option<String> {
+    encoding?;
+    if !zenkey_model::heartbeat::is_key(key) {
+        return None;
+    }
+    let what = match payload {
+        Payload::Heartbeat { .. } | Payload::Refused(_) => return None,
+        Payload::Plain(_) => "a put with no envelope",
+        Payload::Record { .. } => "a mutation",
+        Payload::Frame { .. } => "a frame",
+        Payload::Snapshot { .. } => "a snapshot's page",
+    };
+    let whose = if zenkey_model::heartbeat::owner_class(key).is_some() {
+        "an owner heartbeat's"
+    } else {
+        "a heartbeat's"
+    };
+    Some(format!(
+        "refused: {}, {what} on {whose} key, which carries form 6 and no other",
+        zenkey_model::heartbeat::FormRefusal::TOKEN
+    ))
+}
+
+/// What a put [`no_heartbeat`] refuses renders as, and its conformance:
+/// undecodable as the heartbeat its key declares, with the reason.
+pub fn no_heartbeat_check(
+    key: &str,
+    size: usize,
+    reason: String,
+) -> (PayloadRendering, Conformance) {
+    let declared = heartbeat_declared(key);
+    (
+        PayloadRendering {
+            key: key.to_owned(),
+            size,
+            resource: None,
+            rendered: Rendered::Undecodable {
+                declared: declared.clone(),
+                reason: reason.clone(),
+            },
+        },
+        Conformance::Undecodable { declared, reason },
+    )
+}
+
 /// Why a heartbeat where a record of a resource's type was read is
 /// undecodable: a body, never a value.
 pub const HEARTBEAT_AS_RECORD: &str =
@@ -1019,9 +1075,16 @@ pub fn refused_conformance(rendering: &PayloadRendering, refusal: Refusal) -> Co
 
 /// The structural ladder over a put's bytes, its envelope stripped first
 /// (observer §7.3: strip, then sniff): the record's document, text or byte
-/// count, or a refused envelope's reason, never its bytes sniffed.
+/// count, or a refused envelope's reason, never its bytes sniffed; and a
+/// put on a heartbeat's key that is no heartbeat by its refusal, `form`
+/// ([`no_heartbeat`]).
 pub fn structural_text(key: &str, encoding: Option<&str>, bytes: &[u8]) -> String {
-    match payload(key, encoding, bytes) {
+    let read = payload(key, encoding, bytes);
+    // Another form on a heartbeat's key (core §7.5): `form`, never sniffed.
+    if let Some(reason) = no_heartbeat(key, encoding, &read) {
+        return format!("<undecodable: {reason}>");
+    }
+    match read {
         Payload::Refused(r) => format!("<undecodable: {}>", r.reason()),
         Payload::Heartbeat { body, .. } => {
             format!("<{}, {} bytes>", heartbeat_declared(key), body.len())
@@ -1039,13 +1102,16 @@ pub fn structural_text(key: &str, encoding: Option<&str>, bytes: &[u8]) -> Strin
 
 /// [`structural::structural_value`] over a put's bytes, its envelope
 /// stripped first; `None` for a refused envelope, and for a record under a
-/// tag other than 0, a packed record no sniff reads (observer §7.3).
+/// tag other than 0, a packed record no sniff reads (observer §7.3), and
+/// for a put on a heartbeat's key that is no heartbeat ([`no_heartbeat`]).
 pub fn structural_value(
     key: &str,
     encoding: Option<&str>,
     bytes: &[u8],
 ) -> Option<serde_json::Value> {
     match payload(key, encoding, bytes) {
+        // Another form on a heartbeat's key (core §7.5): `form`, no value.
+        p if no_heartbeat(key, encoding, &p).is_some() => None,
         Payload::Record { tag, .. } if tag != wire::Tag::NONE => None,
         p => p.bytes().and_then(structural::structural_value),
     }
@@ -1229,6 +1295,77 @@ mod tests {
             .unwrap()
             .as_ref(),
             b"up"
+        );
+    }
+
+    /// Core §7.5, "Another form on a heartbeat's key": a mutation, a
+    /// frame and a put with no envelope on a heartbeat's key or an owner
+    /// heartbeat's are refused `form`, never sniffed; a heartbeat, an
+    /// envelope the parse refused, any other key and a put whose Encoding
+    /// the caller does not know are not this refusal's.
+    #[test]
+    fn another_form_on_a_heartbeats_key_is_refused_never_sniffed() {
+        use zenkey_model::heartbeat::{Class, key, owner_key};
+        let at = wire::Stamp {
+            run: wire::Run::U16(7),
+            seq: wire::Seq::new(1).unwrap(),
+        };
+        let doc = br#"{"a":1}"#;
+        let mutation = wire::Envelope::mutation(wire::Tag::NONE, at, doc).write();
+        let frame = wire::Envelope::frame(wire::Tag::NONE, at, doc).write();
+        let heartbeat = wire::Envelope {
+            form: wire::Form::Heartbeat,
+            tag: wire::Tag::NONE,
+            stamp: at,
+            record: &[0x00],
+        }
+        .write();
+        for (k, whose) in [
+            (
+                owner_key("lab", "trio", Class::Link),
+                "an owner heartbeat's",
+            ),
+            (
+                format!("ns/{}", key("lab", "trio", &"alpha.v1".parse().unwrap())),
+                "a heartbeat's",
+            ),
+        ] {
+            for (what, bytes, encoding) in [
+                ("a mutation", &mutation[..], "zenoh/bytes"),
+                ("a frame", &frame[..], "zenoh/bytes"),
+                ("a put with no envelope", &doc[..], "application/json"),
+            ] {
+                let reason = format!(
+                    "refused: form, {what} on {whose} key, which carries form 6 and no other"
+                );
+                let read = payload(&k, Some(encoding), bytes);
+                assert_eq!(
+                    no_heartbeat(&k, Some(encoding), &read),
+                    Some(reason.clone())
+                );
+                assert_eq!(
+                    structural_text(&k, Some(encoding), bytes),
+                    format!("<undecodable: {reason}>")
+                );
+                assert_eq!(structural_value(&k, Some(encoding), bytes), None);
+            }
+            // A heartbeat, and an envelope the parse refused.
+            let read = payload(&k, Some("zenoh/bytes"), &heartbeat);
+            assert!(matches!(read, Payload::Heartbeat { .. }));
+            assert_eq!(no_heartbeat(&k, Some("zenoh/bytes"), &read), None);
+            let read = payload(&k, Some("zenoh/bytes"), &[0xc0]);
+            assert!(matches!(read, Payload::Refused(_)));
+            assert_eq!(no_heartbeat(&k, Some("zenoh/bytes"), &read), None);
+            // An Encoding the caller does not know: nothing is judged.
+            assert_eq!(no_heartbeat(&k, None, &payload(&k, None, doc)), None);
+        }
+        // Any other key.
+        let other = "zk2/h/s/i.v1/stream/x";
+        let read = payload(other, Some("zenoh/bytes"), &mutation);
+        assert_eq!(no_heartbeat(other, Some("zenoh/bytes"), &read), None);
+        assert_eq!(
+            structural_text(other, Some("zenoh/bytes"), &mutation),
+            r#"{"a":1}"#
         );
     }
 

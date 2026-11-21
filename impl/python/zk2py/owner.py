@@ -754,9 +754,9 @@ class Owner:
         self.hostid = hostid
         self.hostid_ephemeral = hostid_ephemeral
         self.meta_host = meta_host
-        #: core §3.3 "Size" (0.107): the last descriptor's size
+        #: core §3.3 "Size" (0.109): the last descriptor's size
         #: (:class:`zk2py.descriptor.Size`), and what the owner says of one
-        #: over 1 KB whose other members exceed 512 B
+        #: over 1 KB whose rest exceeds 512 B
         self.descriptor_size: Any = None
         self.size_note: str | None = None
         self.state_zid = state_zid
@@ -1713,9 +1713,20 @@ class Owner:
           `params`. So "Over 1 KB"'s first SHOULD holds without the owner
           measuring. `token` stays written: its default is `true`, no empty
           list or object. `bindings` stays too, required by the schema.
-        - **Over 1 KB** with the other members beyond 512 B, the owner
-          leaves `meta.host` out, the one member it writes for display
-          alone, and says so (:attr:`size_note`)."""
+        - **Over 1 KB** with the rest beyond 512 B, the owner leaves
+          `meta.host` out, the one member it writes for display alone, and
+          says so (:attr:`size_note`).
+
+        Core 0.109:
+        - "An owner that holds the revision's authoring file SHOULD state
+          the file's minor, where it states one": it does, as above.
+        - **The size** is these bytes', "the document its owner puts and
+          answers, as the owner wrote it", and 1 KB is 1,024 B.
+        - **One rule where 0.107 had two.** "So an owner MAY exceed 1 KB
+          while the rest of its descriptor is within 512 B", the rest "the
+          descriptor's size less each of those four members it states",
+          each with one comma (:class:`zk2py.descriptor.Size`). An owner
+          over 1 KB with a rest over 512 B misses the 1 KB SHOULD."""
         assert self.session is not None
         doc = self._descriptor_doc(plan, instance, host=True)
         data = json.dumps(doc, separators=(",", ":")).encode()
@@ -1723,19 +1734,18 @@ class Owner:
 
         self.size_note = None
         sized = _descriptor.size(data)
-        if "others" in sized.should and "host" in doc.get("meta", {}):
+        if not sized.meets and "host" in doc.get("meta", {}):
             doc = self._descriptor_doc(plan, instance, host=False)
             data = json.dumps(doc, separators=(",", ":")).encode()
-            self.size_note = (f"descriptor: {sized.total} B, over 1 KB, its members other than interfaces, "
-                              f"capabilities, requires and profiles {sized.others} B, over 512 B: meta.host left "
-                              "out (core §3.3)")
+            self.size_note = (f"descriptor: {sized.total} B, over 1 KB, its rest beside interfaces, capabilities, "
+                              f"requires and profiles {sized.rest} B, over 512 B: meta.host left out (core §3.3)")
             sized = _descriptor.size(data)
-        if "others" in sized.should:
-            self.size_note = (f"descriptor: {sized.total} B, over 1 KB, its members other than interfaces, "
-                              f"capabilities, requires and profiles {sized.others} B, over 512 B (core §3.3)")
+        if not sized.meets:
+            self.size_note = (f"descriptor: {sized.total} B, over 1 KB, its rest beside interfaces, capabilities, "
+                              f"requires and profiles {sized.rest} B, over 512 B (core §3.3)")
         if self.size_note is not None:
             print(f"zk2py owner {self.system}/{self.service}: {self.size_note}", file=sys.stderr, flush=True)
-        #: the descriptor's size as core §3.3 counts it (0.107)
+        #: the descriptor's size as core §3.3 counts it (0.109)
         self.descriptor_size = sized
         return data
 

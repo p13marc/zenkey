@@ -32,8 +32,10 @@ Core 0.107: ``minor`` is optional, "so a descriptor that states none is not
 D000, and `null` is D000", and no check reads it "nor whether it is stated".
 The checker takes both from ``descriptor.schema.json``, read at run time:
 the member left ``required`` there, and its type stays ``integer``. So no
-line of this module moved. :func:`size` is §3.3's "Size" as 0.107 words it,
-which no check reads.
+line of this module moved. :func:`size` is §3.3's "Size" as 0.109 words it
+("What is counted", "The rest"), which no check reads: "the descriptor's
+size: the rule is its owner's (above), and a descriptor over 1 KB draws no
+code".
 
 This module follows that text. Before 0.5 these meanings were derived from
 the fixtures (SPEC-FINDINGS F-04, F-05).
@@ -58,16 +60,19 @@ RUN = re.compile(r"[0-9a-f]{4}|[0-9a-f]{8}")
 
 FORMAT = "zk2-descriptor/0.1"
 
-#: core §3.3 "Size" (0.107): "Four members state what the instance
-#: implements, holds, requires and follows."
+#: core §3.3 "Size": "Four members state what the instance implements,
+#: holds, requires and follows: `interfaces`, `capabilities`, `requires` and
+#: `profiles`."
 FOUR = ("interfaces", "capabilities", "requires", "profiles")
-#: "An owner's descriptor SHOULD stay within 1 KB". The text gives 1 KB no
-#: figure; zk2py reads 1,024 B, twice the 512 B beside it (F-536).
+#: "An owner's descriptor SHOULD stay within 1 KB", and, since core 0.109,
+#: "What is counted": "1 KB is 1,024 B" (F-536's answer).
 KB = 1024
-#: "within 512 B together, each counted with its name"
-OTHERS = 512
-#: "A member whose schema default is an empty list or object": the
-#: descriptor's, an entry's and a requirement's, by ``descriptor.schema.json``.
+#: "So an owner MAY exceed 1 KB while the rest of its descriptor is within
+#: 512 B" (0.109; 0.107's second SHOULD is this MAY's condition now).
+REST = 512
+#: "Empty members ... They are seven: `capabilities`, `requires`, `profiles`
+#: and `meta`, an entry's `unavailable` and `cardinality`, and a
+#: requirement's `params`."
 EMPTY_TOP = ("capabilities", "requires", "profiles", "meta")
 EMPTY_ENTRY = ("unavailable", "cardinality")
 EMPTY_REQUIREMENT = ("params",)
@@ -75,26 +80,38 @@ EMPTY_REQUIREMENT = ("params",)
 
 @dataclass
 class Size:
-    """A descriptor's bytes as core §3.3's "Size" counts them (0.107)."""
+    """A descriptor's bytes as core §3.3's "Size" counts them (0.109).
 
-    #: the descriptor's bytes, as written
+    - **What is counted**: "A descriptor's size is the count of bytes of the
+      document its owner puts and answers, as the owner wrote it. 1 KB is
+      1,024 B. So the rule is about an owner's own bytes: the same members
+      written with other spacing are another size."
+    - **The rest** "is the descriptor's size less each of those four members
+      it states. A member is counted from the opening quote of its name to
+      the last byte of its value, and one comma with it. So the rest is the
+      size of the same document with the four taken out: its two braces,
+      every other member, the commas between those, and any spacing the
+      owner wrote."
+    """
+
+    #: the document's bytes, as written
     total: int
-    #: each member of the document "counted with its name": from its name's
-    #: opening quote to its value's last byte, as written. The commas between
-    #: members and the document's braces are in no member (F-536).
+    #: each member from the opening quote of its name to the last byte of
+    #: its value, with no comma
     members: dict[str, int] = field(default_factory=dict)
-    #: the empty members written, each by its path
+    #: the empty members written, each by its path: the seven's
     empty: list[str] = field(default_factory=list)
 
     @property
     def four(self) -> int:
-        return sum(n for m, n in self.members.items() if m in FOUR)
+        """Each of the four members stated, "and one comma with it"."""
+        return sum(n + 1 for m, n in self.members.items() if m in FOUR)
 
     @property
-    def others(self) -> int:
-        """"every member but `interfaces`, `capabilities`, `requires` and
-        `profiles`", together."""
-        return sum(n for m, n in self.members.items() if m not in FOUR)
+    def rest(self) -> int:
+        """The rest: "the descriptor's size less each of those four members
+        it states"."""
+        return self.total - self.four
 
     @property
     def over(self) -> bool:
@@ -102,30 +119,35 @@ class Size:
         return self.total > KB
 
     @property
+    def meets(self) -> bool:
+        """The 1 KB SHOULD with its MAY: within 1 KB, or beyond it "while
+        the rest of its descriptor is within 512 B"."""
+        return not self.over or self.rest <= REST
+
+    @property
     def should(self) -> list[str]:
         """What "Over 1 KB" asks of this descriptor's owner and it does not
-        do: ``empty``, an empty member written, and ``others``, the other
-        members beyond 512 B. Empty for a descriptor within 1 KB, of which
-        neither SHOULD asks anything."""
-        if not self.over:
-            return []
-        return (["empty"] if self.empty else []) + (["others"] if self.others > OTHERS else [])
+        do: ``empty``, a member written "that holds nothing and whose schema
+        default is empty". Empty for a descriptor within 1 KB. The rest is
+        no SHOULD of its own since 0.109: it is :attr:`meets`."""
+        return ["empty"] if self.over and self.empty else []
 
     @property
     def within(self) -> str:
-        """The 1 KB SHOULD, in zk2py's reading of its MAY (F-535):
-        ``within``, at most 1 KB; ``four``, beyond it and the other members
-        within 512 B, so that the four members are what exceeds; ``beyond``
-        otherwise."""
+        """``within``, at most 1 KB; ``rest``, beyond it with the rest
+        within 512 B, which the MAY excepts; ``beyond`` otherwise, which
+        misses the SHOULD."""
         if not self.over:
             return "within"
-        return "four" if self.others <= OTHERS else "beyond"
+        return "rest" if self.rest <= REST else "beyond"
 
 
 def size(data: bytes) -> Size:
-    """The size of a descriptor's bytes (core §3.3, 0.107): the whole, each
-    member with its name, and the empty members it writes. Raises
-    ``ValueError`` on bytes that are no JSON object."""
+    """The size of a descriptor's bytes (core §3.3, 0.109): the whole, each
+    member from its name's opening quote to its value's last byte, and the
+    empty members it writes. Raises ``ValueError`` on bytes that are no JSON
+    object, and on a member stated twice, of which "less each of those four
+    members it states" says nothing."""
     text = data.decode("utf-8")
     dec = json.JSONDecoder()
 
@@ -149,6 +171,8 @@ def size(data: bytes) -> Size:
         if i >= len(text) or text[i] != ":":
             raise ValueError("no colon after a member's name")
         value, i = dec.raw_decode(text, skip(i + 1))
+        if name in out.members:
+            raise ValueError(f"the member {name!r} twice")
         out.members[name] = len(text[start:i].encode("utf-8"))
         doc[name] = value
         i = skip(i)

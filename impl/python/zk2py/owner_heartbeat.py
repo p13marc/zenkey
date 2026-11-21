@@ -4,12 +4,14 @@
 and write, its refusals and its round trip. Written from §7.5 alone, before
 ``conformance/heartbeat/owner.json`` was opened (round 112).
 
-**The layout** is its key's to say: "Nothing in the bytes tells the two
-apart. An implementation MUST NOT choose the layout by a payload's bytes."
-Nothing here reads a payload to decide: a caller that holds an owner
-heartbeat's key calls :func:`read`, and one that holds a heartbeat's calls
-:func:`zk2py.heartbeat.read`. At core 0.108 no text on this main names the
-key (``freshness.v2`` 0.9 does, later), so no function here takes one.
+**The layout** is its key's to say (core 0.109's wording, F-541's answer):
+"Nothing in a body tells the two apart", "CH's tag tells them apart only
+most of the time", "So the key chooses. An implementation MUST NOT choose
+the layout by a payload's bytes, CH's tag among them." Nothing here reads a
+payload to decide: a caller that holds an owner heartbeat's key calls
+:func:`read`, and one that holds a heartbeat's calls
+:func:`zk2py.heartbeat.read_put`. ``freshness.v2`` §3 names both keys
+(0.9), and :mod:`zk2py.freshness_v2` holds them.
 
 **The bytes**::
 
@@ -32,7 +34,9 @@ the next 8 bits of the body, wherever they fall."
 
 1. :func:`read` (a put's payload) and :func:`read_body` (its body): "the
    groups without any contract, as an envelope is parsed". "The envelope's
-   parse comes first", then, in this order: ``tag`` (CH's tag is not 0);
+   parse comes first (above), then the put's form (``form``, below)"
+   (0.109: :func:`zk2py.heartbeat.put_of`, the gate of both readings),
+   then, in this order: ``tag`` (CH's tag is not 0);
    reading the body's fields in order, ``short``, ``code``, ``order`` and
    ``leb128``; then ``trailing``; then ``pad``. "Each field is read whole,
    then judged, and the first field that draws a refusal decides. So an
@@ -66,11 +70,23 @@ groups it is given by index and refuses two of one index, none, more than
 write every owner heartbeat it accepts back to the same bytes"
 (:func:`write_back`).
 
+**The body bounds the sections, never the size** (0.109): "An
+implementation MUST NOT allocate from a size: it takes a group's bits only
+as the body holds them, and a size above the bits left is ``short``".
+:meth:`_Bits.raw` compares the size with the bits left before it takes one.
+
+**A reader needs the catalog too** (0.109, F-543's answer): "beside its
+revision it holds the catalog its owner names, or a successor (§8.6).
+Without one it reads no group. §8.6 refuses each index
+(``unknown_catalog``), its own interface's among them." "The tag finds no
+group": :func:`read_group` resolves the index first, and never looks for a
+group by its tag.
+
+**Every group of one put** (:func:`read_put_groups`): "So it reads on past a
+refused group, the first one too, and drops none after it."
+
 zk2py's readings of what the text leaves to a reader, each in
 ``SPEC-FINDINGS.md`` where it is a finding:
-- a put on an owner heartbeat's key whose form is not 6 is refused
-  ``form``, as zk2py's heartbeat subscriber refuses one on a heartbeat's
-  key. §7.5 names no refusal for it;
 - a size of 0 is read: a revision with no collection has an empty map;
 - the writer orders unordered groups rather than refusing them.
 """
@@ -90,8 +106,9 @@ MAX_GROUPS = 15
 #: "at most 5 bytes and at most 2^32 − 1".
 SIZE_MAX_BYTES, SIZE_MAX = 5, 2 ** 32 - 1
 
-#: The refusals of the first reading, which refuse the owner heartbeat.
-TOKENS = ("tag", "short", "code", "order", "leb128", "trailing", "pad")
+#: The refusals of the first reading, which refuse the owner heartbeat,
+#: after the envelope's parse: the put's form (0.109), then §7.5's list.
+TOKENS = ("form", "tag", "short", "code", "order", "leb128", "trailing", "pad")
 #: The refusals of the second, which refuse one group alone.
 GROUP_TOKENS = ("unknown_catalog", "unknown_index", "short", "code", "trailing")
 
@@ -225,19 +242,17 @@ def read_body(body: bytes) -> OwnerHeartbeat:
     return OwnerHeartbeat(time, tuple(groups))
 
 
-def read(payload: bytes, key_token: str | None = None) -> Put:
+def read(payload: bytes, key_token: str | None = None, enveloped: bool = True) -> Put:
     """The first reading of a put's payload on an owner heartbeat's key.
-    "The envelope's parse comes first": its refusals are the parse's
-    (:class:`zk2py.zk2c.Refused`'s token, raised here as :class:`Refused`).
+    "The envelope's parse comes first (above), then the put's form
+    (``form``, below)": both are :func:`zk2py.heartbeat.put_of`'s, the
+    parse's refusal under its own token and another form, or no envelope
+    (``enveloped`` False), as ``form``, "before it reads a tag or a body".
     Then ``tag``, then the body's."""
     try:
-        env = zk2c.parse(bytes(payload), "put", key_token)
-    except zk2c.Refused as e:
+        env = heartbeat.put_of(payload, key_token, enveloped)
+    except heartbeat.Refused as e:
         raise Refused(e.token, str(e).split(": ", 1)[1]) from None
-    if env.form != "heartbeat":
-        # No sentence of §7.5 names this refusal: zk2py's own, as its
-        # heartbeat subscriber's is on a heartbeat's key.
-        raise Refused("form", f"a {env.form} on an owner heartbeat's key")
     if env.tag != 0:
         raise Refused("tag", f"CH's tag is {env.tag}, and an owner heartbeat's is 0")
     stamp = env.stamp
@@ -294,6 +309,21 @@ def read_groups(body: OwnerHeartbeat, named: str | None, held: Sequence[cat.Cata
     """Every group's second reading, each from its own bits: "A refused
     group says nothing of the groups beside it"."""
     return [read_group(g, named, held, layouts) for g in body.groups]
+
+
+def read_put_groups(payload: bytes, named: str | None, held: Sequence[cat.Catalog], layouts: Layouts,
+                    key_token: str | None = None, enveloped: bool = True) -> list[GroupRead]:
+    """Both readings of one put on an owner heartbeat's key: the first
+    (:func:`read`, whose refusal is the owner heartbeat's and is raised),
+    then every group's second reading, in the order read. "A refused group
+    says nothing of the groups beside it. An implementation MUST read each
+    other group as it would with the refused one left out. So it reads on
+    past a refused group, the first one too, and drops none after it."
+
+    A reader that holds no catalog, or none the owner's lies in the lineage
+    of, reads each group ``unknown_catalog`` (§8.6), "its own interface's
+    among them": the list is as long as the put's groups, each refused."""
+    return read_groups(read(payload, key_token, enveloped).body, named, held, layouts)
 
 
 # -- writing -------------------------------------------------------------------------
