@@ -9,8 +9,11 @@
 # cadence: 192 a day idle, 0.02 false closes a day at 5 % loss. A frame
 # then replaces a keep-alive unless it is later on its schedule than the
 # one before (v2 §2.16), so the plan warns `keep_alive_not_suppressed`:
-# none to 96 uplink keep-alives a day, at most 142 s of air, not measured
-# at SF12. (#988 L5 ran 1,080 s, whose 270 s interval left three
+# none to 96 uplink keep-alives a day, at most 142 s of air. Measured: 72
+# a day, 107 s, and 96 a day each way idle; the uplink 864.5 s a day,
+# the whole duty, with `zenctl gen`'s frames, a full record on every
+# other one (docs/zk2/measurements/wire-baseline/README.md, "W1-73 at
+# LoRa SF9 and SF12"). (#988 L5 ran 1,080 s, whose 270 s interval left three
 # keep-alives between two frames, 288 a day and 427 s of air, half the
 # duty; #991.) The handshake's 384 bytes take 10.5 s here,
 # so the open, accept and interests timeouts are 40 s, and a reply may take

@@ -606,6 +606,14 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   case 44 holds its plan (45 s, `keyframe_s` 675) and case 45 pins the
   inequality one millisecond below the lease, both written by hand; its
   description names `users`; Appendix B names cases 14 to 18.
+  Text 0.20 (#988, editorial; 0.19 is #1110's) puts #989's SF9 and SF12
+  runs in Appendix B: 624 and 72 uplink keep-alives a day beside the
+  frames, inside §2.16's ranges, idle 720 and 96 each way. It also
+  states the batch zenoh ran under zenoh-modem's lean stack (206, 208,
+  101 and 210 B, where the policies state 222, 224, 117 and 224).
+  `frame_over_batch` is unchanged: that it compares the payload alone,
+  10 B short of zenoh's message and length on these faces, is an open
+  question.
   zenoh-modem's notes price each face's uplink keep-alives at the fewest
   and the most (SF12 927 s and SBD 144 messages at the most, over their
   budgets), and the fleet's `zenoh_modem_events_fit_each_face_budget`
