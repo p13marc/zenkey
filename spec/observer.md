@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Text version** | 0.33 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.34 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
-| **Written against** | core 0.103 ([`core.md`](core.md)) |
+| **Written against** | core 0.108 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
 
 This text states what a **reader** of a zk2 bus does, and what it may
@@ -1137,6 +1137,12 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
       [`freshness.v2`](profiles/freshness/v2.md) reader (its §2.5).
     - **Without that revision** it shows the heartbeat by its envelope:
       its form, the interface it covers and its size.
+    - **An owner heartbeat** (core §7.5) is form 6 too, told by its key
+      and never by its bytes. It covers no one interface, so the two
+      items above do not read it. A tool needs no contract to show its
+      groups, each by its index, its tag and its size. Given a catalog,
+      it shows what a group vouches for with the revision the group's
+      index names (§7.5).
   - **An event** (core §7.5's form 4) carries its time where a mutation
     carries its stamp, and its stamp is its key's occurrence chunk. A tool
     reads the run and the seq from the key, and the record after the
@@ -1255,8 +1261,21 @@ reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
   scope is the heartbeat's exact key under each address,
   `…/freshness.v2/stream/heartbeat/<iface>`. A `freshness.v2` contract
   in hand adds no scope of its own.
+- **The owner heartbeat.** An owner given a catalog may confirm an
+  interface by owner heartbeats in place of its heartbeat
+  (`freshness.v2` §2.4). A tool cannot tell which before it hears one.
+  So a tool given a catalog (core §8.6) has a scope for an owner
+  heartbeat key too. It is the key's exact form under each address,
+  `…/freshness.v2/stream/heartbeats/<class>`, for each class that a
+  collection has. The collections are core §7.5's, of each contract in
+  hand that uses `freshness.v2`. `[F: scope/faces.json]`
+  - **Given no catalog** a tool could read no group (core §8.6). It has
+    no such scope.
+  - **The catalog adds that scope alone.** A plan is derived as it is
+    without one (below).
 - **Without a face policy** the scopes are those of every resource of the
-  contracts in hand, and of each heartbeat.
+  contracts in hand, and of each heartbeat. A tool given a catalog adds
+  each owner heartbeat key above.
 - **With a face policy and its face** (`link.v2` §2.1), the scopes are
   what the face's plan lets cross (`link.v2` §2.3). The tool derives the
   plan from the policy and the contracts in hand, as a generator does,
@@ -1265,6 +1284,10 @@ reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
   - to subscribe, each resource that crosses the face, and each heartbeat
     that crosses it (`link.v1` §2.7, §2.9; `link.v2` §2.7). On a face
     that lists its frames, those are the frames it lists;
+  - to subscribe, given a catalog, the `link` class's owner heartbeat
+    key too, where the plan lets it cross (`link.v2` §2.9). It is never
+    the `host` class's, and neither under a `link.v1` policy
+    (`link.v1` §2.9);
   - to GET, each state resource. A request crosses by grant, never by
     exposure (`link.v1` §2.9).
 
@@ -1340,6 +1363,20 @@ with the revision chosen in this order. `[F: envelope/tags.json]`
 - **A heartbeat's** key names the interface it covers. Its revisions are
   those of that interface whose contracts use `freshness.v2`, and its
   resource in each is that revision's collections.
+- **An owner heartbeat** is not read by these steps. Its key names a
+  class, never an interface, and each of its groups names its own
+  revision by its index in the catalog (core §7.5). A tool MUST read an
+  owner heartbeat's group with the revision its index names in the
+  catalog the tool was given, as core §8.6 reads an index, and never
+  with one these steps would choose. `[F: heartbeat/owner.json]`
+  - **The tag is its check.** A tool compares the group's tag with that
+    revision's. Where they differ it says so, and shows the group by
+    its envelope: the bytes disagree with the deployment's word.
+  - **By its envelope** is by its index, its tag and its size. A tool
+    shows so each group it cannot read: every group where it was given
+    no catalog, one whose index core §8.6 refuses, and one whose
+    revision it does not hold. It reads the put's other groups all the
+    same.
 - **An event's** key gives a revision a resource once its occurrence
   chunk is stripped (core §2.6). Its tag is its record's type's, as a
   mutation's is (core §7.5).
@@ -1526,6 +1563,7 @@ tooling guide's rules that carry evidence were promoted with text 0.1.
 | `conformance/budget/` (`population.json`, `rate.json`, `lossless.json`) | §1, §2, §5 |
 | `conformance/keys.json` | §8.1 |
 | `conformance/heartbeat/bodies.json` | §7.3, a heartbeat's body |
+| `conformance/heartbeat/owner.json` | §7.5, an owner heartbeat's groups read through a catalog |
 | `conformance/envelope/carries.json` | §7.3, the envelope first |
 | `conformance/envelope/tags.json` | §7.3, CH's tag; §7.5, the revision of a key |
 | `conformance/scope/faces.json` | §7.5, the scope |
