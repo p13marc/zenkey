@@ -2558,3 +2558,83 @@ async fn a_standby_interface_never_stalls_the_groups_beside_it() {
     );
     b_svc.close().await.unwrap();
 }
+
+/// An owner on `freshness.v2`'s revision 1.0, which declares no owner
+/// heartbeat key (review of #1144): implemented by the application before
+/// any contract that uses the profile, it stays the service's revision.
+/// The service starts, sends each interface's heartbeat, and lists no
+/// `heartbeats/{class}` row, which its contract does not declare (D005).
+/// With `owner_heartbeat` set under a catalog it starts all the same and
+/// covers nothing: it has no key to put an owner heartbeat on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_owner_on_the_first_revision_sends_heartbeats_alone() {
+    const FIRST: &str = "8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890";
+    let bundle = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../spec/profiles/.history/freshness.v2/{FIRST}.bundle.json"
+        )),
+    )
+    .unwrap();
+    let first = zenkey::Implementation::from_bundle(&bundle).unwrap();
+    assert!(
+        first.resource(zenkey::heartbeat::HEARTBEAT).is_ok()
+            && first.resource(zenkey::heartbeat::OWNER_HEARTBEATS).is_err(),
+        "revision 1.0: the heartbeat's key alone"
+    );
+    let (_r1, ep) = router(None).await;
+    let hs = client(&ep).await;
+    let (_hh, host) = puts_on(&hs, W2_HOST).await;
+    let (_hi, per_iface) = puts_on(&hs, W2_HEARTBEATS).await;
+    let none = Bindings::new();
+    for on in [false, true] {
+        let os = client(&ep).await;
+        let cfg = if on {
+            config(W2).owner_heartbeat()
+        } else {
+            config(W2)
+        };
+        let mut b = ServiceBuilder::new(&os, cfg);
+        b.catalog(w2_catalog()).unwrap();
+        b.implement(first.clone()).unwrap();
+        b.implement(imp("pulse.v1")).unwrap();
+        let _pulse = b
+            .declare_state_writer(&"pulse.v1".parse().unwrap(), STATUS, &none)
+            .await
+            .unwrap();
+        let svc = b
+            .start()
+            .await
+            .unwrap_or_else(|e| panic!("owner_heartbeat {on}: {e}"));
+        assert!(
+            svc.owner_heartbeat_cover().is_empty(),
+            "nothing to cover with"
+        );
+        let d: serde_json::Value = serde_json::from_slice(&svc.descriptor_bytes()).unwrap();
+        let fv2 = d["interfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["iface"] == "freshness.v2")
+            .expect("freshness.v2 listed")
+            .clone();
+        assert_eq!(fv2["contract"], format!("sha256:{FIRST}"), "{fv2}");
+        assert!(
+            fv2.get("unavailable").is_none(),
+            "no row for a resource its revision does not declare: {fv2}"
+        );
+        let before = per_iface.lock().unwrap().len();
+        eventually("pulse.v1's heartbeat, twice", || async {
+            per_iface.lock().unwrap().len() >= before + 2
+        })
+        .await;
+        assert!(
+            per_iface
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|k| k.ends_with("/heartbeat/pulse.v1"))
+        );
+        svc.close().await.unwrap();
+    }
+    assert_eq!(host.lock().unwrap().len(), 0, "no owner heartbeat");
+}

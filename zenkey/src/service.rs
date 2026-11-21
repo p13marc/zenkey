@@ -1017,6 +1017,15 @@ impl ServiceBuilder {
     ///   §3.3: the cause says why it is absent here, and it is the
     ///   deployment's configuration that leaves it out). An application
     ///   that listed it itself is taken at its word, and covers none.
+    /// - A service that implements a revision of `freshness.v2` without
+    ///   the resource (1.0, implemented by the application before any
+    ///   contract that uses the profile) covers none and lists no row:
+    ///   its contract declares no owner heartbeat key (D005). It sends
+    ///   heartbeats alone, and says so once when the option is set.
+    ///
+    /// Both rows go through the builder's own [`ServiceBuilder::expose`]
+    /// and [`ServiceBuilder::unavailable`], so each is checked as an
+    /// application's would be.
     fn settle_owner_heartbeats(&mut self) -> Result<Vec<(IfaceId, u16)>> {
         if self.config.owner_heartbeat && self.catalog.is_none() {
             return Err(Error::NotExposed(
@@ -1032,7 +1041,21 @@ impl ServiceBuilder {
         let Ok(hb) = find(&self.impls, &fv2) else {
             return Ok(Vec::new());
         };
+        // Revision 1.1's resource: an earlier revision has none to serve
+        // or to list.
+        if hb.imp.resource(owner).is_err() {
+            if self.config.owner_heartbeat {
+                tracing::warn!(
+                    revision = %hb.imp.fingerprint(),
+                    "`owner_heartbeat` is set, and the revision of freshness.v2 this service \
+                     implements declares no owner heartbeat key (`stream/heartbeats/{{class}}` \
+                     is revision 1.1's): it sends its interfaces' heartbeats alone"
+                );
+            }
+            return Ok(Vec::new());
+        }
         let listed = hb.unavailable.contains_key(owner);
+        let exposed = hb.exposed.contains(owner);
         let covered = match &self.catalog {
             Some(catalog) if self.config.owner_heartbeat && !listed => crate::heartbeat::cover(
                 self.impls
@@ -1046,12 +1069,10 @@ impl ServiceBuilder {
             ),
             _ => Vec::new(),
         };
-        let hb = find_mut(&mut self.impls, &fv2)?;
         if !covered.is_empty() {
-            hb.exposed.insert(owner.to_owned());
-        } else if !listed && !hb.exposed.contains(owner) {
-            hb.unavailable
-                .insert(owner.to_owned(), (Cause::Config, None));
+            self.expose(&fv2, owner)?;
+        } else if !listed && !exposed {
+            self.unavailable(&fv2, owner, Cause::Config, None)?;
         }
         Ok(covered)
     }
@@ -2623,6 +2644,12 @@ impl Service {
                 epoch,
             };
             tasks.push(tokio::spawn(beat.run(self.closed.subscribe())));
+        }
+        // Nothing covered: no owner heartbeat key to write, and none to
+        // look up in a revision that may not declare one.
+        if covered.is_empty() {
+            self.heartbeats.0.extend(tasks);
+            return Ok(());
         }
         covered.sort_by_key(|(index, ..)| *index);
         let owner = hb.imp.resource(crate::heartbeat::OWNER_HEARTBEATS)?.clone();
