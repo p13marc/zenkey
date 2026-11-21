@@ -356,18 +356,19 @@ async fn one_owner_heartbeat_confirms_three_interfaces() {
     assert_eq!(readers[2].got().len(), 3, "charlie.v1 had none in it");
 }
 
-/// A reader given no catalog reads no group (core §8.6, `unknown_catalog`;
-/// `freshness.v2` §2.5, "No index"): the owner heartbeat is read on its
-/// key and confirms nothing, so the member ages from its put and goes
-/// stale. Never fresh.
+/// A reader given no catalog could read no group (core §8.6), so it
+/// declares no owner heartbeat key: the puts a reader with the catalog
+/// reads never reach it, nothing is confirmed, and the member ages from
+/// its put and goes stale. Never fresh.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_reader_with_no_catalog_reads_no_group() {
+async fn a_reader_with_no_catalog_declares_no_owner_heartbeat_key() {
     let (_r1, ep) = router(None).await;
     let os = client(&ep).await;
     let rs = client(&ep).await;
     let cat = catalog();
-    let (_svc, statuses, _reach) = owner(&os, Some(cat)).await;
+    let (_svc, statuses, _reach) = owner(&os, Some(cat.clone())).await;
     let reader = Reader::of(&rs, "alpha.v1", STATUS, None).await;
+    let control = Reader::of(&rs, "alpha.v1", STATUS, Some(&cat)).await;
     let stamps = put_statuses(&statuses[..1], std::slice::from_ref(&reader)).await;
     let key = status_key("alpha.v1");
     let host = owner_key("lab", "trio", Class::Host);
@@ -379,20 +380,220 @@ async fn a_reader_with_no_catalog_reads_no_group() {
         )
         .await
         .unwrap();
-        eventually("the owner heartbeat is read on its key", || async {
-            reader.sub.owner_heartbeats() == u64::from(seq) + 1
+        eventually("the reader with the catalog reads it", || async {
+            control.sub.owner_heartbeats() == u64::from(seq) + 1
         })
         .await;
     }
-    assert!(reader.got().is_empty(), "no group is handed over");
-    assert_eq!(reader.sub.heartbeats(), 0);
-    assert_eq!(reader.sub.heartbeats_unread(), 2);
-    assert!(reader.sub.confirmed(&key).is_none());
     let h = Horizon::Within(Duration::from_secs(2));
     eventually("the member goes stale, 2 s after its put", || async {
         judge(&h, &reader.sub.freshness(&key)).verdict == Verdict::Stale
     })
     .await;
+    assert!(reader.got().is_empty(), "no group is handed over");
+    assert_eq!(
+        (
+            reader.sub.owner_heartbeats(),
+            reader.sub.heartbeats(),
+            reader.sub.heartbeats_unread(),
+            reader.sub.owner_catalog_reads()
+        ),
+        (0, 0, 0, 0),
+        "it heard none, and asked no descriptor"
+    );
+    assert!(reader.sub.confirmed(&key).is_none());
+    assert!(control.sub.confirmed(&key).is_some(), "the control did");
+}
+
+/// A tool's consumer of `alpha.v1` at `lab/trio`, given the catalog, with
+/// no owner behind the address: the test answers its descriptor reads.
+fn bare_consumer(session: &zenoh::Session) -> Consumer {
+    Consumer::for_tool(
+        session,
+        Arc::new(contract(&trio("alpha.v1"))),
+        &["lab/trio"],
+        &Default::default(),
+    )
+    .unwrap()
+    .with_catalog(&catalog())
+}
+
+/// A hand-written owner heartbeat of `alpha.v1`'s group, at `seq` of run 7.
+fn bare_heartbeat(seq: u32) -> Vec<u8> {
+    let like = Stamp {
+        run: zenkey::model::wire::Run::U16(7),
+        seq: Seq::new(0).unwrap(),
+    };
+    owner_heartbeat(vec![group(0, "alpha.v1", STATUS, Digest::EMPTY)], like, seq)
+}
+
+/// A descriptor read that fails names no catalog for its run, and stands
+/// for `OWNER_CATALOG_RETRY`: the owner heartbeats that follow read no
+/// group, and none of them asks again. One GET, never one a put.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_descriptor_read_is_not_asked_again_at_each_owner_heartbeat() {
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    // An owner whose descriptor read answers an error.
+    let asked = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let n = Arc::clone(&asked);
+    let _descriptor = os
+        .declare_queryable("zk2/lab/trio/@zk/instance/*")
+        .callback(move |q| {
+            n.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let _ = zenoh::Wait::wait(q.reply_err("no descriptor here"));
+        })
+        .await
+        .unwrap();
+    let sub = bare_consumer(&rs)
+        .subscribe_heartbeats(STATUS, |_: Delivery| {}, |_: HeartbeatRead| {})
+        .await
+        .unwrap();
+    let host = owner_key("lab", "trio", Class::Host);
+    let publisher = os.declare_publisher(host).await.unwrap();
+    eventually("the class key is matched", || async {
+        publisher.matching_status().await.unwrap().matching()
+    })
+    .await;
+    for seq in 0..5 {
+        publisher.put(bare_heartbeat(seq)).await.unwrap();
+        eventually("the owner heartbeat is read on its key", || async {
+            sub.owner_heartbeats() == u64::from(seq) + 1
+        })
+        .await;
+    }
+    assert_eq!(sub.owner_catalog_reads(), 1, "one read for the run");
+    assert_eq!(asked.load(std::sync::atomic::Ordering::Relaxed), 1);
+    assert_eq!(
+        (sub.heartbeats(), sub.heartbeats_unread()),
+        (0, 5),
+        "no catalog named: every group unknown_catalog, never fresh"
+    );
+}
+
+/// Behind a descriptor read that is slow to answer, at most `OWNER_QUEUE`
+/// owner heartbeats wait: each one past it is read at once with no
+/// catalog, counted, and confirms nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_queue_behind_a_slow_descriptor_read_is_bounded() {
+    use zenkey::consumer::OWNER_QUEUE;
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    // An owner whose descriptor read is held open, never answered.
+    let held: Arc<Mutex<Vec<zenoh::query::Query>>> = Arc::default();
+    let h = Arc::clone(&held);
+    let _descriptor = os
+        .declare_queryable("zk2/lab/trio/@zk/instance/*")
+        .callback(move |q| h.lock().unwrap().push(q))
+        .await
+        .unwrap();
+    let sub = bare_consumer(&rs)
+        .with_reread_timeout(Duration::from_secs(30))
+        .subscribe_heartbeats(STATUS, |_: Delivery| {}, |_: HeartbeatRead| {})
+        .await
+        .unwrap();
+    let host = owner_key("lab", "trio", Class::Host);
+    let publisher = os.declare_publisher(host).await.unwrap();
+    eventually("the class key is matched", || async {
+        publisher.matching_status().await.unwrap().matching()
+    })
+    .await;
+    let past = 6;
+    for seq in 0..(OWNER_QUEUE as u32 + past) {
+        publisher.put(bare_heartbeat(seq)).await.unwrap();
+    }
+    eventually("those past the bound are read with no catalog", || async {
+        sub.owner_heartbeats_unqueued() == u64::from(past)
+    })
+    .await;
+    assert_eq!(sub.owner_catalog_reads(), 1, "one read, still open");
+    assert_eq!(held.lock().unwrap().len(), 1);
+    assert_eq!(sub.heartbeats(), 0, "none confirmed anything");
+    assert_eq!(
+        sub.owner_heartbeats(),
+        u64::from(past),
+        "the rest wait, in order"
+    );
+}
+
+/// The callback runs under no lock of its subscription's: one that calls
+/// back into the subscription reads it, and sees the owner heartbeat it
+/// is handed already applied.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_callback_may_call_back_into_its_subscription() {
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    let cat = catalog();
+    let (_svc, statuses, _reach) = owner(&os, Some(cat.clone())).await;
+    let key = status_key("alpha.v1");
+    let cell: Arc<std::sync::OnceLock<zenkey::consumer::Subscription>> = Arc::default();
+    let delivered: Arc<Mutex<Vec<Stamp>>> = Arc::default();
+    // What the callback read of its subscription: the owner heartbeats
+    // read, the heartbeats applied, whether lost, whether confirmed.
+    type Seen = Vec<(u64, u64, bool, bool)>;
+    let seen: Arc<Mutex<Seen>> = Arc::default();
+    let (c, d, s, k) = (
+        Arc::clone(&cell),
+        Arc::clone(&delivered),
+        Arc::clone(&seen),
+        key.clone(),
+    );
+    let sub = Consumer::for_tool(
+        &rs,
+        Arc::new(contract(&trio("alpha.v1"))),
+        &["lab/trio"],
+        &Default::default(),
+    )
+    .unwrap()
+    .with_catalog(&cat)
+    .subscribe_heartbeats(
+        STATUS,
+        move |x: Delivery| d.lock().unwrap().extend(x.inband),
+        move |_: HeartbeatRead| {
+            let sub = c.get().expect("set before the first owner heartbeat");
+            s.lock().unwrap().push((
+                sub.owner_heartbeats(),
+                sub.heartbeats(),
+                sub.lost(&k),
+                sub.confirmed(&k).is_some(),
+            ));
+        },
+    )
+    .await
+    .unwrap();
+    assert!(cell.set(sub).is_ok());
+    eventually("the status is matched", || async {
+        statuses[0].writer().matching().await.unwrap()
+    })
+    .await;
+    statuses[0].put("up").await.unwrap();
+    eventually("the put is delivered", || async {
+        !delivered.lock().unwrap().is_empty()
+    })
+    .await;
+    let stamp = delivered.lock().unwrap()[0];
+    let held = Digest::of([(key.as_str(), stamp)]);
+    let host = owner_key("lab", "trio", Class::Host);
+    for seq in 0..2 {
+        os.put(
+            &host,
+            owner_heartbeat(vec![group(0, "alpha.v1", STATUS, held)], stamp, seq),
+        )
+        .await
+        .unwrap();
+        eventually("the callback read its subscription", || async {
+            seen.lock().unwrap().len() == seq as usize + 1
+        })
+        .await;
+    }
+    assert_eq!(
+        *seen.lock().unwrap(),
+        [(1, 1, false, true), (2, 2, false, true)],
+        "each handed over after it was applied, in order"
+    );
 }
 
 /// An owner that names no catalog writes no index (core §8.6): a reader

@@ -405,6 +405,14 @@ struct Seen {
     /// The catalog each provider names, and the owner heartbeats waiting
     /// for one to be read.
     named: Mutex<Named>,
+    /// Reads of its owners' descriptors made for that
+    /// ([`crate::answer::owner_catalog`]).
+    catalog_reads: AtomicU64,
+    /// Owner heartbeats read with no catalog because [`OWNER_QUEUE`]
+    /// waited already.
+    owner_unqueued: AtomicU64,
+    /// The groups read, waiting for the callback.
+    outbox: Mutex<Outbox>,
     /// The providers whose collection a re-read is running for, and the
     /// re-reads that replaced a view (`freshness.v2` §2.5).
     rereading: Mutex<std::collections::BTreeSet<Addr>>,
@@ -468,33 +476,64 @@ pub struct OwnerGroup {
     pub index: u16,
 }
 
+/// How many owner heartbeats of one subscription may wait for an owner's
+/// descriptor to be read. Past it one is read at once with no catalog,
+/// every group `unknown_catalog`, and counted
+/// ([`Subscription::owner_heartbeats_unqueued`]): never fresh, and the
+/// queue stays bounded behind a read that is slow to answer.
+pub const OWNER_QUEUE: usize = 64;
+
+/// How long a read of an owner's descriptor that failed stands for its
+/// run before the next one is made: its owner heartbeats meanwhile read no
+/// group (core §8.6, never a guess), one GET a period at most, never one
+/// a put.
+pub const OWNER_CATALOG_RETRY: Duration = Duration::from_secs(30);
+
+/// What a read of one provider's descriptor said of the catalog it names
+/// under a run.
+struct Asked {
+    run: zenkey_model::wire::Run,
+    /// The catalog named; `None` where it names none, and where the read
+    /// failed.
+    named: Option<zenkey_model::catalog::CatalogId>,
+    /// For a read that failed, when the next one may be made.
+    retry: Option<Instant>,
+}
+
 /// The catalog each bound provider names in its descriptor, as last read
 /// for a run, and how many owner heartbeats wait behind such a read.
 #[derive(Default)]
 struct Named {
-    by: BTreeMap<
-        Addr,
-        (
-            zenkey_model::wire::Run,
-            Option<zenkey_model::catalog::CatalogId>,
-        ),
-    >,
+    by: BTreeMap<Addr, Asked>,
     pending: usize,
 }
 
 impl Named {
     /// What `addr` names under `run`, where a read said: `Some(None)` for
-    /// an owner that names no catalog.
+    /// an owner that names no catalog, and for a read that failed until
+    /// its retry is due at `now`. `None`: to be read.
     fn of(
         &self,
         addr: &Addr,
         run: zenkey_model::wire::Run,
+        now: Instant,
     ) -> Option<Option<zenkey_model::catalog::CatalogId>> {
-        self.by
-            .get(addr)
-            .filter(|(r, _)| *r == run)
-            .map(|(_, named)| *named)
+        let asked = self.by.get(addr).filter(|a| a.run == run)?;
+        match asked.retry {
+            Some(due) if now >= due => None,
+            _ => Some(asked.named),
+        }
     }
+}
+
+/// The reads of one subscription's owner heartbeats waiting to be handed
+/// to its callback, in the order they were made, and whether one is being
+/// handed over now: the callback runs under no lock of the subscription's,
+/// one read at a time.
+#[derive(Default)]
+struct Outbox {
+    queue: std::collections::VecDeque<HeartbeatRead>,
+    delivering: bool,
 }
 
 /// What a heartbeat's section did to a followed collection
@@ -672,8 +711,13 @@ impl Consumer {
     /// heartbeat's group is read through the one its owner's descriptor
     /// names among them, or a successor of it (core §7.5; `freshness.v2`
     /// §2.5). Where no descriptor reaches this consumer, as across a
-    /// constrained face, the last one given is the deployment's word. The
-    /// epoch stays [`Consumer::with_deployment_epoch`]'s.
+    /// constrained face, the last one given is the deployment's word. A
+    /// subscription made outside a tokio runtime reads no descriptor, so
+    /// it reads no group: an owner that names no catalog writes no index,
+    /// and its own catalog would be a guess (core §8.6). With none given,
+    /// a subscription declares no owner heartbeat key at all: it could
+    /// read no group. The epoch stays
+    /// [`Consumer::with_deployment_epoch`]'s.
     #[must_use]
     pub fn with_catalogs(
         mut self,
@@ -1390,12 +1434,29 @@ impl Consumer {
     /// Each owner heartbeat is read through the catalog its owner names
     /// ([`crate::answer::owner_catalog`], read once a run on a task of the
     /// subscription's, the owner heartbeats heard meanwhile kept in
-    /// order), and each group read for this interface handed to
-    /// `on_confirm` as one heartbeat.
+    /// order, at most [`OWNER_QUEUE`] of them), and each group read for
+    /// this interface handed to `on_confirm` as one heartbeat, under no
+    /// lock of the subscription's.
+    ///
+    /// **A consumer that holds no catalog declares none.** It could read no
+    /// group (core §8.6), so the key would tell it nothing it can use: a
+    /// member of an interface its owner confirms by owner heartbeats alone
+    /// ages from its last confirmation and goes stale either way, the safe
+    /// side (`freshness.v2` §2.4, "Readers first"). Observer §7.5 gives a
+    /// tool given no catalog no such scope for the same reason.
+    ///
+    /// **Outside a tokio runtime** nothing reads a descriptor, so no
+    /// catalog is named and no group is read: never a guess.
     ///
     /// Through `redeclaring` across a face (core §8.5), each is declared
-    /// again after two of the key's horizons of silence: the shortest
-    /// among this contract's collections of the class.
+    /// again after two of the key's horizons of silence. The horizon is
+    /// this consumer's word on it: the shortest among the collections of
+    /// the class in the one revision it holds
+    /// ([`zenkey_model::link::redeclare_owner_heartbeat_horizon`]). The
+    /// key's own is the shortest among every interface its groups cover,
+    /// which this consumer cannot see, and which is never longer: so its
+    /// re-declaration is never early, and may come later than two of the
+    /// key's own horizons.
     async fn owner_heartbeat_subscribers<F>(
         &self,
         f: &Arc<Followed>,
@@ -1406,6 +1467,9 @@ impl Consumer {
     where
         F: Fn(HeartbeatRead) + Send + Sync + 'static,
     {
+        if self.catalogs.is_empty() {
+            return Ok(Vec::new());
+        }
         let class = f.class();
         let horizon = redeclaring.and(zenkey_model::link::redeclare_owner_heartbeat_horizon(
             &self.contract,
@@ -1468,21 +1532,31 @@ impl Consumer {
                     body: sample.payload().to_bytes().into_owned(),
                     arrival,
                 };
-                let mut named = reader.seen.named.lock().expect("not poisoned");
-                match (named.of(&beat.addr, stamp.run), named.pending, &waiting) {
-                    // Its owner's catalog is known and none waits: read
-                    // here, under the lock that keeps the order.
-                    (Some(through), 0, _) => reader.apply(&beat, through),
-                    (_, _, Some(tx)) => {
-                        named.pending += 1;
-                        if tx.send(beat).is_err() {
-                            named.pending -= 1;
+                {
+                    let mut named = reader.seen.named.lock().expect("not poisoned");
+                    let known = named.of(&beat.addr, stamp.run, arrival);
+                    match (known, named.pending, &waiting) {
+                        // Its owner's catalog is known and none waits: read
+                        // here, under the lock that keeps the order.
+                        (Some(through), 0, _) => reader.apply(&beat, through),
+                        // The queue is full behind a read slow to answer:
+                        // read now with no catalog, and counted.
+                        (_, n, Some(_)) if n >= OWNER_QUEUE => {
+                            reader.seen.owner_unqueued.fetch_add(1, Ordering::Relaxed);
+                            reader.apply(&beat, None);
                         }
+                        (_, _, Some(tx)) => {
+                            named.pending += 1;
+                            if tx.send(beat).is_err() {
+                                named.pending -= 1;
+                            }
+                        }
+                        // No runtime reads a descriptor: no catalog is named,
+                        // and no group is read (core §8.6, never a guess).
+                        (through, _, None) => reader.apply(&beat, through.flatten()),
                     }
-                    // No runtime reads a descriptor: no catalog is named,
-                    // and no group is read (core §8.6, never a guess).
-                    (through, _, None) => reader.apply(&beat, through.flatten()),
                 }
+                reader.deliver();
             });
             match (redeclaring, horizon) {
                 (Some(rd), Some(h)) => {
@@ -2320,6 +2394,22 @@ impl Subscription {
         self.seen.owner_heartbeats.load(Ordering::Relaxed)
     }
 
+    /// Reads of a provider's descriptor made to learn the catalog it
+    /// names (core §8.6): one a run, and after one that failed no other
+    /// for [`OWNER_CATALOG_RETRY`].
+    #[must_use]
+    pub fn owner_catalog_reads(&self) -> u64 {
+        self.seen.catalog_reads.load(Ordering::Relaxed)
+    }
+
+    /// Owner heartbeats read with no catalog, every group
+    /// `unknown_catalog`, because [`OWNER_QUEUE`] of them waited already
+    /// for a descriptor's read. They confirmed nothing.
+    #[must_use]
+    pub fn owner_heartbeats_unqueued(&self) -> u64 {
+        self.seen.owner_unqueued.load(Ordering::Relaxed)
+    }
+
     /// The last heartbeat of `key`'s provider that vouched for it, with
     /// the view's digest (#978's F2).
     #[must_use]
@@ -2519,52 +2609,95 @@ where
     /// - **No descriptor reaches the reader**, as across a constrained
     ///   face: the deployment's word, the last catalog this consumer was
     ///   given.
-    /// - **A read that failed** names none for this one alone, and the
-    ///   next owner heartbeat asks again: never a guess.
+    /// - **A read that failed** names none for its run until
+    ///   [`OWNER_CATALOG_RETRY`] has passed, when the next owner heartbeat
+    ///   asks again: never a guess, and never a GET a put.
     async fn wait(self: Arc<Self>, rx: flume::Receiver<OwnerBeat>) {
         while let Ok(beat) = rx.recv_async().await {
-            let known = self
-                .seen
-                .named
-                .lock()
-                .expect("not poisoned")
-                .of(&beat.addr, beat.stamp.run);
+            let known = self.seen.named.lock().expect("not poisoned").of(
+                &beat.addr,
+                beat.stamp.run,
+                Instant::now(),
+            );
             let read = match known {
                 Some(_) => None,
-                None => Some(
-                    crate::answer::owner_catalog(
-                        &self.session,
-                        &beat.key,
-                        beat.stamp.run,
-                        self.timeout,
+                None => {
+                    self.seen.catalog_reads.fetch_add(1, Ordering::Relaxed);
+                    Some(
+                        crate::answer::owner_catalog(
+                            &self.session,
+                            &beat.key,
+                            beat.stamp.run,
+                            self.timeout,
+                        )
+                        .await,
                     )
-                    .await,
-                ),
-            };
-            let mut named = self.seen.named.lock().expect("not poisoned");
-            let through = match read {
-                None => known.flatten(),
-                Some(crate::answer::OwnerCatalog::Unread) => None,
-                Some(said) => {
-                    let through = match said {
-                        crate::answer::OwnerCatalog::Named(c) => c,
-                        _ => self.held.last().map(zenkey_model::catalog::Catalog::id),
-                    };
-                    named
-                        .by
-                        .insert(beat.addr.clone(), (beat.stamp.run, through));
-                    through
                 }
             };
-            self.apply(&beat, through);
-            named.pending = named.pending.saturating_sub(1);
+            {
+                let mut named = self.seen.named.lock().expect("not poisoned");
+                let through = match read {
+                    None => known.flatten(),
+                    Some(said) => {
+                        let (through, retry) = match said {
+                            crate::answer::OwnerCatalog::Named(c) => (c, None),
+                            crate::answer::OwnerCatalog::Unreached => (
+                                self.held.last().map(zenkey_model::catalog::Catalog::id),
+                                None,
+                            ),
+                            crate::answer::OwnerCatalog::Unread => {
+                                (None, Some(Instant::now() + OWNER_CATALOG_RETRY))
+                            }
+                        };
+                        named.by.insert(
+                            beat.addr.clone(),
+                            Asked {
+                                run: beat.stamp.run,
+                                named: through,
+                                retry,
+                            },
+                        );
+                        through
+                    }
+                };
+                self.apply(&beat, through);
+                named.pending = named.pending.saturating_sub(1);
+            }
+            self.deliver();
+        }
+    }
+
+    /// Hands the reads that wait to the callback, in the order they were
+    /// made, under no lock of the subscription's: one caller at a time
+    /// hands over, and a read made meanwhile is taken by it. So a callback
+    /// may call back into its subscription, and a slow one stalls no
+    /// owner heartbeat's reading.
+    fn deliver(&self) {
+        loop {
+            let next = {
+                let mut out = self.seen.outbox.lock().expect("not poisoned");
+                if out.delivering {
+                    return;
+                }
+                match out.queue.pop_front() {
+                    Some(read) => {
+                        out.delivering = true;
+                        read
+                    }
+                    None => return,
+                }
+            };
+            (self.on_read)(next);
+            self.seen.outbox.lock().expect("not poisoned").delivering = false;
         }
     }
 
     /// One owner heartbeat read into its provider's views, through the
     /// catalog `named` (`None`: its owner names none, or none could be
     /// read, so every group is refused `unknown_catalog`). Each group read
-    /// for the subscription's interface is handed over as one heartbeat.
+    /// for the subscription's interface is queued for the callback as one
+    /// heartbeat ([`OwnerReader::deliver`]). The caller holds the lock
+    /// that keeps owner heartbeats in order.
     fn apply(&self, beat: &OwnerBeat, named: Option<zenkey_model::catalog::CatalogId>) {
         use zenkey_model::freshness::{Catalogs, GroupRead, OwnerApplied};
         let (f, seen) = (&self.f, &self.seen);
@@ -2636,18 +2769,22 @@ where
                 // section is never `OtherClass`.
                 Some(SectionRead::NotFollowed | SectionRead::OtherClass) | None => continue,
             };
-            (self.on_read)(HeartbeatRead {
-                provider: beat.addr.clone(),
-                group: Some(OwnerGroup {
-                    class: beat.class,
-                    index: g.index,
-                }),
-                heartbeat: beat.stamp,
-                arrival: beat.arrival,
-                owner_time,
-                lost,
-                section,
-            });
+            seen.outbox
+                .lock()
+                .expect("not poisoned")
+                .queue
+                .push_back(HeartbeatRead {
+                    provider: beat.addr.clone(),
+                    group: Some(OwnerGroup {
+                        class: beat.class,
+                        index: g.index,
+                    }),
+                    heartbeat: beat.stamp,
+                    arrival: beat.arrival,
+                    owner_time,
+                    lost,
+                    section,
+                });
         }
     }
 }
