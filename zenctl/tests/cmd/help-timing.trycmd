@@ -32,14 +32,16 @@ Options:
           ε, the deployment's stated bound on how far an owner's stamps and this host's wall clock disagree, whole milliseconds (timing.v1 §2.6). Without it every sample's lifespan is unobservable (`no_bound`): never the HLC's delta, nor any number of this tool's own
 
       --lease <SECS>
-          The deployment's link lease, seconds: with --wait-before-close, the longest this reader may stall before it counts a loss (spec §2.7, 0.27), which leaves no miss and no period not kept the owner's
-          
-          [default: 10]
+          The deployment's link lease, seconds: with --wait-before-close, the longest this reader may stall before it counts a loss (spec §2.7, 0.27), which leaves no miss and no period not kept the owner's. Default: --face-policy's, else --binding's, else zenoh 1.10.1's 10 s
 
       --wait-before-close <SECS>
-          The routers' wait_before_close, seconds (spec §2.7, 0.27). The default is zenoh 1.10.1's; a deployment on another binding states its own (zm-1.10.2-r1's is 10 s)
-          
-          [default: 5]
+          The routers' wait_before_close, seconds (spec §2.7, 0.27): this reader may stall no longer than it, nor than --lease less one of the routers' keep-alive intervals. Default: --face-policy's, else --binding's, else zenoh 1.10.1's 5 s
+
+      --face-policy <FILE>
+          The routers' face policy (TOML, `link.v2` §2.1): its `[transport]` is what they run, so its lease and wait_before_close are the defaults of --lease and --wait-before-close, and its keep_alive the stall bound's (#1011). A `link.v1` policy states no transport and is refused, exit 2
+
+      --binding <NAME>
+          The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. Its defaults are those of --lease and --wait-before-close, and its keep-alives the stall bound's, where no flag and no --face-policy states them (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, zenoh 1.10.1 5 s. Omitted, zenoh 1.10.1's
 
       --across-face
           The one owner the selector names sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements the contracts --contracts holds. The deadline and the period are unobservable (timing.v1 §2.8): no owner is seen present, and the face's rate is not the owner's

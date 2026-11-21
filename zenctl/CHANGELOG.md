@@ -6,6 +6,17 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a reader's lease and `wait_before_close` by its binding (#1011)
+
+Observer §5.2; `link.v2` §2.19. No rule moved.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check conform`, `alarms`, `telemetry`, `timing`, `arbitration`: with no face policy, zenoh 1.10.1's 10 s lease and 5 s `wait_before_close`, whatever zenoh the routers run | `--binding <NAME>`, `zenoh-1.10.1` or `zm-1.10.2-r1`: its defaults where no flag and no policy states them | most specific first: `--lease` and `--wait-before-close`, then `--face-policy`'s `[transport]`, then `--binding`'s, then zenoh 1.10.1's. `zm-1.10.2-r1` waits 10 s before it closes a transport, so a 1 s lease on it watches an owner 10 s and the timeout past a window, where 5 s was read before |
+| `timing`, `arbitration`: no `--face-policy`; `--lease` and `--wait-before-close` with `[default: 10]` and `[default: 5]` | `--face-policy <FILE>`, the routers' `link.v2` policy, as `check conform` and `alarms` take it; the two flags have no clap default, and their help states the ladder | a `link.v1` policy is refused, exit 2. Omitting everything reads as before |
+| `telemetry --face-policy F --face N`: the session and the timeout from the face, the stall bound from zenoh 1.10.1's defaults | also the defaults of `--lease` and `--wait-before-close` | `--face-policy` still requires `--across-face` and `--face` here |
+| the stall bound: `--wait-before-close`, or `--lease` less a quarter of it, whatever the policy's `keep_alive` | `--lease` less one of the routers' keep-alive intervals: the policy's `keep_alive`, else the binding's | every binding's default is 4, so only a policy stating another moves the bound: SBD's 2 bounds a stall at half its lease |
+
 ## Unreleased (`main`, zk2) — a face whose cadence is its keep-alive interval (#1108)
 
 `link.v2` 0.17 §2.16.

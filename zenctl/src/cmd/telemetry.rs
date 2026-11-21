@@ -106,6 +106,7 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
         for_secs,
         lease,
         wait_before_close,
+        binding,
         across_face,
         settle,
         face_policy,
@@ -135,9 +136,13 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     }
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let mut spec = TelemetrySpec::new(dep.timeout(), window);
-    spec.routers.lease = ASKING.ask(super::positive_secs("--lease", lease));
-    spec.routers.wait_before_close = ASKING.ask(super::positive_secs(
-        "--wait-before-close",
+    // The routers' lease, keep-alives and wait_before_close: the flags,
+    // else the face policy's, else the binding's, else zenoh 1.10.1's
+    // (#1011).
+    spec.routers = ASKING.ask(zk2::routers(
+        face_policy.as_deref(),
+        binding.binding,
+        lease,
         wait_before_close,
     ));
     spec.across_face = across_face;

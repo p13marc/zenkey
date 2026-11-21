@@ -733,24 +733,34 @@ impl FaceScope {
     }
 }
 
-/// The routers' lease and `wait_before_close` a window reads by (observer
-/// §5.2; #1011's item 3): `--lease` and `--wait-before-close` where given,
-/// else what the routers' `link.v2` face policy's `[transport]` states
-/// (`link.v2` §2.16), else zenoh 1.10.1's. Refused, exit 2: a flag that is
-/// not a positive number of seconds, what [`face_policy`] refuses, and a
-/// `link.v1` policy, which states no transport.
+/// The routers' lease, keep-alives and `wait_before_close` a window reads
+/// by (observer §5.2; #1011's item 3), the one rule of every verb that
+/// takes `--lease` or `--wait-before-close`. Most specific first:
+///
+/// 1. `--lease` and `--wait-before-close`, each where given;
+/// 2. what the routers' `link.v2` face policy's `[transport]` states
+///    (`link.v2` §2.16), its keep-alives included;
+/// 3. the defaults of the binding `--binding` names (`link.v2` §2.19);
+/// 4. zenoh 1.10.1's.
+///
+/// No flag states the keep-alives: they are the policy's, else the
+/// binding's. Refused, exit 2: a flag that is not a positive number of
+/// seconds, what [`face_policy`] refuses, and a `link.v1` policy, which
+/// states no transport.
 pub fn routers(
     policy: Option<&std::path::Path>,
+    binding: Option<zenkey_model::link::Binding>,
     lease: Option<f64>,
     wait_before_close: Option<f64>,
 ) -> Result<zenkey_model::budget::Routers> {
     let mut routers = match policy {
-        None => zenkey_model::budget::Routers::default(),
+        None => zenkey_model::budget::Routers::of_binding(binding.unwrap_or_default()),
         Some(path) => {
             let Some(t) = face_policy(path)?.transport else {
                 return Err(unaskable!(
-                    "--face-policy {}: a link.v1 policy states no transport; give --lease and \
-                     --wait-before-close, or a link.v2 policy (link.v2 §2.16)",
+                    "--face-policy {}: a link.v1 policy states no transport: leave it out and \
+                     give --binding, or --lease and --wait-before-close, or give a link.v2 policy \
+                     (link.v2 §2.16)",
                     path.display()
                 ));
             };
@@ -1124,28 +1134,101 @@ mod tests {
         v
     }
 
-    /// The routers' lease and `wait_before_close` (#1011's item 3): a flag
-    /// stands, else the policy's `[transport]`, else zenoh 1.10.1's; a
+    /// The routers' lease, keep-alives and `wait_before_close` (#1011's
+    /// item 3), most specific first: a flag stands, else the policy's
+    /// `[transport]`, else the binding's defaults, else zenoh 1.10.1's; a
     /// `link.v1` policy is refused.
     #[test]
-    fn a_windows_routers_are_the_flags_the_policys_or_zenohs() {
+    fn a_windows_routers_are_the_flags_the_policys_the_bindings_or_zenohs() {
+        use zenkey_model::budget::Routers;
+        use zenkey_model::link::Binding;
         let s = std::time::Duration::from_secs;
         let examples =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/zk2/link");
         let rf = examples.join("media/rf.face.toml");
-        let none = routers(None, None, None).unwrap();
-        assert_eq!(none, zenkey_model::budget::Routers::default());
-        let policy = routers(Some(&rf), None, None).unwrap();
+        let zm = Some(Binding::Zm1_10_2R1);
+        // 4. Nothing given: zenoh 1.10.1's, which naming it changes nothing of.
+        let none = routers(None, None, None, None).unwrap();
+        assert_eq!(none, Routers::default());
+        assert_eq!(
+            routers(None, Some(Binding::Zenoh1_10_1), None, None).unwrap(),
+            none
+        );
+        // 3. The binding's defaults: the fork waits 10 s where 1.10.1 waits 5.
+        let fork = routers(None, zm, None, None).unwrap();
+        assert_eq!(
+            (fork.lease, fork.keep_alive, fork.wait_before_close),
+            (s(10), 4, s(10))
+        );
+        // 2. The policy's `[transport]` over the binding's, whichever is named.
+        let policy = routers(Some(&rf), None, None, None).unwrap();
         assert_eq!((policy.lease, policy.wait_before_close), (s(240), s(240)));
-        let flag = routers(Some(&rf), Some(20.0), None).unwrap();
+        assert_eq!(routers(Some(&rf), zm, None, None).unwrap(), policy);
+        // 1. A flag over the policy's and over the binding's, each alone.
+        let flag = routers(Some(&rf), zm, Some(20.0), None).unwrap();
         assert_eq!((flag.lease, flag.wait_before_close), (s(20), s(240)));
-        let v1 = routers(Some(&examples.join("radio.face.toml")), None, None)
+        let flag = routers(None, zm, None, Some(3.0)).unwrap();
+        assert_eq!((flag.lease, flag.wait_before_close), (s(10), s(3)));
+        let v1 = routers(Some(&examples.join("radio.face.toml")), zm, None, None)
             .expect_err("a link.v1 policy");
         assert!(v1.to_string().contains("states no transport"), "{v1}");
         assert!(
-            routers(None, Some(0.0), None).is_err(),
+            routers(None, None, Some(0.0), None).is_err(),
             "a flag is positive"
         );
+    }
+
+    /// #1011's case, a 1 s lease on the fork's defaults: with the binding
+    /// named, the owner is watched the fork's 10 s `wait_before_close` and
+    /// the timeout past a window; without it, zenoh 1.10.1's 5 s would end
+    /// the watch 5 s before a router of the fork tells a withdrawal.
+    #[test]
+    fn a_short_lease_on_the_forks_defaults_watches_its_wait_before_close() {
+        let s = std::time::Duration::from_secs;
+        let zm = Some(zenkey_model::link::Binding::Zm1_10_2R1);
+        let told = routers(None, zm, Some(1.0), None).unwrap();
+        assert_eq!(told.presence_tail(s(1)), s(11));
+        let untold = routers(None, None, Some(1.0), None).unwrap();
+        assert_eq!(untold.presence_tail(s(1)), s(6));
+    }
+
+    /// The stall bound's keep-alive is the routers' own, never an assumed
+    /// 4 (#1011, as #1046 found): a policy stating two keep-alives bounds a
+    /// stall at half its lease where its `wait_before_close` is no shorter.
+    #[test]
+    fn a_policys_keep_alives_bound_the_stall() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = |keep_alive: u32| {
+            let path = dir.path().join(format!("{keep_alive}.face.toml"));
+            std::fs::write(
+                &path,
+                format!(
+                    "profile = \"link.v2\"\nsystem = \"v\"\nservices = [\"hop\"]\n\
+                     binding = \"zenoh-1.10.1\"\n\
+                     [transport]\nlease_ms = 240000\nkeep_alive = {keep_alive}\n\
+                     wait_before_close_ms = 240000\nsequence = \"16bit\"\nbatch_bytes = 222\n\
+                     [face.rf]\nfar = \"ground\"\nattach = \"client\"\n\
+                     select = {{ link_protocols = [\"tcp\"] }}\nclass = \"constrained\"\n\
+                     expose = \"none\"\nmax_outage_s = 3600\nlink_bps = 2400\nloss_ppm = 100\n\
+                     arq = true\nreply_timeout_ms = 15000\n"
+                ),
+            )
+            .unwrap();
+            routers(Some(&path), None, None, None).unwrap()
+        };
+        let s = std::time::Duration::from_secs;
+        assert_eq!(
+            policy(4).stall_bound(),
+            s(180),
+            "240 s less a 60 s interval"
+        );
+        let two = policy(2);
+        assert_eq!(two.keep_alive, 2);
+        assert_eq!(two.stall_bound(), s(120), "240 s less a 120 s interval");
+        // A flag moves the lease, and the keep-alives are still the policy's.
+        let stated = dir.path().join("2.face.toml");
+        let flagged = routers(Some(&stated), None, Some(20.0), None).unwrap();
+        assert_eq!(flagged.stall_bound(), s(10), "20 s less a 10 s interval");
     }
 
     /// `--across-face` naming `addresses`, with no face policy.

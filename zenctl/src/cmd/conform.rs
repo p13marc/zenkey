@@ -41,6 +41,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         lease,
         wait_before_close,
         face_policy,
+        binding,
         skip,
         contracts,
         ns,
@@ -49,6 +50,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let routers = ASKING.ask(zk2::routers(
         face_policy.as_deref(),
+        binding.binding,
         lease,
         wait_before_close,
     ));
@@ -66,7 +68,8 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         // (0.27): a window is lossless only if this run never stalled past
         // `wait_before_close`, nor past the lease less one of the routers'
         // keep-alive intervals. None of the three is on the bus: the flags,
-        // else the routers' face policy's, else zenoh 1.10.1's (#1011).
+        // else the routers' face policy's, else the binding's, else zenoh
+        // 1.10.1's (#1011).
         routers,
         // F-222: a skipped case sends nothing.
         skip: zenkey_fleet::bus::conform::Skipped::of(&skip),

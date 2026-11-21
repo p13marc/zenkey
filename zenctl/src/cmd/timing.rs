@@ -75,6 +75,8 @@ pub async fn run(cli: TimingArgs) -> Result<()> {
         clock_bound,
         lease,
         wait_before_close,
+        face_policy,
+        binding,
         across_face,
         owner_zid,
         settle,
@@ -110,9 +112,13 @@ pub async fn run(cli: TimingArgs) -> Result<()> {
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let mut spec = TimingSpec::new(dep.timeout(), window);
     spec.clock_bound = clock_bound.map(std::time::Duration::from_millis);
-    spec.routers.lease = ASKING.ask(super::positive_secs("--lease", lease));
-    spec.routers.wait_before_close = ASKING.ask(super::positive_secs(
-        "--wait-before-close",
+    // The routers' lease, keep-alives and wait_before_close: the flags,
+    // else the face policy's, else the binding's, else zenoh 1.10.1's
+    // (#1011).
+    spec.routers = ASKING.ask(zk2::routers(
+        face_policy.as_deref(),
+        binding.binding,
+        lease,
         wait_before_close,
     ));
     spec.across_face = across_face;

@@ -31,14 +31,13 @@ Options:
           [default: 10]
 
       --lease <SECS>
-          The deployment's link lease, seconds: with --wait-before-close, the longest this reader may stall before it counts a loss, which leaves every pair across it without presence (spec §2.7, 0.27)
-          
-          [default: 10]
+          The deployment's link lease, seconds: with --wait-before-close, the longest this reader may stall before it counts a loss, which leaves every pair across it without presence (spec §2.7, 0.27). Default: --face-policy's, else --binding's, else zenoh 1.10.1's 10 s
 
       --wait-before-close <SECS>
-          The routers' wait_before_close, seconds (spec §2.7, 0.27). The default is zenoh 1.10.1's; a deployment on another binding states its own (zm-1.10.2-r1's is 10 s)
-          
-          [default: 5]
+          The routers' wait_before_close, seconds (spec §2.7, 0.27): this reader may stall no longer than it, nor than --lease less one of the routers' keep-alive intervals. Default: --face-policy's, else --binding's, else zenoh 1.10.1's 5 s
+
+      --binding <NAME>
+          The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. Its defaults are those of --lease and --wait-before-close, and its keep-alives the stall bound's, where no flag and no --face-policy states them (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, zenoh 1.10.1 5 s. Omitted, zenoh 1.10.1's
 
       --across-face
           The one owner the selector names sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements the contracts --contracts holds. No presence is read, so only an in-band epoch establishes one (telemetry.v1 §2.14), and a decrease without one reads as a reset
@@ -49,7 +48,7 @@ Options:
           [default: 0.25]
 
       --face-policy <FILE>
-          With --face, the `link.v2` face policy the owner sits across (#990 V8, as #988 L4's verbs): the session runs the face's `[transport]` (`link.v2` §2.16), a key the --zenoh-config file states winning, and the default --timeout is the face's `reply_timeout_ms` (core §8.1). A `link.v1` policy states none of that and is refused, exit 2
+          With --face, the `link.v2` face policy the owner sits across (#990 V8, as #988 L4's verbs): the session runs the face's `[transport]` (`link.v2` §2.16), a key the --zenoh-config file states winning, the default --timeout is the face's `reply_timeout_ms` (core §8.1), and that transport's lease and wait_before_close are the defaults of --lease and --wait-before-close, its keep_alive the stall bound's (#1011). A `link.v1` policy states none of that and is refused, exit 2
 
       --face <NAME>
           The face of --face-policy, by its name (`[face.<name>]`)

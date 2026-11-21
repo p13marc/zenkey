@@ -1,0 +1,133 @@
+The routers' lease, keep-alives and `wait_before_close` (#1011's item 3;
+observer §5.2). Five judgements read a window by them: `check conform`,
+`alarms`, `telemetry`, `timing` and `arbitration`. None of the three is on
+the bus, and a tool's own session configuration states only its own pushes'
+wait, so each verb takes the deployment's word, most specific first:
+
+1. `--lease` and `--wait-before-close`, each where given;
+2. `--face-policy`'s `[transport]`, which the routers run (`link.v2` §2.16);
+3. the defaults of the zenoh `--binding` names (`link.v2` §2.19):
+   `zm-1.10.2-r1` waits 10 s before it closes a transport, `zenoh-1.10.1` 5 s;
+4. zenoh 1.10.1's.
+
+One rule resolves them for every verb (`cmd::zk2::routers`), before any
+session opens. The cases below run on a dead bus (`connect.timeout_ms: 0`),
+so a run that reaches the session read its flags without complaint.
+
+## `--binding` on each verb
+
+```console
+$ zenctl check conform lab/meter meter.v1 --binding zm-1.10.2-r1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+check conform: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+$ zenctl alarms --binding zm-1.10.2-r1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+alarms: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+$ zenctl telemetry --binding zm-1.10.2-r1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+telemetry: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+$ zenctl timing --binding zm-1.10.2-r1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+timing: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+$ zenctl arbitration --binding zm-1.10.2-r1 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+arbitration: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A binding is one of `link.v2` §2.4's names. Any other is refused, exit 2,
+with the names it could have been.
+
+```console
+$ zenctl timing --binding zenoh-1.10.2
+? 2
+error: invalid value 'zenoh-1.10.2' for '--binding <NAME>': not a binding; one of: zenoh-1.10.1, zm-1.10.2-r1
+
+For more information, try '--help'.
+
+```
+
+## `--face-policy` on `timing` and `arbitration`
+
+The routers' `link.v2` face policy, as `check conform` and `alarms` take it:
+its `[transport]` states every key, so it stands over `--binding`, and a flag
+over it.
+
+```console
+$ zenctl timing --face-policy ../examples/zk2/link/media/rf.face.toml --binding zm-1.10.2-r1 --lease 20 --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+timing: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+$ zenctl arbitration --face-policy ../examples/zk2/link/media/rf.face.toml --zenoh-config tests/cmd/fixtures/dead-bus.json5
+? 2
+Error: failed to open the Zenoh session
+
+Caused by:
+    Unable to connect to any of [Single(tcp/127.0.0.1:1)]!
+arbitration: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A `link.v1` policy states no transport. It is refused, exit 2, before any
+session, by every verb alike.
+
+```console
+$ zenctl timing --face-policy ../examples/zk2/link/radio.face.toml
+? 2
+Error: --face-policy ../examples/zk2/link/radio.face.toml: a link.v1 policy states no transport: leave it out and give --binding, or --lease and --wait-before-close, or give a link.v2 policy (link.v2 §2.16)
+timing: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+$ zenctl arbitration --face-policy ../examples/zk2/link/radio.face.toml --binding zm-1.10.2-r1
+? 2
+Error: --face-policy ../examples/zk2/link/radio.face.toml: a link.v1 policy states no transport: leave it out and give --binding, or --lease and --wait-before-close, or give a link.v2 policy (link.v2 §2.16)
+arbitration: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+$ zenctl alarms --face-policy ../examples/zk2/link/radio.face.toml
+? 2
+Error: --face-policy ../examples/zk2/link/radio.face.toml: a link.v1 policy states no transport: leave it out and give --binding, or --lease and --wait-before-close, or give a link.v2 policy (link.v2 §2.16)
+alarms: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+$ zenctl check conform lab/meter meter.v1 --face-policy ../examples/zk2/link/radio.face.toml
+? 2
+Error: --face-policy ../examples/zk2/link/radio.face.toml: a link.v1 policy states no transport: leave it out and give --binding, or --lease and --wait-before-close, or give a link.v2 policy (link.v2 §2.16)
+check conform: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+A flag that is no positive number of seconds is refused the same way.
+
+```console
+$ zenctl arbitration --wait-before-close 0
+? 2
+Error: --wait-before-close must be a positive number of seconds, got 0
+arbitration: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
