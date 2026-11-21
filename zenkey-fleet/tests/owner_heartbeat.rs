@@ -313,3 +313,216 @@ fn the_host_key_is_in_no_faces_scope() {
     let state = FaceScope::of_given(&across, &set, "", Reads::State, Some(face), true).unwrap();
     assert!(owner(&state).is_empty());
 }
+
+// --- `.zrec`: a capture that holds owner heartbeats (#1110's H2c) -------------
+
+/// The capture zenctl's trycmd reads (`echo --from`, `timeline --from`,
+/// `replay --dry-run`): four rows on `lab/trio`'s two class keys.
+const ZREC: &str = "zenctl/tests/cmd/fixtures/owner-heartbeat.zrec";
+/// The catalog its header names, as `--catalog` takes it.
+const ZREC_CATALOG: &str = "zenctl/tests/cmd/fixtures/owner-heartbeat.catalog.json";
+
+/// The capture's rows: the key's class, the put's seq and its bytes.
+fn zrec_rows() -> Vec<(Class, u32, Vec<u8>)> {
+    let at = |seq: u32, groups: Vec<Group>| {
+        OwnerHeartbeat {
+            time: Time::Unknown,
+            groups,
+        }
+        .envelope(Stamp {
+            run: Run::U16(7),
+            seq: Seq::new(seq).unwrap(),
+        })
+        .unwrap()
+    };
+    // charlie.v1's `reach`, its `link` collection, on the `link` key.
+    let all = contracts(&IFACES);
+    let layout = Layout::of(revision(&all, "charlie.v1").contract());
+    let reach: Vec<Option<Section>> = layout
+        .collections
+        .iter()
+        .map(|c| {
+            (c.resource() == "state/reach").then_some(Section {
+                digest: Digest::from_u32(0x1c),
+                members: Members::One { vouched: true },
+            })
+        })
+        .collect();
+    let mut refused = at(6, vec![group(0, "alpha.v1", 0x0a)]);
+    refused[0] |= 0x05;
+    vec![
+        (
+            Class::Host,
+            3,
+            at(
+                3,
+                vec![
+                    group(0, "alpha.v1", 0x0a),
+                    group(1, "bravo.v1", 0x0b),
+                    group(2, "charlie.v1", 0x0c),
+                ],
+            ),
+        ),
+        (
+            Class::Host,
+            5,
+            at(
+                5,
+                vec![group(0, "alpha.v1", 0x0a), group(900, "bravo.v1", 0x0b)],
+            ),
+        ),
+        (
+            Class::Link,
+            0,
+            at(0, vec![Group::of(2, &layout, &reach).unwrap()]),
+        ),
+        (Class::Host, 6, refused),
+    ]
+}
+
+/// The capture's text: a version 4 header naming the catalog and the
+/// revisions `lab/trio` runs, carrying no bundle, then the rows.
+fn zrec_text() -> String {
+    use base64::Engine as _;
+    let all = contracts(&IFACES);
+    let cat = catalog();
+    let mut revisions: Vec<Value> = IFACES
+        .iter()
+        .map(|name| {
+            json!({
+                "address": "lab/trio",
+                "iface": name,
+                "fingerprint": revision(&all, name).fingerprint().to_string(),
+                "named": cat.id().hex(),
+            })
+        })
+        .collect();
+    revisions.push(json!({
+        "address": "lab/trio",
+        "iface": "freshness.v2",
+        "fingerprint": format!("sha256:{}", zenkey::heartbeat::FINGERPRINT),
+        "named": cat.id().hex(),
+    }));
+    let header = json!({
+        "zrec": 4,
+        "selectors": ["zk2/lab/trio/**"],
+        "base": "",
+        "captured_at": "2026-11-21T00:00:00Z",
+        "excluded": ["@stream", "@state", "@op", "@zk", "@adv"],
+        "catalog": {"id": cat.id().hex(), "epoch": cat.epoch(), "lineage": []},
+        "revisions": revisions,
+    });
+    let mut out = format!("{header}\n");
+    for (i, (class, _, bytes)) in zrec_rows().iter().enumerate() {
+        let row = json!({
+            "key": owner_key("lab", "trio", *class),
+            "t": 1_000_000 * (i as u64 + 1),
+            "encoding": "zenoh/bytes",
+            "qos_axes": "data/drop/reliable",
+            "delete": false,
+            "bytes": base64::engine::general_purpose::STANDARD.encode(bytes),
+        });
+        out.push_str(&format!("{row}\n"));
+    }
+    out
+}
+
+/// The fixture zenctl's snapshots read is what the model's writer writes:
+/// regenerate it with `OWNER_HEARTBEAT_BLESS=1`, never by hand.
+#[test]
+fn the_zrec_fixture_is_what_the_writer_writes() {
+    let (zrec, cat) = (root().join(ZREC), root().join(ZREC_CATALOG));
+    let mut jcs = catalog().to_jcs();
+    jcs.push(b'\n');
+    if std::env::var_os("OWNER_HEARTBEAT_BLESS").is_some() {
+        std::fs::write(&zrec, zrec_text()).unwrap();
+        std::fs::write(&cat, &jcs).unwrap();
+    }
+    assert_eq!(
+        std::fs::read_to_string(&zrec).expect("the capture"),
+        zrec_text()
+    );
+    assert_eq!(std::fs::read(&cat).expect("the catalog"), jcs);
+}
+
+/// A capture that holds owner heartbeats is read offline through the
+/// lens, the header in presence's place (the tooling guide's §5). Its
+/// header keeps the catalog's id, epoch and lineage, and no entry: given
+/// that catalog (`--catalog`), each group is read with the revision its
+/// index names; given none, each is shown by its envelope,
+/// `unknown_catalog`. A put refused whole is undecodable either way.
+#[test]
+fn a_capture_of_owner_heartbeats_reads_through_the_headers_catalog() {
+    use zenkey_fleet::model::recorded::Recorded;
+    use zenkey_fleet::tape::record::{ZrecItem, ZrecReader, reader_catalogs};
+    let text = zrec_text();
+    let mut reader = ZrecReader::new(std::io::Cursor::new(text.into_bytes())).expect("version 4");
+    let header = reader.header().clone();
+    let mut rows = Vec::new();
+    while let Some(item) = reader.next() {
+        match item.expect("a row") {
+            ZrecItem::Sample { row, .. } => rows.push(row),
+            other => panic!("only samples: {other:?}"),
+        }
+    }
+    assert_eq!(rows.len(), 4);
+    let read = |given: Option<&Catalog>| -> Vec<Result<Value, String>> {
+        let (catalogs, _) = reader_catalogs(&header, given).expect("the header's catalog");
+        let recorded = Recorded::of(&header, contracts(&IFACES));
+        let lens = Lens::new("", None, &recorded)
+            .recorded(&recorded)
+            .catalogs(&catalogs);
+        rows.iter()
+            .map(|row| {
+                let c = lens.check(
+                    &row.key,
+                    Member::Type,
+                    row.encoding.as_deref(),
+                    &row.payload,
+                );
+                match c.rendering.rendered {
+                    Rendered::Value { value, .. } => Ok(value),
+                    Rendered::Undecodable { reason, .. } => Err(reason),
+                    other => panic!("never sniffed: {other:?}"),
+                }
+            })
+            .collect()
+    };
+    let cat = catalog();
+    let given = read(Some(&cat));
+    let host = given[0].as_ref().unwrap();
+    assert_eq!((&host["class"], &host["seq"]), (&json!("host"), &json!(3)));
+    assert!(
+        groups(host)
+            .iter()
+            .all(|(_, covers, read)| covers.is_some() && read.is_ok()),
+        "three groups read: {host}"
+    );
+    assert_eq!(
+        groups(given[1].as_ref().unwrap())[1],
+        (900, None, Err("unknown_index".into()))
+    );
+    let link = given[2].as_ref().unwrap();
+    assert_eq!(link["class"], json!("link"));
+    assert_eq!(
+        groups(link),
+        [(
+            2,
+            Some("charlie.v1".into()),
+            Ok(json!({"state/reach": {"digest": "0000001c", "vouched": true}}))
+        )]
+    );
+    assert_eq!(given[3], Err("the owner heartbeat is refused: tag".into()));
+    // The header alone holds no entry to read an index by.
+    let alone = read(None);
+    for v in alone[..3].iter().map(|v| v.as_ref().unwrap()) {
+        assert!(
+            groups(v)
+                .iter()
+                .all(|(_, covers, read)| covers.is_none()
+                    && read == &Err("unknown_catalog".to_owned())),
+            "{v}"
+        );
+    }
+    assert!(alone[3].is_err());
+}
