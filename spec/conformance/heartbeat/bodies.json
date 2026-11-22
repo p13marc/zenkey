@@ -1,5 +1,5 @@
 {
-  "description": "core §7.5, a heartbeat's body, read with its revision's collections (`layouts.json`). Written by an independent reading of the text (Python, standard library), checked, never blessed. A value is `time`, `{\"s\": seconds from the deployment epoch, \"ms\": milliseconds}` or `null` for the unknown time (all 42 bits set), and `sections`, by resource: a collection with a section has its map bit set, and one without has it 0. A collection of one member's section is its `digest` (8 hex digits) and whether it is `vouched`. A templated collection's is its `digest`, its `live` count and the ranks `vouched` for, ascending, and, where read, the `form` read: `bitmap` or `list`. `writes`: a layout and a value → the body's `bits` before the pad, the `pad` and the `hex` bytes; the writer writes the list only where it is shorter than the bitmap, so a tie keeps the bitmap. `reads`: a layout and bytes in hex → the value, or `{\"refused\": token}`, the first in §7.5's order: `short` (the body ends before a bit its fields need), `code` (a millisecond code from 1000 up but the unknown time's, a live count above the cardinality, a count above the live count, or a rank not below the live count or not above the rank before it), `trailing` (a byte after the pad), `pad` (a pad bit set). Every value read writes back to its bytes, in the form read.",
+  "description": "core §7.5, a heartbeat's body, read with its revision's collections (`layouts.json`). Written by an independent reading of the text (Python, standard library), checked, never blessed. A value is `time`, `{\"s\": seconds from the deployment epoch, \"ms\": milliseconds}` or `null` for the unknown time (all 42 bits set) or `\"ahead\"` for the ahead time (the seconds all ones and the millisecond code 1022), and `sections`, by resource: a collection with a section has its map bit set, and one without has it 0. A collection of one member's section is its `digest` (8 hex digits) and whether it is `vouched`. A templated collection's is its `digest`, its `live` count and the ranks `vouched` for, ascending, and, where read, the `form` read: `bitmap` or `list`. `writes`: a layout and a value → the body's `bits` before the pad, the `pad` and the `hex` bytes; the writer writes the list only where it is shorter than the bitmap, so a tie keeps the bitmap. `reads`: a layout and bytes in hex → the value, or `{\"refused\": token}`, the first in §7.5's order: `short` (the body ends before a bit its fields need), `code` (an unused millisecond code, 1000 to 1021 under any seconds and 1022 or 1023 under seconds that are not all ones, a live count above the cardinality, a count above the live count, or a rank not below the live count or not above the rank before it), `trailing` (a byte after the pad), `pad` (a pad bit set). Every value read writes back to its bytes, in the form read. `earlier`, where a case states it, is what a reader built before the ahead time answers for the same bytes. It is no expectation of this text: it shows that such a reader refuses the body, so the heartbeat confirms nothing to it.",
   "writes": [
     {
       "note": "bare.v1: no collection, so the time alone: 42 bits and 6 of pad",
@@ -359,6 +359,56 @@
         "bits": "000000000000000000001110000100000011111010010111011110101011011011111011101111100000000000000000000000000000000000000000000000000000000000000000",
         "pad": 0,
         "hex": "00000e103e977ab6fbbe0000000000000000"
+      }
+    },
+    {
+      "note": "bare.v1: the time ahead, the seconds all ones and 1022 ms: the unknown time with its last bit clear",
+      "layout": "bare.v1",
+      "value": {
+        "time": "ahead",
+        "sections": {}
+      },
+      "expect": {
+        "bits": "111111111111111111111111111111111111111110",
+        "pad": 6,
+        "hex": "ffffffffff80"
+      }
+    },
+    {
+      "note": "the ahead time before sections: \"every collection, in map order: @state first\", its time alone changed; the map and the sections are as under any time",
+      "layout": "hb.v1",
+      "value": {
+        "time": "ahead",
+        "sections": {
+          "@state/route/{dest}": {
+            "digest": "00000001",
+            "live": 2,
+            "vouched": [
+              1
+            ]
+          },
+          "state/link": {
+            "digest": "00000002",
+            "vouched": true
+          },
+          "state/peer/{peer}": {
+            "digest": "00000003",
+            "live": 1,
+            "vouched": [
+              0
+            ]
+          },
+          "state/sdu/{sdu}": {
+            "digest": "00000004",
+            "live": 2,
+            "vouched": []
+          }
+        }
+      },
+      "expect": {
+        "bits": "1111111111111111111111111111111111111111101111000000000000000000000000000000011000100000000000000000000000000000010100000000000000000000000000000011001010000000000000000000000000000010000000000000000000000000000000010000",
+        "pad": 4,
+        "hex": "ffffffffffbc00000006200000005000000032800000020000000100"
       }
     }
   ],
@@ -752,10 +802,14 @@
       }
     },
     {
-      "note": "seconds all ones, 1022 ms: not the unknown time",
+      "note": "seconds all ones, 1022 ms: the ahead time",
       "layout": "bare.v1",
       "hex": "ffffffffff80",
       "expect": {
+        "time": "ahead",
+        "sections": {}
+      },
+      "earlier": {
         "refused": "code"
       }
     },
@@ -869,6 +923,69 @@
       "hex": "00000e103e8100",
       "expect": {
         "refused": "trailing"
+      }
+    },
+    {
+      "note": "written: the ahead time before sections: \"every collection, in map order: @state first\", its time alone changed; the map and the sections are as under any time",
+      "layout": "hb.v1",
+      "hex": "ffffffffffbc00000006200000005000000032800000020000000100",
+      "expect": {
+        "time": "ahead",
+        "sections": {
+          "@state/route/{dest}": {
+            "digest": "00000001",
+            "live": 2,
+            "vouched": [
+              1
+            ],
+            "form": "bitmap"
+          },
+          "state/link": {
+            "digest": "00000002",
+            "vouched": true
+          },
+          "state/peer/{peer}": {
+            "digest": "00000003",
+            "live": 1,
+            "vouched": [
+              0
+            ],
+            "form": "bitmap"
+          },
+          "state/sdu/{sdu}": {
+            "digest": "00000004",
+            "live": 2,
+            "vouched": [],
+            "form": "bitmap"
+          }
+        }
+      },
+      "earlier": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "1022 ms under a known second: unused, never the ahead time",
+      "layout": "bare.v1",
+      "hex": "00000e10ff80",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "seconds all ones, 1021 ms: unused",
+      "layout": "bare.v1",
+      "hex": "ffffffffff40",
+      "expect": {
+        "refused": "code"
+      }
+    },
+    {
+      "note": "the ahead time, and a pad bit set: the time is read, then the pad refused",
+      "layout": "bare.v1",
+      "hex": "ffffffffff81",
+      "expect": {
+        "refused": "pad"
       }
     }
   ]

@@ -170,7 +170,8 @@ conventions say.
    and S receives it. The reference publishes the fault again within
    31 s (§2.5, a SHOULD). The owner's tokens stay present.
    - Every heartbeat from the detection on vouches for the status, its
-     time unknown, all ones (`freshness.v2` §2.10).
+     time the ahead time: the seconds all ones and the millisecond code
+     1022 (`freshness.v2` §2.10, core §7.5).
    - At 65 s, S judges **healthy**, `ok`: the heartbeats confirmed the
      status.
    - A tool reading the faults and the heartbeats answers "is its clock
@@ -189,8 +190,8 @@ conventions say.
    status in a snapshot under the run the owner's descriptor states. Its
    times are from the owner's clock, ahead, which no router reads (core
    §4.1, §4.3). That deployment's readers have only the
-   heartbeat's time unknown to go on, which answers no clock question
-   alone (v1.md §2.5).
+   heartbeat's ahead time to go on, which under `health.v1` answers no
+   clock question alone (v1.md §2.5).
 
 ## §5 A tokenless set of 100 (§2.7)
 

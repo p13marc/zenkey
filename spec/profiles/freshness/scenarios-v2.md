@@ -138,8 +138,10 @@ named after it). §2's step 6 has a test of its own,
   heartbeat that vouched for it.
 - **Step 3.** S judges `status` fresh again from the next heartbeat.
 - **Step 4.** The second put goes on: it carries no Zenoh timestamp
-  (§2.10). H2 hears heartbeats while the guard holds, the time unknown,
-  all 42 bits set. Each has its map, `1 0 1`, vouches for `status`, and
+  (§2.10). H2 hears heartbeats while the guard holds. Each one's time is
+  the ahead time, the seconds all ones and the millisecond code 1022
+  (core §7.5), never the unknown time. Each has its map, `1 0 1`,
+  vouches for `status`, and
   holds `status`'s digest over the second put's stamp. S2 judges `status`
   fresh 4 s on, past its horizon. G's answer is a snapshot of `status`
   alone, its entry vouched for at the snapshot's time. That time is from
@@ -148,11 +150,11 @@ named after it). §2's step 6 has a test of its own,
 - **Step 5.** A silent heartbeat: S judges `status` stale more than 2 s
   after the last heartbeat. It never reports the owner down.
 - **Step 6.** Before the second put, its heartbeats vouch for `status`,
-  the time unknown: no write of it was held. The second put is refused,
-  since it would carry a Zenoh timestamp. From it on, each heartbeat H3
-  hears vouches for nothing, its time unknown, and `status`'s digest is
-  still over the first put's stamp (§2.10). After the release the time is
-  known, and the bit stays clear. The third put goes on, and a heartbeat
+  their time the ahead time: no write of it was held. The second put is
+  refused, since it would carry a Zenoh timestamp. From it on, each
+  heartbeat H3 hears vouches for nothing, its time the ahead time, and
+  `status`'s digest is still over the first put's stamp (§2.10). After
+  the release the time is an instant again, and the bit stays clear. The third put goes on, and a heartbeat
   after it vouches for `status`, its digest over that put's stamp.
 
 ## §3 A GET reader's age from the confirmation (§2.4, §2.6)
