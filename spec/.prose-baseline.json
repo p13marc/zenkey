@@ -134,6 +134,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/profiles/desired/scenarios-v2.md": {
+    "mean": 10.76,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/desired/scenarios.md": {
     "mean": 14.64,
     "over": 0,
