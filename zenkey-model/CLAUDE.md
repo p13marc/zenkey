@@ -473,6 +473,30 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   (`envelope/held.json`, 88 cases), `seed_held` (`seed/held.json`'s 12
   asks, and its 29 cases through `seed_cases`, which `seed_snapshot`
   shares), `envelope_carries` (46 reads), all as written, none blessed.
+  A heartbeat's ahead time (#986's Q0, core 0.113 §7.5, `freshness.v2`
+  0.12 §2.10): `heartbeat::Time` is `At`, `Unknown` or `Ahead`
+  (`0x3fffffffffe`, the seconds all ones and the millisecond code 1022),
+  in both layouts. `Time::from_code` refuses every other millisecond code
+  from 1000 up (`code`), `unix_ms` gives none for `Ahead` as for
+  `Unknown`, `is_instant()`/`is_ahead()` say which reading it is, and
+  `Time::written(guard, at, epoch)` is what an owner writes: `Ahead`
+  while its guard holds, whatever `at`, else the instant or `Unknown`.
+  Adding the variant broke every exhaustive match on purpose; a test
+  with `!= Time::Unknown` reads `is_instant()`. `health::Heard::heartbeat(time)`
+  is health.v1's reading of a heartbeat read in step: `Heartbeat` for an
+  instant, `HeartbeatHeld` for ahead and for unknown, so no answer of
+  `clock_ahead` moved (health.v1 0.11). `tests/conformance.rs`:
+  `heartbeat_time_vectors` (16 writes through `Time::written`, the 3
+  under `guard` ahead; 18 reads, `{"ahead": true}` spelt apart from
+  `{"at": null}`), `heartbeat_body_vectors` (18, 42) and
+  `heartbeat_owner_vectors` (14 writes, 47 reads) share
+  `heartbeat_time_value`/`heartbeat_time_of` (`"ahead"`) and
+  `check_earlier`: a read case states `earlier`, `{"refused": "code"}`,
+  exactly where its time is ahead; no reader here is built as 0.112's.
+  `tests/profiles.rs`'s `freshness_v2_apply`: 39 cases, 23 over owner
+  heartbeats, one heartbeat and one owner heartbeat applied under the
+  ahead time, each read as its source. All as written, none blessed.
+
   `desired.v2` (#986's J2, text 0.1, experimental) is `desired::v2`
   (`src/desired/v2.rs`), and what it shares with `desired.v1` is one
   copy, in `desired`. Shared: `machine::Core<M, R>` (crate-private), the

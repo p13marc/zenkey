@@ -734,6 +734,32 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `v2/plan.json`'s case 48 and `owner.json`'s sixth `forms` case, and
   made `zenctl watch` say, one line on stderr, that given no catalog it
   subscribed no owner heartbeat key (`freshness.v2` §5).
+  Core 0.113 (#986's Q0) gives a heartbeat's time, in both layouts, a
+  code for "this owner's clock is ahead": the seconds all ones with the
+  millisecond code 1022 (`0x3fffffffffe`, body `ffffffffff80`), no
+  instant. All 42 bits set stay unknown, now one meaning (no instant the
+  epoch codes); every other millisecond code from 1000 up stays unused.
+  Two rules: an implementation reads a time as an instant, unknown or
+  ahead, never the ahead time as either other (297 rules, implementation
+  81). `freshness.v2` 0.12 §2.10: an owner MUST write it while its guard
+  holds, where it wrote all ones, on its heartbeat and its owner
+  heartbeat; §2.5 says the time takes no part in a subscriber's steps,
+  and §5 that a tool shows the ahead time as ahead. The cost: a reader
+  built before refuses the body `code` (an owner heartbeat whole), so
+  every member the heartbeat covers goes stale to it during a drift;
+  readers move first. `heartbeat/times.json` (16 writes, 3 of them under
+  `guard`, 18 reads), `bodies.json` (18, 42), `owner.json` (14, 47) and
+  `freshness/conformance/apply.json` (39, 23 over owner heartbeats) hold
+  it, each read whose time is ahead stating what a 0.112 reader answers
+  as `earlier`, no expectation; computed twice, never blessed. The code
+  half ran every case as written, and all pass
+  (`heartbeat_time_vectors`, `heartbeat_body_vectors`,
+  `heartbeat_owner_vectors`, `freshness_v2_apply`); the reference runs
+  `freshness/scenarios-v2.md` §2's steps 4 and 6 and `health/scenarios.md`
+  §4 against the ahead time, and an owner heartbeat under the guard
+  (`zenkey/tests/profile_freshness_v2.rs`). `health.v1` 0.11 is
+  editorial: `heartbeat_held` is a time that is no instant, ahead or
+  unknown, and no answer of `clock.json` moved.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

@@ -532,3 +532,13 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `get_with_a_held_stamp_as_its_body_is_answered_by_the_held_stamp`).
   A `get --held RUN:SEQ` that writes the stamp and reads the answer as
   unchanged is not built.
+  A heartbeat's ahead time (#986's Q0, core 0.113 §7.5, `freshness.v2`
+  0.12 §5): zenctl shows it through the fleet's lens and nowhere else.
+  `echo`, `get`, `watch`, `record` and `timeline` over a heartbeat's key or
+  a class key print `"time":"ahead"` in JSON, where the unknown time is
+  `null`, and `time ahead` in an owner heartbeat's table line, never
+  `time unknown` and never an instant. `tests/cmd/owner-heartbeat.trycmd`
+  reads the capture's fifth row, an owner heartbeat written under the
+  guard (edited from real output). `health`'s clock question still reads
+  health.v1, where the ahead time is `heartbeat_held`: its answers did not
+  move.
