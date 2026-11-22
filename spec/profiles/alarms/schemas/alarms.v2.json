@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "alarms.v2.json",
+  "$comment": "The alarms.v2 profile's words (spec/profiles/alarms/v2.md, section 2.4): the text of an alarm that no table names. It carries no producer, host or source field, because the key names the publisher. The alarm's state, severity and time are in its packed record, on alarms/{slot}.",
+  "$defs": {
+    "alarms.v2.Words": {
+      "type": "object",
+      "properties": {
+        "rule": {
+          "description": "The rule's name. The first input of the key recipe.",
+          "type": "string"
+        },
+        "labels": {
+          "description": "The alarm's labels. Every label that is not host-scoped is a discriminating label and enters the key recipe.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "summary": {
+          "description": "One human-readable line.",
+          "type": "string"
+        },
+        "category": {
+          "description": "Free text naming what produced the alarm. Not part of the key.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule",
+        "summary"
+      ]
+    }
+  }
+}
