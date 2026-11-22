@@ -734,6 +734,32 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `v2/plan.json`'s case 48 and `owner.json`'s sixth `forms` case, and
   made `zenctl watch` say, one line on stderr, that given no catalog it
   subscribed no owner heartbeat key (`freshness.v2` §5).
+  Core 0.113 (#986's Q0) gives a heartbeat's time, in both layouts, a
+  code for "this owner's clock is ahead": the seconds all ones with the
+  millisecond code 1022 (`0x3fffffffffe`, body `ffffffffff80`), no
+  instant. All 42 bits set stay unknown, now one meaning (no instant the
+  epoch codes); every other millisecond code from 1000 up stays unused.
+  Two rules: an implementation reads a time as an instant, unknown or
+  ahead, never the ahead time as either other (297 rules, implementation
+  81). `freshness.v2` 0.12 §2.10: an owner MUST write it while its guard
+  holds, where it wrote all ones, on its heartbeat and its owner
+  heartbeat; §2.5 says the time takes no part in a subscriber's steps,
+  and §5 that a tool shows the ahead time as ahead. The cost: a reader
+  built before refuses the body `code` (an owner heartbeat whole), so
+  every member the heartbeat covers goes stale to it during a drift;
+  readers move first. `heartbeat/times.json` (16 writes, 3 of them under
+  `guard`, 18 reads), `bodies.json` (18, 42), `owner.json` (14, 47) and
+  `freshness/conformance/apply.json` (39, 23 over owner heartbeats) hold
+  it, each read whose time is ahead stating what a 0.112 reader answers
+  as `earlier`, no expectation; computed twice, never blessed. The code
+  half ran every case as written, and all pass
+  (`heartbeat_time_vectors`, `heartbeat_body_vectors`,
+  `heartbeat_owner_vectors`, `freshness_v2_apply`); the reference runs
+  `freshness/scenarios-v2.md` §2's steps 4 and 6 and `health/scenarios.md`
+  §4 against the ahead time, and an owner heartbeat under the guard
+  (`zenkey/tests/profile_freshness_v2.rs`). `health.v1` 0.11 is
+  editorial: `heartbeat_held` is a time that is no instant, ahead or
+  unknown, and no answer of `clock.json` moved.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`
@@ -855,6 +881,37 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   compatible) but moves the fingerprint, since the packed file's id
   hashes it (§2.2). Core Appendix D lists no `config` vocabulary, so W105
   reads none.
+- **`health.v2`** (#986 Q1, text 0.1, `experimental`, written against
+  core 0.113) sits beside `health.v1` in `spec/profiles/health/`:
+  `v2.md`, `scenarios-v2.md` (9 sections, no implementation has run
+  them: the owner and the readers are #986's Q2), `health.v2.toml`
+  (revision 2.0, `sha256:b447f613…05b1`, heartbeat tag 1, published in
+  `.history/health.v2/` by the code half with the fingerprint the
+  drafter computed), `health.v2.json` (artifact `sha256:d270e148…a983`;
+  `Status` and `Check` tag 3, `Fault` 11; 6, 6 and 8 bytes) and
+  `conformance/v2/{schema,records,tables,snapshots,judgements,clock}.json`
+  (327 cases, computed twice outside the repo, never blessed), with the
+  one `CHANGELOG.md`, its entries headed `health.v2 0.N`. It restates v1
+  by reference and replaces §2.5 (the heartbeat's ahead time answers; one
+  `clock_ahead` fault per hold, no Zenoh timestamp; the clock question
+  reads the last read heartbeat, never a fault), §2.6 (`unknown` and a
+  refused record are unknown) and §2.10 (words: 0 none, 1–31 the
+  profile's tables, 32–62 the service's own
+  `health.reasons`/`details`/`codes` on `[defaults]` of a contract that
+  lists `health.v2`, 63 `out_of_range`), and restates §2.2 by seq (one
+  instant: both snapshots complete, one run, one asof, no entry above
+  it). `judgements.json` takes the status's freshness as judged, where
+  v1's states the observations. Core Appendix D publishes the
+  vocabulary; `health.v1` publishes none and draws no W105. The code
+  half ran every case as written, and all 327 pass
+  (`zenkey-model/tests/profiles/health_v2.rs`, a runner per file, none
+  blessing). Three things a runner had to settle: `clock.json`'s cases
+  across a face state no `deployment`, where `judgements.json`'s do, and
+  are read as this major's; a `heartbeats` case's `last_read` is seeded
+  as one read heartbeat on the key; and §2.10's "a contract that loads
+  cannot hold `not_used`" does not hold for one that lists `health.v1`,
+  which loads with a `health.<key>` (no E020, no W105) and is
+  `not_used` in `tables.json`.
 - **`freshness.v1`** is `experimental` since #978's F5 (a status entry in
   `freshness/CHANGELOG.md`, text still 0.5): the adopters' contracts and
   `nav.v2` moved to `freshness.v2`, each a `uses_changed` revision in

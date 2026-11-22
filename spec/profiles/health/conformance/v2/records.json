@@ -1,0 +1,1417 @@
+{
+  "description": "health.v2 §2.3, §2.5, §2.6, §3: the packed Status, Check and Fault of health.v2.json (core §7.6). Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `layouts`: a type -> its layout form, the sha256 of its JCS bytes, its tag, and its shortest and longest record in bits, before the pad. `writes`: a type, the deployment `epoch` in seconds (0 where none is given) and a value in core §7.6's JSON reading (a word a number or the reserved code's name, a time in milliseconds since the Unix epoch, an absent optional field no member) -> the record's `bits` before the pad, the `pad` and the bytes in `hex`; with `stamp`, the owner's own stamp of that put (<run>/<seq>, the run in 4 lowercase hexadecimal digits for a 16-bit run and 8 for a 32-bit run, the seq in decimal), also the put's `payload`: CH (form 0, the stamp's width bit, the type's tag), the run, the seq, the record; or {refused: token}, the writer's, as the core's packed/vectors.json names them (`missing`, a field not given; `unknown`, a member the type does not have; `value`, a value of the wrong JSON type or a name not declared; `range`, a value with no code). An accepted write reads back, under the type's tag, to `reads_as` where given, else to its value. `reads`: a type, CH's `tag`, the record's bytes and the epoch -> {value} or {refused: token}, core §7.6's reading: `tag`, then `length` (the record ends before a bit the layout needs), then `length` (a byte after the pad) and `pad` (a pad bit set). No field of these types has an unused code, so no record is refused `code`; each layout ends at its marker, so none is refused `extension`: a marker read as 1 ends the reading, the rest a later text's, which must hold at least one bit. A reader of the profile reads a refused status or check as unknown, never ok (§2.6; judgements.json). `arguments`: the offset a clock guard measured, in milliseconds, or null for none -> a clock_ahead fault's argument (§2.5): whole seconds, rounded up, 65534 for that or more, not_available for none.",
+  "schema": "health.v2.json",
+  "layouts": [
+    {
+      "type": "Status",
+      "expect": {
+        "form": [
+          {
+            "type": "enum",
+            "width": 2,
+            "optional": false,
+            "escape": false,
+            "values": 4
+          },
+          {
+            "type": "int",
+            "width": 6,
+            "optional": false,
+            "minimum": 0,
+            "maximum": 62,
+            "reserved": [
+              "out_of_range"
+            ]
+          },
+          {
+            "type": "time",
+            "width": 32,
+            "optional": true,
+            "ms": false
+          },
+          "..."
+        ],
+        "sha256": "36961466df19a73d776c433db2c8da9c0aebd2690fe1137532eee1581c69f823",
+        "tag": 3,
+        "min_bits": 10,
+        "max_bits": 42
+      }
+    },
+    {
+      "type": "Check",
+      "expect": {
+        "form": [
+          {
+            "type": "enum",
+            "width": 2,
+            "optional": false,
+            "escape": false,
+            "values": 4
+          },
+          {
+            "type": "int",
+            "width": 6,
+            "optional": false,
+            "minimum": 0,
+            "maximum": 62,
+            "reserved": [
+              "out_of_range"
+            ]
+          },
+          {
+            "type": "time",
+            "width": 32,
+            "optional": true,
+            "ms": false
+          },
+          "..."
+        ],
+        "sha256": "36961466df19a73d776c433db2c8da9c0aebd2690fe1137532eee1581c69f823",
+        "tag": 3,
+        "min_bits": 10,
+        "max_bits": 42
+      }
+    },
+    {
+      "type": "Fault",
+      "expect": {
+        "form": [
+          {
+            "type": "int",
+            "width": 6,
+            "optional": false,
+            "minimum": 0,
+            "maximum": 62,
+            "reserved": [
+              "out_of_range"
+            ]
+          },
+          {
+            "type": "enum",
+            "width": 2,
+            "optional": false,
+            "escape": false,
+            "values": 4
+          },
+          {
+            "type": "int",
+            "width": 16,
+            "optional": false,
+            "minimum": 0,
+            "maximum": 65534,
+            "reserved": [
+              "not_available"
+            ]
+          },
+          {
+            "type": "time",
+            "width": 32,
+            "optional": true,
+            "ms": false
+          },
+          "..."
+        ],
+        "sha256": "7a197603c029edd0d8c9644f0cc060310d4fb80b16f66fae853de63a9b654a6b",
+        "tag": 11,
+        "min_bits": 26,
+        "max_bits": 58
+      }
+    }
+  ],
+  "writes": [
+    {
+      "note": "a status ok, serving, its level changed at 14:45:59: 42 bits, 6 bytes; its put under the 16-bit run 0003 at seq 5 has CH 0x03, 12 bytes",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "since": 1794062759000
+      },
+      "stamp": "0003/5",
+      "expect": {
+        "bits": "010000101000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "4280ccc05380",
+        "payload": "0300030000054280ccc05380"
+      }
+    },
+    {
+      "note": "the same under a 32-bit run: CH 0x13, 14 bytes",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "since": 1794062759000
+      },
+      "stamp": "0000002a/5",
+      "expect": {
+        "bits": "010000101000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "4280ccc05380",
+        "payload": "130000002a0000054280ccc05380"
+      }
+    },
+    {
+      "note": "an owner at start, its level not yet established, on a clock the epoch does not code: unknown, starting, no since: 10 bits, 2 bytes",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "unknown",
+        "reason": 1
+      },
+      "stamp": "0003/0",
+      "expect": {
+        "bits": "0000000100",
+        "pad": 6,
+        "hex": "0100",
+        "payload": "0300030000000100"
+      }
+    },
+    {
+      "note": "failed, raised to its worst check's level",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "failed",
+        "reason": 4,
+        "since": 1794062759000
+      },
+      "expect": {
+        "bits": "110001001000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "c480ccc05380"
+      }
+    },
+    {
+      "note": "degraded, upstream_lost",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "degraded",
+        "reason": 5,
+        "since": 1794062759000
+      },
+      "expect": {
+        "bits": "100001011000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "8580ccc05380"
+      }
+    },
+    {
+      "note": "degraded, the service's own first word, 32",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "degraded",
+        "reason": 32,
+        "since": 1794062759000
+      },
+      "expect": {
+        "bits": "101000001000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "a080ccc05380"
+      }
+    },
+    {
+      "note": "the service's own last word, 62",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 62,
+        "since": 1794062759000
+      },
+      "expect": {
+        "bits": "011111101000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "7e80ccc05380"
+      }
+    },
+    {
+      "note": "a word no table names: out_of_range, the code 63",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "degraded",
+        "reason": "out_of_range",
+        "since": 1794062759000
+      },
+      "expect": {
+        "bits": "101111111000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "bf80ccc05380"
+      }
+    },
+    {
+      "note": "no word given: 0",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 0,
+        "since": 1794062759000
+      },
+      "expect": {
+        "bits": "010000001000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "4080ccc05380"
+      }
+    },
+    {
+      "note": "since at the epoch itself: 32 zero bits",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "since": 1767225600000
+      },
+      "expect": {
+        "bits": "010000101000000000000000000000000000000000",
+        "pad": 6,
+        "hex": "428000000000"
+      }
+    },
+    {
+      "note": "since at the epoch's last second",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "since": 6062192895000
+      },
+      "expect": {
+        "bits": "010000101111111111111111111111111111111110",
+        "pad": 6,
+        "hex": "42ffffffff80"
+      }
+    },
+    {
+      "note": "a time keeps whole seconds: the milliseconds are dropped",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "since": 1794062759123
+      },
+      "expect": {
+        "bits": "010000101000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "4280ccc05380"
+      },
+      "reads_as": {
+        "level": "ok",
+        "reason": 2,
+        "since": 1794062759000
+      }
+    },
+    {
+      "note": "with no catalog, E = 0: the 32 bits are Unix seconds",
+      "type": "Status",
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "since": 1794062759000
+      },
+      "expect": {
+        "bits": "010000101011010101110111100111001101001110",
+        "pad": 6,
+        "hex": "42b5779cd380"
+      }
+    },
+    {
+      "note": "63 given as a number: no value has that code, which is out_of_range's",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 63
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "a word above 6 bits",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 64
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "a negative word",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": -1
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "a level in capitals is no declared name",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "OK",
+        "reason": 2
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a level this major does not have",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "unspecified",
+        "reason": 2
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a reserved name the field does not declare",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": "not_available"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "a word given as text: a name is no value of the field",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": "serving"
+      },
+      "expect": {
+        "refused": "value"
+      }
+    },
+    {
+      "note": "no level",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "reason": 2
+      },
+      "expect": {
+        "refused": "missing"
+      }
+    },
+    {
+      "note": "no reason",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok"
+      },
+      "expect": {
+        "refused": "missing"
+      }
+    },
+    {
+      "note": "a member the type does not have: a check's detail on a status",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "detail": 1
+      },
+      "expect": {
+        "refused": "unknown"
+      }
+    },
+    {
+      "note": "since one second before the epoch: no code",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "since": 1767225599000
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "since 2^32 seconds after the epoch: no code",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "reason": 2,
+        "since": 6062192896000
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "the Unix epoch, as a clock with no real-time clock reads at boot, under a catalog's epoch: no code. Such an owner leaves since absent",
+      "type": "Status",
+      "epoch": 1767225600,
+      "value": {
+        "level": "unknown",
+        "reason": 1,
+        "since": 0
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "a check ok, with the detail ok: 42 bits, 6 bytes; its put has CH 0x03, a status's",
+      "type": "Check",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "detail": 1,
+        "at": 1794062759000
+      },
+      "stamp": "0003/6",
+      "expect": {
+        "bits": "010000011000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "4180ccc05380",
+        "payload": "0300030000064180ccc05380"
+      }
+    },
+    {
+      "note": "a check failed, timeout",
+      "type": "Check",
+      "epoch": 1767225600,
+      "value": {
+        "level": "failed",
+        "detail": 3,
+        "at": 1794062759000
+      },
+      "expect": {
+        "bits": "110000111000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "c380ccc05380"
+      }
+    },
+    {
+      "note": "a check its owner cannot run: unknown, cannot_run, and no time: 2 bytes",
+      "type": "Check",
+      "epoch": 1767225600,
+      "value": {
+        "level": "unknown",
+        "detail": 5
+      },
+      "expect": {
+        "bits": "0000010100",
+        "pad": 6,
+        "hex": "0500"
+      }
+    },
+    {
+      "note": "a check degraded, with the service's own detail 33",
+      "type": "Check",
+      "epoch": 1767225600,
+      "value": {
+        "level": "degraded",
+        "detail": 33,
+        "at": 1794062759000
+      },
+      "expect": {
+        "bits": "101000011000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "a180ccc05380"
+      }
+    },
+    {
+      "note": "a check with a detail no table names",
+      "type": "Check",
+      "epoch": 1767225600,
+      "value": {
+        "level": "failed",
+        "detail": "out_of_range",
+        "at": 1794062759000
+      },
+      "expect": {
+        "bits": "111111111000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "ff80ccc05380"
+      }
+    },
+    {
+      "note": "a status's reason on a check: a member the type does not have",
+      "type": "Check",
+      "epoch": 1767225600,
+      "value": {
+        "level": "ok",
+        "detail": 1,
+        "reason": 2
+      },
+      "expect": {
+        "refused": "unknown"
+      }
+    },
+    {
+      "note": "clock_ahead, failed, an offset of 2 s: 58 bits, 8 bytes; its put under the 16-bit run 0003 at seq 9 has CH 0x0b, 14 bytes",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 1,
+        "level": "failed",
+        "argument": 2,
+        "at": 1794062759000
+      },
+      "stamp": "0003/9",
+      "expect": {
+        "bits": "0000011100000000000000101000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "07000280ccc05380",
+        "payload": "0b000300000907000280ccc05380"
+      }
+    },
+    {
+      "note": "the same under a 32-bit run: CH 0x1b, 16 bytes",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 1,
+        "level": "failed",
+        "argument": 2,
+        "at": 1794062759000
+      },
+      "stamp": "0000002a/9",
+      "expect": {
+        "bits": "0000011100000000000000101000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "07000280ccc05380",
+        "payload": "1b0000002a00000907000280ccc05380"
+      }
+    },
+    {
+      "note": "clock_ahead with no offset measured: not_available, all 16 bits set",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 1,
+        "level": "failed",
+        "argument": "not_available",
+        "at": 1794062759000
+      },
+      "expect": {
+        "bits": "0000011111111111111111111000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "07ffff80ccc05380"
+      }
+    },
+    {
+      "note": "the service's own code 33, degraded, with its own number",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 33,
+        "level": "degraded",
+        "argument": 4012,
+        "at": 1794062759000
+      },
+      "expect": {
+        "bits": "1000011000001111101011001000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "860fac80ccc05380"
+      }
+    },
+    {
+      "note": "an occurrence that degrades nothing, with no code and no time: 26 bits, 4 bytes",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 0,
+        "level": "ok",
+        "argument": "not_available"
+      },
+      "expect": {
+        "bits": "00000001111111111111111100",
+        "pad": 6,
+        "hex": "01ffff00"
+      }
+    },
+    {
+      "note": "a code no table names",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": "out_of_range",
+        "level": "degraded",
+        "argument": 0,
+        "at": 1794062759000
+      },
+      "expect": {
+        "bits": "1111111000000000000000001000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "fe000080ccc05380"
+      }
+    },
+    {
+      "note": "the largest argument",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 1,
+        "level": "failed",
+        "argument": 65534,
+        "at": 1794062759000
+      },
+      "expect": {
+        "bits": "0000011111111111111111101000000011001100110000000101001110",
+        "pad": 6,
+        "hex": "07fffe80ccc05380"
+      }
+    },
+    {
+      "note": "65535 given as a number: no value has that code, which is not_available's",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 1,
+        "level": "failed",
+        "argument": 65535,
+        "at": 1794062759000
+      },
+      "expect": {
+        "refused": "range"
+      }
+    },
+    {
+      "note": "no argument: the field is not optional",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 1,
+        "level": "failed",
+        "at": 1794062759000
+      },
+      "expect": {
+        "refused": "missing"
+      }
+    },
+    {
+      "note": "a fault's detail as text: a member the type does not have",
+      "type": "Fault",
+      "epoch": 1767225600,
+      "value": {
+        "code": 1,
+        "level": "failed",
+        "argument": 2,
+        "detail": "2 s"
+      },
+      "expect": {
+        "refused": "unknown"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "read back: a status ok, serving, its level changed at 14:45:59: 42 bits, 6 bytes; its put under the 16-bit run 0003 at seq 5 has CH 0x03, 12 bytes",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4280ccc05380",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 2,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: the same under a 32-bit run: CH 0x13, 14 bytes",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4280ccc05380",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 2,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: an owner at start, its level not yet established, on a clock the epoch does not code: unknown, starting, no since: 10 bits, 2 bytes",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "0100",
+      "expect": {
+        "value": {
+          "level": "unknown",
+          "reason": 1
+        }
+      }
+    },
+    {
+      "note": "read back: failed, raised to its worst check's level",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "c480ccc05380",
+      "expect": {
+        "value": {
+          "level": "failed",
+          "reason": 4,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: degraded, upstream_lost",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "8580ccc05380",
+      "expect": {
+        "value": {
+          "level": "degraded",
+          "reason": 5,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: degraded, the service's own first word, 32",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "a080ccc05380",
+      "expect": {
+        "value": {
+          "level": "degraded",
+          "reason": 32,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: the service's own last word, 62",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "7e80ccc05380",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 62,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: a word no table names: out_of_range, the code 63",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "bf80ccc05380",
+      "expect": {
+        "value": {
+          "level": "degraded",
+          "reason": "out_of_range",
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: no word given: 0",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4080ccc05380",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 0,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: since at the epoch itself: 32 zero bits",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "428000000000",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 2,
+          "since": 1767225600000
+        }
+      }
+    },
+    {
+      "note": "read back: since at the epoch's last second",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "42ffffffff80",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 2,
+          "since": 6062192895000
+        }
+      }
+    },
+    {
+      "note": "read back: a time keeps whole seconds: the milliseconds are dropped",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4280ccc05380",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 2,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: with no catalog, E = 0: the 32 bits are Unix seconds",
+      "type": "Status",
+      "tag": 3,
+      "hex": "42b5779cd380",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 2,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: a check ok, with the detail ok: 42 bits, 6 bytes; its put has CH 0x03, a status's",
+      "type": "Check",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4180ccc05380",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "detail": 1,
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: a check failed, timeout",
+      "type": "Check",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "c380ccc05380",
+      "expect": {
+        "value": {
+          "level": "failed",
+          "detail": 3,
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: a check its owner cannot run: unknown, cannot_run, and no time: 2 bytes",
+      "type": "Check",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "0500",
+      "expect": {
+        "value": {
+          "level": "unknown",
+          "detail": 5
+        }
+      }
+    },
+    {
+      "note": "read back: a check degraded, with the service's own detail 33",
+      "type": "Check",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "a180ccc05380",
+      "expect": {
+        "value": {
+          "level": "degraded",
+          "detail": 33,
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: a check with a detail no table names",
+      "type": "Check",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "ff80ccc05380",
+      "expect": {
+        "value": {
+          "level": "failed",
+          "detail": "out_of_range",
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: clock_ahead, failed, an offset of 2 s: 58 bits, 8 bytes; its put under the 16-bit run 0003 at seq 9 has CH 0x0b, 14 bytes",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "07000280ccc05380",
+      "expect": {
+        "value": {
+          "code": 1,
+          "level": "failed",
+          "argument": 2,
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: the same under a 32-bit run: CH 0x1b, 16 bytes",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "07000280ccc05380",
+      "expect": {
+        "value": {
+          "code": 1,
+          "level": "failed",
+          "argument": 2,
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: clock_ahead with no offset measured: not_available, all 16 bits set",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "07ffff80ccc05380",
+      "expect": {
+        "value": {
+          "code": 1,
+          "level": "failed",
+          "argument": "not_available",
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: the service's own code 33, degraded, with its own number",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "860fac80ccc05380",
+      "expect": {
+        "value": {
+          "code": 33,
+          "level": "degraded",
+          "argument": 4012,
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: an occurrence that degrades nothing, with no code and no time: 26 bits, 4 bytes",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "01ffff00",
+      "expect": {
+        "value": {
+          "code": 0,
+          "level": "ok",
+          "argument": "not_available"
+        }
+      }
+    },
+    {
+      "note": "read back: a code no table names",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "fe000080ccc05380",
+      "expect": {
+        "value": {
+          "code": "out_of_range",
+          "level": "degraded",
+          "argument": 0,
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "read back: the largest argument",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "07fffe80ccc05380",
+      "expect": {
+        "value": {
+          "code": 1,
+          "level": "failed",
+          "argument": 65534,
+          "at": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "a status under a fault's tag",
+      "type": "Status",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "4280ccc05380",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a fault under a status's tag",
+      "type": "Fault",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "07000280ccc05380",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a status under tag 0",
+      "type": "Status",
+      "tag": 0,
+      "epoch": 1767225600,
+      "hex": "4280ccc05380",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "a check's bytes read as a status: one layout and one tag, so they read. The key says which, never the tag",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "c380ccc05380",
+      "expect": {
+        "value": {
+          "level": "failed",
+          "reason": 3,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "no byte at all",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "one byte: the level and the reason, and no presence bit",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "42",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "five bytes where the time is present: the record ends before its 42 bits",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4280ccc053",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "a byte after the pad",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4280ccc0538000",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "a byte after a two-byte record's pad",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "010000",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "a pad bit set",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4280ccc05381",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "a pad bit set in a two-byte record",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "0101",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "a tag is checked before the length",
+      "type": "Status",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "the marker at 1: a later text's field follows, ignored. The level and the words stand",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "8580ccc053e0",
+      "expect": {
+        "value": {
+          "level": "degraded",
+          "reason": 5,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "the marker at 1 and two more bytes of a later text's",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "8580ccc053e0beef",
+      "expect": {
+        "value": {
+          "level": "degraded",
+          "reason": 5,
+          "since": 1794062759000
+        }
+      }
+    },
+    {
+      "note": "the marker at 1 in a record with no time: what follows is a later text's, its bits not read as a pad",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "c441",
+      "expect": {
+        "value": {
+          "level": "failed",
+          "reason": 4
+        }
+      }
+    },
+    {
+      "note": "every code of the level is a value: unknown",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "0000",
+      "expect": {
+        "value": {
+          "level": "unknown",
+          "reason": 0
+        }
+      }
+    },
+    {
+      "note": "every code of the level is a value: ok",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "4000",
+      "expect": {
+        "value": {
+          "level": "ok",
+          "reason": 0
+        }
+      }
+    },
+    {
+      "note": "every code of the level is a value: degraded",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "8000",
+      "expect": {
+        "value": {
+          "level": "degraded",
+          "reason": 0
+        }
+      }
+    },
+    {
+      "note": "every code of the level is a value: failed",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "c000",
+      "expect": {
+        "value": {
+          "level": "failed",
+          "reason": 0
+        }
+      }
+    },
+    {
+      "note": "a fault cut before its time",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "07000280",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "a fault's pad bit set",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "07000280ccc05381",
+      "expect": {
+        "refused": "pad"
+      }
+    },
+    {
+      "note": "a fault with a byte after its pad",
+      "type": "Fault",
+      "tag": 11,
+      "epoch": 1767225600,
+      "hex": "07000280ccc0538000",
+      "expect": {
+        "refused": "length"
+      }
+    },
+    {
+      "note": "all ones in six bytes: failed, out_of_range, a time at the epoch's last second, and the marker at 1 with a later text's bits after it",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "ffffffffffff",
+      "expect": {
+        "value": {
+          "level": "failed",
+          "reason": "out_of_range",
+          "since": 6062192895000
+        }
+      }
+    },
+    {
+      "note": "all zeros in two bytes: unknown, no word, no time",
+      "type": "Status",
+      "tag": 3,
+      "epoch": 1767225600,
+      "hex": "0000",
+      "expect": {
+        "value": {
+          "level": "unknown",
+          "reason": 0
+        }
+      }
+    }
+  ],
+  "arguments": [
+    {
+      "note": "an offset of 2 s exactly",
+      "offset_ms": 2000,
+      "expect": {
+        "argument": 2
+      }
+    },
+    {
+      "note": "one millisecond over 2 s: rounded up",
+      "offset_ms": 2001,
+      "expect": {
+        "argument": 3
+      }
+    },
+    {
+      "note": "0.7 s, beyond a 500-ms delta: 1, never 0",
+      "offset_ms": 700,
+      "expect": {
+        "argument": 1
+      }
+    },
+    {
+      "note": "one millisecond",
+      "offset_ms": 1,
+      "expect": {
+        "argument": 1
+      }
+    },
+    {
+      "note": "no offset measured",
+      "offset_ms": null,
+      "expect": {
+        "argument": "not_available"
+      }
+    },
+    {
+      "note": "65,534 s exactly",
+      "offset_ms": 65534000,
+      "expect": {
+        "argument": 65534
+      }
+    },
+    {
+      "note": "one millisecond more: still 65,534",
+      "offset_ms": 65534001,
+      "expect": {
+        "argument": 65534
+      }
+    },
+    {
+      "note": "a day and more",
+      "offset_ms": 100000000,
+      "expect": {
+        "argument": 65534
+      }
+    }
+  ]
+}

@@ -1,16 +1,20 @@
 An owner heartbeat's groups (#1110; core §7.5, observer 0.34 §7.3, §7.5).
 
-The capture holds four puts on `lab/trio`'s owner heartbeat keys, written
+The capture holds five puts on `lab/trio`'s owner heartbeat keys, written
 by the model's writer (the fleet's `tests/owner_heartbeat.rs` regenerates
 it): three groups on the `host` key, a known group beside an index the
-catalog does not hold, one group on the `link` key, and a put whose CH tag
-is not 0. The key says which layout a put carries, never its bytes.
+catalog does not hold, one group on the `link` key, a put whose CH tag
+is not 0, and a put written while its owner's clock guard holds, whose
+time is the ahead time (core 0.113 §7.5). The key says which layout a put
+carries, never its bytes.
 
 Given the catalog its header names, each group is read with the revision its
 index names (observer §7.5): its index, its tag and its size, then what it
 vouches for. A group at an index the catalog does not hold is shown by its
 envelope, and the put's other groups are read all the same. A put core §7.5
-refuses whole is undecodable.
+refuses whole is undecodable. The ahead time is shown as `time ahead`,
+never as unknown and never as an instant (`freshness.v2` §5), and its
+group is read as under any other time.
 
 ```console
 $ zenctl echo --from tests/cmd/fixtures/owner-heartbeat.zrec --contracts ../zenkey/tests/contracts/trio --catalog tests/cmd/fixtures/owner-heartbeat.catalog.json --format table --color never
@@ -22,6 +26,8 @@ zk2/lab/trio/freshness.v2/stream/heartbeats/link
   zk2c owner heartbeat (link): link, run 0007, seq 0, time unknown, 1 group | #2 charlie.v1, tag 1, 35 bits: state/reach 0000001c vouched
 zk2/lab/trio/freshness.v2/stream/heartbeats/host
   <13 B that do not decode as zk2c owner heartbeat (host): the owner heartbeat is refused: tag>
+zk2/lab/trio/freshness.v2/stream/heartbeats/host
+  zk2c owner heartbeat (host): host, run 0007, seq 7, time ahead, 1 group | #0 alpha.v1, tag 11, 34 bits: state/status 0000000a vouched
 
 ```
 
@@ -40,10 +46,13 @@ zk2/lab/trio/freshness.v2/stream/heartbeats/link
   zk2c owner heartbeat (link): link, run 0007, seq 0, time unknown, 1 group | #2, tag 1, 35 bits: unread, unknown_catalog: no catalog to read its index through (core §8.6): give the one its owner names
 zk2/lab/trio/freshness.v2/stream/heartbeats/host
   <13 B that do not decode as zk2c owner heartbeat (host): the owner heartbeat is refused: tag>
+zk2/lab/trio/freshness.v2/stream/heartbeats/host
+  zk2c owner heartbeat (host): host, run 0007, seq 7, time ahead, 1 group | #0, tag 11, 34 bits: unread, unknown_catalog: no catalog to read its index through (core §8.6): give the one its owner names
 
 ```
 
-The ndjson form carries each group whole.
+The ndjson form carries each group whole, and the ahead time as
+`"time":"ahead"` where the unknown time is `null`.
 
 ```console
 $ zenctl echo --from tests/cmd/fixtures/owner-heartbeat.zrec --contracts ../zenkey/tests/contracts/trio --catalog tests/cmd/fixtures/owner-heartbeat.catalog.json --format ndjson
@@ -51,6 +60,7 @@ $ zenctl echo --from tests/cmd/fixtures/owner-heartbeat.zrec --contracts ../zenk
 {"key":"zk2/lab/trio/freshness.v2/stream/heartbeats/host","identity":{"is":"resource","address":"lab/trio","iface":"freshness.v2","token":"stream","unresolved":{"reason":"contract_not_held","fingerprint":"sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1"}},"t":2000000,"type":"zk2c owner heartbeat (host)","typed":true,"encoding":"zenoh/bytes","delete":false,"value":{"class":"host","groups":[{"covered":"sha256:3d869b95ed2f13dae57af9d47774ebbd5a9f65e57878524f93c12808a38b770b","covers":"alpha.v1","index":0,"sections":{"state/status":{"digest":"0000000a","vouched":true}},"size":34,"tag":11},{"index":900,"size":34,"tag":11,"unread":"unknown_index"}],"run":"0007","seq":5,"time":null},"payload_bytes":26,"verdict":"valid"}
 {"key":"zk2/lab/trio/freshness.v2/stream/heartbeats/link","identity":{"is":"resource","address":"lab/trio","iface":"freshness.v2","token":"stream","unresolved":{"reason":"contract_not_held","fingerprint":"sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1"}},"t":3000000,"type":"zk2c owner heartbeat (link)","typed":true,"encoding":"zenoh/bytes","delete":false,"value":{"class":"link","groups":[{"covered":"sha256:b4dec33cdf5800d23bce2476f23b899c44e14373be36895d300adf9987dfa8d1","covers":"charlie.v1","index":2,"sections":{"state/reach":{"digest":"0000001c","vouched":true}},"size":35,"tag":1}],"run":"0007","seq":0,"time":null},"payload_bytes":19,"verdict":"valid"}
 {"key":"zk2/lab/trio/freshness.v2/stream/heartbeats/host","identity":{"is":"resource","address":"lab/trio","iface":"freshness.v2","token":"stream","unresolved":{"reason":"contract_not_held","fingerprint":"sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1"}},"t":4000000,"type":"zk2c owner heartbeat (host)","typed":false,"encoding":"zenoh/bytes","delete":false,"value":"<zk2c owner heartbeat (host), 13 bytes>","payload_bytes":19,"verdict":"undecodable","decode_error":"the owner heartbeat is refused: tag"}
+{"key":"zk2/lab/trio/freshness.v2/stream/heartbeats/host","identity":{"is":"resource","address":"lab/trio","iface":"freshness.v2","token":"stream","unresolved":{"reason":"contract_not_held","fingerprint":"sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1"}},"t":5000000,"type":"zk2c owner heartbeat (host)","typed":true,"encoding":"zenoh/bytes","delete":false,"value":{"class":"host","groups":[{"covered":"sha256:3d869b95ed2f13dae57af9d47774ebbd5a9f65e57878524f93c12808a38b770b","covers":"alpha.v1","index":0,"sections":{"state/status":{"digest":"0000000a","vouched":true}},"size":34,"tag":11}],"run":"0007","seq":7,"time":"ahead"},"payload_bytes":19,"verdict":"valid"}
 
 ```
 
@@ -58,11 +68,12 @@ $ zenctl echo --from tests/cmd/fixtures/owner-heartbeat.zrec --contracts ../zenk
 
 ```console
 $ zenctl timeline --from tests/cmd/fixtures/owner-heartbeat.zrec --contracts ../zenkey/tests/contracts/trio --format table --color never
-lab/trio freshness.v2 stream/heartbeats/{class} · arrival · no stamper; 4 stamped in band
+lab/trio freshness.v2 stream/heartbeats/{class} · arrival · no stamper; 5 stamped in band
 0  +1.000s  in band run 0007, seq 3  zk2/lab/trio/freshness.v2/stream/heartbeats/host
 1  +2.000s  in band run 0007, seq 5  zk2/lab/trio/freshness.v2/stream/heartbeats/host
 2  +3.000s  in band run 0007, seq 0  zk2/lab/trio/freshness.v2/stream/heartbeats/link
 3  +4.000s  in band run 0007, seq 6  zk2/lab/trio/freshness.v2/stream/heartbeats/host
+4  +5.000s  in band run 0007, seq 7  zk2/lab/trio/freshness.v2/stream/heartbeats/host
 ordered by arrival — observer monotonic, µs since window start; a position says when this observer saw a sample, never when it was produced (observer §8.3)
 the per-publisher sequence-number lane is unavailable: zenoh 1.9/1.10 deliver no SourceInfo to subscribers (eclipse-zenoh/zenoh#2563); `tests/stamper.rs` pins it (observer §1)
 @stream, @state, @op, @zk, @adv excluded from this window, not empty: no selector names them, and `*`/`**` never match a verbatim chunk (tooling guide O5)
@@ -90,7 +101,8 @@ would put replay/zk2/lab/trio/freshness.v2/stream/heartbeats/host  (33 B, zenoh/
 would put replay/zk2/lab/trio/freshness.v2/stream/heartbeats/host  (26 B, zenoh/bytes)
 would put replay/zk2/lab/trio/freshness.v2/stream/heartbeats/link  (19 B, zenoh/bytes)
 would put replay/zk2/lab/trio/freshness.v2/stream/heartbeats/host  (19 B, zenoh/bytes)
-would replay 4 put(s) and 0 tombstone(s) from zk2/lab/trio/** (captured 2026-11-21T00:00:00Z)
+would put replay/zk2/lab/trio/freshness.v2/stream/heartbeats/host  (19 B, zenoh/bytes)
+would replay 5 put(s) and 0 tombstone(s) from zk2/lab/trio/** (captured 2026-11-21T00:00:00Z)
 into namespace "replay", each key moved from the capture's base ""
 
 ```

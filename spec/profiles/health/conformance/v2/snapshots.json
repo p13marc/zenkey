@@ -1,0 +1,1331 @@
+{
+  "description": "health.v2 §2.2, §2.4: a late joiner's reading of one owner's answer to a GET over zk2/lab/svc/health.v2/state/** (core §4.2, §7.5). Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `epoch` is the deployment epoch in seconds. `replies` are the GET's replies, each its `key` and its payload in `hex`: a snapshot's page, the status's on its own key with collection index 1 and one entry of the empty id, the checks' on .../state/checks with collection index 0 and one entry per check, its id the check's name. Every page is one core §7.5 accepts. `expect.status` and `expect.checks` are null where no page of that collection was read, else: `complete` (the reader holds a page of each index up to one whose more bit is 0), the snapshot's `run` (4 lowercase hexadecimal digits for a 16-bit run, 8 for a 32-bit run), its `asof` and its `time` in milliseconds since the Unix epoch. The status's `entry` is null (no entry), a tombstone ({tombstone: true, stamp}) or a live entry; the checks' `live` and `retired` list their live entries and tombstones in the order read, each with its `check`. A live entry is its `stamp` (<run>/<seq>, the entry's own run where it states one), its `confirmation` (`none`, `time`: vouched for at the snapshot's time, or `conf`: its last confirmation), `confirmed_at` in milliseconds since the Unix epoch (null for none) and its `record`, read by core §7.6 under the page's tag as records.json reads it: the fields, or {refused: token}. `expect.instant` is §2.2's one instant: both snapshots read and complete, under one run in width and value and one asof, and no live entry or tombstone of that run with a seq above the asof; an entry that states its own run breaks nothing. `expect.status_better_than_a_check` is null unless the reading is one instant and the status's record reads at a level; then it is true when a live check's record reads at a worse level, the break of §2.2 a tool may report from this reading alone, and false otherwise. A check at unknown, and one whose record is refused, bound nothing.",
+  "cases": [
+    {
+      "note": "a late joiner's GET over health.v2/state/**: the status ok, vouched for at the snapshot's time, and two checks ok, both snapshots under the run 0007 at asof 12. One instant, and no check worse",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000002046469736b00000003064180ccc05380036e657400000004064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            },
+            {
+              "check": "net",
+              "stamp": "0007/4",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "the owner no longer vouches for its status: confirmation 2, with its last confirmation, 90 s before the snapshot's time. A GET reader ages it from that time",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010040000005019980890000064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b00000003064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "conf",
+            "confirmed_at": 1794062729000,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "a status failed for its check, read in one instant: the status is as bad as its worst check",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa000101002000000a06c480ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000002046469736b0000000b06c380ccc05380036e657400000004064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/10",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "failed",
+              "reason": 4,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/11",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "failed",
+                "detail": 3,
+                "at": 1794062759000
+              }
+            },
+            {
+              "check": "net",
+              "stamp": "0007/4",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "a status ok over a check failed, in one instant: the owner held a status better than a check, and a tool may report it from this reading alone (§2.2)",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b0000000b06c380ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/11",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "failed",
+                "detail": 3,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": true
+      }
+    },
+    {
+      "note": "the same two snapshots at two asofs, 11 and 12: not one instant. The status may have been put between them, so a tool needs a second reading",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000b019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b0000000b06c380ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 11,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/11",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "failed",
+                "detail": 3,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": false,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "a check's entry above the asof: the owner put it while it answered, so the snapshot shows a later state than its asof. Not one instant",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b0000000d06c380ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/13",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "failed",
+                "detail": 3,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": false,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "the status's entry above the asof: not one instant",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa000101002000000d06c480ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b0000000b06c380ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/13",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "failed",
+              "reason": 4,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/11",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "failed",
+                "detail": 3,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": false,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "a check retired within the window: a tombstone at or below the asof, and one instant",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b00000003064180ccc0538001036e657400000009"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": [
+            {
+              "check": "net",
+              "stamp": "0007/9"
+            }
+          ]
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "a tombstone above the asof: the check was deleted while the owner answered. Not one instant",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b00000003064180ccc0538001036e65740000000e"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": [
+            {
+              "check": "net",
+              "stamp": "0007/14"
+            }
+          ]
+        },
+        "instant": false,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "a check last put under an earlier run of this instance: its entry states its own run, 0006, and a seq above the asof. It is that run's seq, and breaks nothing",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000002046469736b800006000028064180ccc05380036e657400000004064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0006/40",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            },
+            {
+              "check": "net",
+              "stamp": "0007/4",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "the two snapshots under two runs: the owner took a new run between them. Not one instant",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000800000c019980e300fa000001046469736b00000003064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0008",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0008/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": false,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "a 16-bit run and a 32-bit run of one value are two runs",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "f30000000700000c019980e300fa000001046469736b00000003064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "00000007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "00000007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": false,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "both under a 32-bit run: CH 0xf3, and one instant",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "f30000002a00000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "f30000002a00000c019980e300fa000001046469736b00000003064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0000002a",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0000002a/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0000002a",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0000002a/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "the checks' snapshot in two pages, both read: complete, and one instant, whose second page holds a check failed under the status ok",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa010001046469736b00000003064180ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa020001036e65740000000406c380ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            },
+            {
+              "check": "net",
+              "stamp": "0007/4",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "failed",
+                "detail": 3,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": true
+      }
+    },
+    {
+      "note": "the same with its second page lost: the checks are not known whole, so the reading is not one instant, and the check it lists says nothing of those it does not",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa010001046469736b00000003064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": false,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": false,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "no check at all: the checks' snapshot with no entry is the owner's word that it holds none",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa00000000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "the status's snapshot with no entry: the owner holds no status, which §2.3 forbids. A reader judges it deleted",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa00010000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b00000003064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": null
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "the status as a tombstone: the owner deleted it within its window",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa000100010000000009"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b00000003064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "tombstone": true,
+            "stamp": "0007/9"
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "only the status's snapshot was read, by a member read of its key: the checks count as none, and nothing is one instant",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": null,
+        "instant": false,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "an owner at start: unknown, starting, no since, a 2-byte record",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e30007000000019980e300fa000101002000000002010000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e30007000000019980e300fa00000000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 0,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/0",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "unknown",
+              "reason": 1
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 0,
+          "time": 1794062819250,
+          "live": [],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "a status whose record has a pad bit set: the entry is read, its record refused. The status is unknown, never ok, and the reading states no better-than",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538100"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b0000000306c380ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "refused": "pad"
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "failed",
+                "detail": 3,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "a check whose record is cut short: refused, so it bounds nothing",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b0000000303c380cc00"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "refused": "length"
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "a snapshot under another tag than the type's: every record of it is refused, tag",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "eb000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b00000003064180ccc0538000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "refused": "tag"
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/3",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "ok",
+                "detail": 1,
+                "at": 1794062759000
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": null
+      }
+    },
+    {
+      "note": "a status with confirmation 0: the collection has a horizon, so the owner broke core S2. The entry carries no time to age it by",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010000000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa00000000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "none",
+            "confirmed_at": null,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    },
+    {
+      "note": "a check at unknown, which its owner cannot run, under a status ok: it bounds nothing",
+      "epoch": 1767225600,
+      "replies": [
+        {
+          "key": "zk2/lab/svc/health.v2/state/status",
+          "hex": "e3000700000c019980e300fa0001010020000005064280ccc0538000"
+        },
+        {
+          "key": "zk2/lab/svc/health.v2/state/checks",
+          "hex": "e3000700000c019980e300fa000001046469736b0000000802050000"
+        }
+      ],
+      "expect": {
+        "status": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "entry": {
+            "stamp": "0007/5",
+            "confirmation": "time",
+            "confirmed_at": 1794062819250,
+            "record": {
+              "level": "ok",
+              "reason": 2,
+              "since": 1794062759000
+            }
+          }
+        },
+        "checks": {
+          "complete": true,
+          "run": "0007",
+          "asof": 12,
+          "time": 1794062819250,
+          "live": [
+            {
+              "check": "disk",
+              "stamp": "0007/8",
+              "confirmation": "none",
+              "confirmed_at": null,
+              "record": {
+                "level": "unknown",
+                "detail": 5
+              }
+            }
+          ],
+          "retired": []
+        },
+        "instant": true,
+        "status_better_than_a_check": false
+      }
+    }
+  ]
+}

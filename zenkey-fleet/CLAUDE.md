@@ -770,3 +770,20 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   use, refuses alike. No tool sends a held stamp but through `zenctl get
   --body`. `model::inband`'s `a_held_stamp_is_read_as_what_it_is_never_as_a_page_cut_short`
   and `model::lens`'s `a_held_stamp_renders_as_a_held_stamp_refused_held`.
+  A heartbeat's ahead time (#986's Q0, core 0.113 §7.5, `freshness.v2`
+  0.12 §5): every reader of a heartbeat's time reads three things.
+  `bus::health`'s watch maps a heartbeat read in step through
+  `zenkey_model::health::Heard::heartbeat`: an instant is `Heartbeat`,
+  the ahead time and the unknown time are both `HeartbeatHeld`, as
+  health.v1 0.11 reads them, so no health.v1 answer moved (health.v2's
+  yes from the ahead time is #986's Q2). `model::inband`'s `time_value`
+  shows a heartbeat's and an owner heartbeat's time as `{"s", "ms"}`
+  with its date, `null` for unknown, and `"ahead"` (`TIME_AHEAD`) for the
+  ahead time, neither of the last two dated; `owner_heartbeat_lines`
+  says `time ahead` where it said `time unknown`. zengui shows that
+  value through the lens and reads no heartbeat's time elsewhere.
+  `model::lens`'s `a_heartbeat_reads_with_the_revision_it_covers` pins
+  the three spellings, and `tests/owner_heartbeat.rs`'s capture has a
+  fifth row, an owner heartbeat under the ahead time
+  (`OWNER_HEARTBEAT_BLESS=1` regenerates
+  `zenctl/tests/cmd/fixtures/owner-heartbeat.zrec`).

@@ -1,0 +1,402 @@
+{
+  "description": "health.v2 §3: the standard packed schema's published artifact id, and its types' tags. file is the profile's schema, a path relative to this profile's directory, and current its artifact's id: sha256 over the document's JCS bytes (RFC 8785; core §7.1, §9.4), as sha256:<64 lowercase hex>. published lists every id the profile publishes, oldest first, each with the text that published it. types are the profile's type names, each with the first text that defines it and its tag (core §7.6: the low four bits of the last byte of the sha256 of its layout form's JCS bytes); Status and Check have one layout, so one tag. Each case names a file (path, from the repository's root) or gives a document, decoded -> its id, and whether the profile publishes it. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed.",
+  "file": "health.v2.json",
+  "current": "sha256:d270e1487bb6b2688aa34e5cb55804a14edc61a64e5fdd88d167b21ca4eaa983",
+  "published": [
+    {
+      "id": "sha256:d270e1487bb6b2688aa34e5cb55804a14edc61a64e5fdd88d167b21ca4eaa983",
+      "revision": "0.1",
+      "note": "health.v2 0.1: Status, Check, Fault."
+    }
+  ],
+  "types": [
+    {
+      "name": "Status",
+      "since": "0.1",
+      "tag": 3
+    },
+    {
+      "name": "Check",
+      "since": "0.1",
+      "tag": 3
+    },
+    {
+      "name": "Fault",
+      "since": "0.1",
+      "tag": 11
+    }
+  ],
+  "cases": [
+    {
+      "note": "the profile's file: the current revision",
+      "path": "spec/profiles/health/health.v2.json",
+      "expect": {
+        "id": "sha256:d270e1487bb6b2688aa34e5cb55804a14edc61a64e5fdd88d167b21ca4eaa983",
+        "published": true
+      }
+    },
+    {
+      "note": "a copy, its types in another order: JCS-equal, so the same artifact",
+      "document": {
+        "types": {
+          "Fault": {
+            "description": "stream faults: one occurrence a level would lose. 58 bits, 8 bytes; 26 bits, 4 bytes, with no time.",
+            "fields": [
+              {
+                "name": "code",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "What happened: a word of the codes table. 1 is clock_ahead."
+              },
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "The occurrence's severity: degraded or failed, or ok for one that degrades nothing."
+              },
+              {
+                "name": "argument",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 65534,
+                "reserved": [
+                  "not_available"
+                ],
+                "description": "The code's own number, as its table's text says: for clock_ahead, the offset measured, in whole seconds. not_available where the code takes none, or none was measured."
+              },
+              {
+                "name": "at",
+                "type": "time",
+                "optional": true,
+                "description": "When it happened, on the owner's clock, in whole seconds."
+              },
+              "..."
+            ]
+          },
+          "Check": {
+            "description": "state checks/{check}: one named check's level, what it found, and when. 42 bits, 6 bytes; 10 bits, 2 bytes, with no time.",
+            "fields": [
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "As a Status's. unknown is a check its owner cannot run, and bounds nothing."
+              },
+              {
+                "name": "detail",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "What the check found: a word of the details table."
+              },
+              {
+                "name": "at",
+                "type": "time",
+                "optional": true,
+                "description": "When the check found the value put, on the owner's clock, in whole seconds. Informative: a check is not aged by it."
+              },
+              "..."
+            ]
+          },
+          "Status": {
+            "description": "state status: the service's level, why, and when the level last changed. 42 bits, 6 bytes; 10 bits, 2 bytes, with no time.",
+            "fields": [
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "The order is ok, degraded, failed. unknown is no level: it reads unknown, never ok."
+              },
+              {
+                "name": "reason",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "Why the level is what it is: a word of the reasons table."
+              },
+              {
+                "name": "since",
+                "type": "time",
+                "optional": true,
+                "description": "When the level last changed, on the owner's clock, in whole seconds. Absent while that clock reads no instant the deployment epoch codes."
+              },
+              "..."
+            ]
+          }
+        },
+        "description": "health.v2's standard schema (spec/profiles/health/v2.md, section 3; core section 7.6). The standard contract health.v2.toml lists this file and types its three resources by it. A word (a reason, a detail, a code) is a number: 0 for none given, 1 to 31 the profile's, 32 to 62 the service's own, and out_of_range for a word no table names (section 2.10)."
+      },
+      "expect": {
+        "id": "sha256:d270e1487bb6b2688aa34e5cb55804a14edc61a64e5fdd88d167b21ca4eaa983",
+        "published": true
+      }
+    },
+    {
+      "note": "a copy with one description changed: another artifact, whose types are not the profile's by their names alone",
+      "document": {
+        "description": "health.v2's standard schema (spec/profiles/health/v2.md, section 3; core section 7.6). The standard contract health.v2.toml lists this file and types its three resources by it. A word (a reason, a detail, a code) is a number: 0 for none given, 1 to 31 the profile's, 32 to 62 the service's own, and out_of_range for a word no table names (section 2.10).",
+        "types": {
+          "Status": {
+            "description": "state status: the service's level, why, and when the level last changed. 42 bits, 6 bytes; 10 bits, 2 bytes, with no time.",
+            "fields": [
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "The order is ok, degraded, failed. unknown is no level: it reads unknown, never ok."
+              },
+              {
+                "name": "reason",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "Why."
+              },
+              {
+                "name": "since",
+                "type": "time",
+                "optional": true,
+                "description": "When the level last changed, on the owner's clock, in whole seconds. Absent while that clock reads no instant the deployment epoch codes."
+              },
+              "..."
+            ]
+          },
+          "Check": {
+            "description": "state checks/{check}: one named check's level, what it found, and when. 42 bits, 6 bytes; 10 bits, 2 bytes, with no time.",
+            "fields": [
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "As a Status's. unknown is a check its owner cannot run, and bounds nothing."
+              },
+              {
+                "name": "detail",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "What the check found: a word of the details table."
+              },
+              {
+                "name": "at",
+                "type": "time",
+                "optional": true,
+                "description": "When the check found the value put, on the owner's clock, in whole seconds. Informative: a check is not aged by it."
+              },
+              "..."
+            ]
+          },
+          "Fault": {
+            "description": "stream faults: one occurrence a level would lose. 58 bits, 8 bytes; 26 bits, 4 bytes, with no time.",
+            "fields": [
+              {
+                "name": "code",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "What happened: a word of the codes table. 1 is clock_ahead."
+              },
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "The occurrence's severity: degraded or failed, or ok for one that degrades nothing."
+              },
+              {
+                "name": "argument",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 65534,
+                "reserved": [
+                  "not_available"
+                ],
+                "description": "The code's own number, as its table's text says: for clock_ahead, the offset measured, in whole seconds. not_available where the code takes none, or none was measured."
+              },
+              {
+                "name": "at",
+                "type": "time",
+                "optional": true,
+                "description": "When it happened, on the owner's clock, in whole seconds."
+              },
+              "..."
+            ]
+          }
+        }
+      },
+      "expect": {
+        "id": "sha256:1b0c7e6e02ae6689d92d68bfafde75bc720cc98d7c557f734dcca310f54a3ad1",
+        "published": false
+      }
+    },
+    {
+      "note": "a copy whose Fault's argument ends one lower: another artifact",
+      "document": {
+        "description": "health.v2's standard schema (spec/profiles/health/v2.md, section 3; core section 7.6). The standard contract health.v2.toml lists this file and types its three resources by it. A word (a reason, a detail, a code) is a number: 0 for none given, 1 to 31 the profile's, 32 to 62 the service's own, and out_of_range for a word no table names (section 2.10).",
+        "types": {
+          "Status": {
+            "description": "state status: the service's level, why, and when the level last changed. 42 bits, 6 bytes; 10 bits, 2 bytes, with no time.",
+            "fields": [
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "The order is ok, degraded, failed. unknown is no level: it reads unknown, never ok."
+              },
+              {
+                "name": "reason",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "Why the level is what it is: a word of the reasons table."
+              },
+              {
+                "name": "since",
+                "type": "time",
+                "optional": true,
+                "description": "When the level last changed, on the owner's clock, in whole seconds. Absent while that clock reads no instant the deployment epoch codes."
+              },
+              "..."
+            ]
+          },
+          "Check": {
+            "description": "state checks/{check}: one named check's level, what it found, and when. 42 bits, 6 bytes; 10 bits, 2 bytes, with no time.",
+            "fields": [
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "As a Status's. unknown is a check its owner cannot run, and bounds nothing."
+              },
+              {
+                "name": "detail",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "What the check found: a word of the details table."
+              },
+              {
+                "name": "at",
+                "type": "time",
+                "optional": true,
+                "description": "When the check found the value put, on the owner's clock, in whole seconds. Informative: a check is not aged by it."
+              },
+              "..."
+            ]
+          },
+          "Fault": {
+            "description": "stream faults: one occurrence a level would lose. 58 bits, 8 bytes; 26 bits, 4 bytes, with no time.",
+            "fields": [
+              {
+                "name": "code",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 62,
+                "reserved": [
+                  "out_of_range"
+                ],
+                "description": "What happened: a word of the codes table. 1 is clock_ahead."
+              },
+              {
+                "name": "level",
+                "type": "enum",
+                "values": [
+                  "unknown",
+                  "ok",
+                  "degraded",
+                  "failed"
+                ],
+                "description": "The occurrence's severity: degraded or failed, or ok for one that degrades nothing."
+              },
+              {
+                "name": "argument",
+                "type": "int",
+                "minimum": 0,
+                "maximum": 65533,
+                "reserved": [
+                  "not_available"
+                ],
+                "description": "The code's own number, as its table's text says: for clock_ahead, the offset measured, in whole seconds. not_available where the code takes none, or none was measured."
+              },
+              {
+                "name": "at",
+                "type": "time",
+                "optional": true,
+                "description": "When it happened, on the owner's clock, in whole seconds."
+              },
+              "..."
+            ]
+          }
+        }
+      },
+      "expect": {
+        "id": "sha256:74a336927503ca2af309f0ad12a638dd286dcf27e1f953aa90d447fc2caca1af",
+        "published": false
+      }
+    }
+  ]
+}
