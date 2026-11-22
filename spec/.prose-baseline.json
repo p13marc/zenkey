@@ -79,6 +79,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/profiles/alarms/v2.md": {
+    "mean": 13.63,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/arbitration/CHANGELOG.md": {
     "mean": 21.05,
     "over": 7,
