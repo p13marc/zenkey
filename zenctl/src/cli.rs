@@ -512,7 +512,9 @@ pub(crate) struct DoctorArgs {
     /// its author stamped before desired-behind finds it, seconds, by a
     /// clock --clocks-synced trusts (desired.v1 §2.17): the doctor makes one
     /// reading, and one reading without a trusted clock never finds a target
-    /// behind.
+    /// behind. A desired.v2 version has no time (desired.v2 §2.17): no clock
+    /// dates it, so such a target not yet converged is unjudged here, and
+    /// `zenctl desired --for` reads it over a window.
     #[arg(long, value_name = "SECS",
           default_value_t = zenkey_fleet::judge::doctor::DEFAULT_DESIRED_BEHIND.as_secs_f64())]
     pub(crate) desired_behind: f64,
@@ -1050,7 +1052,8 @@ pub(crate) enum Command {
     /// author stamped longer ago than --desired-behind, read only with
     /// --clocks-synced: one reading never finds a target behind) and
     /// desired-last-known (info: a target running a document read from an
-    /// archive); and redundancy.v1's redundancy-vacancy (a warning: a
+    /// archive), each reading a desired.v2 role by its own major, whose
+    /// version has no time for desired-behind to age; and redundancy.v1's redundancy-vacancy (a warning: a
     /// governed interface with candidates and no incumbent in both of two
     /// complete presence reads); and timing.v1's timing-declaration (a
     /// warning, from the contracts: an invalid timing value, a deadline
@@ -1274,7 +1277,7 @@ pub(crate) enum Command {
     /// `says` and `finding`. A field absent is a question not asked, never
     /// null; ndjson carries the same, the envelope first, then a line per row.
     Timing(TimingArgs),
-    /// Read desired.v1 targets: has each converged on its author's document?
+    /// Read desired.v1 and v2 targets: has each converged on its author's document?
     ///
     /// desired.v1's tool (spec/profiles/desired/v1.md §2.17, §5), through a
     /// session in the deployment's namespace: presence and each descriptor — a
@@ -1314,21 +1317,53 @@ pub(crate) enum Command {
     /// refused; 2 no verdict: not yet, unobservable, an author absent, nothing
     /// asked, or a run that could not start.
     ///
+    /// desired.v2 (spec/profiles/desired/v2.md §2.10, §2.17, §2.18) is read
+    /// beside it, per role: a role whose author's revision lists desired.v2 is
+    /// read by it, and each row names its `profile`. Its report is the packed
+    /// Report on the resource of the target's contract whose `desired.report`
+    /// names the role, read under its envelope's tag: a record core §7.6
+    /// refuses is unreadable, with its token, and one with a finding
+    /// malformed, its record shown; neither answers anything. A refusal's
+    /// place and line are indices, shown as the words that contract's
+    /// `desired.pointers` and `desired.details` hold, an index no table in
+    /// hand names as its number. The author's version is its member read's
+    /// snapshot: an entry's or a tombstone's in-band stamp, written
+    /// <run>/<seq>, never a time; a snapshot with no entry is the author's
+    /// word that it holds no document, read only under the run of the report's
+    /// observed version (not yet, behind, or yes, reverted), and under another
+    /// run unobservable, author_silent. The versions compare by run and seq:
+    /// a lower seq of the same run is behind, another run other_epoch. With no
+    /// revision of the author's interface in hand such a role has no slice,
+    /// the target alone giving none: no GET is made, converged is not asked
+    /// where the author is absent and unobservable, author_not_read,
+    /// otherwise, and the three other questions are answered from the report;
+    /// --contracts gives the revision. A version has no time, so only --for's
+    /// readings find a target behind, never --clocks-synced. With no revision
+    /// of the author's in hand, a role is read as desired.v2's when a
+    /// `desired.report` of its target's contract names it, unless only a
+    /// desired.v1.Report claims it.
+    ///
     /// --format json is one document: `report` ("desired"), `namespace`,
     /// `target` and `role` when asked, `presence` (`selector`, `complete`,
     /// `services`), `window_s`, `readings`, `clock`, `asked`, `judgement`,
     /// `rows` and `notes`, and `unobservable` when the reading could not be
-    /// made. A `desired` row: `target`, `role`, `listing` (`bound`, `unbound`,
+    /// made. A `desired` row: `target`, `role`, `profile` (`desired.v1` or
+    /// `desired.v2`, the major it was read by), `listing` (`bound`, `unbound`,
     /// `not_listed`, `unread`), `interface`, `resource`, `slice` and
     /// `slice_from` (`author_contract`, `offline_contract`, `requirement`),
     /// `declaration_invalid` and `binding_invalid` when there is something to
     /// say, `requirement_unread` (the declaring contract, when no revision of
     /// it in hand declares the role), `report` (`key`, `document` as the target
     /// put it, or `unreadable`, with `differing`, the other reports' keys, when
-    /// two claim the slice and differ; `findings`, `stamp`, `freshness`),
-    /// `author` (`address`, `presence`, `current`: `put`, `delete`, `silent`,
-    /// `incomplete` or `not_read`, its `stamp` as the profile writes one,
-    /// `why`), `archived` (an archive's last-known, never current), `answers`
+    /// two claim the slice and differ; `findings`, `stamp`, `freshness`; for a
+    /// desired.v2 one `document` is the profile's reading, a version
+    /// `<run>/<seq>` and a refusal's `pointer` and `detail` indices, with
+    /// `place` and `line`, the contract's words, where a table in hand names
+    /// them, `record`, a malformed one's fields, and `inband`, its put's own
+    /// stamp), `author` (`address`, `presence`, `current`: `put`, `delete`,
+    /// `silent`, `incomplete` or `not_read`, and under desired.v2 `entry`,
+    /// `tombstone`, `no_entry` or `unstamped`; its `stamp` as the profile
+    /// writes one, a no-entry snapshot's `run`, `why`), `archived` (an archive's last-known, never current), `answers`
     /// (`converged`, `refused`, `last_known`, `in_force`, each an `answer` —
     /// `yes`, `no`, `not_yet`, `unobservable`, `not_asked` — a `reason` in
     /// conclusions.json's tokens and `says` in words) and `behind` (`version`,
@@ -1611,7 +1646,10 @@ pub(crate) enum CheckCmd {
     ///                    resource or a desired.v1.Report resource, every
     ///                    report it puts reads strict and consistent, and
     ///                    each such role has its report: of its slice, or
-    ///                    keyless for a role left unbound (desired.v1 §2.10)
+    ///                    keyless for a role left unbound (desired.v1 §2.10);
+    ///                    a desired.v2 role's is the packed report on the
+    ///                    resource whose desired.report names it (desired.v2
+    ///                    §2.10)
     ///   desired-binding  its descriptor lists each such role with a
     ///                    binding §2.3 reads: one exact author, each target
     ///                    parameter its own self, the author's declaration
