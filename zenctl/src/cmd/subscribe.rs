@@ -205,10 +205,40 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
             eprintln!("{line}");
         }
     }
+    if let Some(line) = unheard_owner_heartbeats(
+        catalogs.is_empty(),
+        watch.subscription().followed_class(),
+        heartbeats,
+    ) {
+        eprintln!("{line}");
+    }
     if received == 0 {
         std::process::exit(crate::exit::NO_VERDICT);
     }
     Ok(())
+}
+
+/// What a watch given no catalog says of a collection no heartbeat
+/// confirmed in its window (`freshness.v2` §2.5, §5; observer §7.5): it
+/// declared no owner heartbeat key, since it could read no group, so it
+/// cannot tell an owner that confirms by owner heartbeats from one that
+/// confirms nothing. One line, on stderr in every format: the summary's
+/// `"heartbeats":0` is then silence, never a verdict (observer §2).
+/// `None` where it was given a catalog, follows no collection (`class`),
+/// or read a heartbeat: an owner sends one form, never both.
+fn unheard_owner_heartbeats(
+    no_catalog: bool,
+    class: Option<zenkey_model::heartbeat::Class>,
+    heartbeats: u64,
+) -> Option<String> {
+    let class = class.filter(|_| no_catalog && heartbeats == 0)?;
+    Some(format!(
+        "-- no heartbeat read, and no catalog given (--catalog): the owner heartbeat key \
+         of the `{}` class was not subscribed, so an owner that confirms by owner \
+         heartbeats is heard as one that confirms nothing; no finding about the owner \
+         (freshness.v2 §2.5, §5) --",
+        class.as_str()
+    ))
 }
 
 /// Say when R6's discards, the unresolved count or the lag moved: a row for
@@ -260,4 +290,34 @@ fn counts(
         *lagged = l;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unheard_owner_heartbeats;
+    use zenkey_model::heartbeat::Class;
+
+    /// `freshness.v2` §5: a tool that subscribed to no owner heartbeat key
+    /// says so where it heard no heartbeat at all, and only there.
+    #[test]
+    fn a_watch_given_no_catalog_says_what_it_did_not_listen_to() {
+        let line = unheard_owner_heartbeats(true, Some(Class::Host), 0).expect("a line");
+        assert!(
+            line.contains("no catalog given (--catalog)")
+                && line.contains("`host` class")
+                && line.contains("no finding about the owner"),
+            "{line}"
+        );
+        assert!(!line.contains('\n'), "one line: {line}");
+        assert!(
+            unheard_owner_heartbeats(true, Some(Class::Link), 0)
+                .is_some_and(|l| l.contains("`link` class"))
+        );
+        // Given a catalog it declared the key: silence there is its own.
+        assert_eq!(unheard_owner_heartbeats(false, Some(Class::Host), 0), None);
+        // A heartbeat read: the owner confirms by heartbeats, never both.
+        assert_eq!(unheard_owner_heartbeats(true, Some(Class::Host), 3), None);
+        // No collection followed: no heartbeat of either form confirms it.
+        assert_eq!(unheard_owner_heartbeats(true, None, 0), None);
+    }
 }

@@ -729,7 +729,11 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   code half (105 cases, `heartbeat_owner_vectors` reading it through
   `wire::read_put`); `profiles/README.md` says a header's "written
   against" is the core its rules were last read whole against. The
-  code half is `/srv/dev/scratch/zenkey/p/r115-code.md`.
+  code half is `/srv/dev/scratch/zenkey/p/r115-code.md`: it ran every
+  new case as written (all pass), added `v2/transport.json`'s case 31,
+  `v2/plan.json`'s case 48 and `owner.json`'s sixth `forms` case, and
+  made `zenctl watch` say, one line on stderr, that given no catalog it
+  subscribed no owner heartbeat key (`freshness.v2` §5).
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

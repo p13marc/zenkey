@@ -54,9 +54,13 @@ choices, and says where a reader has latitude.
   about the owner. A tool that sees a descriptor name a catalog it does
   not hold can say so. One that subscribed to no owner heartbeat key
   cannot tell an owner that sends them from one that confirms nothing.
-- **The reference's `zenctl watch`** given no catalog prints no row and
+- **The reference's `zenctl watch`** given no catalog printed no row and
   no word. This text asks no more of it: §5 states what a tool may
   conclude. Observer 0.35 says the same of a tool's scope.
+  - **It says so since the code half.** Where it was given no catalog
+    and read no heartbeat of a collection, it prints one line on stderr.
+    The line names the class key it did not subscribe.
+  - It names no catalog's id: the verb reads no descriptor's `catalog`.
 
 **Answered: F-548, minor. `conformance/apply.json`, five cases.**
 - **Named within the run.** A gap before any group has named a followed

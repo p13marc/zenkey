@@ -2548,6 +2548,17 @@ impl Subscription {
             .is_some_and(|vs| vs.is_lost(&f.layout.iface, f.index))
     }
 
+    /// The class of the collection this subscription follows, the one whose
+    /// owner heartbeat key it declares when its consumer holds a catalog
+    /// (`freshness.v2` §2.5): `None` for a subscription that follows no
+    /// collection, which no heartbeat of either form confirms. A consumer
+    /// that holds no catalog declares no class key, so a tool given none
+    /// can say what it did not listen to (`freshness.v2` §5).
+    #[must_use]
+    pub fn followed_class(&self) -> Option<zenkey_model::heartbeat::Class> {
+        self.followed.as_ref().map(|f| f.class())
+    }
+
     /// Owner heartbeats read on a bound provider's key of the followed
     /// collection's class, whatever became of their groups
     /// (`freshness.v2` §2.5; #1110). A group read for this interface
