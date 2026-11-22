@@ -11453,11 +11453,11 @@
   {
    "note": "one of the instance's contracts holds the table: alarms.v2's own revision holds none",
    "names": [
-    "alarms.v2@eb4d",
+    "alarms.v2@2292",
     "tc.v1@1111"
    ],
    "holds": {
-    "alarms.v2@eb4d": null,
+    "alarms.v2@2292": null,
     "tc.v1@1111": [
      {
       "name": "hot",
@@ -11613,11 +11613,11 @@
   {
    "note": "no contract holds one: the owner writes every alarm by words",
    "names": [
-    "alarms.v2@eb4d",
+    "alarms.v2@2292",
     "tc.v1@1111"
    ],
    "holds": {
-    "alarms.v2@eb4d": null,
+    "alarms.v2@2292": null,
     "tc.v1@1111": null
    },
    "expect": null
@@ -11625,12 +11625,12 @@
   {
    "note": "two contracts hold the same list: one table",
    "names": [
-    "alarms.v2@eb4d",
+    "alarms.v2@2292",
     "tc.v1@1111",
     "net.v1@2222"
    ],
    "holds": {
-    "alarms.v2@eb4d": null,
+    "alarms.v2@2292": null,
     "tc.v1@1111": [
      {
       "name": "hot",
@@ -12193,7 +12193,7 @@
   {
    "note": "the reader holds a revision the descriptor does not name: it adds nothing",
    "names": [
-    "alarms.v2@eb4d",
+    "alarms.v2@2292",
     "tc.v1@1111"
    ],
    "holds": {
@@ -12376,7 +12376,7 @@
   {
    "note": "the reader holds nothing",
    "names": [
-    "alarms.v2@eb4d",
+    "alarms.v2@2292",
     "tc.v1@1111"
    ],
    "holds": {},
