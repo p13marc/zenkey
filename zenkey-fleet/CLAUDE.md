@@ -223,6 +223,68 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   reading to the model's four judges, never re-deriving one;
   `report::desired`'s `DesiredReport` finds a refused or failed act, or a
   target behind past the window.
+  `desired.v2` (#986's J4, text 0.1) is read beside it, per role, by the
+  major the role's author's revision lists in `uses` (v2 §2.18;
+  `RoleResolution::author_major`, `RoleRead::major`): `resolve_role`
+  reads a `desired.v2` author's declaration by `v2::declaration_of`
+  (`horizon_v1` after v1's reasons), and a row names its `profile`. With
+  no revision of the author's interface in hand the target's contract
+  says which (`RoleRead::settle`, after the reports' GET): a role a
+  `desired.report` of its declaring contract names is `desired.v2`'s,
+  unless no reply is on that report's key and a `desired.v1.Report`
+  claims a candidate slice (a target that serves both puts its author's
+  major's); such a role has no slice, the requirement's candidates
+  dropped (v2 §2.17), so no GET and no archive read: converged is not
+  asked, `author_absent`, or unobservable, `author_not_read`, and the
+  three other questions are the report's. **The report:**
+  `ReportWhere::of(target, declaring contract, role)` is the model's
+  `report_at_of` with the resource's horizon; `report_selectors` adds each
+  bound role's report key, a member read; `packed_replies` merges per key
+  exactly as `report_replies` does (`bus::query::merged`, a delete
+  skipped after the merge, so desired.v1 0.14's rule holds unchanged:
+  within one run the higher seq, across two runs the later arrival), then
+  reads the kept reply by `model::desired::packed_read(tag, record)`
+  under its envelope's CH tag into `PackedReply { read: Result<v2::Read,
+  PackedUnreadable { token, says }>, inband, .. }`: core §7.6's refusal,
+  the envelope's own, `tag` for a put with no envelope, `form` for a
+  heartbeat, frame or page, never guessed at; `packed_report_of(at,
+  replies)` → `PackedFound::{None(reasons), Two, Unreadable, One}`, the
+  reply on the role's key alone. **The slice:** `slice_get_v2` is a
+  member read with no held stamp, each reply on the key (R6) read into
+  `MemberReply::{Entry, Tombstone, NoEntry { run, asof }, Unstamped,
+  Refused}` (`member_replies`: a page's entries merged per key, a page
+  of no entry its run, a held stamp refused since none was sent), and
+  `current_v2_of` gives `v2::Current`: a refused reply `Incomplete`, one
+  with no envelope `Unstamped`, an entry or a tombstone before another
+  instance's no entry, else `NoEntry(run)`. `RoleRead::reading_v2`
+  projects into `TargetReading<v2::Read>` and `v2::AuthorReading`, the
+  report found with no slice needed; `judge::desired` hands it to
+  `v2::converged` and the three judges generic over either major, and
+  writes each version `<run>/<seq>`, a refusal's place and line through
+  the report resource's tables (`refusal_v2`, `v2::word`: the contract's
+  word, the number where no table in hand names the index,
+  `out_of_range`, "the type's own" for the escape), a malformed report as
+  its record's fields. `Behind` follows an `AuthorVersion::{V1, V2,
+  NoEntry(run)}` and dates only a `V1` one: a `desired.v2` role is
+  behind by the window alone, whatever clock is trusted, so the doctor's
+  `desired-behind` leaves one not yet converged unjudged and says why.
+  `report::desired`: `DesiredRow::profile`, `DesiredDocument::{V1, V2}`
+  (untagged; v2's is `Report::reading()`), `DesiredReportSeen::{record,
+  place, line, inband}`, `DesiredCurrentState::{Entry, Tombstone,
+  NoEntry, Unstamped}`, `DesiredAuthorSeen::run`; an archive's last-known
+  shows its in-band stamp for a `desired.v2` role (`Archived::inband`).
+  `check conform`'s `desired-report` reads a `desired.v2` role's packed
+  report, and `desired-author` a `desired.v2` revision's declaration.
+  `judge::why` reads no desired state. The tests run
+  `v2/slices.json` through `packed_read` and `packed_report_of`
+  (`every_v2_slice_reads_as_the_fixture`) and `v2/conclusions.json`
+  through `judge` (`every_v2_conclusion_reads_as_the_fixture`), both as
+  written; `report-fixtures`' `desired_v2_report` is a both-majors
+  deployment. Not done: a `desired.v2` report under a horizon is aged by
+  its Zenoh timestamp alone, as a `desired.v1.Report` on a `freshness.v2`
+  resource is (a snapshot entry's confirmation is not read here); an
+  unbound `desired.v2` role's baseline record is not read by `desired-
+  report`; and no `--across-face` word reaches `zenctl desired`.
   `redundancy.v1` (#841, RC) runs through all four layers too.
   `bus::redundancy` makes two presence reads of the scope's `@zk/**` a
   grace apart (2 s) on a session with no liveliness subscriber, `cut_off`

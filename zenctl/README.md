@@ -236,7 +236,7 @@ zenctl telemetry 'zk2/rf/modem/**' --namespace prod --across-face --contracts co
 zenctl timing --namespace prod --for 30 --clock-bound 50   # every timed stream; lifespans on the deployment's ε
 zenctl timing 'zk2/robot/**' --namespace prod --for 10      # no --clock-bound: every lifespan unobservable, exit 2 where one is declared
 
-# Desired state, desired.v1: exit 1 on a refused or failed act, or a target behind its author's version for the whole window.
+# Desired state, desired.v1 and desired.v2: exit 1 on a refused or failed act, or a target behind its author's version for the whole window.
 zenctl desired --namespace prod --for 30               # every target's roles, read again while an answer may move
 zenctl desired lab/worker --role task --namespace prod --clocks-synced   # one target's role, its report's age on the deployment's word
 
@@ -436,7 +436,7 @@ window: did each member meet its deadline, did its owner keep its period,
 did a sample arrive expired — exit 1 on a miss with the owner present and
 nothing lost, a period not kept likewise, or a sample expired, 2 when a
 question could not be answered) ·
-`zenctl desired [SYSTEM/SERVICE]` (each `desired.v1` target's roles against
+`zenctl desired [SYSTEM/SERVICE]` (each `desired.v1` or `desired.v2` target's roles against
 their authors' documents: has it converged on its author's current version,
 is its last act refused or failed, is what it acted on last-known, is a
 document in force — exit 1 on a refused or failed act or a target behind
@@ -800,9 +800,9 @@ none.
 | `alarm-stale` | does a present owner hold a firing alarm unconfirmed beyond its 900 s horizon? Neither firing now nor resolved (`--clocks-synced`; warning) | alarms.v1 §2.7 |
 | `telemetry-declaration` | does a contract an owner implements declare a metric resource whose declaration is invalid, so that no reader reads its members? (warning) | telemetry.v1 §2.2 |
 | `telemetry-sample` | does an owner answer a GET of a state metric member with a sample that does not conform? (`--deep`; error; a reply that does not decode, or under an invalid declaration, leaves it unobservable) | telemetry.v1 §2.6 |
-| `desired-refused` | was a desired.v1 target's last act on its author's document refused, or did it fail partway, by its report? (warning) | desired.v1 §2.7 |
-| `desired-behind` | is a desired.v1 target not yet converged on a version its author stamped longer ago than `--desired-behind` (60 s)? (warning; `--clocks-synced` only: one reading never finds a target behind) | desired.v1 §2.17 |
-| `desired-last-known` | does a desired.v1 target run a document it read from an archive, its author not answering for it? (info) | desired.v1 §2.9 |
+| `desired-refused` | was a desired.v1 or desired.v2 target's last act on its author's document refused, or did it fail partway, by its report? (warning) | desired.v1 §2.7 |
+| `desired-behind` | is a desired.v1 target not yet converged on a version its author stamped longer ago than `--desired-behind` (60 s)? (warning; `--clocks-synced` only: one reading never finds a target behind, and a desired.v2 version has no time, so such a target is unjudged) | desired.v1 §2.17 |
+| `desired-last-known` | does a desired.v1 or desired.v2 target run a document it read from an archive, its author not answering for it? (info) | desired.v1 §2.9 |
 | `redundancy-vacancy` | does an interface redundancy.v1 governs have candidates and no incumbent, in both of two complete presence reads? (warning; one read's vacancy is a takeover due) | redundancy.v1 §2.15 |
 | `timing-declaration` | does a contract an owner implements declare timing.v1 values a reader cannot judge: an invalid one, a deadline below its period, or timing keys on a resource that is not a stream or on a requirement? (warning) | timing.v1 §2.2 |
 | `arbitration-declaration` | does a running consumer hold a role carrying `arbitration.policy` whose declaration is invalid over every revision of the required interface in hand (error: its consumer cannot start on it), or whose binding has a wildcard or a shadowed entry, a priority nobody chose (warning)? | arbitration.v1 §2.14 |
@@ -897,6 +897,9 @@ reading has only on a trusted clock: with `--clocks-synced`, a target not yet
 on a version its author stamped more than `--desired-behind` ago is the
 finding; without it, every target not yet converged is unjudged, never clean
 and never a finding. `zenctl desired --for` reads over a window instead.
+A `desired.v2` role is read by its own major (its packed report, its
+author's snapshot), and its version has no time: not yet converged, it is
+unjudged whatever clock is trusted.
 
 The `redundancy.v1` reading (#841) is the doctor's own two presence reads:
 `split-brain` asks a governed interface the profile's first question, so a
@@ -1181,6 +1184,26 @@ desired.v1 in namespace "acme", target lab/worker — 1 role(s), 1 reading(s)
 ✓  lab/worker task  converged: yes (converged) — its report's observed 7386690599959157260/33 is its author lab/author's current version, converged
     role bound, requiring tasking.v1, its author lab/author
     slice zk2/lab/author/tasking.v1/state/tasks/lab/worker (from the author contract)
+    …
+```
+
+**`desired.v2`** (`spec/profiles/desired/v2.md`) is read beside it, with no
+flag: a role whose author's revision lists `desired.v2` is read by it, and
+each row names its `profile`. Its report is the packed `Report` on the
+resource of the target's contract whose `desired.report` names the role; a
+refusal's place and line are indices, shown as that contract's words. The
+author's version is its snapshot's in-band stamp, written `<run>/<seq>`,
+never a time, so only `--for` finds such a target behind. A snapshot with no
+entry is the author's word that it holds no document, read only under the
+run of the report's observed version. With no revision of the author's
+interface in hand such a role has no slice: give it by `--contracts`.
+
+```console
+$ zenctl desired lab/worker --namespace acme -c tcp/127.0.0.1:7447
+desired.v2 in namespace "acme", target lab/worker — 1 role(s), 1 reading(s)
+✗  lab/worker task  converged: no (refused) — its author lab/author's current version, 0007/13, was refused by the target: code reach at "/endpoint": names how the worker reaches the bus
+    role bound, requiring tasking.v2 (desired.v2), its author lab/author
+    slice zk2/lab/author/tasking.v2/state/tasks/lab/worker (from the author contract)
     …
 ```
 
