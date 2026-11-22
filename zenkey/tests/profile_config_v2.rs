@@ -1538,7 +1538,13 @@ async fn s10_an_idempotent_retry() {
             .attachment(CallMetadata::new("ops", "r1").to_bytes())
             .target(QueryTarget::BestMatching)
             .timeout(CALL)
-            .with(flume::bounded::<Reply>(0))
+            // Unbounded, and never read. A rendezvous channel blocks its
+            // sender, and zenoh 1.10.1 hands a GET its consolidated replies
+            // on whichever thread ends it: when the owner's reply and final
+            // came back before this thread had run its own local final, the
+            // sender was this thread, inside `get`, with the receiver not
+            // yet returned, and the test hung (#1151).
+            .with(flume::unbounded::<Reply>())
             .await
             .unwrap(),
     );
