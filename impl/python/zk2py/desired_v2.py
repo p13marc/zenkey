@@ -917,11 +917,12 @@ def sample_of(x: dict[str, Any]) -> Sample | NoEntry:
     return Sample(x["from"], False, version, payload, None if rev is None else int(rev))
 
 
-def run_steps(steps: list[dict[str, Any]]) -> tuple[list[str], dict[str, Any]]:
+def run_steps(steps: list[dict[str, Any]], role: Any = None) -> tuple[list[str], dict[str, Any]]:
     """order.json: one role's steps -> each step's word, and the report
     after the last, as its record's fields. A step's Refusal carries
-    indices, so the role's tables play no part."""
-    t = TargetRole()
+    indices, so the role's tables play no part. ``role`` is the machine's
+    class, :class:`TargetRole` unless a reading runs a changed one."""
+    t = (role or TargetRole)()
     words: list[str] = []
     for s in steps:
         if "sample" in s:
@@ -1332,7 +1333,7 @@ def report_key(target: str, iface: str, r: ReportResource, role: str) -> str:
 
 
 def find_report(target: str, iface: str, resources: Any, roles: Any, role: str,
-                replies: Any) -> ReportFound:
+                replies: Any, names: Any = None) -> ReportFound:
     """§2.10 "A tool finds a target's report by type identity and by the
     annotation, never by a resource's name." ``resources`` are those of the
     target's contract that declares ``role``, ``roles`` that contract's
@@ -1340,7 +1341,7 @@ def find_report(target: str, iface: str, resources: Any, roles: Any, role: str,
     merged per key ("Two instances' reports on one key are one reply after a
     tool's merge")."""
     resources = list(resources)
-    naming = [r for r in resources if names_role(r, role)]
+    naming = [r for r in resources if (names or names_role)(r, role)]  # names: a reading's changed reader
     if not naming:
         return ReportFound(FOUND_NONE)                    # "None names it: no report was read."
     if len(naming) >= 2:
