@@ -708,7 +708,9 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   collection, one the revisions disagree on read `host`; §2.19, as
   data, reads a refused `mode` as `router` and a refused
   `timestamping/enabled` at its mode's default (`v2/transport.json`'s
-  cases 27 to 30, written by hand, 31 cases), and a refusal is of the
+  cases 27 to 31, written by hand, 32 cases; the last, a `mode` of
+  `"bogus"`, came with the code half, which made
+  `StatedTransport::stamps` read it so), and a refusal is of the
   file refused, a tool free to ask the router's rows or to stop with no
   verdict; Appendix B: an SDU is 23 B over its payload (put 4, frame 3,
   lean stack 16, as #1110's H4 measured), LoRa's columns derivable from

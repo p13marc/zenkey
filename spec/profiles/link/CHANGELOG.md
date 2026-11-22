@@ -62,9 +62,15 @@ disagree on.**
   both drew `face_timestamping`. For a refused `mode` beside
   timestamping stated off, the reference drew none and zk2py drew it.
   The text is the reference's answer there.
-- **One corner is the reference's to mend.** It reads a `mode` string
+- **One corner was the reference's to mend.** It read a `mode` string
   that is none of the three as a mode of its own, off by default. The
-  text reads it as `router`. No case holds it yet.
+  text reads it as `router`.
+  - **Mended with this text.** `StatedTransport::stamps` now reads any
+    `mode` but zenoh's three as `router`.
+  - **A fifth case holds it,** written by hand: a `mode` of `"bogus"`
+    beside the peer's value alone draws `face_timestamping`. 32 cases.
+  - **zenoh 1.10.1's loader refuses such a file:** "unknown variant
+    `bogus`", and "invalid type" for a `mode` of 5.
 
 **Answered: F-567, an ambiguity. §2.19, "Two files".**
 - **A refusal is of the file refused.** Where either file is refused,
@@ -110,7 +116,7 @@ newest, and is corrected where it stands.
 
 **Deliberately not changed.**
 - **No keyword.** §2.19's "It MUST report what the fixture reports"
-  stands, and now cites four cases more.
+  stands, and now cites five cases more.
 - **No plan.** `v2/plan.json` and `plan.json` are as they were.
 - **`frame_over_batch`** still reads the payload alone. The put's 4 or
   5 bytes and the frame's 3 are in the appendix, and no rule counts
