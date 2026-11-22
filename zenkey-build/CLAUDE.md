@@ -62,6 +62,15 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
   `codegen-test` generates the spec's `rfcfg.v1`, and `tests/config_v2.rs`
   reads `records.json`'s records and `validation.json`'s requests through
   them, agreeing with the model's codec, refusals included.
+- **health.v2** (#986 Q2): `generate` runs `health::v2::lint_contract`
+  beside desired.v2's (`table_lints`, both `zenkey_model::words::Lint`,
+  printed by its `Display`): an invalid table of words in a contract
+  that lists `health.v2` (`value`, `disagrees`; v2.md §2.10) is a lint
+  error naming the resource and the key, and nothing is generated. No
+  codegen moved: the tables are annotations, read at run time by the
+  runtime (`Health::tables`). `tests/health_v2.rs` generates the
+  scenarios' `tc.v1` and fails on a table that is no list of names, one
+  with a name twice and two lists that differ.
 - **desired.v2** (#986 J2): `generate` runs
   `desired::v2::lint_contract` on every contract, a finding a lint error
   (an invalid declaration of a desired resource, `horizon_v1` among its
