@@ -44,7 +44,7 @@ No implementation has run them yet.
   answer `alarms.v1`'s own [`conclusions.json`](../conclusions.json) as
   it expects: its 22 `any_firing` cases, and the 19 readings that no
   freshness verdict decides.
-- Each of the 473 cases was changed once, and the second script
+- Each of the 475 cases was changed once, and the second script
   disagreed with every changed one.
 
 **`alarms.v1`'s fixtures** ([`../`](../)) still hold what this text

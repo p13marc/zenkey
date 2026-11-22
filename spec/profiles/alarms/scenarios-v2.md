@@ -81,10 +81,10 @@ No implementation runs them yet. The reference implements `alarms.v1`.
    with no entry, its collection's index 0, under the run the owner's
    descriptor states (core §3.3, §4.2).
 2. S receives one put, on `…/state/alarms/0`: the lowest slot (§2.2).
-   - Its payload is 18 bytes: CH `0x00`, the run, the seq, and a record
+   - Its payload is 18 bytes: CH `0x0b`, the run, the seq, and a record
      of 12 bytes.
-   - The record reads `firing`, `warning`, `at` within 1 s of the step,
-     rule 1, `labels` 2, `argument` `not_available`, and no `key`.
+   - The record reads `firing`, `warning`, rule 1, `at` within 1 s of
+     the step, `labels` 2, `argument` `not_available`, and no `key`.
    - S receives nothing on `…/state/words/0`. S reads **raised**.
    - G's snapshot lists one entry, of id `0`, with the same record under
      the same in-band stamp, vouched for at the snapshot's time. G
@@ -118,7 +118,7 @@ a reading of 85.5: `argument` 1255.
    owner MAY put the latest reading once they have passed.
 4. S receives no put of H (`freshness.v2` §2.4). It receives a
    heartbeat at least every 450 s, of form 6.
-   - Its tag is 9, that of `alarms.v2`'s revision 2.0, and its payload
+   - Its tag is 7, that of `alarms.v2`'s revision 2.0, and its payload
      17 bytes.
    - Its section has a live count of 1, and slot 0's bit set.
    - At 905 s, past the horizon, S judges H **yes**, `firing`: the
@@ -300,7 +300,8 @@ index 3.
 **Expected.**
 1. A subscriber to `zk2/lab/plain/alarms.v2/**` receives two puts.
    - One is on `…/state/words/0`: an `alarms.v2.Words` document as
-     strict JSON, after an envelope whose CH is `0x00`.
+     strict JSON, after an envelope whose CH is `0x00`: a JSON type
+     has no tag.
    - One is on `…/state/alarms/0`, of 23 bytes: rule `not_available`,
      no `labels`, and `key` `0xa659f813308ad1da`.
    - The words' seq is below the record's: the owner put them first

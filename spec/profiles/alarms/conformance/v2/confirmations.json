@@ -1,9 +1,9 @@
 {
- "description": "alarms.v2 §2.7, §3: the heartbeat's bit, and the alarms' snapshot. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. The owner is lab/svc, and its alarms' keys zk2/lab/svc/alarms.v2/state/alarms/<slot>. `heartbeats`: a reader's `view` of the collection (each slot it holds, with the stamp of its record's put, <run>/<seq>, and the record's state), each record's put heard at instant 0, and one heartbeat heard 905 s later, its `payload` in hex: core §7.5's form 6 on zk2/lab/svc/freshness.v2/stream/heartbeat/alarms.v2, CH's tag 9 the standard contract's revision 2.0's, read with its one collection, state/alarms/{slot}, of cardinality 256 (a live count of 9 bits). `holds_tag` is the tag of the revision the reader holds. -> {unread: \"revision\" | \"refused\"}, or {read: {live, section, confirmed}}: the section's live count; `absent` (its map bit is 0), `diverged` (its digest or its live count is not the view's) or `confirmed`; and the slots it confirms, ascending: those whose bit is set, where the section is `confirmed`. A rank is a place in the byte order of the live members' keys, so slot 10 ranks before slot 2. Then `firing`, the number of firing records in the view, which the live count is not; and `judged`, each slot's answer to \"is this alarm firing?\" 905 s after its put, its owner present and listed and nothing lost: a resolved record is no, `resolved`, whatever its bit and its age; a firing one the heartbeat confirmed is yes, `firing`; a firing one it did not confirm was last confirmed by its put, past the 900 s horizon: unobservable, `stale`, neither firing nor resolved. `built_from` says how each payload was made. `snapshots`: a GET's reply on zk2/lab/svc/alarms.v2/state/alarms, one page in hex (core §7.5), under the deployment `epoch` -> its `size`, its run, asof and `coll` (the alarms are collection 0), and each entry: its `slot` (the id), its stamp, its `confirmation` (`time`: vouched for at the snapshot's time; `conf`: its last confirmation, `confirmed_at` in milliseconds since the Unix epoch) and its record read as records.json reads it.",
+ "description": "alarms.v2 §2.7, §3: the heartbeat's bit, and the alarms' snapshot. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. The owner is lab/svc, and its alarms' keys zk2/lab/svc/alarms.v2/state/alarms/<slot>. `heartbeats`: a reader's `view` of the collection (each slot it holds, with the stamp of its record's put, <run>/<seq>, and the record's state), each record's put heard at instant 0, and one heartbeat heard 905 s later, its `payload` in hex: core §7.5's form 6 on zk2/lab/svc/freshness.v2/stream/heartbeat/alarms.v2, CH's tag 7 the standard contract's revision 2.0's, read with its one collection, state/alarms/{slot}, of cardinality 256 (a live count of 9 bits). `holds_tag` is the tag of the revision the reader holds. -> {unread: \"revision\" | \"refused\"}, or {read: {live, section, confirmed}}: the section's live count; `absent` (its map bit is 0), `diverged` (its digest or its live count is not the view's) or `confirmed`; and the slots it confirms, ascending: those whose bit is set, where the section is `confirmed`. A rank is a place in the byte order of the live members' keys, so slot 10 ranks before slot 2. Then `firing`, the number of firing records in the view, which the live count is not; and `judged`, each slot's answer to \"is this alarm firing?\" 905 s after its put, its owner present and listed and nothing lost: a resolved record is no, `resolved`, whatever its bit and its age; a firing one the heartbeat confirmed is yes, `firing`; a firing one it did not confirm was last confirmed by its put, past the 900 s horizon: unobservable, `stale`, neither firing nor resolved. `built_from` says how each payload was made. `snapshots`: a GET's reply on zk2/lab/svc/alarms.v2/state/alarms, one page in hex (core §7.5), under the deployment `epoch` -> its `size`, its run, asof and `coll` (the alarms are collection 0), and each entry: its `slot` (the id), its stamp, its `confirmation` (`time`: vouched for at the snapshot's time; `conf`: its last confirmation, `confirmed_at` in milliseconds since the Unix epoch) and its record read as records.json reads it.",
  "heartbeats": [
   {
    "note": "W2's three firing alarms, each vouched for: 17 bytes, and each reads firing past the horizon",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -21,10 +21,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e019984300026d9d94ac037",
+   "payload": "c7000300000e019984300026d9d94ac037",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -66,12 +66,12 @@
   },
   {
    "note": "nothing live: the heartbeat is sent all the same, 17 bytes, a live count of 0",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [],
-   "payload": "c9000300000e0199843000200000000000",
+   "payload": "c7000300000e0199843000200000000000",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [],
     "vouched_ranks": [],
     "map_bit": true
@@ -88,7 +88,7 @@
   },
   {
    "note": "three firing and five resolved records kept: a live count of 8 beside 3 firing alarms. The resolved ones have their bits clear, and read resolved, never stale. 18 bytes",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -131,10 +131,10 @@
      "state": "resolved"
     }
    ],
-   "payload": "c9000300000e01998430003663a8f1e08700",
+   "payload": "c7000300000e01998430003663a8f1e08700",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -201,7 +201,7 @@
   },
   {
    "note": "a hung evaluator: slot 1's bit is clear while its record fires. It reads stale, neither firing nor resolved; a clear bit is no resolve",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -219,10 +219,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e019984300026d9d94ac035",
+   "payload": "c7000300000e019984300026d9d94ac035",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -262,7 +262,7 @@
   },
   {
    "note": "every bit clear, an owner that evaluates nothing: three stale alarms, and none resolved",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -280,10 +280,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e019984300026d9d94ac038",
+   "payload": "c7000300000e019984300026d9d94ac038",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -317,7 +317,7 @@
   },
   {
    "note": "only resolved records live: a live count of 2 and nothing firing",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -330,10 +330,10 @@
      "state": "resolved"
     }
    ],
-   "payload": "c9000300000e0199843000213c9c342020",
+   "payload": "c7000300000e0199843000213c9c342020",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1
@@ -362,7 +362,7 @@
   },
   {
    "note": "ranks follow the keys' bytes: alarms/10, alarms/100, alarms/2, alarms/9. Slot 2 and slot 9 are vouched for at ranks 2 and 3; slot 10, at rank 0, is not, and reads stale",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 2,
@@ -385,10 +385,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e0199843000338be0ff804180",
+   "payload": "c7000300000e0199843000338be0ff804180",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      10,
      100,
@@ -433,7 +433,7 @@
   },
   {
    "note": "the same view, the bitmap's first bit set alone: slot 10's, not slot 2's",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 2,
@@ -456,10 +456,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e0199843000338be0ff804400",
+   "payload": "c7000300000e0199843000338be0ff804400",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      10,
      100,
@@ -502,7 +502,7 @@
   },
   {
    "note": "the owner holds a record the reader does not: the live count and the digest are not the view's, and nothing is confirmed. Every firing alarm of the view ages toward stale, and the reader reads the collection again",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -520,10 +520,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e01998430003c6ac906804780",
+   "payload": "c7000300000e01998430003c6ac906804780",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -563,7 +563,7 @@
   },
   {
    "note": "the reader holds slot 1 under an older put than the owner's: the digest diverges at an equal live count",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -581,10 +581,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e0199843000340b09d16037",
+   "payload": "c7000300000e0199843000340b09d16037",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -622,7 +622,7 @@
   },
   {
    "note": "a map bit of 0: the owner does not expose the collection. Nothing is said, and nothing confirmed",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -640,10 +640,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e019984300000",
+   "payload": "c7000300000e019984300000",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -677,7 +677,7 @@
   },
   {
    "note": "another revision's tag: not read",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -732,7 +732,7 @@
   },
   {
    "note": "a body with a byte after its pad: refused, and nothing confirmed",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -750,10 +750,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e019984300026d9d94ac03700",
+   "payload": "c7000300000e019984300026d9d94ac03700",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -787,7 +787,7 @@
   },
   {
    "note": "256 firing alarms, every one vouched for: a bitmap of 256 bits, 49 bytes",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -2070,10 +2070,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e01998430002e9b3f615007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8",
+   "payload": "c7000300000e01998430002e9b3f615007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -3886,7 +3886,7 @@
   },
   {
    "note": "256 live and one vouched for: the list is shorter than the bitmap, a count of 9 bits and a rank of 8. Slot 100 ranks 3rd, after 0, 1 and 10",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -5169,10 +5169,10 @@
      "state": "firing"
     }
    ],
-   "payload": "c9000300000e01998430002e9b3f615008040c",
+   "payload": "c7000300000e01998430002e9b3f615008040c",
    "built_from": {
     "stamp": "0003/14",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -6475,7 +6475,7 @@
   },
   {
    "note": "an owner on a 32-bit run: its records' stamps and its heartbeat's are 2 bytes wider, 19 bytes",
-   "holds_tag": 9,
+   "holds_tag": 7,
    "view": [
     {
      "slot": 0,
@@ -6493,10 +6493,10 @@
      "state": "resolved"
     }
    ],
-   "payload": "d90000a1b20000030199843000359a4769c036",
+   "payload": "d70000a1b20000030199843000359a4769c036",
    "built_from": {
     "stamp": "0000a1b2/3",
-    "tag": 9,
+    "tag": 7,
     "live_in_key_order": [
      0,
      1,
@@ -6539,7 +6539,7 @@
   {
    "note": "nothing held: a page of no entry, the owner's word that no alarm fires. 16 bytes",
    "epoch": 1767225600,
-   "hex": "e0000300001e019980ac000000000000",
+   "hex": "eb000300001e019980ac000000000000",
    "expect": {
     "size": 16,
     "run": "0003",
@@ -6552,7 +6552,7 @@
   {
    "note": "a late joiner's seed, W2's three firing alarms: 64 bytes, each entry vouched for at the snapshot's time",
    "epoch": 1767225600,
-   "hex": "e0000300001e019980ac0000000003013020000005095019980a7037ffff80013120000006095019980a7007ffff80013220000007095019980a8037ffff8000",
+   "hex": "eb000300001e019980ac000000000301302000000509407019980a77ffff8001312000000609401019980a77ffff8001322000000709407019980a87ffff8000",
    "expect": {
     "size": 64,
     "run": "0003",
@@ -6605,7 +6605,7 @@
   {
    "note": "three firing and two resolved records kept: a resolved entry carries its last confirmation, its put's, 22 bytes each",
    "epoch": 1767225600,
-   "hex": "e0000300001e019980ac0000000005013020000005095019980a7037ffff80013120000006095019980a7007ffff80013220000007095019980a8037ffff80013340000009019980e301f409d019980e3037ffff8001344000000b019980e4000009d019980e3007ffff8000",
+   "hex": "eb000300001e019980ac000000000501302000000509407019980a77ffff8001312000000609401019980a77ffff8001322000000709407019980a87ffff80013340000009019980e301f409c07019980e37ffff8001344000000b019980e4000009c01019980e37ffff8000",
    "expect": {
     "size": 108,
     "run": "0003",
@@ -6684,7 +6684,7 @@
   {
    "note": "a firing alarm its owner no longer vouches for: confirmation 2, its last confirmation",
    "epoch": 1767225600,
-   "hex": "e0000300001e019980ac0000000001013040000005019980a90000095019980a7037ffff8000",
+   "hex": "eb000300001e019980ac0000000001013040000005019980a9000009407019980a77ffff8000",
    "expect": {
     "size": 38,
     "run": "0003",
@@ -6711,7 +6711,7 @@
   {
    "note": "entries in the byte order of their ids: 10, 100, 2, 9",
    "epoch": 1767225600,
-   "hex": "e0000300001e019980ac000000000402313020000006095019980a7007ffff800331303040000007019980e301f409d019980e3037ffff80013220000005095019980a7037ffff80013920000008095019980a7007ffff8000",
+   "hex": "eb000300001e019980ac00000000040231302000000609401019980a77ffff800331303040000007019980e301f409c07019980e37ffff8001322000000509407019980a77ffff8001392000000809401019980a77ffff8000",
    "expect": {
     "size": 89,
     "run": "0003",
@@ -6777,7 +6777,7 @@
   {
    "note": "an adopted alarm put again under the new run, and an entry of a run the instance wrote under before: the entry states its own run",
    "epoch": 1767225600,
-   "hex": "e00004000004019980ac0000000002013020000002095019980a7037ffff800131a00003000006095019980a7007ffff8000",
+   "hex": "eb0004000004019980ac000000000201302000000209407019980a77ffff800131a0000300000609401019980a77ffff8000",
    "expect": {
     "size": 50,
     "run": "0004",
@@ -6817,7 +6817,7 @@
   {
    "note": "an alarm by words and one with labels",
    "epoch": 1767225600,
-   "hex": "e0000300001e019980ac0000000002013020000005113019980a7ff7ffffe9967e04cc22b476800131200000060c3019980a7018000017ffff8000",
+   "hex": "eb000300001e019980ac0000000002013020000005113ff019980a77ffffe9967e04cc22b476800131200000060c203019980a78000017ffff8000",
    "expect": {
     "size": 59,
     "run": "0003",

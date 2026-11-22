@@ -4,7 +4,7 @@
   {
    "file": "alarms.v2.json",
    "kind": "packed",
-   "current": "sha256:66140ae459da80e93c621431b87c4f698b328340322f5c5dcb25ed1c567cb56f"
+   "current": "sha256:fe59e748fc957322428ac633a0908d09aa8b6c66952f7a9cdd8608db715a2b2a"
   },
   {
    "file": "schemas/alarms.v2.json",
@@ -14,7 +14,7 @@
  ],
  "published": [
   {
-   "id": "sha256:66140ae459da80e93c621431b87c4f698b328340322f5c5dcb25ed1c567cb56f",
+   "id": "sha256:fe59e748fc957322428ac633a0908d09aa8b6c66952f7a9cdd8608db715a2b2a",
    "revision": "0.1",
    "note": "alarms.v2 0.1: the packed Alarm."
   },
@@ -29,7 +29,7 @@
    "name": "Alarm",
    "kind": "packed",
    "since": "0.1",
-   "tag": 0
+   "tag": 11
   },
   {
    "name": "alarms.v2.Words",
@@ -42,7 +42,7 @@
    "note": "the profile's packed file: the current revision",
    "path": "spec/profiles/alarms/alarms.v2.json",
    "expect": {
-    "id": "sha256:66140ae459da80e93c621431b87c4f698b328340322f5c5dcb25ed1c567cb56f",
+    "id": "sha256:fe59e748fc957322428ac633a0908d09aa8b6c66952f7a9cdd8608db715a2b2a",
     "published": true
    }
   },
@@ -82,12 +82,6 @@
         "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
        },
        {
-        "name": "at",
-        "type": "time",
-        "optional": true,
-        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
-       },
-       {
         "name": "rule",
         "type": "int",
         "minimum": 0,
@@ -96,6 +90,12 @@
          "not_available"
         ],
         "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+       },
+       {
+        "name": "at",
+        "type": "time",
+        "optional": true,
+        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
        },
        {
         "name": "labels",
@@ -129,7 +129,7 @@
     "description": "alarms.v2's standard packed schema (spec/profiles/alarms/v2.md, section 3; core section 7.6). The standard contract alarms.v2.toml lists this file and types its resource alarms/{slot} by it. An alarm's slot is its key's last chunk, never a field. Its rule and its labels are numbers that the service's own table names (the annotation alarms.rules, section 4), or its rule is not_available and its words are on words/{slot} (section 2.4)."
    },
    "expect": {
-    "id": "sha256:66140ae459da80e93c621431b87c4f698b328340322f5c5dcb25ed1c567cb56f",
+    "id": "sha256:fe59e748fc957322428ac633a0908d09aa8b6c66952f7a9cdd8608db715a2b2a",
     "published": true
    }
   },
@@ -162,12 +162,6 @@
         "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
        },
        {
-        "name": "at",
-        "type": "time",
-        "optional": true,
-        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
-       },
-       {
         "name": "rule",
         "type": "int",
         "minimum": 0,
@@ -176,6 +170,12 @@
          "not_available"
         ],
         "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+       },
+       {
+        "name": "at",
+        "type": "time",
+        "optional": true,
+        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
        },
        {
         "name": "labels",
@@ -208,7 +208,7 @@
     }
    },
    "expect": {
-    "id": "sha256:1f288f5efc81ed8740dfa7be8464cd817edc1e00b125db233c44f5459a1a6f82",
+    "id": "sha256:d39845bf3672a476c11fa6ad361e43be4c8e342096c2ff9b76212e9bcdf26710",
     "published": false
    }
   },
@@ -241,12 +241,6 @@
         "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
        },
        {
-        "name": "at",
-        "type": "time",
-        "optional": true,
-        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
-       },
-       {
         "name": "rule",
         "type": "int",
         "minimum": 0,
@@ -255,6 +249,12 @@
          "not_available"
         ],
         "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+       },
+       {
+        "name": "at",
+        "type": "time",
+        "optional": true,
+        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
        },
        {
         "name": "labels",
@@ -280,7 +280,7 @@
     }
    },
    "expect": {
-    "id": "sha256:c59be50fbcec133002c9334f9b5885266110eee738761bc5cfac508ab0e7b32b",
+    "id": "sha256:ec3fc6a56478a9e4b1ec415b7e666465864c3b62b019f3a506a55cc095e31bfb",
     "published": false
    }
   },
