@@ -881,6 +881,37 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   compatible) but moves the fingerprint, since the packed file's id
   hashes it (§2.2). Core Appendix D lists no `config` vocabulary, so W105
   reads none.
+- **`health.v2`** (#986 Q1, text 0.1, `experimental`, written against
+  core 0.113) sits beside `health.v1` in `spec/profiles/health/`:
+  `v2.md`, `scenarios-v2.md` (9 sections, no implementation has run
+  them: the owner and the readers are #986's Q2), `health.v2.toml`
+  (revision 2.0, `sha256:b447f613…05b1`, heartbeat tag 1, published in
+  `.history/health.v2/` by the code half with the fingerprint the
+  drafter computed), `health.v2.json` (artifact `sha256:d270e148…a983`;
+  `Status` and `Check` tag 3, `Fault` 11; 6, 6 and 8 bytes) and
+  `conformance/v2/{schema,records,tables,snapshots,judgements,clock}.json`
+  (327 cases, computed twice outside the repo, never blessed), with the
+  one `CHANGELOG.md`, its entries headed `health.v2 0.N`. It restates v1
+  by reference and replaces §2.5 (the heartbeat's ahead time answers; one
+  `clock_ahead` fault per hold, no Zenoh timestamp; the clock question
+  reads the last read heartbeat, never a fault), §2.6 (`unknown` and a
+  refused record are unknown) and §2.10 (words: 0 none, 1–31 the
+  profile's tables, 32–62 the service's own
+  `health.reasons`/`details`/`codes` on `[defaults]` of a contract that
+  lists `health.v2`, 63 `out_of_range`), and restates §2.2 by seq (one
+  instant: both snapshots complete, one run, one asof, no entry above
+  it). `judgements.json` takes the status's freshness as judged, where
+  v1's states the observations. Core Appendix D publishes the
+  vocabulary; `health.v1` publishes none and draws no W105. The code
+  half ran every case as written, and all 327 pass
+  (`zenkey-model/tests/profiles/health_v2.rs`, a runner per file, none
+  blessing). Three things a runner had to settle: `clock.json`'s cases
+  across a face state no `deployment`, where `judgements.json`'s do, and
+  are read as this major's; a `heartbeats` case's `last_read` is seeded
+  as one read heartbeat on the key; and §2.10's "a contract that loads
+  cannot hold `not_used`" does not hold for one that lists `health.v1`,
+  which loads with a `health.<key>` (no E020, no W105) and is
+  `not_used` in `tables.json`.
 - **`freshness.v1`** is `experimental` since #978's F5 (a status entry in
   `freshness/CHANGELOG.md`, text still 0.5): the adopters' contracts and
   `nav.v2` moved to `freshness.v2`, each a `uses_changed` revision in

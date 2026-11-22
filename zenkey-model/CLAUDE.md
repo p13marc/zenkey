@@ -561,3 +561,63 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   snapshot with no entry fails; reads a version at exactly a remembered
   asof as older; and holds no stamp to send while a snapshot with no
   entry waits or after one was acted on.
+  `health.v2` (#986's Q1, text 0.1, experimental; the session-free half,
+  no owner and no reader on a bus until Q2) is `health::v2`
+  (`src/health/v2.rs`), and what a reader concludes is `health`'s for
+  both majors: `health::Major` (`of(interfaces)`, v2 where a descriptor
+  lists both; `named(iface)`, the deployment's word across a face;
+  `iface()`), `health::judge_status(presence, freshness::Judged, level,
+  checks)`, §2.11's steps from the status's freshness as judged, which
+  `judge(&Reading)` now calls over `freshness::judge_all`, `NAME`
+  (`"health"`), `is_code_form`, and `ClockReason::Ahead` (`ahead`).
+  In `v2`: `PROFILE`/`IFACE`, `FINGERPRINT` (revision 2.0, `b447f613…`),
+  `PUBLISHED` (the packed schema's artifact, `d270e148…`), `VOCABULARY`
+  (`reasons`, `details`, `codes`: W105 reads it for a contract that lists
+  `health.v2`, `contract::vocabulary`), `STATUS_COLL` 1 and `CHECKS_COLL`
+  0, `STATUS_CLASS` (`host`). The records: `Status { level, reason,
+  since }`, `Check { level, detail, at }` and `Fault { code, level,
+  argument, at }` (a level `Option<Level>`, `None` the record's
+  `unknown`; a time whole Unix seconds, `time_at(unix_ms, epoch)` none
+  where the epoch has no code), each `Packed`: `to_json`/`of_json` (core
+  §7.6's reading), `write(epoch)`, `put(stamp, epoch)` (CH's tag 3, or
+  11 for a fault) and `read(tag, bytes, epoch)`, all through
+  `RecordType::layout()`, the schema restated as a declaration, since no
+  crate reads `spec/`. `level_read` maps a record read to `health::Read`:
+  `unknown` is `Unspecified`, a refused record `Undecodable`.
+  `Argument::clock_ahead(offset)` rounds up to whole seconds, capped at
+  65,534, `NotAvailable` for none; `Fault::clock_ahead`, `Status::starting`.
+  Words: `Word` (0 to 62, `NONE`, `OUT_OF_RANGE` 63), `Kind`
+  (`key()`, `table()`, `profile()`), `REASONS` (8), `DETAILS` (5),
+  `CODES` (1), `names(value)`, `declaration(uses_v2, carried)` →
+  `Declared::{None, Table, Invalid(not_used | value | disagrees)}` and
+  `declaration_of(&Contract, kind)`, `Tables` (`of(&Contract)`,
+  `of_instance(named)` → `InstanceTables`, each kind an
+  `Instance::{None, Table, Differ}`, `own(kind)`), `instance_table`,
+  `write_word(kind, word, own)` (the profile's number before the
+  instance's own), `read_word` → `Named::{None, Profile, Service, Number,
+  OutOfRange}`, `growth` (`same`, `appended`, `moved`), and
+  `lint_contract`, for a contract that lists `health.v2` alone, which
+  `zk2 contract lint` prints as `error[health.v2 <reason>] <resource>:
+  <key>` and exits 1 on (`tests/cli.rs`). A late joiner: `Reading::of(replies,
+  epoch)` reads a GET's pages by key and collection index
+  (`Collection::of`) into a `StatusSnapshot` (`StatusEntry::{None,
+  Tombstone, Live}`) and a `ChecksSnapshot` (`live`, `retired`), each
+  entry its stamp, confirmation, `confirmed_at` and record read under
+  the page's tag; `is_one_instant()` (§2.2), `status_level()`,
+  `check_levels()` (none unless the checks' snapshot is whole) and
+  `status_better_than_a_check()`, the break a tool may report from one
+  reading. A second snapshot of one collection in one reading sets
+  `mixed`, never one instant (no fixture has one). The clock question:
+  `ClockHeard::{Heartbeat(Time), HeartbeatUnread, StatusPut,
+  StatusDeleted, ClockAhead, Fault}`, `clock_ahead(presence, heard)` and
+  `clock_of(presence, last_read)`: the last read heartbeat's time
+  answers, ahead yes (`ahead`), an instant no, unknown and none
+  unobservable, and no fault answers. `tests/profiles/health_v2.rs`, a
+  module of `profiles.rs`, runs the six `v2/` files as written (schema
+  4; records 3 layouts, 42 writes, 49 reads, 8 arguments; tables 23, 9,
+  20, 23, 8; snapshots 25; judgements 60; clock 16 heartbeats through
+  `freshness::View::apply`, 37 cases), none blessed, all passing, and
+  `health_v2_standard_contract` holds `health.v2.toml` to the constants.
+  A case that expects `{"major": 1}` is checked for the major alone;
+  `clock.json`'s across-face cases state no `deployment` and are read as
+  `health.v2`'s. `spec/profiles/.history/health.v2/` holds revision 2.0.
