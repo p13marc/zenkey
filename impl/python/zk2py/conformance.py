@@ -4329,7 +4329,8 @@ def family_readings(root: Path) -> list[Result]:
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
-        + _round104_readings(root) + _round118_readings(root) + _round119_readings(root)
+        + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
+        + _round120_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4580,6 +4581,214 @@ def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "- `declarations.json`: 12 desired resources and 34 report resources.",
                           "- `slices.json`: 16. `conclusions.json`: 39. `schema.json`: 3."),
                 [[22, 57, 12, 6], 67, 25, [12, 34], 16, 39, 3]))
+    return out
+
+
+def _round120_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.113, freshness.v2 0.12, health.v1 0.11 and health.v2 0.1 (#609,
+    round 120; #986): each text at its version; the ahead time through every
+    reader of a heartbeat's time; the five answers given from the text, as
+    zk2py's code gives them; the sentences round 120's findings quote, read
+    where they are stated; and what the files of ``conformance/v2/`` do not
+    pin. No session is opened."""
+    import re
+    import tempfile
+
+    from . import health as h1, health_v2 as h2, heartbeat, owner_heartbeat as oh, zk2c
+    from .contract import load_contract
+    from .echo_tool import heartbeat_of
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    core, f2, v1t, v2t, sc = (flat("core.md"), flat("profiles/freshness/v2.md"), flat("profiles/health/v1.md"),
+                              flat("profiles/health/v2.md"), flat("profiles/health/scenarios-v2.md"))
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    out: list[tuple[str, Any, Any]] = []
+    at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
+    out.append(("core 0.113 or later, freshness.v2 0.12 or later, health.v1 0.11 or later, and health.v2 at text 0.1, "
+                "written against core 0.113 and using freshness.v2 0.12 and health.v1 0.11: each header says so",
+                [at is not None and _at_least(at.group(1), "0.113")]
+                + missing(f2, "| **Text version** | 0.12 (") + missing(v1t, "| **Text version** | 0.11 (")
+                + missing(v2t, "| **Text version** | 0.1 ([`CHANGELOG.md`](CHANGELOG.md)) |",
+                          "| **Written against** | core 0.113 ([`../../core.md`](../../core.md)) |",
+                          "[`freshness.v2`](../freshness/v2.md), text 0.12", "[`health.v1`](v1.md)'s rules by "
+                          "reference, text 0.11"), [True]))
+    # -- the ahead time through every reader of a heartbeat's time ---------------------------
+    lo = h2.standard_layout()
+    sections = {"state/status": {"digest": "00000001", "vouched": True}}
+    bodies = {name: heartbeat.write(lo, {"time": t, "sections": sections})
+              for name, t in (("instant", {"s": 5, "ms": 0}), ("unknown", None), ("ahead", heartbeat.AHEAD))}
+
+    def raises(fn: Any, *args: Any) -> bool:
+        try:
+            fn(*args)
+        except (ValueError, TypeError, KeyError):
+            return True
+        return False
+
+    out.append(("core §7.5's three readings: zk2py reads each body's time as its reading and no other; the ahead time "
+                "has no instant, and a value that is none of the three raises, never falls to unknown",
+                [{n: heartbeat.reading_of(heartbeat.read(lo, b)["time"]) for n, b in bodies.items()},
+                 [heartbeat.instant_of(heartbeat.read(lo, b)["time"], 0) for b in bodies.values()],
+                 [heartbeat.shown(heartbeat.read(lo, b)["time"], 0)["clock"] for b in bodies.values()],
+                 raises(heartbeat.reading_of, "behind"), raises(heartbeat.reading_of, 0),
+                 raises(heartbeat.time_bits, "unknown")]
+                + missing(core, "An implementation MUST NOT read the ahead time as unknown, nor as an instant."),
+                [{"instant": "instant", "unknown": "unknown", "ahead": "ahead"}, [5000, None, None],
+                 ["instant", "unknown", "ahead"], True, True, True]))
+    out.append(("freshness.v2 §2.10: time_of writes the ahead time under a guard whatever the clock reads, an instant "
+                "the epoch codes, one it does not, and none; with no guard, the unknown time for the last two",
+                [heartbeat.time_of(10**18, 0, guard=True), heartbeat.time_of(2**33 * 10**9, 0, guard=True),
+                 heartbeat.time_of(None, 0, guard=True), heartbeat.time_of(2**33 * 10**9, 0),
+                 heartbeat.time_of(None, 0), heartbeat.time_of(10**18, 0)]
+                + missing(f2, "- **Whatever its clock reads.** The ahead time carries no instant.",
+                          "- **Never the unknown time.** All ones say the owner's clock reads no instant the epoch "
+                          "codes (§2.4)."),
+                ["ahead", "ahead", "ahead", None, None, {"s": 10**9, "ms": 0}]))
+
+    class _Read:
+        tag, stamp = lo.tag, zk2c.InBand(16, 9, 1)
+
+        def __init__(self, record: bytes) -> None:
+            self.record = record
+
+    class _Held:
+        several: set[str] = set()
+
+        def __init__(self, c: Any) -> None:
+            self.by_iface = {c.interface.rsplit(".", 1)[0] + "." + c.interface.rsplit(".", 1)[1]: c}
+
+    std = load_contract(h2.CONTRACT)
+    held = _Held(std)
+    rows = {n: heartbeat_of("zk2/lab/svc/freshness.v2/stream/heartbeat/health.v2", _Read(b), len(b) + 6, held)
+            for n, b in bodies.items()}
+    out.append(("freshness.v2 §5: zk2py's echo tool names a heartbeat's reading, ahead as ahead and unknown as "
+                "unknown, never the epoch",
+                [{n: r.get("clock") for n, r in rows.items()}, "ahead" in rows["ahead"]["says"],
+                 "unknown" in rows["unknown"]["says"]]
+                + missing(f2, "A tool that shows one shows the ahead time as ahead: never as unknown, and never as "
+                              "an instant. It shows the unknown time as unknown, never as the epoch."),
+                [{"instant": "instant", "unknown": "unknown", "ahead": "ahead"}, True, True]))
+    out.append(("health.v1 0.11: under that major the ahead time answers nothing alone, as the unknown time did: "
+                "an ahead heartbeat alone is unobservable, time_unknown; the fault answers yes; zk2py's v2 question "
+                "over a descriptor that lists health.v1 alone is health.v1's",
+                [h1.clock_question("present", {"lists": True}, ["heartbeat_held"]),
+                 h1.clock_question("present", {"lists": True}, ["clock_ahead", "heartbeat_held"]),
+                 h2.clock_question("present", ["freshness.v2", "health.v1"], [h2.AHEAD]),
+                 h2.clock_question("present", ["freshness.v2", "health.v1"], ["clock_ahead", h2.AHEAD]),
+                 h2.clock_question("present", ["health.v1", "health.v2"], [h2.AHEAD])]
+                + missing(v1t, "- **No instant** is the ahead time or the unknown time (core §7.5).")
+                + missing(v2t, "Only this major answers yes from it: `health.v1` reads it as it read the unknown "
+                               "time (v1 §2.5)."),
+                [("unobservable", "time_unknown"), ("yes", "clock_ahead"), ("unobservable", "time_unknown"),
+                 ("yes", "clock_ahead"), ("yes", "ahead")]))
+    # -- the answers from the text, as the code gives them ------------------------------------
+    r = h2.ClockReader()
+    other = oh.Group(7, 9, "0")          # a group of another interface, which this reader cannot read
+    link = r.owner_heartbeat(oh.write(zk2c.InBand(16, 9, 0), heartbeat.AHEAD, [other]), "link")
+    after_link = r.answer()
+    host = r.owner_heartbeat(oh.write(zk2c.InBand(16, 9, 0), heartbeat.AHEAD, [other]))
+    out.append(("health.v2 §2.5 \"Which heartbeats count\" (answer 3): a read owner heartbeat of the host class "
+                "counts whatever became of its groups, one that holds no group for health.v2 too; one of the link "
+                "class does not; an older one is not read; no case of clock.json holds an owner heartbeat's bytes "
+                "(F-598)",
+                [link, after_link, host, r.answer(),
+                 r.owner_heartbeat(oh.write(zk2c.InBand(16, 9, 0), {"s": 1, "ms": 0}, [other])), r.answer()]
+                + missing(v2t, "A heartbeat covering `health.v2` counts, and an owner heartbeat of the status's "
+                               "class, `host` (`freshness.v2` §2.4), each where it is a read heartbeat. Its sections "
+                               "play no part: the time is the owner's word of its clock.")
+                + missing(f2, "A **read owner heartbeat** is one read at step 3, whatever became of its groups."),
+                [h2.NOT_READ, ("unobservable", "nothing_heard"), h2.AHEAD, ("yes", "ahead"), h2.NOT_READ,
+                 ("yes", "ahead")]))
+    text = ("[interface]\nname = \"hv1tab\"\nmajor = 1\nminor = 0\nsummary = \"lists health.v1, carries "
+            "health.v2's tables\"\nuses = [\"health.v1\"]\n\n[defaults]\nannotations = { \"health.reasons\" = "
+            "[\"tc_netns_gone\"], \"health.codes\" = [\"tc_restarted\"] }\n\n[resources.rates]\nkind = "
+            "\"stream\"\ntype = { raw = \"application/octet-stream\" }\nreliability = \"reliable\"\ncongestion = "
+            "\"block\"\n")
+    with tempfile.TemporaryDirectory() as tmp:
+        c1 = load_contract(Path(tmp) / "hv1tab.v1.toml", text=text)
+        c2 = load_contract(Path(tmp) / "hv2tab.v1.toml",
+                           text=text.replace("hv1tab", "hv2tab").replace('uses = ["health.v1"]', 'uses = ["health.v2"]'))
+        c3 = load_contract(Path(tmp) / "hv2bad.v1.toml",
+                           text=text.replace("hv1tab", "hv2bad").replace('uses = ["health.v1"]', 'uses = ["health.v2"]')
+                           .replace("health.codes", "health.words"))
+    out.append(("health.v2 §2.10 (answer 4, F-593): a contract that lists health.v1 and carries health.v2's keys "
+                "loads with no finding, E020 and W105 included, with the reference CLI's fingerprint, and its "
+                "tables read not_used; the text's \"A contract that loads cannot hold it\" stands beside; the "
+                "same under health.v2 holds the tables, and a key outside §4's three draws W105",
+                [c1.valid, c1.codes, c1.fingerprint,
+                 {k: d.expect() for k, d in h2.contract_tables(c1.canonical).items()},
+                 {k: d.expect() for k, d in h2.contract_tables(c2.canonical).items()}, c2.codes, c3.codes]
+                + missing(v2t, "A contract that loads cannot hold it (core E020).")
+                + missing(core, "so a key `health.<key>` in a contract that lists `health.v1` draws no W105, as "
+                                "before (`health.v1` §1)."),
+                [True, [], "sha256:cddafb46c774b5ba684968e0bcd6418bb741889b95a99ca862f359dfdfd02300",
+                 {"reason": {"invalid": "not_used"}, "detail": {"table": None}, "code": {"invalid": "not_used"}},
+                 {"reason": {"table": ["tc_netns_gone"]}, "detail": {"table": None},
+                  "code": {"table": ["tc_restarted"]}}, [], ["W105"]]))
+
+    def snap(coll: int, asof: int, live: list[Any]) -> dict[str, Any]:
+        return {"tag": 3, "run_width": 16, "run": 7, "asof": asof, "time": {"s": 1, "ms": 0}, "coll": coll,
+                "live": live, "tombs": []}
+
+    ok = {"id": "", "run_width": None, "run": None, "seq": 5, "confirmation": "time",
+          "record": h2.write(h2.STATUS, h2.value_of(h2.STATUS, "ok", 2)).hex()}
+    bad = {"id": "disk", "run_width": None, "run": None, "seq": 6, "confirmation": "none",
+           "record": h2.write(h2.CHECK, h2.value_of(h2.CHECK, "failed", 3)).hex()}
+    one = h2.late_joiner(snap(1, 12, [ok]), snap(0, 12, [bad]))
+    two = h2.late_joiner(snap(1, 11, [ok]), snap(0, 12, [bad]))
+    out.append(("health.v2 §2.2 (answer 5): a status better than its worst check, read in one GET, is a finding "
+                "about the owner from one instant, and two readings a grace apart from any other reading; the "
+                "judgement is unhealthy, inconsistent, either way",
+                [[one.instant, one.breaks, one.report], [two.instant, two.why_not, two.breaks, two.report],
+                 [h2.judge(h2.Reading("present", ["health.v2"], None, ("fresh", "within_horizon"), j.status,
+                                      j.checks)).expect() for j in (one, two)]]
+                + missing(v2t, "A tool MAY report the break itself, as a finding about the owner, from one reading "
+                               "that is one instant.",
+                          "From any other reading it SHOULD see the break in two readings a grace apart, as v1 §2.2 "
+                          "says."),
+                [[True, True, "finding"], [False, "asof", True, "two_readings"],
+                 [{"verdict": "unhealthy", "reason": "inconsistent", "level": "failed"}] * 2]))
+    # -- the findings' sentences, and what the files do not pin -------------------------------
+    st = h2.value_of(h2.STATUS, "ok", 2, 1_800_000_000_000)
+    fa = h2.clock_ahead_fault(2, 1_800_000_000_000)
+    hb16 = zk2c.heartbeat(zk2c.InBand(16, 9, 1), bodies["instant"], lo.tag)
+    hb32 = zk2c.heartbeat(zk2c.InBand(32, 9, 1), bodies["instant"], lo.tag)
+    out.append(("scenarios-v2 §1 Expected 1 (F-595): a status's put is 12 bytes under a 16-bit run, CH 0x03, and 14 "
+                "under a 32-bit run, CH 0x13; a fault's 14 and 16; the heartbeat's 16 and 18; the text gives 12 for "
+                "both CHs",
+                [[len(h2.payload(h2.STATUS, st, 7, 1, w)) for w in (16, 32)],
+                 [h2.payload(h2.STATUS, st, 7, 1, w)[0] for w in (16, 32)],
+                 [len(h2.payload(h2.FAULT, fa, 7, 1, w)) for w in (16, 32)], [len(hb16), len(hb32)]]
+                + missing(sc, "Its put, as S heard it, is 12 bytes: CH `0x03` or `0x13`, the run, the seq, and a "
+                              "record of 6 bytes."),
+                [[12, 14], [0x03, 0x13], [14, 16], [16, 18]]))
+    out.append(("scenarios-v2 §8 (F-596): runs B and C deny the state alone, and expect that no heartbeat and, in "
+                "B, no fault crosses; the heartbeat's key and the faults' are stream keys, which that deny does not "
+                "name",
+                [zk2c.key_token(heartbeat.heartbeat_key("vehicle-01", "nav", "health.v2")),
+                 zk2c.key_token("zk2/vehicle-01/nav/health.v2/stream/faults")]
+                + missing(sc, "- **Run B:** the face denies `zk2/vehicle-01/*/*/state/**`.",
+                          "- **Run B:** nothing crosses at any step.",
+                          "no heartbeat crosses, and a fault published once cannot say that the hold lasts (§2.5)."),
+                ["stream", "stream"]))
+    out.append(("core §2.6 (F-597): an event's time is still said unknown under the guard \"as a heartbeat's is\", "
+                "which since 0.113 is the ahead time; zk2py's owner writes an event's unknown, as the first clause "
+                "says",
+                missing(core, "It is unknown while §4.3's clock guard holds, as a heartbeat's is, and where the "
+                              "owner does not trust its clock.",
+                        "Only a heartbeat's time has it,"), []))
+    empty, some = h2.Declared(()), h2.Declared(("tc_a",))
+    out.append(("health.v2 §2.10, what tables.json does not pin (F-599): an empty list beside another list is two "
+                "different lists, differ; beside none, the empty table; a reader given no named revision shows "
+                "numbers",
+                [h2.instance_table(h2.REASON, ["a", "b"], {"a": empty, "b": some}).expect(),
+                 h2.instance_table(h2.REASON, ["a", "b"], {"a": empty, "b": h2.Declared(None)}).expect(),
+                 h2.read_word(h2.REASON, 32, h2.instance_table(h2.REASON, None, {"a": some})).expect()],
+                [{"table": None, "reason": "differ"}, {"table": []}, {"number": 32}]))
     return out
 
 
