@@ -176,3 +176,59 @@ def write_back(stamp: InBand) -> bytes:
     """"Every held stamp an implementation accepts MUST write back to the
     same bytes."""
     return write(stamp)
+
+
+# -- §4.2, the owner's answer (round 116, before held.json's `answers`) -------
+
+#: the kinds of state GET `answers` names: a member read of one concrete key
+#: on a collection its owner answers by snapshot, a member read whose
+#: selector is not one concrete key, a collection read, and a read of one
+#: concrete key of a per-key resource
+READS = ("member", "wildcard", "collection", "per_key")
+
+
+def one_concrete_key(selector: str) -> bool:
+    """Core §4.2: "One concrete key is a selector with no wildcard: no ``*``,
+    no ``**`` and no ``$*`` chunk." Every wildcard a key expression has holds
+    a ``*``."""
+    return "*" not in selector.split("?", 1)[0]
+
+
+def same(a: InBand | None, b: InBand | None) -> bool:
+    """Core §4.2: "exactly that stamp: the same run, in width and value, and
+    the same seq"."""
+    return a is not None and b is not None and (a.width, a.run, a.seq) == (b.width, b.run, b.seq)
+
+
+def answer(read: str, encoding: Any, payload: bytes | None, last: InBand | None) -> bytes | None:
+    """An owner's answer to one state GET, by core §4.2's "A conditional
+    read": the held stamp's bytes where it answers "with the held stamp
+    alone", None where it answers whole, "as it answers one with no
+    payload".
+
+    - ``read``: one of :data:`READS`. "On any other GET a held stamp is
+      ignored: a collection read, a member read whose selector is not one
+      concrete key, and a per-key resource's read";
+    - ``encoding``, ``payload``: the GET's, read by :func:`read_get`. "A
+      payload §7.5 refuses is answered whole too";
+    - ``last``: the in-band stamp of "the member's last mutation … its last
+      put, or its delete within the window (S3). Its stamp is the one a
+      snapshot would list for the member: its live entry's, or its
+      tombstone's"; None where the owner holds no member at the key ("No
+      member held … is answered with a snapshot of no entry").
+
+    The owner compares the GET's stamp with the member's stored one, never
+    with the run it writes under now or its newest seq: an entry "states its
+    own [run] when its member's last mutation was under another run" (§7.5),
+    and that is the stamp a snapshot would list. "Another stamp is answered
+    with the member's snapshot: another seq, another run, or the same run's
+    value at the other width." The answer's "payload is the held stamp the
+    GET carried"."""
+    if read not in READS:
+        raise ValueError(f"no such read: {read!r}")
+    if read != "member":
+        return None
+    asked = carried(encoding, payload)
+    if asked is None or not same(asked, last):
+        return None
+    return write(asked)

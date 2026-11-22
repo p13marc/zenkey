@@ -116,6 +116,7 @@ from typing import Any, Callable
 import zenoh
 
 from . import bundle, freshness, freshness_v2, snapshot, templates, zk2c
+from . import held as held_stamp
 from . import heartbeat as hbeat
 from .contract import Contract
 from .lexical import parse_interface_id
@@ -828,6 +829,17 @@ class Owner:
         #: each snapshot this owner built, (key, coll, asof, pages): what a
         #: scenario checks of its answers
         self.snapshots_sent: list[tuple[str, int, int, int]] = []
+        #: core §4.2 (0.110), "A conditional read": "An owner SHOULD answer a
+        #: conditional read with the held stamp alone when the member's last
+        #: mutation carries exactly that stamp". False answers every GET
+        #: whole, as "an owner built before this version" does: it "reads no
+        #: payload on a state GET"
+        self.conditional = True
+        #: each conditional read this owner answered with the held stamp
+        #: alone, (key, stamp); and each state GET's payload §7.5 refused,
+        #: (selector, token), answered whole
+        self.held_sent: list[tuple[str, zk2c.InBand]] = []
+        self.held_refused: list[tuple[str, str]] = []
         self.before_tokens = before_tokens
         #: §8.2's plan, kept for a re-mint (:meth:`new_epoch`)
         self._plan_made: dict[str, list[tuple[dict[str, Any], str]]] = {}
@@ -2814,7 +2826,12 @@ class Owner:
           alone, on the member's own key … one page, whose one entry has the
           empty id"; or, for "a member read of one concrete key that it holds
           no member at, live or deleted within the window", "a snapshot of no
-          entry on that key".
+          entry on that key";
+        - ``("held", key, bytes)``: a conditional read's answer (core 0.110),
+          "the held stamp alone", where the GET is a member read of one
+          concrete key that carries a held stamp and "the member's last
+          mutation carries exactly that stamp" (:func:`zk2py.held.answer`).
+          Every other GET is answered "as it answers one with no payload".
 
         A collection read "is a GET whose selector includes the snapshot key
         followed by ``/**``"; a member read reaches a collection's member
@@ -2825,6 +2842,18 @@ class Owner:
         asked = zenoh.KeyExpr(sel)
         concrete = not any(templates.is_wild(c) for c in sel.split("/"))
         out: list[tuple[Any, ...]] = []
+        # core §4.2 (0.110), "A conditional read": "a member read of one
+        # concrete key, whose GET carries a held stamp that §7.5's parse
+        # accepts. Its member is of a collection the owner answers by
+        # snapshot." "A payload §7.5 refuses is answered whole too", and "On
+        # any other GET a held stamp is ignored".
+        named: zk2c.InBand | None = None
+        if self.conditional and not isinstance(query, str):
+            payload = None if query.payload is None else query.payload.to_bytes()
+            try:
+                named = held_stamp.read_get(query.encoding, payload)
+            except zk2c.Refused as e:
+                self.held_refused.append((sel, e.token))
         with self._writes:
             now = time.monotonic()
             held = self._live_or_windowed(now)
@@ -2846,6 +2875,16 @@ class Owner:
                     out.append(("snapshot", col.key, self._pages(col, header, entries)))
                     continue
                 reached = [(k, h) for k, h in members if asked.intersects(zenoh.KeyExpr(k))]
+                if concrete and named is not None and len(reached) == 1 and reached[0][0] == sel:
+                    # "the member's last mutation carries exactly that stamp:
+                    # the same run, in width and value, and the same seq". It
+                    # is the member's stored stamp, "the one a snapshot would
+                    # list for the member: its live entry's, or its
+                    # tombstone's", never the run this owner writes under now.
+                    reply = held_stamp.answer("member", zk2c.ENCODING, held_stamp.write(named), reached[0][1].inband)
+                    if reply is not None:
+                        out.append(("held", sel, reply))
+                        continue
                 for k, h in sorted(reached, key=lambda x: x[0].encode()):
                     header = header or self._snapshot_header()
                     out.append(("snapshot", k, self._pages(col, header, [("", k, h)])))
@@ -2940,6 +2979,15 @@ class Owner:
             if len(item) == 2:
                 item = ("reply", *item)  # an answer made before core 0.100's items
             what, key, x = item
+            if what == "held":
+                # core §4.2 (0.110): "The answer is one reply on the member's
+                # key. Its payload is the held stamp the GET carried (§7.5)",
+                # under `zenoh/bytes`, with no Zenoh timestamp, as a snapshot.
+                query.reply(key, x, encoding=zk2c.ENCODING)
+                stamp = held_stamp.read_reply(x).stamp
+                assert stamp is not None
+                self.held_sent.append((key, stamp))
+                continue
             if what == "snapshot":
                 for page in x:
                     query.reply(key, page, encoding=zk2c.ENCODING)
