@@ -319,7 +319,7 @@ cargo test -p zengui        # unit, pane-rendering, scene and spray tests
 just spray                  # the zk2 spray in one terminal…
 just test-live              # …live-bus tests in another (or, with nothing running:
                             #  cargo test -p zengui --test live_bus -- --ignored)
-just ci                     # everything CI runs
+just ci                     # what CI runs on a pull request
 just shots                  # a PNG of every scene, both themes → target/shots/current
 just shots-base main        # the same scenes drawn from main → target/shots/base
 ```
