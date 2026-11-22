@@ -6091,7 +6091,9 @@ A contract that lists `alarms.v1` and writes `alarms.<key>` draws W105.
 `alarms.v2` publishes one key, `rules`: a service's own table of its
 alarm rules, which a contract writes once on `[defaults]` (`alarms.v2`
 §4). W105 reads it for a contract that lists `alarms.v2`, and any other
-`alarms.<key>` there draws W105.
+`alarms.<key>` there draws W105. A contract that lists `alarms.v1` and
+writes `alarms.rules` draws W105 as well.
+`[F: contracts/ok-alarms-v2-rules, w105-alarms-v2-vocabulary, w105-alarms-rules]`
 
 `desired.target` left with the interim `desired` row: the binding
 already says which identity fills each target parameter (R2), and no
