@@ -473,3 +473,67 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   (`envelope/held.json`, 88 cases), `seed_held` (`seed/held.json`'s 12
   asks, and its 29 cases through `seed_cases`, which `seed_snapshot`
   shares), `envelope_carries` (46 reads), all as written, none blessed.
+  `desired.v2` (#986's J2, text 0.1, experimental) is `desired::v2`
+  (`src/desired/v2.rs`), and what it shares with `desired.v1` is one
+  copy, in `desired`. Shared: `machine::Core<M, R>` (crate-private), the
+  target's state machine over a `Mark`, an epoch nothing orders and a
+  tick within it (v1: a stamp's id and time; v2: a run with its width
+  and a seq), with a floor for v2's snapshot with no entry, and a
+  `Ledger` each major renders its report from; `desired::Target` is that
+  core with v1's stamp, its public surface unchanged (`Ended<R =
+  Refusal>` the one type that grew a parameter). §5's judges read a
+  report of either major through `Reported::facts()` → `Facts { source,
+  outcome, last_known, in_force }`, `None` for a malformed one:
+  `refused`, `last_known` and `in_force` are generic over
+  `TargetReading<'_, R = Report>` and `ReportRead<'_, R>`, and step 7's
+  comparison is one function over a mark. `Invalid::HorizonV1`, and
+  `Finding::{Escape, RunFields}`, are v2's alone. In `v2`: `PROFILE`,
+  `VOCABULARY` (`target_param`, `report`, `pointers`, `details`, which
+  `contract::vocabulary` gives W105 at major 2), `PUBLISHED`, `TAG` 12,
+  `MAX_REVISION`, `uses_v2`, `Major::of(&Contract)`; `Version =
+  wire::Stamp`, `version_text`/`parse_version` (`<run>/<seq>`);
+  `declaration(kind, template, params, annotations, uses)` and
+  `declaration_of(&Contract, &Resource)` → `desired::Declaration` (v1's
+  reading, then `horizon_v1`); `Names::{Role, Param}`,
+  `ReportResource`, `report_declaration(resource, is_role, others)` and
+  `report_declaration_of` → `ReportDeclaration::{NotThisProfiles,
+  Invalid(Vec<ReportInvalid>), Declared { names, tables }}`,
+  `is_report(&TypeId)`, `lint_contract` (each invalid declaration a
+  `Lint { at, token, says }`, an error of `zk2 contract lint` and of
+  `zenkey-build`); `Tables { pointers, details }` with `place(pointer)`
+  and `line(text)` → `Index::{At(u8), OutOfRange}` and
+  `pointer`/`detail`/`word(table, index)` → `Word::{Entry, Number,
+  OutOfRange}`; `layout()` (declared in the crate, held to
+  `desired.v2.json`'s by `desired_v2_schema`: no published crate reads
+  `spec/`), `Fields` (the record, `to_json`/`of_json`, `record()`,
+  `check()` → §2.10's findings, `report()`), `Report { source, outcome,
+  last_known, observed, in_force, refusal }` (the profile's reading:
+  `baseline()`, `fields()`, `write()`, `put(stamp)`, `reading()`,
+  `from_reading()`), `Observed { version, revision }`, `Refusal { code,
+  pointer, detail }`, `Code` (`Own` the escape, `Code::of(name)`),
+  `read(tag, bytes)` → `Read { fields, findings, report }` or core
+  §7.6's refusal; `Target` (`observe(Sample)`, `observe_no_entry(run,
+  asof)`, `unchanged(sent)`, `finish(Ended)`, `call()`, `report()`,
+  `running()`, `held()`/`holds()`, `remembered(run)`), `Step` with
+  `NoVerdict`, `Act { kind, cause, .. }` with `Cause::{Version,
+  NoEntry}`, `version()` and `bound()` (§2.4's refusal of a revision
+  above the bound, which the report then leaves out); `Watch::new(key,
+  moves)` with `heartbeat(Beat, holds)` → `Decision`, `answer(Answered,
+  holds)`, `heard(old, new)` → `Heard`, `expects()`, `outstanding()`,
+  over `freshness::Sequence`; `report_at(target, iface, role, resources,
+  is_role)`/`report_at_of(target, &Contract, role)` → `ReportAt::{None,
+  Two, Invalid, At { key, tables }}` and `ReportAt::found(reply)` →
+  `Found::{None, Unreadable, One(Read)}`; `Current::{NotRead,
+  Incomplete, Unstamped, Silent, Entry, Tombstone, NoEntry(run)}`,
+  `AuthorReading` and `converged`. `collection::per_key_in` leaves out a
+  desired resource of a revision that uses `desired.v2` (core 0.112),
+  which narrows `link::tombstone_only` (link.v2 0.23; `v2/plan.json`'s
+  case 49). `tests/profiles/desired_v2.rs`, a module of `profiles.rs`,
+  runs the seven `v2/` fixtures as written, 293 cases, none blessed and
+  no runner able to: `watch.json` drives a `Watch` beside a real
+  `Target`. It also loads the scenarios' `tasking.v2` and `worker.v2`
+  (`zenkey/tests/contracts/`) with no finding. Where the text is silent
+  the model: keeps the version it was reverting when a revert on a
+  snapshot with no entry fails; reads a version at exactly a remembered
+  asof as older; and holds no stamp to send while a snapshot with no
+  entry waits or after one was acted on.
