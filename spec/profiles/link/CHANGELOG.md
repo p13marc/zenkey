@@ -30,11 +30,14 @@ listed every desired resource among them.
 - **The MUST** on a listed service's window is as it was. Its list of
   resources is one shorter.
 - **A `desired.v1` desired resource** keeps its floor.
-- **No vector moved, and none was added.** No contract in
-  `conformance/` uses `desired.v2`. A plan is derived by the reference
-  and read by hand, as case 48 was. A case of a listed owner whose one
-  state is a `desired.v2` desired resource, with no floor, is the model
-  lane's to derive with its code.
+- **No vector moved.** No contract in `conformance/` uses `desired.v2`.
+- **One case, added with the model.** `v2/plan.json`'s case 49 is case
+  31's face and state, its revision's `uses` moved from `desired.v1` to
+  `desired.v2`.
+  - **Expected:** no floor. Case 31's plan floors the owner's window at
+    the face's outage.
+  - **Derived by the reference, then read by hand,** as case 48 was. It
+    differs from case 31's plan by that floor alone. 50 cases.
 - **`link.v1` §2.11** floors every state, and is unchanged.
 
 ## link.v2 0.22 — 2026-11-21: editorial: which interfaces an owner heartbeat's plan counts, §2.19's refused `mode` and far end's file, and Appendix B's put of 4 bytes with LoRa's formula, no keyword changed (#609, #1110)
