@@ -3117,10 +3117,19 @@ mod zk2fx {
     }
 
     /// Every published revision, as `--contracts examples/zk2/.history`.
+    ///
+    /// Loaded once a process. [`fp`] and [`current`] each ask for it, a
+    /// [`catalog`] asks them a dozen times, and loading the history is
+    /// seconds of a debug build: `every_observing_family_states_its_scope`
+    /// spent 53 s of CPU reloading it (#1151).
     pub fn contracts() -> ContractSet {
-        let (set, problems) = ContractSet::load_path(&examples().join(".history"));
-        assert!(problems.is_empty(), "{problems:?}");
-        set
+        static SET: std::sync::OnceLock<ContractSet> = std::sync::OnceLock::new();
+        SET.get_or_init(|| {
+            let (set, problems) = ContractSet::load_path(&examples().join(".history"));
+            assert!(problems.is_empty(), "{problems:?}");
+            set
+        })
+        .clone()
     }
 
     /// The current revision of `iface`, as `contracts()` holds it: its
