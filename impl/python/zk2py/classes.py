@@ -1158,6 +1158,17 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("static", "core §7.5", "Every held stamp an implementation accepts MUST write back to the same bytes", MET,
      "held.write_back (envelope family: each held stamp a gets or a replies case accepts, written back) (round 116, "
      "core 0.110)"),
+    ("static", "core §7.5", "An implementation that reads a heartbeat's time MUST read it as an instant, as unknown "
+     "or as ahead", MET,
+     "heartbeat.read_time: {s, ms} below the code 1000; None for all 42 bits set; heartbeat.AHEAD for the seconds all "
+     "ones under 1022; every other code from 1000 up refused `code`; an owner heartbeat's time through the same "
+     "(heartbeat family: times.json's 18 reads and bodies.json's 42, written before either was opened, none missed) "
+     "(round 120, core 0.113)"),
+    ("static", "core §7.5", "An implementation MUST NOT read the ahead time as unknown, nor as an instant", MET,
+     "heartbeat.AHEAD is a value of its own: heartbeat.reading_of names the reading and raises for any other value, "
+     "instant_of gives it no instant, health.v1's heard_from and health.v2's clock question take it by reading_of, "
+     "and the echo tool's row names it (`clock`) (readings: the three readings through every reader of a "
+     "heartbeat's time) (round 120, core 0.113)"),
 ]
 
 
