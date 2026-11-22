@@ -251,7 +251,12 @@ def keeps_timestamp(c: Contract, r: dict[str, Any]) -> bool:
         # replies alone (:attr:`_Held.confirm`).
         if freshness.horizon("state", ann).horizon == "within" and not freshness_v2.uses_v2(c.canonical):
             return True
-        if "desired.target_param" in ann:
+        # Core 0.112's table: "A desired resource of a contract that does not
+        # use desired.v2"; "A desired.v2 desired resource carries none. Its
+        # version is its in-band stamp, and a GET of it is answered by
+        # snapshot" (desired.v2 §2.4: "An author MUST NOT set a Zenoh
+        # timestamp on a put or a delete of it").
+        if "desired.target_param" in ann and "desired.v2" not in c.canonical["uses"]:
             return True
         # Core 0.90 (F-462's answer): "A state that is a metric resource of
         # telemetry.v1, or of telemetry.v2 and no frame resource". A state is
@@ -269,7 +274,8 @@ def per_key(c: Contract, r: dict[str, Any]) -> bool:
     """Core §4.2 (0.100), "A per-key resource keeps S2's reply per key …
     These are the states §4.3's table lists": a state that declares
     ``freshness.ttl_s`` above 0 of a contract that does not use
-    ``freshness.v2``, a ``desired.v1`` desired resource, a ``telemetry.v1``
+    ``freshness.v2``, "a desired resource of a contract that does not use
+    ``desired.v2``" (core 0.112), a ``telemetry.v1``
     or ``telemetry.v2`` metric state, and "every state of an interface whose
     contract uses ``redundancy.v1``" (:func:`keeps_timestamp` reads the
     first three)."""

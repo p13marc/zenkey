@@ -1,0 +1,29 @@
+# desired.v2 scenarios-v2.md, "The contracts", transcribed (zk2py round 118):
+# worker.v2.toml: what a worker runs, its report, and its role
+[interface]
+name  = "worker"
+major = 2
+minor = 0
+uses  = ["desired.v2"]
+
+[schemas]
+packed     = ["../../../../spec/profiles/desired/desired.v2.json"]
+jsonschema = ["tasking.json"]
+
+[resources.running]
+kind = "state"
+type = "json:Task"
+
+[resources."desired/task"]
+kind = "state"
+type = "packed:Report"
+
+[resources."desired/task".annotations]
+"desired.report"   = "task"
+"desired.pointers" = ["", "/mode", "/rate_hz", "/endpoint", "/revision"]
+"desired.details"  = ["above what the drive supports", "names how the worker reaches the bus", "a revision above 4,294,967,295"]
+
+[requires.task]
+interface = "tasking.v2"
+resources = ["tasks/{system}/{service}"]
+optional  = true

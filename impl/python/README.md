@@ -82,7 +82,7 @@ case name. It exits with:
 | link | profiles/link §2.1–§2.15 | `link` | every file of `spec/profiles/link/conformance/`, `contracts/` (0.13: each contract there valid, each artifact listed) among them: `exposure.json` (§2.2's exposure and whether a resource's pushes cross), `plan.json` (a face policy and a deployment to each face's plan, or its refusal) and `lints.json` (the policy's linter, the plan's warnings, the windows and a router's block). An unknown file there fails. |
 | alarms | profiles/alarms §2.2–§2.6, §2.12, §2.14, §2.15, §5 | `alarms` | every file of `spec/profiles/alarms/conformance/`: `keys.json` (the recipe through the sanitizing step, the strict recipe beside it, host-scoped names, references and their keys), `documents.json` (readable, the owner's errors and warnings; a case given as its `text` read as strict JSON first, 0.2), `transitions.json` (one key's samples read in stamp order) and `conclusions.json` (§5's four questions, and §2.15's verdict on an owner's alarms). An unknown file there fails. |
 | telemetry | profiles/telemetry §2.1–§2.11, §3 | `telemetry` | every file of `spec/profiles/telemetry/conformance/`: `schema.json` (the standard schema's published ids, the file's header against zk2py's tables, and each case's document by path, inside a bundle, or inline), `declarations.json` (a resolved resource's declaration), `samples.json` (one sample's conformance, and the member's kind and unit; since 0.2 a sample may come as its bytes, `json_text` read as strict JSON, `cbor_hex` as CBOR, `attachment_text` as JSON) and `continuity.json` (a pair's continuity, its epoch's evidence and its rate, compared exactly; `stamp_ntp64` read as zenoh's `as_nanos`, 0.2). An unknown file there fails. |
-| desired | profiles/desired §2.2–§2.10, §2.17, §3 | `desired` | every file of `spec/profiles/desired/conformance/`: `schema.json` (the standard schema's two published ids, the file's header against zk2py's tables, each case's document by path or inline), `declarations.json` (a resolved resource with its parameters' types -> its declaration, or its reasons in order, `not_string` since 0.2), `bindings.json` (a requirement as a descriptor lists it -> the slice's key, the kill switch, or its findings), `order.json` (one role's steps through the target's state machine, a put's payload decoded, as its text or as its bytes: each step's word and the report after the last, which must itself read with no finding), `reports.json` (a report decoded or as its bytes: readable, and its findings in order), `conclusions.json` (§5's four questions over one reading, the deployment's word across a face since 0.2) and `slices.json` (0.5: a tool's reading of one role before §2.17 answers -> its candidate slices, where they came from, §2.3's and §2.2's problems, and which reply is the report). An unknown file there fails. |
+| desired | profiles/desired §2.2–§2.10, §2.17, §3; `v2.md` §2.2–§2.10, §2.17, §3 | `desired`, `desired_v2` | `conformance/v2/`, seven files and 293 cases (round 118: `schema.json`, `reports.json`, `order.json`, `watch.json`, `declarations.json`, `slices.json`, `conclusions.json`); and every file of `spec/profiles/desired/conformance/`: `schema.json` (the standard schema's two published ids, the file's header against zk2py's tables, each case's document by path or inline), `declarations.json` (a resolved resource with its parameters' types -> its declaration, or its reasons in order, `not_string` since 0.2), `bindings.json` (a requirement as a descriptor lists it -> the slice's key, the kill switch, or its findings), `order.json` (one role's steps through the target's state machine, a put's payload decoded, as its text or as its bytes: each step's word and the report after the last, which must itself read with no finding), `reports.json` (a report decoded or as its bytes: readable, and its findings in order), `conclusions.json` (§5's four questions over one reading, the deployment's word across a face since 0.2) and `slices.json` (0.5: a tool's reading of one role before §2.17 answers -> its candidate slices, where they came from, §2.3's and §2.2's problems, and which reply is the report). An unknown file there fails. |
 | redundancy | profiles/redundancy §2.2–§2.15, §5 | `redundancy` | every file of `spec/profiles/redundancy/conformance/`: `declarations.json` (a contract's `uses` and resolved annotations, and the tokenless set -> governed with its election, not governed, or its reasons in order), `descriptors.json` (one entry's mark and §2.14's findings, `malformed` alone), `elections.json` (one read from the instance's view -> take over, or stand by and why), `heals.json` (two reads' holders -> step down to the lower, or stay and why), `lifecycle.json` (one candidate's events through the state machine -> each step and its role) and `conclusions.json` (§5's four questions over two reads a grace apart). An unknown file there fails. |
 | timing | profiles/timing §2.2–§2.7, §5 | `timing` | every file of `spec/profiles/timing/conformance/`: `declarations.json` (a resolved resource, its annotations or its three layers, or a requirement -> not this profile's, ignored, invalid with its reasons in order, or declared with `below_period`), `deadlines.json` (one reader's tracker for one provider and resource, driven by its events, each instant read exactly to the nanosecond -> its reports, what it holds, its next due), `lifespans.json` (one member's samples within one reading -> each sample's judgement, a clock falsified for the reading), `periods.json` (one member's arrivals over a window -> kept, not kept, too short or not heard, with its count and span) and `conclusions.json` (§5's three questions of one member over one window). An unknown file there fails. |
 | arbitration | profiles/arbitration §2.2–§2.11, §2.14, §5 | `arbitration` | every file of `spec/profiles/arbitration/conformance/`: `declarations.json` (one role and the revision of its required interface held -> not arbitrated, arbitrated with its policy, stream, deadline and period, unread, or invalid with its reasons in order), `rankings.json` (a binding and the addresses heard -> the providers in rank order, the unbound, the wildcard and shadowed entries), `arbitrations.json` (one consumer's role and its events -> after each, its switches, the active provider, its due, a sample's outcome, the reads again) and `conclusions.json` (§5's three questions over a tool's reading). An unknown file there fails. |
@@ -8491,6 +8491,148 @@ refuses at another mode than the one read). None is a blocker. F-569 to
 F-572 stay open. See "At freshness.v2 0.11, link.v2 0.22, observer 0.35
 and core 0.111" in `SPEC-FINDINGS.md`.
 
+## `desired.v2` 0.1, core 0.112 and `link.v2` 0.23: a new major, each part written before its fixture (round 118)
+
+Round 118 read the branch `chunk-986-j2` at a6aab761 (#986's second
+chunk): `desired.v2`, `desired.v1` by reference on a wire a far target
+can afford.
+- **The version is the in-band stamp,** a run and a seq (§2.4). The
+  desired resource carries no Zenoh timestamp and is answered by
+  snapshot.
+- **A target asks less** (§2.5): a conditional re-read, or a watch on
+  its author's heartbeat.
+- **The report is a packed record,** 3 to 27 bytes (§2.10, §3), a
+  refusal's place and line indices into two tables of the target's
+  contract.
+- **Core 0.112 and `link.v2` 0.23:** such a resource is no per-key
+  resource, and has no floor. `v2/plan.json` holds 50 cases.
+
+`RULES.md` and `observer.md` did not move: 295 rules, and the walk's 308
+rows keep their verdicts.
+
+**`just py-conformance`: 7566 of 7566** on this tree. Of them, `desired`
+774, `readings` 1124 and `link` 357.
+
+### Written from the text, then run
+
+Each part was written from `v2.md` and committed before its file of
+`conformance/v2/` was opened. **No case of the 293 was missed on a first
+run.**
+
+| Part | In `desired_v2` | Commit | First run |
+|---|---|---|---|
+| The packed Report, its checks, its two tables | `write_report`, `read_report`, `consistency`, `place_index`, `line_index` | 0970e914 | `schema` 3/3, `reports` 97/97 |
+| The target, by run and seq | `TargetRole` | 3b38d970 | `order` 67/67 |
+| The watch | `Watch` | f306641a | `watch` 25/25 |
+| The two declarations | `declare`, `declare_report` | 0d63a619 | `declarations` 46/46 |
+| A role's report, and a tool's four answers | `find_report`, `conclude` | f63b3004 | `slices` 16/16, `conclusions` 39/39 |
+
+- **What came after a file was opened** is its format alone: the nested
+  form `reports.json` and `order.json` write a report in, and each
+  file's steps.
+- **Four checks of zk2py's own failed on `reports.json`,** and are a
+  finding: four records read with no finding and do not write back to
+  their bytes, against §2.10's "Every report reads back to the same
+  bytes" (F-576).
+
+**The four answers, given from the text first** (`SPEC-FINDINGS.md`,
+committed before any `desired.v2` code):
+1. **A version at exactly a remembered asof is older,** by §2.8's "at or
+   below the asof". §2.6 step 4, which it cites, says "Equal is the same
+   version" (F-582). `order.json`'s case 26 pins older.
+2. **A revert on a snapshot with no entry that fails** has no observed
+   version, by §2.10, and that report breaks §2.10's own
+   `observed_outcome` (F-577). No case holds one.
+3. **A read around a snapshot with no entry carries no stamp,** by
+   zk2py's reading. The text names neither case (F-581).
+4. **A heartbeat under another run than the last read one's makes the
+   target read once,** whatever run its held version is of. Then it
+   waits on the section alone.
+
+### What changed in zk2py
+
+- **`desired_v2`, new,** session-free:
+  - `Run` and `Version`, written `<run>/<seq>`; the standard schema's id
+    and tag 12;
+  - the report through `packed`'s codec, its eight consistency
+    findings, a place written as its index, its nearest listed ancestor
+    or `out_of_range`;
+  - `TargetRole`: steps 1 to 5 over runs, 16 remembered, a snapshot with
+    no entry judged against the held document's run and recorded as its
+    asof, a revision above 4,294,967,295 refused and left out of the
+    report, the stamp a read carries, an unchanged answer that confirms
+    a last-known version;
+  - `Watch`: the six steps, one sequence per heartbeat key, the three
+    answers, the digest moved for its own change;
+  - `declare`, with `horizon_v1`; `declare_report`, its ten reasons;
+    `lint_contract` over a contract's canonical form;
+  - `find_report` and `conclude`.
+- **The owner** carries no Zenoh timestamp on a desired resource of a
+  contract that uses `desired.v2`, and answers it by snapshot
+  (`keeps_timestamp`). The plan gives it no floor (`link._per_key`).
+  W105 reads `desired.v2`'s four keys for a contract that lists it.
+- **`desired_v2_live`, new:** the author and the target on a bus.
+  **`desired_v2_owner`** is either as a process, and
+  **`desired_v2_scenarios`** the runner.
+- **`interop/desired-v2/`** holds the scenarios' two contracts,
+  transcribed. Their fingerprints are those of the reference's
+  `tasking.v2.toml` and `worker.v2.toml`. `interop/desired-v2-watched/`
+  is `tasking.v2` with a horizon of 4 s.
+
+### The lint
+
+`zk2 contract lint` of a6aab761 and zk2py's reading agree on the two
+scenario contracts, on five contracts broken on purpose and on four of
+five shapes no case holds. They differ on one: a stream and a state that
+both hold `desired.report = "task"`. The reference says `two_reports` on
+both, and zk2py on the stream alone, by §0's "a state resource" (F-580).
+The reference errors, exit 1, where v1 §2.2 says a linter warns (F-583).
+
+### Live
+
+```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.desired_v2_scenarios \
+  [--only 1|2|3|4|5|6|8|13|14|14-no-move|15]...
+```
+
+**Both parties are zk2py's own processes.** The reference's runtime does
+not speak `desired.v2` at a6aab761, so this shows that the sections can
+be run as written, and no interop. A face is a TCP relay and the
+target's word: no `link.v2` policy stood between the routers.
+
+| Section | Result |
+|---|---|
+| §1 to §6, §8 | 7, 6, 5, 6, 3, 6 and 1 checks, all passing |
+| §13, P played by the runner | 8/8 |
+| §14, and a target that does not move what it expects | 6/6, 2/2 |
+| §15 | 3/3 |
+
+- **53 of 53 in one whole run on the final tree.** On the first pass,
+  made in parts, two failed, both the runner's. One showed a gap: an author given the path of a run's record
+  that is gone took run 0000 again, and its target read the new v2 the
+  same version (F-578).
+- **§3 step 4:** past the window, the seed carries `s3`, the author
+  answers a snapshot with no entry under v3's run, and the target
+  reverts. Its report is 5 bytes of record.
+- **§13 step 5:** one GET, the seed, 1.0 s after the unanswered re-read.
+- **§14:** over 10 s, one read and four unmoved heartbeats; a member's
+  change elsewhere, one read answered unchanged; its own v2, no GET.
+- **§15:** the restarted author's snapshot with no entry is no verdict,
+  and v1 stays in force until the delete made again.
+
+**Not run:**
+- any section against the reference;
+- §7 and §10 (no archive read), §9 (no `desired.v2` tool on a bus), §11
+  and §12;
+- a real `link.v2` face, and an owner heartbeat's group read by the
+  watch;
+- §6 step 1's clock 5 s behind;
+- zenohd: `bin/current` holds none.
+
+Round 118 found F-576 to F-587: four ambiguities, two gaps and six
+minor errors. None is a blocker. F-569 to F-575 stay open. See "At
+desired.v2 0.1, core 0.112 and link.v2 0.23" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -8790,6 +8932,13 @@ impl/python/
     desired_scenarios.py desired.v1 scenarios.md §1–§12, edges, a re-mint and the tool's shapes, with any two
                                 parties, zk2py's tool and zenctl's; §12 and config-fed with zk2py's config.v1 owner
     desired_tool.py   desired.v1 §2.17's tool on a bus: the slice, the report, the author's version, a window
+    desired_v2.py     desired.v2 the packed Report and its checks, a refusal's indices, the target by run and seq
+                                with a snapshot of no entry, the watch, the two declarations, a role's report
+                                and a tool's four answers, each written before its fixture (round 118)
+    desired_v2_live.py desired.v2 the author and the target on a bus: a snapshot's answer, a conditional
+                                re-read, a period or the watch, the packed report (round 118)
+    desired_v2_owner.py desired.v2 either party as a process
+    desired_v2_scenarios.py desired.v2 scenarios-v2.md §1 to §6, §8 and §13 to §15 between two zk2py processes
     desired.py        desired.v1 the standard schema's ids, declarations, bindings and the slice's key, stamps, equal
                                 documents, the target's state machine, the report's reader, §2.17's conclusions
     budget.py         §2.7, observer §5 the population budget: the bound, a population, a rate, lossless, the stall watch,

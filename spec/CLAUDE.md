@@ -864,3 +864,62 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `tasking.v1` (`desired.v1`'s scenarios), and the conformance corpus's
   contracts (`conformance/contracts/`, `link/conformance/contracts/
   sampler.v1.toml`: streams alone, no collection).
+- **`desired.v2`** (#986's J2, text 0.1, `experimental` until an adopter's
+  mapping lists it, written against core 0.112) sits beside `desired.v1`
+  in `spec/profiles/desired/`: `v2.md`, `scenarios-v2.md`, the packed
+  standard schema `desired.v2.json` (one type, `Report`, tag 12, artifact
+  `sha256:1ac893a1…`), `conformance/v2/{schema,reports,order,watch,
+  declarations,slices,conclusions}.json` with a `README.md`, and the one
+  `CHANGELOG.md`, its entries headed `desired.v2 0.N`. It restates
+  `desired.v1` 0.14 by reference and replaces §2.4 (the version is the
+  put's in-band stamp, written `<run>/<seq>`, the run in 4 or 8 hex
+  digits; no Zenoh timestamp, a GET answered by snapshot; a revision at
+  most 2^32 − 1, above it refused whole `invalid`), §2.5's reading (a
+  conditional re-read, SHOULD; across a face a target MUST wait the
+  face's reply timeout and MUST NOT read while a read is outstanding;
+  the watch: one section of the author's heartbeat, expected or none,
+  six steps, `revision`/`refused`/`older`/`no_section`/`unmoved`/
+  `outstanding`/`read`, an unmoved section never a confirmation), §2.6
+  (by seq within a run, another run admitted, 16 runs remembered), §2.8
+  (a snapshot with no entry reverts under the held version's run, at or
+  below its asof, with no observed version, the asof remembered; under
+  another run `no_verdict`, a MUST NOT; v1's window MUST gone), §2.10
+  and §3 (the packed `Report`, 20 to 215 bits; `desired.report` a
+  role's name or the one parameter in braces; `desired.pointers`, first
+  `""`, and `desired.details`; a place written as its nearest listed
+  ancestor other than `""`, else `out_of_range`; findings `escape`,
+  `run_fields`, `observed_outcome`, `refusal`, `source`, `in_force`,
+  `revision_on_revert`, `last_known`), §2.11 (no catch-up, a record with
+  no stamp) and §2.17's comparison (by run and seq; a snapshot with no
+  entry answers only under the report's observed run, else
+  `author_silent`; no slice from the target alone, no "behind for longer
+  than" by age). §2.18 says how both majors run side by side. Three
+  guarantees depart from v1, stated in its changelog entry and Appendix
+  A. Core 0.112 narrows §4.3's table and §4.2's per-key list to "a
+  desired resource of a contract that does not use `desired.v2`", names
+  `desired.v2` §2.6 under "A profile's order", and Appendix D's row
+  names the three keys v2 adds; `link.v2` 0.23 narrows §2.11's list the
+  same way, and `v2/plan.json`'s case 49 (case 31's state, its revision
+  using `desired.v2`: no floor; 50 cases) was derived by the reference
+  into a copy, read by hand and inserted as text. No keyword of the core
+  moved: 295 rules. The fixtures (293 cases) were computed twice by two
+  scripts of the drafter's that share no code
+  (`/srv/dev/scratch/zenkey/py/986-j2/{a_gen,a_core,a_packed,b_check}.py`),
+  never blessed. The reference then ran every case as written
+  (`zenkey-model/tests/profiles/desired_v2.rs`, a runner per file, none
+  able to bless), and all 293 pass with no case, sentence or count
+  moved. Its model is J2's alone: no runtime and no tool speaks the
+  major yet, and no implementation has run `scenarios-v2.md` (J3's
+  `zenkey/tests/profile_desired_v2.rs`, over
+  `zenkey/tests/contracts/{tasking,worker}.v2.toml`, which are in the
+  tree and lint clean). Three things the text does not say, which the
+  model settles and a second implementation would meet: a revert on a
+  snapshot with no entry that cannot finish (§2.10 gives it no observed
+  version, and calls `failed` with none stated malformed: the model
+  keeps the version it was reverting); a version at exactly a
+  remembered asof (§2.8 says older, `order.json`'s description "where
+  that is higher": the model follows §2.8, and no case tells them
+  apart); and the held stamp while a snapshot with no entry waits or
+  after one was acted on (the model sends none). `watch.json` gives its
+  one `no_entry` answer no run, which is no verdict only because that
+  target holds nothing.

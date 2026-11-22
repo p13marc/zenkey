@@ -1,0 +1,1614 @@
+{
+ "description": "desired.v2 §2.17, §5: one reading of one target's role against its author's document -> §5's four questions (converged, refused, last_known, in_force), each an answer (yes, no, not_yet, unobservable, not_asked) and a reason. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. reading.target: its presence (present; absent, a complete read without its instance token; incomplete; across_face, where the deployment's word stands for its descriptor); its descriptor ({lists, bound}, or null when not read); deployment, the deployment's word in the same form, read across a face; its report, the reply §2.10 finds ({tag, hex}, read as reports.json's reads are), or null when none was read; age, its report's by the freshness major its contract uses (fresh, stale, unobservable, or null with no horizon). reading.author: its presence (the same four), and get, its answer to S4's GET of the slice: \"not_made\" (no GET, as with no slice); \"timeout\" (ended at its timeout, or with an error); \"silent\" (no reply); \"unstamped\" (a reply with no envelope); {entry: version} (a live entry); {tombstone: version}; {no_entry: run} (a snapshot with no entry, its header's run). Steps 1 to 4 are v1 §2.17's, for every question: target_absent (not asked), presence_incomplete, no_descriptor, not_a_target (not asked), unbound (not asked, but in_force no), no_report (nothing_crossed across a face), report_invalid (unreadable or malformed), report_stale, report_unobservable. Step 5 reads the report's fields: refused, by outcome, not asked with not_acted; last_known; in_force, yes with desired (desired where in_force is not none, else partial), no with the source otherwise. Steps 6 and 7 answer converged: author_absent (not asked), author_presence_incomplete, author_not_read, author_read_incomplete (a timeout, or unstamped), author_silent (no reply; or a snapshot with no entry under another run than the report's observed version's, or with no observed version stated); a snapshot with no entry under the observed version's run: yes reverted where the outcome is reverted, else not_yet behind; an entry or a tombstone: not_yet not_acted with no observed version; the same version, by outcome (yes converged or reverted, no refused or failed); the same run, a lower observed seq not_yet behind, a higher one unobservable ahead; another run not_yet other_epoch.",
+ "cases": [
+  {
+   "note": "converged: the report's version is the author's current",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "yes",
+     "reason": "converged"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "the same version, refused: no, with the refusal",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "528003a000019000000038003a00000700000001b0"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "no",
+     "reason": "refused"
+    },
+    "refused": {
+     "answer": "yes",
+     "reason": "refused"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "the same version, failed: in force in part",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "588003a000019000000030c0"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "no",
+     "reason": "failed"
+    },
+    "refused": {
+     "answer": "yes",
+     "reason": "failed"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "partial"
+    }
+   }
+  },
+  {
+   "note": "the author's tombstone is the version the target reverted on",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "208003a000018000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "tombstone": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "yes",
+     "reason": "reverted"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "reverted"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "baseline"
+    }
+   }
+  },
+  {
+   "note": "the same run, a lower seq: behind",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/15"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_yet",
+     "reason": "behind"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "the same run, a higher seq than the author's answer: ahead, the two reads raced",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/9"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "ahead"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "another run: other_epoch, the author wrote under a run the target has not acted on",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0008/0"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_yet",
+     "reason": "other_epoch"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "the same run value at the other width is another run",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "00000007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_yet",
+     "reason": "other_epoch"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "no act yet: not yet, and the two questions about an act not asked",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "000000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_yet",
+     "reason": "not_acted"
+    },
+    "refused": {
+     "answer": "not_asked",
+     "reason": "not_acted"
+    },
+    "last_known": {
+     "answer": "not_asked",
+     "reason": "not_acted"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "baseline"
+    }
+   }
+  },
+  {
+   "note": "a call since: converged still, what the target did when it acted",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "888003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "yes",
+     "reason": "converged"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "call"
+    }
+   }
+  },
+  {
+   "note": "last-known, its author present and holding the same version",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "4d8003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "yes",
+     "reason": "converged"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "yes",
+     "reason": "last_known"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "last-known, its author absent: not asked",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "4d8003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "absent",
+     "get": "not_made"
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_asked",
+     "reason": "author_absent"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "yes",
+     "reason": "last_known"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "the author's presence possibly incomplete",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "incomplete",
+     "get": "not_made"
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "author_presence_incomplete"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "no GET made of the author: with no revision of its interface in hand, a tool has no slice",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": "not_made"
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "author_not_read"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "the author's GET ended at its timeout",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": "timeout"
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "author_read_incomplete"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "the author's GET drew no reply: silence",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": "silent"
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "author_silent"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "a reply with no envelope carries no version",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": "unstamped"
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "author_read_incomplete"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry under the observed version's run: the author deleted the document beyond its window, and the target has not reverted yet: behind",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "no_entry": "0007"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_yet",
+     "reason": "behind"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "the same, the target reverted on the delete: yes",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "208003a000018000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "no_entry": "0007"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "yes",
+     "reason": "reverted"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "reverted"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "baseline"
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry under another run: the author restarted, is pacing, or deleted; a tool cannot tell",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "no_entry": "0008"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "author_silent"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry, the target reverted on one: its report names no version, so no run to compare",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "200000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "no_entry": "0007"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "author_silent"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "reverted"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "baseline"
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry, no act yet",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "000000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "no_entry": "0007"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "author_silent"
+    },
+    "refused": {
+     "answer": "not_asked",
+     "reason": "not_acted"
+    },
+    "last_known": {
+     "answer": "not_asked",
+     "reason": "not_acted"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "baseline"
+    }
+   }
+  },
+  {
+   "note": "the target reverted on a snapshot with no entry, and its author has since put a document: not yet",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "200000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/30"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_yet",
+     "reason": "not_acted"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "reverted"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "baseline"
+    }
+   }
+  },
+  {
+   "note": "the target absent: not asked, every question",
+   "reading": {
+    "target": {
+     "presence": "absent",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_asked",
+     "reason": "target_absent"
+    },
+    "refused": {
+     "answer": "not_asked",
+     "reason": "target_absent"
+    },
+    "last_known": {
+     "answer": "not_asked",
+     "reason": "target_absent"
+    },
+    "in_force": {
+     "answer": "not_asked",
+     "reason": "target_absent"
+    }
+   }
+  },
+  {
+   "note": "the target's presence possibly incomplete",
+   "reading": {
+    "target": {
+     "presence": "incomplete",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "presence_incomplete"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "presence_incomplete"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "presence_incomplete"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "presence_incomplete"
+    }
+   }
+  },
+  {
+   "note": "no descriptor read",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": null,
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    }
+   }
+  },
+  {
+   "note": "its descriptor does not list the role",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": false,
+      "bound": false
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_asked",
+     "reason": "not_a_target"
+    },
+    "refused": {
+     "answer": "not_asked",
+     "reason": "not_a_target"
+    },
+    "last_known": {
+     "answer": "not_asked",
+     "reason": "not_a_target"
+    },
+    "in_force": {
+     "answer": "not_asked",
+     "reason": "not_a_target"
+    }
+   }
+  },
+  {
+   "note": "the kill switch: not asked, but for a document in force, which is no",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": false
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "000000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_asked",
+     "reason": "unbound"
+    },
+    "refused": {
+     "answer": "not_asked",
+     "reason": "unbound"
+    },
+    "last_known": {
+     "answer": "not_asked",
+     "reason": "unbound"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "unbound"
+    }
+   }
+  },
+  {
+   "note": "no report read",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": null,
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "no_report"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "no_report"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "no_report"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "no_report"
+    }
+   }
+  },
+  {
+   "note": "a report core §7.6 refuses: unreadable",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 3,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    }
+   }
+  },
+  {
+   "note": "a malformed report answers nothing",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "040000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    }
+   }
+  },
+  {
+   "note": "a report whose source is a later text's: malformed for this reader",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "c00000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "report_invalid"
+    }
+   }
+  },
+  {
+   "note": "a stale report",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": "stale"
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "report_stale"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "report_stale"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "report_stale"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "report_stale"
+    }
+   }
+  },
+  {
+   "note": "a report of an unobservable age",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": "unobservable"
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "report_unobservable"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "report_unobservable"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "report_unobservable"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "report_unobservable"
+    }
+   }
+  },
+  {
+   "note": "a fresh report is read",
+   "reading": {
+    "target": {
+     "presence": "present",
+     "descriptor": {
+      "lists": true,
+      "bound": true
+     },
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": "fresh"
+    },
+    "author": {
+     "presence": "present",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "yes",
+     "reason": "converged"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "across a face, the deployment's word for the descriptor, and nothing crossed",
+   "reading": {
+    "target": {
+     "presence": "across_face",
+     "descriptor": null,
+     "deployment": {
+      "lists": true,
+      "bound": true
+     },
+     "report": null,
+     "age": null
+    },
+    "author": {
+     "presence": "across_face",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "nothing_crossed"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "nothing_crossed"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "nothing_crossed"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "nothing_crossed"
+    }
+   }
+  },
+  {
+   "note": "across a face, no word of the deployment's",
+   "reading": {
+    "target": {
+     "presence": "across_face",
+     "descriptor": null,
+     "deployment": null,
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "across_face",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    },
+    "refused": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    },
+    "last_known": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    },
+    "in_force": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    }
+   }
+  },
+  {
+   "note": "across a face, the report crossed and the author answered",
+   "reading": {
+    "target": {
+     "presence": "across_face",
+     "descriptor": null,
+     "deployment": {
+      "lists": true,
+      "bound": true
+     },
+     "report": {
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     },
+     "age": null
+    },
+    "author": {
+     "presence": "across_face",
+     "get": {
+      "entry": "0007/12"
+     }
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "yes",
+     "reason": "converged"
+    },
+    "refused": {
+     "answer": "no",
+     "reason": "converged"
+    },
+    "last_known": {
+     "answer": "no",
+     "reason": "current"
+    },
+    "in_force": {
+     "answer": "yes",
+     "reason": "desired"
+    }
+   }
+  },
+  {
+   "note": "across a face, the kill switch by the deployment's word",
+   "reading": {
+    "target": {
+     "presence": "across_face",
+     "descriptor": null,
+     "deployment": {
+      "lists": true,
+      "bound": false
+     },
+     "report": null,
+     "age": null
+    },
+    "author": {
+     "presence": "across_face",
+     "get": "not_made"
+    }
+   },
+   "expect": {
+    "converged": {
+     "answer": "not_asked",
+     "reason": "unbound"
+    },
+    "refused": {
+     "answer": "not_asked",
+     "reason": "unbound"
+    },
+    "last_known": {
+     "answer": "not_asked",
+     "reason": "unbound"
+    },
+    "in_force": {
+     "answer": "no",
+     "reason": "unbound"
+    }
+   }
+  }
+ ]
+}

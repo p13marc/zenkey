@@ -1,0 +1,17 @@
+# desired.v2 scenarios-v2.md, "The contracts", transcribed (zk2py round 118):
+# tasking.v2.toml: a task per worker, state of its author
+[interface]
+name  = "tasking"
+major = 2
+minor = 0
+uses  = ["desired.v2", "freshness.v2"]
+
+[schemas]
+jsonschema = ["tasking.json"]
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

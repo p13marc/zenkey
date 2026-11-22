@@ -1665,6 +1665,305 @@ def _desired_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _desired_v2_schema(path: Path) -> list[Result]:
+    """desired.v2 §3: the standard packed schema's id, its type's tag, and
+    each case's document -> its id and whether the profile publishes it."""
+    from . import desired_v2 as d2, jcs
+
+    data = _load_json(path)
+    repo = path.parents[5]
+    out = [
+        _check("v2 schema: the profile's file is the current revision",
+               d2.artifact_id(jcs.loads((path.parents[2] / data["file"]).read_bytes())), data["current"]),
+        _check("v2 schema: zk2py's current id is the file's, §3's", d2.CURRENT, data["current"]),
+        _check("v2 schema: zk2py's published ids are §3's", list(d2.PUBLISHED_IDS), [x["id"] for x in data["published"]]),
+        _check("v2 schema: the Report's tag is §3's 12, by core §7.6's layout form",
+               [[d2.REPORT_TYPE, d2.report_record().tag, d2.REPORT_TAG]], [[t["name"], t["tag"], 12] for t in data["types"]]),
+    ]
+    for i, c in enumerate(data["cases"]):
+        doc = jcs.loads((repo / c["path"]).read_bytes()) if "path" in c else c["document"]
+        got = d2.artifact_id(doc)
+        out.append(_check(f"v2 schema #{i}: {c['note']}", {"id": got, "published": d2.is_published(got)}, c["expect"]))
+    return out
+
+
+def _desired_v2_reports(path: Path) -> list[Result]:
+    """desired.v2 §2.10, §3: a report written as a record and as its put;
+    records read back, refused, or read with their findings; a refusal's
+    place and line written as indices, and read back as words."""
+    from . import desired_v2 as d2, packed
+
+    data = _load_json(path)
+    rec = d2.report_record()
+    lo, hi = rec.bit_bounds()
+    out = [_check("v2 reports: the Report's layout form, its sha256, its tag and its shortest and longest record",
+                  {"form": rec.layout_form(), "sha256": rec.layout_sha256(), "tag": rec.tag, "min_bits": lo,
+                   "max_bits": hi}, data["layout"])]
+    for i, c in enumerate(data["writes"]):
+        got: dict[str, Any]
+        try:
+            fields = d2.fields_of(c["report"])
+            bits = d2.write_bits(fields)
+            record = d2.write_report(fields)
+            got = {"fields": fields, "bits": bits, "pad": -len(bits) % 8, "hex": record.hex()}
+            if "stamp" in c:
+                at = d2.Version.parse(c["stamp"])
+                assert at is not None
+                got["payload"] = d2.put_payload(fields, at.run.value, at.seq, at.run.width).hex()
+        except packed.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(f"v2 reports, write #{i}: {c['note']}", got, c["expect"]))
+    not_back: list[int] = []
+    for i, c in enumerate(data["reads"]):
+        r = d2.read_report(c["tag"], bytes.fromhex(c["hex"]))
+        if not r.readable:
+            got = {"refused": r.refusal}
+        else:
+            assert r.report is not None
+            got = {"fields": r.report, "findings": list(r.findings)}
+            if not r.findings:
+                got["report"] = d2.reading_of_fields(r.report)
+        out.append(_check(f"v2 reports, read #{i}: {c['note']}", got, c["expect"]))
+        if r.valid and d2.write_report(r.report).hex() != c["hex"]:
+            not_back.append(i)
+    # zk2py's own, beside the file (F-576): §2.10 says "Every report reads
+    # back to the same bytes. The checks leave one record for one report."
+    # Four of the file's records read with no finding and write back to
+    # other bytes: three hold a later text's bits behind the marker, and one
+    # a `code` past its five values, which reads as the escape.
+    out.append(_check("v2 reports: the records that read with no finding and do not write back to their bytes "
+                      "(§2.10 \"Every report reads back to the same bytes\"; F-576)", not_back, [27, 28, 29, 32]))
+    for i, c in enumerate(data["places"]):
+        got = {}
+        p = d2.place_index(c["pointers"], c["refusal"]["place"])
+        ln = d2.line_index(c["details"], c["refusal"]["line"])
+        if p is not None:
+            got["pointer"] = p
+        if ln is not None:
+            got["detail"] = ln
+        out.append(_check(f"v2 reports, place #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(data["words"]):
+        got = {}
+        for k, table in (("pointer", c["pointers"]), ("detail", c["details"])):
+            if k in c["refusal"]:
+                shown = d2.show_index(table, c["refusal"][k])
+                # the file's null: "an index past the table (shown as its number)"
+                got[k] = None if isinstance(shown, int) else shown
+        out.append(_check(f"v2 reports, word #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _desired_v2_order(path: Path) -> list[Result]:
+    """desired.v2 §2.4, §2.6 to §2.10: one target's steps -> each step's
+    word, and the report after the last. Each report the machine builds is
+    also written, read back and checked (§2.10: "A target's report MUST be
+    consistent")."""
+    from . import desired_v2 as d2
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        name = f"v2 order #{i}: {c['note']}"
+        words, fields = d2.run_steps(c["steps"])
+        out.append(_check(name, {"steps": words, "report": d2.reading_of_fields(fields)}, c["expect"]))
+        back = d2.read_report(d2.REPORT_TAG, d2.write_report(fields))
+        out.append(_check(f"{name} (its report reads back, with no finding)",
+                          {"fields": back.report, "findings": list(back.findings)}, {"fields": fields, "findings": []}))
+    return out
+
+
+def _desired_v2_watch(path: Path) -> list[Result]:
+    """desired.v2 §2.5, the watch: one target's heartbeats, live versions
+    and answers -> what each does, the section it expects after each, and
+    whether the version it holds is still last-known. The file's holder of
+    one version is this function's: the watch itself holds none."""
+    from . import desired_v2 as d2, heartbeat
+
+    def section(x: Any) -> Any:
+        return None if x is None else d2.Section(int(x["digest"], 16), x["live"])
+
+    def shown(x: Any) -> Any:
+        return None if x is None else {"digest": format(x.digest, "08x"), "live": x.live}
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        name = f"v2 watch #{i}: {c['note']}"
+        w = d2.Watch()
+        held = None if c["held"] is None else [d2.Version.parse(c["held"]["version"]), c["held"]["kind"] == "delete",
+                                               bool(c["held"].get("last_known"))]
+        sent: Any = None
+        words: list[str] = []
+        expects: list[Any] = []
+        digests_ok = True
+        for st in c["steps"]:
+            if "heartbeat" in st:
+                h = st["heartbeat"]
+                run = d2.Run.parse(h["run"])
+                assert run is not None
+                if "read" in h:
+                    word = w.heartbeat(run, h["seq"], None, read=False)
+                    word = h["read"] if word == d2.NOT_READ else word
+                else:
+                    if "members" in h:
+                        ms = [(m["key"], d2.Version.parse(m["version"])) for m in h["members"]]
+                        dg = heartbeat.digest((k, v.run.width, v.run.value, v.seq) for k, v in ms)
+                        digests_ok &= section(h["section"]) == d2.Section(dg, len(ms))
+                    word = w.heartbeat(run, h["seq"], section(h["section"]))
+                    if word == d2.READ:
+                        sent = None if held is None else held[0]
+                words.append(word)
+            elif "heard" in st:
+                new = (d2.Version.parse(st["heard"]["version"]), st["heard"]["kind"] == "delete")
+                moved = bool(c["moves"]) and w.own_change(c["key"], None if held is None else (held[0], held[1]), new)
+                held = [new[0], new[1], False]
+                words.append("moved" if moved else "kept")
+            else:
+                a = st["answer"]
+                if a == "unchanged":
+                    still = held is not None and held[0] == sent
+                    w.unchanged(still)
+                    if still:
+                        held[2] = False  # "that version is no longer last-known"
+                    words.append("unchanged")
+                elif isinstance(a, dict):
+                    e = a["whole"]
+                    held = None if e["kind"] == "no_entry" else [d2.Version.parse(e["version"]), e["kind"] == "delete",
+                                                                 False]
+                    w.whole()
+                    words.append("whole")
+                else:
+                    w.no_answer()
+                    words.append("no_answer")
+            expects.append(shown(w.expects))
+        got = {"steps": words, "expects": expects, "last_known": bool(held is not None and held[2])}
+        out.append(_check(name, got, c["expect"]))
+        if not digests_ok:
+            out.append((f"{name} (each section given with its members is core §7.5's digest of them)", False,
+                        "a section is not its members' digest and count"))
+    return out
+
+
+def _desired_v2_declarations(path: Path) -> list[Result]:
+    """desired.v2 §2.2, §2.10: a resolved resource -> its declaration as a
+    desired resource (v1's reading and ``horizon_v1``), and as a report
+    resource. An explicit state is read as its kind token, ``@state``."""
+    from . import desired as ds, desired_v2 as d2
+
+    def token(r: dict[str, Any]) -> str:
+        return "@state" if r.get("explicit") and r["kind"] == "state" else r["kind"]
+
+    data = _load_json(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["resources"]):
+        r = c["resource"]
+        got = d2.declare(token(r), r["template"], r["annotations"], r["params"], c["uses"]).expect()
+        out.append(_check(f"v2 declarations, resource #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(data["reports"]):
+        r = c["resource"]
+        ty = r["type"]
+        mine = d2.ReportResource(token(r), r["template"], r["annotations"],
+                                 ty["kind"] == "packed" and ty["name"] == d2.REPORT_TYPE
+                                 and d2.is_published(ty["artifact"]))
+        # the file gives the other resources by their desired.report values alone
+        others = [d2.ReportResource("state", "", {d2.REPORT_KEY: v}, True) for v in c["others"]]
+        d = d2.declare_report(mine, set(c["requires"]), others)
+        if d.declaration == ds.NOT_THIS:
+            got = {"declaration": ds.NOT_THIS}
+        elif d.declaration == ds.INVALID:
+            got = {"declaration": ds.INVALID, "reasons": list(d.reasons)}
+        else:
+            got = {"declaration": ds.DECLARED, d.form: d.name, "pointers": list(d.pointers), "details": list(d.details)}
+        out.append(_check(f"v2 declarations, report #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _desired_v2_resource(r: dict[str, Any]) -> Any:
+    """A resource as declarations.json's ``reports`` writes one."""
+    from . import desired_v2 as d2
+
+    ty = r["type"]
+    token = "@state" if r.get("explicit") and r["kind"] == "state" else r["kind"]
+    return d2.ReportResource(token, r["template"], r["annotations"],
+                             ty["kind"] == "packed" and ty["name"] == d2.REPORT_TYPE
+                             and d2.is_published(ty["artifact"]))
+
+
+def _desired_v2_slices(path: Path) -> list[Result]:
+    """desired.v2 §2.10: a tool's finding of one role's report, among the
+    replies of S4's GET over the target's state. The file gives each reply
+    as its CH tag and its record, which the runner puts back in an envelope
+    for the reader."""
+    from . import desired_v2 as d2, zk2c
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        rd = c["reading"]
+        replies = [(x["key"], zk2c.write("mutation", 16, 0, 0, x["tag"], bytes.fromhex(x["hex"])))
+                   for x in rd["replies"]]
+        f = d2.find_report(rd["target"], rd["iface"], [_desired_v2_resource(r) for r in rd["resources"]],
+                           set(rd["requires"]), rd["role"], replies)
+        got: dict[str, Any] = {"found": f.found, "key": f.key, "reasons": list(f.reasons)}
+        if f.found == d2.FOUND_UNREADABLE:
+            got["why"] = f.why
+        if f.found == d2.FOUND_ONE and f.reading is not None:
+            got["findings"] = list(f.reading.findings)
+        out.append(_check(f"v2 slices #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _desired_v2_conclusions(path: Path) -> list[Result]:
+    """desired.v2 §2.17, §5: one reading of one target's role -> §5's four
+    questions, each an answer and a reason."""
+    from . import desired_v2 as d2
+
+    def said(x: Any) -> Any:
+        return None if x is None else (bool(x["lists"]), bool(x["bound"]))
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        t, a = c["reading"]["target"], c["reading"]["author"]
+        report = None if t["report"] is None else d2.read_report(t["report"]["tag"], bytes.fromhex(t["report"]["hex"]))
+        get = a["get"]
+        has_slice = True
+        if get == "not_made":
+            cur: Any = None
+        elif get in ("timeout", "unstamped"):
+            cur = "incomplete"
+        elif get == "silent":
+            cur = "silent"
+        elif "no_entry" in get:
+            cur = d2.NoEntry(d2.Run.parse(get["no_entry"]), 0)
+        else:
+            (_, text), = get.items()
+            cur = d2.Version.parse(text)
+        r = d2.Reading(t["presence"], said(t["descriptor"]), report, "not_asked" if t["age"] is None else t["age"],
+                       a["presence"], cur, said(t["deployment"]), has_slice)
+        got = {q: x.pair() for q, x in d2.conclude(r).items()}
+        out.append(_check(f"v2 conclusions #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+#: desired.v2's fixtures (``conformance/v2/``), by file name; an unknown file
+#: fails, as in :data:`PROFILE_FIXTURES`.
+DESIRED_V2_FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
+    "schema.json": _desired_v2_schema, "reports.json": _desired_v2_reports, "order.json": _desired_v2_order,
+    "watch.json": _desired_v2_watch, "declarations.json": _desired_v2_declarations,
+    "slices.json": _desired_v2_slices, "conclusions.json": _desired_v2_conclusions,
+}
+
+
+def _desired_v2(directory: Path) -> list[Result]:
+    out: list[Result] = []
+    for path in sorted(directory.iterdir()):
+        if path.name == "README.md":
+            continue
+        run = DESIRED_V2_FIXTURES.get(path.name)
+        if run is None:
+            out.append((f"v2/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        out += run(path)
+    return out
+
+
 def _redundancy_declarations(path: Path) -> list[Result]:
     """redundancy.v1 §2.2: a contract's uses, each resource's resolved
     annotations, and the tokenless set -> its declaration."""
@@ -1918,7 +2217,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                   "v2": _telemetry_v2, "contracts": _telemetry_contracts},
     "desired": {"schema.json": _desired_schema, "declarations.json": _desired_declarations,
                 "bindings.json": _desired_bindings, "order.json": _desired_order, "reports.json": _desired_reports,
-                "conclusions.json": _desired_conclusions, "slices.json": _desired_slices},
+                "conclusions.json": _desired_conclusions, "slices.json": _desired_slices, "v2": _desired_v2},
     "redundancy": {"declarations.json": _redundancy_declarations, "descriptors.json": _redundancy_descriptors,
                    "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
                    "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions,
@@ -4026,8 +4325,261 @@ def family_readings(root: Path) -> list[Result]:
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
-        + _round104_readings(root)
+        + _round104_readings(root) + _round118_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """desired.v2 0.1, core 0.112 and link.v2 0.23 (#609, round 118; #986):
+    each text at its version, the sentences zk2py's four answers and its
+    findings quote, read where they are stated; §3's sizes; the four answers
+    as zk2py's machines give them; and what the files of ``conformance/v2/``
+    do not tell apart, by readers changed in one place. No session is
+    opened."""
+    from . import conformance as me
+    from . import desired as ds, desired_v2 as d2
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    v2, core, l2, log = (flat("profiles/desired/v2.md"), flat("core.md"), flat("profiles/link/v2.md"),
+                         flat("profiles/desired/CHANGELOG.md"))
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("desired.v2 at text 0.1, written against core 0.112, with link.v2 at 0.23: each header says so",
+                missing(v2, "| **Text version** | 0.1 ([`CHANGELOG.md`](CHANGELOG.md)) |",
+                        "| **Written against** | core 0.112 ([`../../core.md`](../../core.md)) |")
+                + missing(core, "**Version 0.112**") + missing(l2, "| **Text version** | 0.23 ("), []))
+    out.append(("core 0.112 and link.v2 0.23: a desired resource is per key, and floored, only where its contract "
+                "does not use desired.v2; one of desired.v2 with a snapshot key has no floor",
+                missing(core, "- a desired resource of a contract that does not use `desired.v2`;",
+                        "| A desired resource of a contract that does not use `desired.v2` |",
+                        "- **A `desired.v2` desired resource** carries none.")
+                + missing(l2, "one whose resolved annotations hold `desired.target_param`, of a contract that does "
+                              "not use `desired.v2`;",
+                          "- **A `desired.v2` desired resource has no floor,** unless its template's first chunk is a "
+                          "parameter."), []))
+    out.append(("round 118's four answers, the sentences each quotes (v2.md §2.5, §2.6, §2.8, §2.10)",
+                missing(v2, "So a version of that run at or below the asof is older (§2.6).",
+                        "Lower is **older**, and a target MUST NOT act on it. Equal is **the same version**. Higher "
+                        "is admitted.",
+                        "- A revert on a snapshot with no entry has no observed version (§2.8).",
+                        "- `observed_outcome`: an observed version stated with `not_acted`; or `converged`, "
+                        "`refused` or `failed` with none stated.",
+                        "A target that holds no version sends none. Core §4.2 forbids any other stamp.",
+                        "- **After it,** the target holds no document.",
+                        "- **It MUST read** when its section moves, after a heartbeat lost and after a heartbeat of "
+                        "another run, as steps 3 and 6 say."), []))
+
+    rec = d2.report_record()
+    v16, v32 = d2.Version.of(16, 7, 12), d2.Version.of(32, 7, 12)
+
+    def refused(v: Any, w: Any) -> dict[str, Any]:
+        return {"source": "desired", "outcome": "refused", "last_known": False, "in_force": "other",
+                **d2.version_fields(v, 4), **d2.version_fields(w, 3, d2.IN_FORCE_FIELDS), "code": "invalid",
+                "pointer": 2, "detail": 0}
+
+    rows = [d2.baseline_report(),
+            {"source": "desired", "outcome": "converged", "last_known": False, "in_force": "observed",
+             **d2.version_fields(v16, 3)},
+            {"source": "desired", "outcome": "converged", "last_known": False, "in_force": "observed",
+             **d2.version_fields(v32, 3)},
+            refused(d2.Version.of(16, 7, 13), v16), refused(d2.Version.of(32, 7, 13), v32)]
+    out.append(("desired.v2 §3, \"Its sizes\": the table's five reports are 20, 92, 108, 183 and 215 bits, records of "
+                "3, 12, 14, 23 and 27 bytes, puts of 9, 18, 20, 29 and 33 bytes under a 16-bit run; the tag is 12, "
+                "and each is consistent",
+                [[len(d2.write_bits(r)), len(d2.write_report(r)), len(d2.put_payload(r, 3, 5)), d2.consistency(r)]
+                 for r in rows] + [rec.tag, d2.put_payload(rows[0], 3, 5)[0], d2.put_payload(rows[0], 3, 5, 32)[0]],
+                [[20, 3, 9, []], [92, 12, 18, []], [108, 14, 20, []], [183, 23, 29, []], [215, 27, 33, []],
+                 12, 0x0C, 0x1C]))
+
+    # The four answers, as the machines give them.
+    def put(run: int, seq: int, doc: Any, width: int = 16) -> Any:
+        return d2.Sample(d2.OWNER, False, d2.Version.of(width, run, seq), ds.Payload(value=doc), doc.get("revision"))
+
+    t = d2.TargetRole()
+    w1 = [t.receive(put(7, 5, {"revision": 1})), t.finish(d2.Finish(d2.DONE)),
+          t.receive_no_entry(d2.NoEntry(d2.Run(16, 7), 20)), t.finish(d2.Finish(d2.DONE)),
+          t.receive(put(7, 20, {"revision": 2})), t.receive(put(7, 21, {"revision": 2}))]
+    out.append(("answer 1 (v2.md §2.8, against §2.6 step 4's \"Equal is the same version\"): after a revert on a "
+                "snapshot with no entry at asof 20, a version of the run at seq 20 is older, and one at 21 is acted "
+                "on; order.json's case 26 pins it",
+                w1, ["act", "done", "revert", "done", "older", "act"]))
+    t = d2.TargetRole()
+    t.receive(put(7, 5, {"revision": 1}))
+    t.finish(d2.Finish(d2.DONE))
+    during = [t.receive_no_entry(d2.NoEntry(d2.Run(16, 7), 20)), t.stamp_to_send()]
+    t.finish(d2.Finish(d2.FAILED, "apply"))
+    failed = t.report()
+    order = _load_json(spec / "profiles/desired/conformance/v2/order.json")["cases"]
+
+    def ends_no_entry_otherwise(c: dict[str, Any]) -> bool:
+        """Whether a case ends a revert on a snapshot with no entry by a
+        ``finish`` other than ``done``: its steps run, each finish looked at
+        before it is taken."""
+        m = d2.TargetRole()
+        hit = False
+        for s in c["steps"]:
+            if "finish" in s and m.running and m.current is not None and m.current.no_entry is not None:
+                hit = hit or s["finish"] != "done"
+            if "sample" in s:
+                x = d2.sample_of(s["sample"])
+                m.receive_no_entry(x) if isinstance(x, d2.NoEntry) else m.receive(x)
+            elif "finish" in s:
+                f = s["finish"]
+                m.finish(d2.Finish(d2.DONE) if f in ("done", "check") else d2.Finish(*next(iter(f.items()))[:1]))
+            elif s.get("call"):
+                m.call()
+            else:
+                m.restart()
+        return hit
+
+    out.append(("answer 2 (v2.md §2.10): a revert on a snapshot with no entry that fails is written with no observed "
+                "version, failed, apply, baseline, none in force, and the reader's own check finds observed_outcome "
+                "(F-577); no case of order.json's 67 ends such a revert otherwise than done",
+                [failed, d2.consistency(failed), sum(1 for c in order if ends_no_entry_otherwise(c)), len(order)],
+                [{"source": "baseline", "outcome": "failed", "last_known": False, "in_force": "none", "code": "apply"},
+                 ["observed_outcome"], 0, 67]))
+    out.append(("answer 3 (v2.md §2.5, \"The stamp it sends\"): while a snapshot with no entry is acted on, and after "
+                "it, zk2py's target sends no held stamp; with a version it sends that version's",
+                [during, t.stamp_to_send(), (lambda m: (m.receive(put(7, 5, {"revision": 1})),
+                                                        m.stamp_to_send().text))(d2.TargetRole())[1]],
+                [["revert", None], None, "0007/5"]))
+    w = d2.Watch()
+    a_run, b_run, sec = d2.Run(16, 0x21), d2.Run(16, 0x22), d2.Section(0xA78DBBD2, 2)
+    words = [w.heartbeat(a_run, 0, sec)]
+    w.unchanged(True)
+    words += [w.heartbeat(a_run, 1, sec), w.heartbeat(b_run, 0, sec)]
+    w.unchanged(True)
+    words += [w.heartbeat(b_run, 1, sec), w.heartbeat(b_run, 2, None), w.heartbeat(b_run, 3, sec)]
+    out.append(("answer 4 (v2.md §2.5, steps 3 and 6): the first heartbeat of another run than the last read one's "
+                "makes the target read once, whatever run its held version is of; answered unchanged, it waits on "
+                "the section alone; a heartbeat with no section makes it expect none, and the next reads",
+                words, ["read", "unmoved", "read", "unmoved", "no_section", "read"]))
+
+    # What the files do not tell apart: readers changed in one place.
+    base = spec / "profiles/desired/conformance/v2"
+
+    def failing(run: Any, path: Path) -> list[int]:
+        return [i for i, r in enumerate(run(path)) if not r[1]]
+
+    T, W = d2.TargetRole, d2.Watch
+    kept = (T.receive, T._judge_no_entry, T.finish, W.heartbeat, W.own_change, d2.declare_report, d2.names_role)
+    got: dict[str, Any] = {}
+    try:
+        def at_asof_same(self: Any, s: Any) -> str:
+            if s.version is not None:
+                latest = self.remembered.get(s.version.run)
+                held = self.current is not None and self.current.version is not None
+                if latest and latest[1] and s.version.seq == latest[0] and not (
+                        held and self.current.version.run == s.version.run):
+                    return d2.SAME_VERSION
+            return kept[0](self, s)
+
+        T.receive = at_asof_same  # type: ignore[method-assign]
+        got["order: a version at a remembered asof is the same version"] = [i // 2 for i in failing(
+            me._desired_v2_order, base / "order.json")]
+        T.receive = kept[0]  # type: ignore[method-assign]
+
+        def asof_at_seq_older(n: Any, held: Any) -> Any:
+            r = kept[1](n, held)
+            return d2.OLDER if r is None and n.asof == held.version.seq else r
+
+        T._judge_no_entry = staticmethod(asof_at_seq_older)  # type: ignore[method-assign,assignment]
+        got["order: an asof equal to the held version's seq is older, where the text reverts"] = failing(
+            me._desired_v2_order, base / "order.json")
+        T._judge_no_entry = staticmethod(kept[1])  # type: ignore[method-assign,assignment]
+
+        def failed_keeps_observed(self: Any, f: Any) -> str:
+            h, prev = self.current, self.observed
+            word = kept[2](self, f)
+            if h.no_entry is not None and self.outcome == d2.FAILED and self.observed is None:
+                self.observed = prev
+            return word
+
+        T.finish = failed_keeps_observed  # type: ignore[method-assign]
+        got["order: a failed revert on a snapshot with no entry keeps the version it held as observed"] = failing(
+            me._desired_v2_order, base / "order.json")
+        T.finish = kept[2]  # type: ignore[method-assign]
+
+        def not_read_moves(self: Any, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
+            if not read:
+                self.expects = None
+                self.lasts[key] = (run, seq)
+                return d2.NOT_READ
+            return kept[3](self, run, seq, section, read, key)
+
+        W.heartbeat = not_read_moves  # type: ignore[method-assign]
+        got["watch: a heartbeat not read moves the sequence"] = failing(me._desired_v2_watch, base / "watch.json")
+
+        def half_apart_read(self: Any, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
+            last = self.lasts.get(key)
+            if read and last is not None and last[0] == run and (seq - last[1]) % d2.SEQ_MOD == 1 << 23:
+                del self.lasts[key]
+            return kept[3](self, run, seq, section, read, key)
+
+        W.heartbeat = half_apart_read  # type: ignore[method-assign]
+        got["watch: a seq exactly 2^23 after the last read one's is read"] = failing(
+            me._desired_v2_watch, base / "watch.json")
+        W.heartbeat = kept[3]  # type: ignore[method-assign]
+
+        def moves_holding_none(self: Any, key: str, old: Any, new: Any) -> bool:
+            return kept[4](self, key, (new[0], True) if old is None else old, new)
+
+        W.own_change = moves_holding_none  # type: ignore[method-assign]
+        got["watch: it moves what it expects while it holds no version"] = failing(
+            me._desired_v2_watch, base / "watch.json")
+        W.own_change = kept[4]  # type: ignore[method-assign]
+
+        def two_reports_skipped(r: Any, roles: Any, others: Any = ()) -> Any:
+            x = kept[5](r, roles, others)
+            if {"not_state", "not_a_role", "not_a_param", "rest_param"} & set(x.reasons):
+                return d2.ReportDeclaration(x.declaration, tuple(k for k in x.reasons if k != "two_reports"))
+            return x
+
+        d2.declare_report = two_reports_skipped
+        got["declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param"] = failing(
+            me._desired_v2_declarations, base / "declarations.json")
+        d2.declare_report = kept[5]
+
+        def any_kind_names(r: Any, role: str) -> bool:
+            if not r.holds_key or r.named is None:
+                return False
+            return r.named[0] == d2.PARAM or r.named[1] == role
+
+        d2.names_role = any_kind_names
+        got["slices: a resource of another kind that holds desired.report names the role"] = failing(
+            me._desired_v2_slices, base / "slices.json")
+    finally:
+        T.receive, T.finish, W.heartbeat, W.own_change = kept[0], kept[2], kept[3], kept[4]  # type: ignore[method-assign]
+        T._judge_no_entry = staticmethod(kept[1])  # type: ignore[method-assign,assignment]
+        d2.declare_report, d2.names_role = kept[5], kept[6]
+    out.append(("conformance/v2/, what its files tell apart (F-579): a reader changed in one place fails order.json's "
+                "case 26 for a version at a remembered asof, and no case for each of the other seven",
+                got,
+                {"order: a version at a remembered asof is the same version": [26],
+                 "order: an asof equal to the held version's seq is older, where the text reverts": [],
+                 "order: a failed revert on a snapshot with no entry keeps the version it held as observed": [],
+                 "watch: a heartbeat not read moves the sequence": [],
+                 "watch: a seq exactly 2^23 after the last read one's is read": [],
+                 "watch: it moves what it expects while it holds no version": [],
+                 "declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param": [],
+                 "slices: a resource of another kind that holds desired.report names the role": []}))
+    out.append(("desired.v2 0.1's entry, its evidence: seven files, 293 cases (reports 22 writes, 57 reads, 12 places "
+                "and 6 words; order 67; watch 25; declarations 12 and 34; slices 16; conclusions 39; schema 3)",
+                [(lambda d: [len(d["writes"]), len(d["reads"]), len(d["places"]), len(d["words"])])(
+                    _load_json(base / "reports.json")), len(order), len(_load_json(base / "watch.json")["cases"]),
+                 (lambda d: [len(d["resources"]), len(d["reports"])])(_load_json(base / "declarations.json")),
+                 len(_load_json(base / "slices.json")["cases"]), len(_load_json(base / "conclusions.json")["cases"]),
+                 len(_load_json(base / "schema.json")["cases"])]
+                + missing(log, "- `reports.json`: 22 writes, 57 reads, 12 places and 6 words.",
+                          "- `order.json`: 67 cases. `watch.json`: 25.",
+                          "- `declarations.json`: 12 desired resources and 34 report resources.",
+                          "- `slices.json`: 16. `conclusions.json`: 39. `schema.json`: 3."),
+                [[22, 57, 12, 6], 67, 25, [12, 34], 16, 39, 3]))
+    return out
 
 
 def _round97_readings(root: Path) -> list[tuple[str, Any, Any]]:
@@ -6623,7 +7175,8 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  60, 1074, 1074, 294, 30, []]))
     out.append(("link.v2 0.22 §2.9, \"A collection the revisions disagree on is read `host`\" (F-551's answer, the "
                 "plan's half), and its evidence (F-573): §2.16's warning it bears on cites `[F: v2/plan.json]`, and "
-                "no case of v2/plan.json's 49 draws exposure_disagrees, so none holds such a collection: a plan "
+                "no case of v2/plan.json's 49, 50 since link.v2 0.23's case 49 (round 118), draws exposure_disagrees, "
+                "so none holds such a collection: a plan "
                 "that counted it `link`, for the horizon or for the longest put, passes the file whole; link.v1's "
                 "plan.json draws the code, in cases that weigh no owner heartbeat",
                 [len(plan), [i for i, c in enumerate(plan) if "exposure_disagrees" in codes(c["expect"])],
@@ -6634,7 +7187,7 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "heartbeat is above `batch_bytes` (`block_over_batch`). `[F: v2/plan.json]`")
                 + missing(llog, "- **Now:** the plan reads it `host`, for the horizon and for the longest put. Both "
                                 "implementations do."),
-                [49, [], True]))
+                [50, [], True]))
 
     # -- scope/faces.json's four cases, v2/transport.json's five, carries.json's three ------
     faces = _load_json(root / "scope" / "faces.json")["cases"]
@@ -8052,7 +8605,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     crossing = [(i, f) for i, c in enumerate(plan2) for f in faces(c) if any(e.startswith(HB) for e in evidence(f))]
     v1_cases = sorted({i for i, _ in crossing if plan2[i]["expect"]["transport"] is None})
     out.append(("link.v2 0.19's entry, its evidence: v2/plan.json held 48 cases then, 49 since link.v2 0.22's case "
-                "48 (round 117); fourteen faces let a heartbeat cross, in the twelve cases the entry names and in "
+                "48 (round 117) and 50 since 0.23's case 49 (round 118); fourteen faces let a heartbeat cross, in the twelve cases the entry names and in "
                 "cases 46 and 47, and case 48's one more; each under a link.v2 policy "
                 "denies the host key by name, nothing under heartbeats/link, and lists the link key as evidence; "
                 "case 10, a link.v1 policy, denies both classes' and lists none; case 6 draws horizon_under_face at "
@@ -8064,7 +8617,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                 for x in f["findings"])]]
                 + missing(llog, "**Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8, 9, 10, 12, 19, "
                                 "20, 22, 23, 44 and 45."),
-                [49, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48], 14, [10],
+                [50, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48], 14, [10],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/host/**",), True)],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/**",), False)], [6]]))
     c46 = plan2[46]
@@ -8714,7 +9267,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
         return next((n for n, word in enumerate(("RF", "SF7", "SF9", "SF12", "SBD")) if word in mm.group(1)), None)
 
     out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases then, 48 since "
-                "0.19 (round 113) and 49 since 0.22 (round 117), v2/transport.json 27 then and 32 since 0.22; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
+                "0.19 (round 113), 49 since 0.22 (round 117) and 50 since 0.23 (round 118), v2/transport.json 27 then and 32 since 0.22; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
                 "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
                 "where case 5 at 240,000 ms does: §2.16's inequality pinned on both sides; transport.json's cases "
                 "24 to 26 state a null among the eight keys, the lease and twice routing/interests/timeout, drawing "
@@ -8724,7 +9277,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  lease_of(case(5)), draws(case(5)), with_null,
                  [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
                 + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
-                [49, 32, True, False, False, True, 240_001, False, 240_000, True,
+                [50, 32, True, False, False, True, 240_001, False, 240_000, True,
                  {24: ["transport/link/tx/lease"], 25: ["routing/interests/timeout"],
                   26: ["routing/interests/timeout"]},
                  [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
@@ -8732,10 +9285,10 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     modem = [i for i, c in enumerate(plan) if "zm-1.10.2-r1" in c["policy"] and "modem.v3" in c["policy"]]
     out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
                 "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
-                "then SBD, in that order, of 46 then, 48 since 0.19 and 49 since 0.22",
+                "then SBD, in that order, of 46 then, 48 since 0.19, 49 since 0.22 and 50 since 0.23",
                 ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
                  [medium(plan[i]["note"]) for i in modem], len(plan)],
-                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 49]))
+                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 50]))
     zm = repo / "examples" / "zk2" / "zenoh-modem"
     zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
     # link.md's notes are block quotes: their lines' "> " is no word of theirs.
@@ -9001,11 +9554,11 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out.append(("link.v2 0.17's evidence as zk2py counts it: keep_alive_not_suppressed is drawn by 6, 15 and 19, "
                 "above their intervals as before, and by the eleven the entry names, each at its interval; "
-                "v2/plan.json held 45 cases then, 46 since 0.18, 48 since 0.19 (round 113) and 49 since 0.22 (round "
-                "117)",
+                "v2/plan.json held 45 cases then, 46 since 0.18, 48 since 0.19 (round 113), 49 since 0.22 (round "
+                "117) and 50 since 0.23 (round 118)",
                 [len(plan), [i for i, c in enumerate(plan) if draws(c)]]
                 + missing(log, "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
-                [49, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
+                [50, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
     # review-bot's note 5 on #1121: stamps() reads a shape the text does not
     # name as stamping. No spec case hits it; zk2py's own cases pin it.
     shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731

@@ -1,8 +1,137 @@
-# `desired.v1` changelog
+# `desired` changelog
 
-Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
-what deliberately did not, and why. A breaking change is a new major, a new
-file, never an entry here ([`../README.md`](../README.md)).
+Versions of the texts of [`v1.md`](v1.md) (`desired.v1`) and
+[`v2.md`](v2.md) (`desired.v2`). Each entry records what changed, what
+deliberately did not, and why. A breaking change is a new major, a new
+file, never an entry here ([`../README.md`](../README.md)). An entry
+headed `desired.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
+`v1.md`'s.
+
+## desired.v2 0.1 — 2026-11-22: a new major: the version is the in-band stamp, a target re-reads conditionally or watches its author's heartbeat, and the report is a packed record (#986)
+
+`desired.v2` is `desired.v1` on a wire a far target can afford. It is a
+new file, [`v2.md`](v2.md), and no entry of `v1.md`'s: it changes what a
+conforming author and target put on the wire. It restates `desired.v1`
+0.14 by reference, and is written against core 0.112. Its status is
+`experimental`: no adopter's mapping uses it yet.
+
+**What it replaces.**
+- **§2.4, the version.** A document's version is its put's in-band
+  stamp, a run and a seq (core §4.3). The desired resource carries no
+  Zenoh timestamp, and its author answers a GET by snapshot.
+- **§2.5, reading.** A re-read is a conditional read (core §4.2), which
+  an unchanged author answers in 6 bytes. A target may watch its
+  author's heartbeat in place of a period. A far target waits the
+  face's reply timeout, one read at a time.
+- **§2.6, the order.** By seq within a run, another run admitted, and
+  never an older version of one of 16 remembered runs.
+- **§2.8, the window.** A snapshot with no entry reverts, under the held
+  version's run alone.
+- **§2.10 and §3, the report.** A packed `Report` of 3 to 27 bytes,
+  `desired.v2.json`, its role named by `desired.report`.
+- **§2.11, the author.** No clock catch-up, and a record with no stamp.
+- **§2.17, the comparison.** By run and seq.
+
+**Three guarantees depart from `desired.v1`.**
+1. **A document's revision is at most 4,294,967,295.** `desired.v1`
+   allowed 2^64 − 1. A document whose revision is above the bound is
+   refused whole, `invalid`. The report carries a revision in 32 bits,
+   as `config.v2` does.
+2. **A target reverts on more than a delete.** `desired.v1` reverted on
+   a delete or a `reply_del`, and on nothing else. Here it also reverts
+   on a member's snapshot with no entry, where that snapshot is of the
+   run of the version it holds. Under another run it never does.
+   - So a delete past the window now reaches a target at its next read.
+   - One case is left as `desired.v1` left every delete past the window:
+     the author also restarted. Its new run's snapshot with no entry is
+     no verdict, and the target keeps the deleted document in force.
+   - `desired.v1`'s MUST on a deployment's tombstone window, for a
+     target's sake, is gone with it.
+3. **`desired.v1`'s residual is kept, and it follows every new run.** A
+   value of an old run still in transit, its seq higher than any the
+   target acted on, is acted on after the new run's first value. The
+   target holds it until its author's next put.
+   - `desired.v1` ordered a re-mint in the author's own session by time,
+     under one zid. Here every new instance takes a new run, so the
+     residual covers a re-mint too, and a run taken before the seq
+     wraps.
+   - A conditional read shows it and does not heal it.
+
+**What a tool loses.**
+- **"Behind for longer than" by a version's age.** A version has no
+  time. The window's way is left.
+- **The slice from the target alone.** A report names no key. A tool
+  with no revision of the author's interface in hand answers three of
+  §5's questions from the report, and not the first.
+
+**What an author gains.** An author whose clock is wrong still orders
+its versions. `desired.v1`'s rule against stamping at or below its last
+stamp is gone: a run is never reused (core S7).
+
+**Settled here, where the design left a choice.**
+- **A place the table does not hold** is written as its nearest listed
+  ancestor other than `""`, and `out_of_range` with none. So index 0
+  says the document itself is refused, never "somewhere". The table's
+  first entry is `""`, written out.
+- **`desired.report`** is a role's name, or the resource's one parameter
+  in braces. Two report resources that can report one role are both
+  invalid.
+- **A revert on a snapshot with no entry** has no observed version. The
+  target records the snapshot's asof as the seq it acted on under that
+  run, so a later arrival at or below it is older.
+- **`run_fields`** reads every field of a version: two runs, a seq with
+  no run, a run with no seq, a revision with no version.
+- **`escape`**: a `source` or an `outcome` a later text names makes a
+  report malformed to this reader.
+- **A tool's reading of a snapshot with no entry** answers only under
+  the report's observed run, as the target's own rule does. Otherwise it
+  is `author_silent`, as `desired.v1` read a GET that drew nothing.
+- **The watch's steps**: a heartbeat not read and one with no section
+  each leave the target expecting none, and neither makes it read. An
+  unchanged answer sets what it expects to the section of the heartbeat
+  that made it read.
+- **A horizon above 0 under `freshness.v1`** is `horizon_v1`.
+  `desired.v1`'s SHOULD of a horizon of 0 is gone: a horizon is the
+  watch's budget.
+
+**Evidence.** [`conformance/v2/`](conformance/v2/) holds seven files.
+- `reports.json`: 22 writes, 57 reads, 12 places and 6 words.
+- `order.json`: 67 cases. `watch.json`: 25.
+- `declarations.json`: 12 desired resources and 34 report resources.
+- `slices.json`: 16. `conclusions.json`: 39. `schema.json`: 3.
+- **Computed twice.** One script read the text into code and wrote the
+  files. A second, written from the finished text, computed every
+  expectation again. They share no code, and agree on all 293 cases.
+  Both are the drafter's, kept out of the repository. No file was
+  blessed.
+- **Checked against what the repository holds.** The first script's
+  packed records agree with 29 of the core's `packed/vectors.json`. Its
+  digests agree with `heartbeat/digests.json`, and its reading of
+  `desired.target_param` with all 43 cases of v1's `declarations.json`.
+- [`scenarios-v2.md`](scenarios-v2.md) holds 15 sections: v1's twelve
+  restated, and §13 to §15.
+
+**The bytes, recomputed** from these layouts through the wire
+baseline's model. Each matches the design's figure.
+- A converged report is 92 bits, 12 bytes, in a 43-byte SDU.
+  `desired.v1`'s was 294 bytes of payload, in two SDUs of 340 bytes.
+- A conditional re-read is 159 bytes of SDUs where `desired.v1`'s is
+  222. A day at 300 s is 45.8 KB where it is 63.9 KB.
+- A day of the watch is 12.1 KB at a 600-s horizon, and 2.0 KB at
+  3,600 s.
+
+**Not verified.**
+- **No implementation has run a fixture or a scenario.** The reference
+  implements none of this yet.
+- **No byte crossed a wire.** Every figure is computed.
+- **Which way a far author's heartbeat crosses a `link.v2` face** was
+  not checked. §2.5 says "where it reaches the target".
+- **`link.v2` 0.23's narrowed list** has no new case in `v2/plan.json`.
+
+**What deliberately did not change.** Each version is acted on once.
+A refusal is whole. Last-known is flagged. A restart acts again. The
+kill switch, one author, the binding and the report before the tokens
+are `desired.v1`'s, by reference.
 
 ## 0.14 — 2026-11-21: editorial: `scenarios.md` §8's unbound role states no parameter bound, and §2.10's two reports on one key are merged, not consolidated, no rule changed (#609)
 
