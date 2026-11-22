@@ -1,0 +1,61 @@
+{
+  "description": "alarms.v2's standard packed schema (spec/profiles/alarms/v2.md, section 3; core section 7.6). The standard contract alarms.v2.toml lists this file and types its resource alarms/{slot} by it. An alarm's slot is its key's last chunk, never a field. Its rule and its labels are numbers that the service's own table names (the annotation alarms.rules, section 4), or its rule is not_available and its words are on words/{slot} (section 2.4).",
+  "types": {
+    "Alarm": {
+      "description": "state alarms/{slot}: one alarm's record. 35 bits, 5 bytes, with no optional field; 67 bits, 9 bytes, with its time; 91 bits, 12 bytes, with its labels too; 131 bits, 17 bytes, for an alarm named by words, with its time and its key.",
+      "fields": [
+        {
+          "name": "state",
+          "type": "enum",
+          "values": ["firing", "resolved"],
+          "description": "Whether the alarm fires. The record says the state, never the sample's kind, the heartbeat's bit or its live count."
+        },
+        {
+          "name": "severity",
+          "type": "enum",
+          "values": ["info", "warning", "critical"],
+          "escape": true,
+          "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
+        },
+        {
+          "name": "at",
+          "type": "time",
+          "optional": true,
+          "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
+        },
+        {
+          "name": "rule",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 254,
+          "reserved": ["not_available"],
+          "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+        },
+        {
+          "name": "labels",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 16777215,
+          "optional": true,
+          "description": "The codes of the rule's labels, in the table's order, the first the most significant, as one integer. Present exactly where the rule declares a label."
+        },
+        {
+          "name": "argument",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 1048574,
+          "reserved": ["not_available"],
+          "description": "The rule's own number: the reading that changes while the condition holds. It reads as the rule's minimum plus this code times its resolution. not_available where the rule declares none, or the reading has no code."
+        },
+        {
+          "name": "key",
+          "type": "counter",
+          "width": 64,
+          "optional": true,
+          "description": "The alert key, as the 64 bits of its hash. Present exactly where rule is not_available. It counts nothing: a counter is the one kind that holds 64 bits."
+        },
+        "..."
+      ]
+    }
+  }
+}
