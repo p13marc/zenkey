@@ -1263,3 +1263,210 @@ def declare_report(r: ReportResource, roles: Any, others: Any = ()) -> ReportDec
     return ReportDeclaration(v1.DECLARED, (), named[0], named[1],
                              tuple(ann.get(POINTERS_KEY, DEFAULT_POINTERS)),
                              tuple(ann.get(DETAILS_KEY, DEFAULT_DETAILS)))
+
+
+# -- §2.10: which reply is a role's report --------------------------------------------------------
+#
+# Written from §2.10 "A tool finds a target's report" before
+# conformance/v2/slices.json was opened (round 118).
+
+FOUND_ONE, FOUND_UNREADABLE, FOUND_NONE = "one", "unreadable", "none"
+TWO_REPORTS = "two_reports"
+
+
+@dataclass(frozen=True)
+class ReportFound:
+    """§2.10: what a tool found of one role's report. ``found``: ``one`` (a
+    reply read on the member's key, readable; it may still be malformed),
+    ``unreadable`` (two resources name the role, ``why`` ``two_reports``; or
+    a record core §7.6 refuses, ``why`` its token), or ``none`` (no resource
+    names it; one names it and is invalid, its ``reasons`` beside; or no
+    reply)."""
+
+    found: str
+    why: str | None = None
+    key: str | None = None
+    reading: ReportReading | None = None
+    reasons: tuple[str, ...] = ()
+    declaration: ReportDeclaration | None = None
+
+    def as_reading(self) -> ReportReading | None:
+        """§2.17 step 3's report: None for none read; an unreadable one
+        reads as such."""
+        if self.found == FOUND_NONE:
+            return None
+        if self.found == FOUND_UNREADABLE:
+            return self.reading if self.reading is not None else ReportReading(None, self.why or TWO_REPORTS)
+        return self.reading
+
+
+def names_role(r: ReportResource, role: str) -> bool:
+    """§2.10 "The report resources of a role are the resources of the
+    contract that declares the role whose ``desired.report`` names it: by
+    its name, or by a parameter in braces." A report resource is "a state
+    resource" (§0)."""
+    if not _report_resource(r) or r.named is None:
+        return False
+    form, name = r.named
+    return form == PARAM or name == role
+
+
+def report_key(target: str, iface: str, r: ReportResource, role: str) -> str:
+    """§2.10: "That key is the resource's, its parameter filled with the
+    role's name", "slugged as any parameter value is (core §1.4)"."""
+    from . import slug, templates
+
+    t = templates.parse_template(r.template)
+    chunks = [s.text if s.kind == templates.LITERAL else slug.slug(role) for s in t.segments]
+    return f"zk2/{target}/{iface}/{r.token}/" + "/".join(chunks)
+
+
+def find_report(target: str, iface: str, resources: Any, roles: Any, role: str,
+                replies: Any) -> ReportFound:
+    """§2.10 "A tool finds a target's report by type identity and by the
+    annotation, never by a resource's name." ``resources`` are those of the
+    target's contract that declares ``role``, ``roles`` that contract's
+    requirements, and ``replies`` S4's GET's, ``(key, payload)``, already
+    merged per key ("Two instances' reports on one key are one reply after a
+    tool's merge")."""
+    resources = list(resources)
+    naming = [r for r in resources if names_role(r, role)]
+    if not naming:
+        return ReportFound(FOUND_NONE)                    # "None names it: no report was read."
+    if len(naming) >= 2:
+        return ReportFound(FOUND_UNREADABLE, TWO_REPORTS)  # "The target's contract says two things of one role."
+    r = naming[0]
+    decl = declare_report(r, roles, resources)
+    if decl.declaration != v1.DECLARED:
+        return ReportFound(FOUND_NONE, reasons=decl.reasons, declaration=decl)
+    key = report_key(target, iface, r, role)
+    mine = [payload for k, payload in replies if k == key]
+    if not mine:
+        return ReportFound(FOUND_NONE, key=key, declaration=decl)  # "With no reply, none was read."
+    reading = read_put(mine[-1])
+    if not reading.readable:
+        return ReportFound(FOUND_UNREADABLE, reading.refusal, key, reading, declaration=decl)
+    return ReportFound(FOUND_ONE, None, key, reading, declaration=decl)
+
+
+# -- §2.17, §5: what a tool concludes of one target ---------------------------------------------
+#
+# Written from §2.17 and §5 before conformance/v2/conclusions.json was
+# opened (round 118).
+
+YES, NO, NOT_YET, UNOBSERVABLE, NOT_ASKED = v1.YES, v1.NO, v1.NOT_YET, v1.UNOBSERVABLE, v1.NOT_ASKED
+Q_CONVERGED, Q_REFUSED, Q_LAST_KNOWN, Q_IN_FORCE = v1.Q_CONVERGED, v1.Q_REFUSED, v1.Q_LAST_KNOWN, v1.Q_IN_FORCE
+QUESTIONS = v1.QUESTIONS
+Answer = v1.Answer
+
+
+@dataclass(frozen=True)
+class Reading:
+    """One reading of one target's role (v1's :class:`zk2py.desired.Reading`
+    with this major's report and versions):
+
+    - ``report``: None when none was read, else its reading (§2.10);
+    - ``slice``: whether the tool has the slice, which needs "a revision of
+      the author's interface in hand" (§2.17 "The slice from the target
+      alone goes");
+    - ``author_current``: None for no GET made, ``incomplete``, ``silent``
+      (no reply), a :class:`Version` (its snapshot entry's, "a live entry's,
+      or a tombstone's"), or a :class:`NoEntry`."""
+
+    target_presence: str
+    descriptor: tuple[bool, bool] | None
+    report: ReportReading | None
+    report_freshness: str
+    author_presence: str
+    author_current: Any
+    deployment: tuple[bool, bool] | None = None
+    slice: bool = True
+
+
+def conclude(r: Reading) -> dict[str, v1.Answer]:
+    """§2.17: "v1 §2.17 holds, with these changes", "by the first of these
+    that answers"."""
+    if r.target_presence == v1.ABSENT:
+        return v1._all(NOT_ASKED, "target_absent")
+    if r.target_presence == v1.INCOMPLETE:
+        return v1._all(UNOBSERVABLE, "presence_incomplete")
+    across = r.target_presence == v1.ACROSS_FACE
+    said = r.deployment if across else r.descriptor
+    if said is None:
+        return v1._all(UNOBSERVABLE, "no_descriptor")
+    lists, bound = said
+    if not lists:
+        return v1._all(NOT_ASKED, "not_a_target")
+    if not bound:
+        out = v1._all(NOT_ASKED, "unbound")
+        out[Q_IN_FORCE] = Answer(NO, "unbound")
+        return out
+    # 3. "Step 3, its report, is found as §2.10 says. No slice is needed to
+    # find it."
+    if r.report is None:
+        return v1._all(UNOBSERVABLE, "nothing_crossed" if across else "no_report")
+    if not r.report.valid:
+        return v1._all(UNOBSERVABLE, "report_invalid")
+    if r.report_freshness == "stale":
+        return v1._all(UNOBSERVABLE, "report_stale")
+    if r.report_freshness == "unobservable":
+        return v1._all(UNOBSERVABLE, "report_unobservable")
+    rep = r.report.report or {}
+    outcome, source = rep["outcome"], rep["source"]
+    out = {}
+    # 5. "Step 5 reads the report's fields. not_acted is v1's "no observed"."
+    if outcome == NOT_ACTED:
+        out[Q_REFUSED] = Answer(NOT_ASKED, "not_acted")
+        out[Q_LAST_KNOWN] = Answer(NOT_ASKED, "not_acted")
+    else:
+        out[Q_REFUSED] = Answer(YES if outcome in (REFUSED, FAILED) else NO, outcome)
+        out[Q_LAST_KNOWN] = Answer(YES, "last_known") if rep.get("last_known") else Answer(NO, "current")
+    # §5: "in_force observed or other is v1's in_force; none with source
+    # desired is partial."
+    if source == DESIRED:
+        out[Q_IN_FORCE] = Answer(YES, "desired" if rep["in_force"] in (IN_OBSERVED, IN_OTHER) else "partial")
+    else:
+        out[Q_IN_FORCE] = Answer(NO, source)
+    out[Q_CONVERGED] = _converged(r, rep)
+    return {q: out[q] for q in QUESTIONS}
+
+
+def _converged(r: Reading, rep: dict[str, Any]) -> v1.Answer:
+    """§2.17 steps 6 and 7, "by run and seq"."""
+    outcome = rep["outcome"]
+    observed = stated(rep)
+    if r.author_presence == v1.ABSENT:
+        return Answer(NOT_ASKED, "author_absent")
+    if r.author_presence == v1.INCOMPLETE:
+        return Answer(UNOBSERVABLE, "author_presence_incomplete")
+    # "A tool with no revision of the author's interface in hand has no
+    # slice. ... It answers the first not asked, author_absent, where the
+    # author is absent, and otherwise unobservable, author_not_read." No
+    # slice, no GET: v1's "no GET made".
+    cur = r.author_current if r.slice else None
+    if cur is None:
+        return Answer(UNOBSERVABLE, "author_not_read")
+    if cur == "incomplete":
+        return Answer(UNOBSERVABLE, "author_read_incomplete")
+    if cur == "silent":
+        return Answer(UNOBSERVABLE, "author_silent")
+    if isinstance(cur, NoEntry):
+        # "A snapshot with no entry, under the run of the report's observed
+        # version, is the author's word that it holds no document. By the
+        # report's outcome: yes, reverted; any other, not yet, behind."
+        # "otherwise, under another run or with no observed version:
+        # unobservable, author_silent."
+        if observed is not None and observed.run == cur.run:
+            return Answer(YES, "reverted") if outcome == REVERTED else Answer(NOT_YET, "behind")
+        return Answer(UNOBSERVABLE, "author_silent")
+    # 7. v1: "no observed: not yet, not_acted". A report that reverted on a
+    # snapshot with no entry states no observed version either, and the text
+    # names no other answer for it: zk2py reads v1's line as written.
+    if observed is None:
+        return Answer(NOT_YET, "not_acted")
+    assert isinstance(cur, Version)
+    if observed.run != cur.run:
+        return Answer(NOT_YET, "other_epoch")
+    if observed.seq == cur.seq:
+        return Answer(YES if outcome in (CONVERGED, REVERTED) else NO, outcome)
+    return Answer(NOT_YET, "behind") if observed.seq < cur.seq else Answer(UNOBSERVABLE, "ahead")
