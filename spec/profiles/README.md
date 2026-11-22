@@ -42,10 +42,10 @@ and fails when a row's is stale.
 No adopter's mapping and no shipped service uses these, yet or any
 longer. Their texts, fixtures, runtimes and tools are as complete as the
 others'. Only the walkthrough exercises them, or for `freshness.v1` and
-`desired.v2` their scenarios' own contracts. `health.v2` has its
-standard contract. It is a text and its fixtures so far. No
-implementation runs it yet. A profile leaves this table when one does
-(the process, below).
+`desired.v2` their scenarios' own contracts. `health.v2` and `alarms.v2`
+each have a standard contract. Each is a text and its fixtures so far.
+No implementation runs either yet. A profile leaves this table when one
+does (the process, below).
 
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|---|
@@ -68,7 +68,7 @@ profiles/
     scenarios.md          the rules a fixture cannot check; scenarios-v<major>.md for a later major
     conformance/          fixtures; each file states its format in its description; v<major>/ for a later major
     <name>.v<major>.toml  the standard contract, for a profile that defines one
-    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, desired.v2, config.v2); for health.v2, its standard contract's packed types
+    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, desired.v2, config.v2); for health.v2 and alarms.v2, the standard contract's packed types
 ```
 
 ## The template
