@@ -533,7 +533,8 @@ def _fixture_group(g: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def apply_owner_case(contracts: dict[str, Any], case: dict[str, Any]) -> list[tuple[str, Any, Any]]:
+def apply_owner_case(contracts: dict[str, Any], case: dict[str, Any],
+                     reader: Any = None) -> list[tuple[str, Any, Any]]:
     """One ``apply.json`` case with a ``catalog`` (text 0.9) through a
     :class:`Reader`: each heartbeat's and owner heartbeat's answer and each
     check, as (what, got, want). ``contracts`` are the layouts' contracts,
@@ -543,13 +544,14 @@ def apply_owner_case(contracts: dict[str, Any], case: dict[str, Any]) -> list[tu
     where the owner names none." """
     from . import catalog as cat
 
+    make = Reader if reader is None else reader  # a changed reader, for what a case pins
     if case["catalog"] is None:
-        r = Reader()
+        r = make()
     else:
         entries = [(contracts[e].interface, contracts[e].fingerprint) if isinstance(e, str)
                    else (e["iface"], e["contract"]) for e in case["catalog"]]
         c = cat.Catalog(epoch=0, entries=entries, id="00000000")
-        r = Reader([c], c.id)
+        r = make([c], c.id)
     names = {}  # interface id -> layout name
     for name, follows in case["follows"].items():
         v = r.follow(contracts[name].canonical, contracts[name].fingerprint, follows)

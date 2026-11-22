@@ -2203,9 +2203,9 @@ class Owner:
         ``stream/heartbeats/{class}`` unavailable. Its cause is ``config``:
         text 0.10 (F-549's answer), "`config` where the deployment's
         configuration leaves the owner heartbeat out: it is not turned on,
-        or the owner was given no catalog". A catalog that lists none of its
-        interfaces is the deployment's too, and reads ``config`` here
-        (F-568). ``build`` is never zk2py's: its implementation sends them.
+        or the owner was given no catalog", and since text 0.11 "or its
+        catalog lists none of the interfaces it serves" (F-568's answer).
+        ``build`` is never zk2py's: its implementation sends them.
         "An owner whose owner heartbeats cover an interface exposes it." """
         from . import owner_heartbeat as oh
 
