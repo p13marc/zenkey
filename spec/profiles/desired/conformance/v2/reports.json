@@ -1,0 +1,2426 @@
+{
+ "description": "desired.v2 §2.10, §3: the packed Report of desired.v2.json. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `layout` is the Report's layout form, the sha256 of its JCS bytes, its tag, and its shortest and longest record in bits, before the pad. `writes`: a report in the profile's reading -> the record's `fields` (core §7.6's JSON reading: an absent optional field no member, an enum's escape null, a reserved code its name), its `bits` before the pad, the `pad` and the bytes in `hex`; with `stamp`, the target's own version of that put, also the put's `payload`: CH (form 0, the stamp's width bit, the Report's tag), the run, the seq, the record; or {refused: token}, the writer's, as core's packed/vectors.json names them (`range`, a value with no code; `value`, a name not declared). The profile's reading is {source, outcome, last_known, observed?, in_force?, refusal?}: observed and in_force are {version, revision?}, a version written <run>/<seq> (§2.4: the run in 4 lowercase hexadecimal digits for a 16-bit run and 8 for a 32-bit run, the seq in decimal); in_force absent is the field `none`, equal to observed in its version is `observed`, and any other is `other` with the four in_force fields; refusal is {code, pointer?, detail?}, code null for a code of the type's own, pointer and detail an index or \"out_of_range\". `reads`: CH's `tag` and the record's bytes -> {refused: token}, core §7.6's reading (tag, length, code, extension, pad; a marker read as 1 ends the reading, the rest a later text's, which must hold at least one bit), an unreadable report; or {fields, findings, report?}: the record's fields, §2.10's consistency findings in the order checked (escape, alone; run_fields; observed_outcome; refusal; source; in_force; revision_on_revert; last_known), and, with no finding, the profile's reading. A version is stated by its seq and exactly one of its two runs; a check that reads a version reads a stated one. `places`: a report resource's two tables and a refusal's place (a JSON Pointer, or null for none) and line (or null) -> the indices a target writes: a listed place its index; an unlisted one its nearest listed ancestor, the longest listed pointer other than \"\" that the place continues with a /, else out_of_range; a listed line its index, an unlisted one out_of_range; no member for none. `words`: the tables a reader holds (null: it holds no revision of the target's contract) and a refusal's indices -> the word of each: the entry, null for an index past the table (shown as its number), or \"out_of_range\".",
+ "schema": "desired.v2.json",
+ "layout": {
+  "form": [
+   {
+    "type": "enum",
+    "width": 2,
+    "optional": false,
+    "escape": true
+   },
+   {
+    "type": "enum",
+    "width": 3,
+    "optional": false,
+    "escape": true
+   },
+   {
+    "type": "bool",
+    "width": 1,
+    "optional": false
+   },
+   {
+    "type": "enum",
+    "width": 2,
+    "optional": false,
+    "escape": false,
+    "values": 3
+   },
+   {
+    "type": "int",
+    "width": 16,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 65535,
+    "reserved": []
+   },
+   {
+    "type": "int",
+    "width": 32,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 4294967295,
+    "reserved": []
+   },
+   {
+    "type": "int",
+    "width": 24,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 16777215,
+    "reserved": []
+   },
+   {
+    "type": "int",
+    "width": 32,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 4294967295,
+    "reserved": []
+   },
+   {
+    "type": "int",
+    "width": 16,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 65535,
+    "reserved": []
+   },
+   {
+    "type": "int",
+    "width": 32,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 4294967295,
+    "reserved": []
+   },
+   {
+    "type": "int",
+    "width": 24,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 16777215,
+    "reserved": []
+   },
+   {
+    "type": "int",
+    "width": 32,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 4294967295,
+    "reserved": []
+   },
+   {
+    "type": "enum",
+    "width": 3,
+    "optional": true,
+    "escape": true
+   },
+   {
+    "type": "int",
+    "width": 8,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 254,
+    "reserved": [
+     "out_of_range"
+    ]
+   },
+   {
+    "type": "int",
+    "width": 8,
+    "optional": true,
+    "minimum": 0,
+    "maximum": 254,
+    "reserved": [
+     "out_of_range"
+    ]
+   },
+   "..."
+  ],
+  "sha256": "eb40f0349f72aa22add978765cf7595a6149553c6187421c97d8a65312150f7c",
+  "tag": 12,
+  "min_bits": 20,
+  "max_bits": 247
+ },
+ "writes": [
+  {
+   "note": "a target's first report, and the kill switch's: the baseline, nothing observed, 20 bits",
+   "report": {
+    "source": "baseline",
+    "outcome": "not_acted",
+    "last_known": false
+   },
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": false,
+     "in_force": "none"
+    },
+    "bits": "00000000000000000000",
+    "pad": 4,
+    "hex": "000000"
+   }
+  },
+  {
+   "note": "converged on a version of a 16-bit run, with its revision: 92 bits, 12 bytes; its put under the target's 16-bit run 0003 at seq 5 has CH 0x0c",
+   "report": {
+    "source": "desired",
+    "outcome": "converged",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12",
+     "revision": 3
+    },
+    "in_force": {
+     "version": "0007/12",
+     "revision": 3
+    }
+   },
+   "stamp": "0003/5",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "in_force": "observed"
+    },
+    "bits": "01001001100000000000001110100000000000000000000110010000000000000000000000000000001100000000",
+    "pad": 4,
+    "hex": "498003a00001900000003000",
+    "payload": "0c0003000005498003a00001900000003000"
+   }
+  },
+  {
+   "note": "converged on a version of a 32-bit run: 108 bits, 14 bytes; its put under the target's 32-bit run has CH 0x1c",
+   "report": {
+    "source": "desired",
+    "outcome": "converged",
+    "last_known": false,
+    "observed": {
+     "version": "00a1b2c3/4",
+     "revision": 3
+    },
+    "in_force": {
+     "version": "00a1b2c3/4",
+     "revision": 3
+    }
+   },
+   "stamp": "0badcafe/16777215",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed_run32": 10597059,
+     "observed_seq": 4,
+     "revision": 3,
+     "in_force": "observed"
+    },
+    "bits": "010010010100000000101000011011001011000011100000000000000000000010010000000000000000000000000000001100000000",
+    "pad": 4,
+    "hex": "4940286cb0e00000900000003000",
+    "payload": "1c0badcafeffffff4940286cb0e00000900000003000"
+   }
+  },
+  {
+   "note": "converged, the document's type carrying no revision",
+   "report": {
+    "source": "desired",
+    "outcome": "converged",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12"
+    },
+    "in_force": {
+     "version": "0007/12"
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "in_force": "observed"
+    },
+    "bits": "010010011000000000000011101000000000000000000001100000000000",
+    "pad": 4,
+    "hex": "498003a000018000"
+   }
+  },
+  {
+   "note": "refused from the baseline: a code, a place and a line",
+   "report": {
+    "source": "baseline",
+    "outcome": "refused",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12",
+     "revision": 1
+    },
+    "refusal": {
+     "code": "invalid",
+     "pointer": 2,
+     "detail": 0
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 1,
+     "in_force": "none",
+     "code": "invalid",
+     "pointer": 2,
+     "detail": 0
+    },
+    "bits": "000100001000000000000011101000000000000000000001100100000000000000000000000000000001000010111000000101000000000",
+    "pad": 1,
+    "hex": "108003a000019000000010b81400"
+   }
+  },
+  {
+   "note": "refused over a document in force, both versions of 16-bit runs: 183 bits, 23 bytes",
+   "report": {
+    "source": "desired",
+    "outcome": "refused",
+    "last_known": false,
+    "observed": {
+     "version": "0007/15",
+     "revision": 4
+    },
+    "in_force": {
+     "version": "0007/12",
+     "revision": 3
+    },
+    "refusal": {
+     "code": "reach",
+     "pointer": 3,
+     "detail": 1
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 15,
+     "revision": 4,
+     "in_force": "other",
+     "in_force_run16": 7,
+     "in_force_seq": 12,
+     "in_force_revision": 3,
+     "code": "reach",
+     "pointer": 3,
+     "detail": 1
+    },
+    "bits": "010100101000000000000011101000000000000000000001111100000000000000000000000000000100100000000000001110100000000000000000000110010000000000000000000000000000001110011000000111000000010",
+    "pad": 1,
+    "hex": "528003a00001f000000048003a00001900000003981c04"
+   }
+  },
+  {
+   "note": "the same, both versions of 32-bit runs: 215 bits, 27 bytes, the longest consistent report",
+   "report": {
+    "source": "desired",
+    "outcome": "refused",
+    "last_known": false,
+    "observed": {
+     "version": "00a1b2c3/9",
+     "revision": 4
+    },
+    "in_force": {
+     "version": "00a1b2c3/4",
+     "revision": 3
+    },
+    "refusal": {
+     "code": "reach",
+     "pointer": 3,
+     "detail": 1
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "observed_run32": 10597059,
+     "observed_seq": 9,
+     "revision": 4,
+     "in_force": "other",
+     "in_force_run32": 10597059,
+     "in_force_seq": 4,
+     "in_force_revision": 3,
+     "code": "reach",
+     "pointer": 3,
+     "detail": 1
+    },
+    "bits": "01010010010000000010100001101100101100001110000000000000000000010011000000000000000000000000000001000100000000101000011011001011000011100000000000000000000010010000000000000000000000000000001110011000000111000000010",
+    "pad": 1,
+    "hex": "5240286cb0e0000130000000440286cb0e00000900000003981c04"
+   }
+  },
+  {
+   "note": "a put applied in part: failed, source desired, nothing wholly in force",
+   "report": {
+    "source": "desired",
+    "outcome": "failed",
+    "last_known": false,
+    "observed": {
+     "version": "0007/15",
+     "revision": 5
+    },
+    "refusal": {
+     "code": "apply"
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "failed",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 15,
+     "revision": 5,
+     "in_force": "none",
+     "code": "apply"
+    },
+    "bits": "01011000100000000000001110100000000000000000000111110000000000000000000000000000010100001100000",
+    "pad": 1,
+    "hex": "588003a00001f000000050c0"
+   }
+  },
+  {
+   "note": "a delete acted on: reverted, the delete's version, no revision",
+   "report": {
+    "source": "baseline",
+    "outcome": "reverted",
+    "last_known": false,
+    "observed": {
+     "version": "0007/15"
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 15,
+     "in_force": "none"
+    },
+    "bits": "001000001000000000000011101000000000000000000001111000000000",
+    "pad": 4,
+    "hex": "208003a00001e000"
+   }
+  },
+  {
+   "note": "reverted on a snapshot with no entry: no observed version (§2.8)",
+   "report": {
+    "source": "baseline",
+    "outcome": "reverted",
+    "last_known": false
+   },
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "in_force": "none"
+    },
+    "bits": "00100000000000000000",
+    "pad": 4,
+    "hex": "200000"
+   }
+  },
+  {
+   "note": "a revert that could not finish: failed, source baseline",
+   "report": {
+    "source": "baseline",
+    "outcome": "failed",
+    "last_known": false,
+    "observed": {
+     "version": "0007/15"
+    },
+    "refusal": {
+     "code": "apply",
+     "detail": 2
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "failed",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 15,
+     "in_force": "none",
+     "code": "apply",
+     "detail": 2
+    },
+    "bits": "00011000100000000000001110100000000000000000000111100000110001000000100",
+    "pad": 1,
+    "hex": "188003a00001e0c408"
+   }
+  },
+  {
+   "note": "a call since the document converged: source call, nothing wholly in force",
+   "report": {
+    "source": "call",
+    "outcome": "converged",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12",
+     "revision": 3
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "call",
+     "outcome": "converged",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "in_force": "none"
+    },
+    "bits": "10001000100000000000001110100000000000000000000110010000000000000000000000000000001100000000",
+    "pad": 4,
+    "hex": "888003a00001900000003000"
+   }
+  },
+  {
+   "note": "converged on an archive's last-known version",
+   "report": {
+    "source": "desired",
+    "outcome": "converged",
+    "last_known": true,
+    "observed": {
+     "version": "0007/12",
+     "revision": 3
+    },
+    "in_force": {
+     "version": "0007/12",
+     "revision": 3
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": true,
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "in_force": "observed"
+    },
+    "bits": "01001101100000000000001110100000000000000000000110010000000000000000000000000000001100000000",
+    "pad": 4,
+    "hex": "4d8003a00001900000003000"
+   }
+  },
+  {
+   "note": "a refused document put again under a 32-bit run, adopted refused: the observed version moved, the one in force is of a 16-bit run",
+   "report": {
+    "source": "desired",
+    "outcome": "refused",
+    "last_known": false,
+    "observed": {
+     "version": "00a1b2c3/4",
+     "revision": 4
+    },
+    "in_force": {
+     "version": "0007/12",
+     "revision": 3
+    },
+    "refusal": {
+     "code": "invalid",
+     "pointer": 2
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "observed_run32": 10597059,
+     "observed_seq": 4,
+     "revision": 4,
+     "in_force": "other",
+     "in_force_run16": 7,
+     "in_force_seq": 12,
+     "in_force_revision": 3,
+     "code": "invalid",
+     "pointer": 2
+    },
+    "bits": "01010010010000000010100001101100101100001110000000000000000000001001000000000000000000000000000001001000000000000011101000000000000000000001100100000000000000000000000000000011101110000001000",
+    "pad": 1,
+    "hex": "5240286cb0e000009000000048003a00001900000003b810"
+   }
+  },
+  {
+   "note": "a code of the document type's own: the escape, null",
+   "report": {
+    "source": "baseline",
+    "outcome": "refused",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12",
+     "revision": 1
+    },
+    "refusal": {
+     "code": null,
+     "pointer": 0
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 1,
+     "in_force": "none",
+     "code": null,
+     "pointer": 0
+    },
+    "bits": "0001000010000000000000111010000000000000000000011001000000000000000000000000000000010000111110000000000",
+    "pad": 1,
+    "hex": "108003a000019000000010f800"
+   }
+  },
+  {
+   "note": "a place and a line the tables do not hold: out_of_range, each all ones",
+   "report": {
+    "source": "baseline",
+    "outcome": "refused",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12",
+     "revision": 1
+    },
+    "refusal": {
+     "code": "sensitive",
+     "pointer": "out_of_range",
+     "detail": "out_of_range"
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 1,
+     "in_force": "none",
+     "code": "sensitive",
+     "pointer": "out_of_range",
+     "detail": "out_of_range"
+    },
+    "bits": "000100001000000000000011101000000000000000000001100100000000000000000000000000000001000010101111111111111111110",
+    "pad": 1,
+    "hex": "108003a000019000000010affffc"
+   }
+  },
+  {
+   "note": "an undecodable document: a code alone, and no revision, since none was read",
+   "report": {
+    "source": "baseline",
+    "outcome": "refused",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12"
+    },
+    "refusal": {
+     "code": "undecodable"
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "in_force": "none",
+     "code": "undecodable"
+    },
+    "bits": "000100001000000000000011101000000000000000000001100000001000000",
+    "pad": 1,
+    "hex": "108003a000018080"
+   }
+  },
+  {
+   "note": "the largest values: run ffff, seq 16,777,215, revision 4,294,967,295, indices 254",
+   "report": {
+    "source": "desired",
+    "outcome": "refused",
+    "last_known": true,
+    "observed": {
+     "version": "ffff/16777215",
+     "revision": 4294967295
+    },
+    "in_force": {
+     "version": "ffffffff/16777215",
+     "revision": 4294967295
+    },
+    "refusal": {
+     "code": "apply",
+     "pointer": 254,
+     "detail": 254
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": true,
+     "observed_run16": 65535,
+     "observed_seq": 16777215,
+     "revision": 4294967295,
+     "in_force": "other",
+     "in_force_run32": 4294967295,
+     "in_force_seq": 16777215,
+     "in_force_revision": 4294967295,
+     "code": "apply",
+     "pointer": 254,
+     "detail": 254
+    },
+    "bits": "0101011011111111111111111011111111111111111111111111111111111111111111111111111111110111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111001111111101111111100",
+    "pad": 1,
+    "hex": "56ffffbffffffffffffff7ffffffffffffffffffffffcff7f8"
+   }
+  },
+  {
+   "note": "the smallest: run 0000, seq 0, revision 0",
+   "report": {
+    "source": "desired",
+    "outcome": "converged",
+    "last_known": false,
+    "observed": {
+     "version": "0000/0",
+     "revision": 0
+    },
+    "in_force": {
+     "version": "0000/0",
+     "revision": 0
+    }
+   },
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed_run16": 0,
+     "observed_seq": 0,
+     "revision": 0,
+     "in_force": "observed"
+    },
+    "bits": "01001001100000000000000000100000000000000000000000010000000000000000000000000000000000000000",
+    "pad": 4,
+    "hex": "498000200000100000000000"
+   }
+  },
+  {
+   "note": "a revision above 4,294,967,295 has no code: the writer refuses it (§2.4)",
+   "report": {
+    "source": "desired",
+    "outcome": "converged",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12",
+     "revision": 4294967296
+    },
+    "in_force": {
+     "version": "0007/12",
+     "revision": 4294967296
+    }
+   },
+   "expect": {
+    "refused": "range"
+   }
+  },
+  {
+   "note": "an index of 255 has no code: 254 is the last, and 255 is out_of_range's",
+   "report": {
+    "source": "baseline",
+    "outcome": "refused",
+    "last_known": false,
+    "observed": {
+     "version": "0007/12"
+    },
+    "refusal": {
+     "code": "invalid",
+     "pointer": 255
+    }
+   },
+   "expect": {
+    "refused": "range"
+   }
+  },
+  {
+   "note": "a source the type does not name",
+   "report": {
+    "source": "file",
+    "outcome": "not_acted",
+    "last_known": false
+   },
+   "expect": {
+    "refused": "value"
+   }
+  }
+ ],
+ "reads": [
+  {
+   "note": "read back: a target's first report, and the kill switch's: the baseline, nothing observed, 20 bits",
+   "tag": 12,
+   "hex": "000000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": false,
+     "in_force": "none"
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "read back: converged on a version of a 16-bit run, with its revision: 92 bits, 12 bytes; its put under the target's 16-bit run 0003 at seq 5 has CH 0x0c",
+   "tag": 12,
+   "hex": "498003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 3
+     },
+     "in_force": {
+      "version": "0007/12",
+      "revision": 3
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: converged on a version of a 32-bit run: 108 bits, 14 bytes; its put under the target's 32-bit run has CH 0x1c",
+   "tag": 12,
+   "hex": "4940286cb0e00000900000003000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run32": 10597059,
+     "observed_seq": 4,
+     "revision": 3
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "00a1b2c3/4",
+      "revision": 3
+     },
+     "in_force": {
+      "version": "00a1b2c3/4",
+      "revision": 3
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: converged, the document's type carrying no revision",
+   "tag": 12,
+   "hex": "498003a000018000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_seq": 12
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12"
+     },
+     "in_force": {
+      "version": "0007/12"
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: refused from the baseline: a code, a place and a line",
+   "tag": 12,
+   "hex": "108003a000019000000010b81400",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 1,
+     "code": "invalid",
+     "pointer": 2,
+     "detail": 0
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 1
+     },
+     "refusal": {
+      "code": "invalid",
+      "pointer": 2,
+      "detail": 0
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: refused over a document in force, both versions of 16-bit runs: 183 bits, 23 bytes",
+   "tag": 12,
+   "hex": "528003a00001f000000048003a00001900000003981c04",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "other",
+     "observed_run16": 7,
+     "observed_seq": 15,
+     "revision": 4,
+     "in_force_run16": 7,
+     "in_force_seq": 12,
+     "in_force_revision": 3,
+     "code": "reach",
+     "pointer": 3,
+     "detail": 1
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/15",
+      "revision": 4
+     },
+     "in_force": {
+      "version": "0007/12",
+      "revision": 3
+     },
+     "refusal": {
+      "code": "reach",
+      "pointer": 3,
+      "detail": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: the same, both versions of 32-bit runs: 215 bits, 27 bytes, the longest consistent report",
+   "tag": 12,
+   "hex": "5240286cb0e0000130000000440286cb0e00000900000003981c04",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "other",
+     "observed_run32": 10597059,
+     "observed_seq": 9,
+     "revision": 4,
+     "in_force_run32": 10597059,
+     "in_force_seq": 4,
+     "in_force_revision": 3,
+     "code": "reach",
+     "pointer": 3,
+     "detail": 1
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "00a1b2c3/9",
+      "revision": 4
+     },
+     "in_force": {
+      "version": "00a1b2c3/4",
+      "revision": 3
+     },
+     "refusal": {
+      "code": "reach",
+      "pointer": 3,
+      "detail": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: a put applied in part: failed, source desired, nothing wholly in force",
+   "tag": 12,
+   "hex": "588003a00001f000000050c0",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "failed",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 15,
+     "revision": 5,
+     "code": "apply"
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "failed",
+     "last_known": false,
+     "observed": {
+      "version": "0007/15",
+      "revision": 5
+     },
+     "refusal": {
+      "code": "apply"
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: a delete acted on: reverted, the delete's version, no revision",
+   "tag": 12,
+   "hex": "208003a00001e000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 15
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "observed": {
+      "version": "0007/15"
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: reverted on a snapshot with no entry: no observed version (§2.8)",
+   "tag": 12,
+   "hex": "200000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "in_force": "none"
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "read back: a revert that could not finish: failed, source baseline",
+   "tag": 12,
+   "hex": "188003a00001e0c408",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "failed",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 15,
+     "code": "apply",
+     "detail": 2
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "failed",
+     "last_known": false,
+     "observed": {
+      "version": "0007/15"
+     },
+     "refusal": {
+      "code": "apply",
+      "detail": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: a call since the document converged: source call, nothing wholly in force",
+   "tag": 12,
+   "hex": "888003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "call",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [],
+    "report": {
+     "source": "call",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 3
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: converged on an archive's last-known version",
+   "tag": 12,
+   "hex": "4d8003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": true,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": true,
+     "observed": {
+      "version": "0007/12",
+      "revision": 3
+     },
+     "in_force": {
+      "version": "0007/12",
+      "revision": 3
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: a refused document put again under a 32-bit run, adopted refused: the observed version moved, the one in force is of a 16-bit run",
+   "tag": 12,
+   "hex": "5240286cb0e000009000000048003a00001900000003b810",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "other",
+     "observed_run32": 10597059,
+     "observed_seq": 4,
+     "revision": 4,
+     "in_force_run16": 7,
+     "in_force_seq": 12,
+     "in_force_revision": 3,
+     "code": "invalid",
+     "pointer": 2
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "00a1b2c3/4",
+      "revision": 4
+     },
+     "in_force": {
+      "version": "0007/12",
+      "revision": 3
+     },
+     "refusal": {
+      "code": "invalid",
+      "pointer": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: a code of the document type's own: the escape, null",
+   "tag": 12,
+   "hex": "108003a000019000000010f800",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 1,
+     "code": null,
+     "pointer": 0
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 1
+     },
+     "refusal": {
+      "code": null,
+      "pointer": 0
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: a place and a line the tables do not hold: out_of_range, each all ones",
+   "tag": 12,
+   "hex": "108003a000019000000010affffc",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 1,
+     "code": "sensitive",
+     "pointer": "out_of_range",
+     "detail": "out_of_range"
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 1
+     },
+     "refusal": {
+      "code": "sensitive",
+      "pointer": "out_of_range",
+      "detail": "out_of_range"
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: an undecodable document: a code alone, and no revision, since none was read",
+   "tag": 12,
+   "hex": "108003a000018080",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "code": "undecodable"
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12"
+     },
+     "refusal": {
+      "code": "undecodable"
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: the largest values: run ffff, seq 16,777,215, revision 4,294,967,295, indices 254",
+   "tag": 12,
+   "hex": "56ffffbffffffffffffff7ffffffffffffffffffffffcff7f8",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": true,
+     "in_force": "other",
+     "observed_run16": 65535,
+     "observed_seq": 16777215,
+     "revision": 4294967295,
+     "in_force_run32": 4294967295,
+     "in_force_seq": 16777215,
+     "in_force_revision": 4294967295,
+     "code": "apply",
+     "pointer": 254,
+     "detail": 254
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": true,
+     "observed": {
+      "version": "ffff/16777215",
+      "revision": 4294967295
+     },
+     "in_force": {
+      "version": "ffffffff/16777215",
+      "revision": 4294967295
+     },
+     "refusal": {
+      "code": "apply",
+      "pointer": 254,
+      "detail": 254
+     }
+    }
+   }
+  },
+  {
+   "note": "read back: the smallest: run 0000, seq 0, revision 0",
+   "tag": 12,
+   "hex": "498000200000100000000000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 0,
+     "observed_seq": 0,
+     "revision": 0
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0000/0",
+      "revision": 0
+     },
+     "in_force": {
+      "version": "0000/0",
+      "revision": 0
+     }
+    }
+   }
+  },
+  {
+   "note": "another type's tag: refused before a field is read",
+   "tag": 11,
+   "hex": "498003a00001900000003000",
+   "expect": {
+    "refused": "tag"
+   }
+  },
+  {
+   "note": "tag 0, as a record of no packed type would carry",
+   "tag": 0,
+   "hex": "000000",
+   "expect": {
+    "refused": "tag"
+   }
+  },
+  {
+   "note": "two bytes: the record ends inside the presence bits",
+   "tag": 12,
+   "hex": "0000",
+   "expect": {
+    "refused": "length"
+   }
+  },
+  {
+   "note": "a converged report cut one byte short",
+   "tag": 12,
+   "hex": "498003a000019000000030",
+   "expect": {
+    "refused": "length"
+   }
+  },
+  {
+   "note": "no byte at all",
+   "tag": 12,
+   "hex": "",
+   "expect": {
+    "refused": "length"
+   }
+  },
+  {
+   "note": "a byte after the pad",
+   "tag": 12,
+   "hex": "498003a0000190000000300000",
+   "expect": {
+    "refused": "length"
+   }
+  },
+  {
+   "note": "a bit of the pad set",
+   "tag": 12,
+   "hex": "000001",
+   "expect": {
+    "refused": "pad"
+   }
+  },
+  {
+   "note": "in_force's code 3 is unused: the enum has three values and no escape",
+   "tag": 12,
+   "hex": "030000",
+   "expect": {
+    "refused": "code"
+   }
+  },
+  {
+   "note": "the marker read as 1 and a later text's bits behind it: ignored, the report read",
+   "tag": 12,
+   "hex": "498003a0000190000000301b",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 3
+     },
+     "in_force": {
+      "version": "0007/12",
+      "revision": 3
+     }
+    }
+   }
+  },
+  {
+   "note": "the marker read as 1 and bytes behind it, the last not a pad: still ignored",
+   "tag": 12,
+   "hex": "000010ffff",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": false,
+     "in_force": "none"
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "the marker read as 1 and one bit behind it, the pad's: a record of this type never ends on its marker, so that bit is read as a later text's",
+   "tag": 12,
+   "hex": "108003a000019000000030b2",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "code": "invalid"
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 3
+     },
+     "refusal": {
+      "code": "invalid"
+     }
+    }
+   }
+  },
+  {
+   "note": "source's code 3 is the escape: a later text's value, reported alone",
+   "tag": 12,
+   "hex": "c00000",
+   "expect": {
+    "fields": {
+     "source": null,
+     "outcome": "not_acted",
+     "last_known": false,
+     "in_force": "none"
+    },
+    "findings": [
+     "escape"
+    ]
+   }
+  },
+  {
+   "note": "outcome's codes 5, 6 and 7 all read as the escape: here 6",
+   "tag": 12,
+   "hex": "300000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": null,
+     "last_known": false,
+     "in_force": "none"
+    },
+    "findings": [
+     "escape"
+    ]
+   }
+  },
+  {
+   "note": "a code's value past its five reads as the escape, the type's own: no finding",
+   "tag": 12,
+   "hex": "108003a000019000000030e0",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "code": null
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 3
+     },
+     "refusal": {
+      "code": null
+     }
+    }
+   }
+  },
+  {
+   "note": "run_fields: two runs of the observed version",
+   "tag": 12,
+   "hex": "498003c0000001e00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_run32": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [
+     "run_fields",
+     "observed_outcome",
+     "source",
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "run_fields: a seq without a run; so no version is stated, and converged has none",
+   "tag": 12,
+   "hex": "49200001900000003000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [
+     "run_fields",
+     "observed_outcome",
+     "source",
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "run_fields: a run without a seq",
+   "tag": 12,
+   "hex": "498003900000003000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "revision": 3
+    },
+    "findings": [
+     "run_fields",
+     "observed_outcome",
+     "source",
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "run_fields: a revision with no version, on a baseline report",
+   "tag": 12,
+   "hex": "00100000001000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": false,
+     "in_force": "none",
+     "revision": 1
+    },
+    "findings": [
+     "run_fields"
+    ]
+   }
+  },
+  {
+   "note": "run_fields: two runs of the version in force",
+   "tag": 12,
+   "hex": "528003a000019000000038003c0000001e000006b0",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "other",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "in_force_run16": 7,
+     "in_force_run32": 7,
+     "in_force_seq": 3,
+     "code": "invalid"
+    },
+    "findings": [
+     "run_fields",
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "observed_outcome: an observed version with not_acted",
+   "tag": 12,
+   "hex": "808003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "call",
+     "outcome": "not_acted",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [
+     "observed_outcome"
+    ]
+   }
+  },
+  {
+   "note": "observed_outcome: converged with no observed version; source and in_force follow",
+   "tag": 12,
+   "hex": "490000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed"
+    },
+    "findings": [
+     "observed_outcome",
+     "source",
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "reverted with no observed version is no finding (§2.8)",
+   "tag": 12,
+   "hex": "200000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "in_force": "none"
+    },
+    "findings": [],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "refusal: a code with converged",
+   "tag": 12,
+   "hex": "498003a000019000000030b0",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "code": "invalid"
+    },
+    "findings": [
+     "refusal"
+    ]
+   }
+  },
+  {
+   "note": "refusal: refused without a code",
+   "tag": 12,
+   "hex": "108003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [
+     "refusal"
+    ]
+   }
+  },
+  {
+   "note": "refusal: a place without a code, with reverted",
+   "tag": 12,
+   "hex": "208003a00001804040",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "pointer": 1
+    },
+    "findings": [
+     "refusal"
+    ]
+   }
+  },
+  {
+   "note": "source: desired with no observed version",
+   "tag": 12,
+   "hex": "400000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "not_acted",
+     "last_known": false,
+     "in_force": "none"
+    },
+    "findings": [
+     "source"
+    ]
+   }
+  },
+  {
+   "note": "source: converged with baseline",
+   "tag": 12,
+   "hex": "088003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [
+     "source"
+    ]
+   }
+  },
+  {
+   "note": "source: reverted with desired",
+   "tag": 12,
+   "hex": "608003a000018000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "reverted",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12
+    },
+    "findings": [
+     "source"
+    ]
+   }
+  },
+  {
+   "note": "in_force: observed with the source call",
+   "tag": 12,
+   "hex": "898003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "call",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "in_force: observed after a failed act",
+   "tag": 12,
+   "hex": "598003a000019000000030c0",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "failed",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "code": "apply"
+    },
+    "findings": [
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "in_force: converged and desired, and nothing in force",
+   "tag": 12,
+   "hex": "488003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "in_force: other with no version in force stated",
+   "tag": 12,
+   "hex": "528003a000019000000030b0",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "other",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "code": "invalid"
+    },
+    "findings": [
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "in_force: other naming the observed version, which observed says in two bits",
+   "tag": 12,
+   "hex": "528003a000019000000038003a00001900000003b0",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "other",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "in_force_run16": 7,
+     "in_force_seq": 12,
+     "in_force_revision": 3,
+     "code": "invalid"
+    },
+    "findings": [
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "in_force: the same run value at the other width is another version: no finding",
+   "tag": 12,
+   "hex": "528003a0000190000000340000001e00001900000003b0",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": "other",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "in_force_run32": 7,
+     "in_force_seq": 12,
+     "in_force_revision": 3,
+     "code": "invalid"
+    },
+    "findings": [],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/12",
+      "revision": 3
+     },
+     "in_force": {
+      "version": "00000007/12",
+      "revision": 3
+     },
+     "refusal": {
+      "code": "invalid"
+     }
+    }
+   }
+  },
+  {
+   "note": "in_force: a field of the version in force with observed",
+   "tag": 12,
+   "hex": "498003a000019000000038003a00000600",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": "observed",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3,
+     "in_force_run16": 7,
+     "in_force_seq": 3
+    },
+    "findings": [
+     "in_force"
+    ]
+   }
+  },
+  {
+   "note": "revision_on_revert: reverted with a revision",
+   "tag": 12,
+   "hex": "208003a00001900000003000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "in_force": "none",
+     "observed_run16": 7,
+     "observed_seq": 12,
+     "revision": 3
+    },
+    "findings": [
+     "revision_on_revert"
+    ]
+   }
+  },
+  {
+   "note": "last_known: true with no observed version",
+   "tag": 12,
+   "hex": "040000",
+   "expect": {
+    "fields": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": true,
+     "in_force": "none"
+    },
+    "findings": [
+     "last_known"
+    ]
+   }
+  },
+  {
+   "note": "several findings, in the order checked: observed_outcome, refusal, source, in_force, last_known",
+   "tag": 12,
+   "hex": "550000",
+   "expect": {
+    "fields": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": true,
+     "in_force": "observed"
+    },
+    "findings": [
+     "observed_outcome",
+     "refusal",
+     "source",
+     "in_force",
+     "last_known"
+    ]
+   }
+  }
+ ],
+ "places": [
+  {
+   "note": "a place the table holds",
+   "refusal": {
+    "place": "/rate_hz",
+    "line": "above what the drive supports"
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": 2,
+    "detail": 0
+   }
+  },
+  {
+   "note": "the document itself: index 0",
+   "refusal": {
+    "place": "",
+    "line": null
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": 0
+   }
+  },
+  {
+   "note": "a place it does not hold, under a listed one: its nearest listed ancestor",
+   "refusal": {
+    "place": "/limits/min_hz",
+    "line": null
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": 3
+   }
+  },
+  {
+   "note": "the longest listed ancestor, not the first",
+   "refusal": {
+    "place": "/limits/max_hz/0",
+    "line": null
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": 4
+   }
+  },
+  {
+   "note": "no listed ancestor but the document: out_of_range, never index 0",
+   "refusal": {
+    "place": "/endpoint",
+    "line": null
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": "out_of_range"
+   }
+  },
+  {
+   "note": "a listed pointer that is a prefix of the place's text, but not on a /: no ancestor",
+   "refusal": {
+    "place": "/model",
+    "line": null
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": "out_of_range"
+   }
+  },
+  {
+   "note": "an escaped token: /a~1b is the member named a/b, listed",
+   "refusal": {
+    "place": "/a~1b",
+    "line": null
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": 5
+   }
+  },
+  {
+   "note": "/a/b is another place, under no listed pointer",
+   "refusal": {
+    "place": "/a/b",
+    "line": null
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": "out_of_range"
+   }
+  },
+  {
+   "note": "a refusal that points nowhere, with a line the table holds",
+   "refusal": {
+    "place": null,
+    "line": "names how the worker reaches the bus"
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "detail": 1
+   }
+  },
+  {
+   "note": "a line the table does not hold: out_of_range, the words staying in the log",
+   "refusal": {
+    "place": "/mode",
+    "line": "no such mode on this drive"
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": 1,
+    "detail": "out_of_range"
+   }
+  },
+  {
+   "note": "a resource with neither key: the tables are [\"\"] and empty",
+   "pointers": [
+    ""
+   ],
+   "details": [],
+   "refusal": {
+    "place": "/rate_hz",
+    "line": "above what the drive supports"
+   },
+   "expect": {
+    "pointer": "out_of_range",
+    "detail": "out_of_range"
+   }
+  },
+  {
+   "note": "with neither key, the document itself is still index 0",
+   "pointers": [
+    ""
+   ],
+   "details": [],
+   "refusal": {
+    "place": "",
+    "line": null
+   },
+   "expect": {
+    "pointer": 0
+   }
+  }
+ ],
+ "words": [
+  {
+   "note": "an index each table holds",
+   "refusal": {
+    "pointer": 2,
+    "detail": 1
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": "/rate_hz",
+    "detail": "names how the worker reaches the bus"
+   }
+  },
+  {
+   "note": "index 0: the document itself, the empty pointer",
+   "refusal": {
+    "pointer": 0
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": ""
+   }
+  },
+  {
+   "note": "an index past the table the reader holds: a later revision's, shown as its number (null here)",
+   "refusal": {
+    "pointer": 6,
+    "detail": 2
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": null,
+    "detail": null
+   }
+  },
+  {
+   "note": "out_of_range, each",
+   "refusal": {
+    "pointer": "out_of_range",
+    "detail": "out_of_range"
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": "out_of_range",
+    "detail": "out_of_range"
+   }
+  },
+  {
+   "note": "the last index of a table",
+   "refusal": {
+    "pointer": 5,
+    "detail": 0
+   },
+   "pointers": [
+    "",
+    "/mode",
+    "/rate_hz",
+    "/limits",
+    "/limits/max_hz",
+    "/a~1b"
+   ],
+   "details": [
+    "above what the drive supports",
+    "names how the worker reaches the bus"
+   ],
+   "expect": {
+    "pointer": "/a~1b",
+    "detail": "above what the drive supports"
+   }
+  },
+  {
+   "note": "a reader that holds no revision of the target's contract holds no table: numbers",
+   "pointers": null,
+   "details": null,
+   "refusal": {
+    "pointer": 2,
+    "detail": 1
+   },
+   "expect": {
+    "pointer": null,
+    "detail": null
+   }
+  }
+ ]
+}

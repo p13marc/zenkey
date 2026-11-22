@@ -1,0 +1,2355 @@
+{
+ "description": "desired.v2 §2.5, the watch: one target, the base-relative `key` of its slice, the version it `held` ({kind: put | delete, version, last_known?} or null), whether it `moves` what it expects at its own change (§2.5's MAY), and its steps -> what each does, what the target expects after each, and whether the version it holds is still last-known at the end. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A step is one of: {heartbeat: {run, seq, section, members?}}, a heartbeat read by freshness.v2 §2.5's steps, its key's run (4 or 8 hexadecimal digits) and seq, and the section of the author's desired collection, {digest, live}, or null where the collection's map bit is 0; members, where given, are the author's live members, each {key, version}, of which the section is core §7.5's digest (the XOR of the first 4 bytes of the sha256 of each member's key, a zero byte, its run's width bit, its run and its seq) and their count; {heartbeat: {run, seq, read: \"revision\" | \"refused\"}}, one of another revision, or one core §7.5 refuses; {heard: {kind, version}}, a version of the slice heard live and admitted; {answer: \"unchanged\" | {whole: {kind: put | delete | no_entry, version?}} | \"timeout\" | \"held\"}, the outstanding read's end: the held stamp the target sent, a snapshot (its entry then the version the target holds, none for no_entry), no reply within the timeout, or a held stamp it did not send. The target starts expecting none, with no heartbeat read and no read outstanding. expect.steps, for a heartbeat, the first that answers: revision or refused (not read: it expects none, and the sequence does not move); older (in the last read one's run, its seq not after it by core §4.3's serial order: nothing changes); then, the heartbeat read and the sequence moved, the target expecting none where it is of another run than the last read one's or its seq is not that one's plus 1 modulo 2^24: no_section (it expects none); unmoved (the section is the one it expects); outstanding (a read is outstanding); read (one conditional read, carrying the version it holds, or none). For heard: moved (it moves, it expects a section and it holds a version: the old member's value XORed out where it held a put, the new one's XORed in for a put, the live count following) or kept. For an answer: unchanged (it expects the section of the heartbeat that made it read where it still holds the version it sent, else none; that version is no longer last-known), whole (it expects none), no_answer (nothing changes). expect.expects is what it expects after each step, {digest, live} or null. expect.last_known is true when the version it holds at the end came from an archive and no answer or sample of its author's carried it: an unmoved section never confirms.",
+ "cases": [
+  {
+   "note": "the first heartbeat: the target expects none, so it reads once; answered unchanged, it expects that section, and the next heartbeats, unmoved, make no read",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "unmoved",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "another member's change moves the section: every watcher reads once, and is answered unchanged",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/8"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "0e216d14",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/8"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "0e216d14",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "0e216d14",
+      "live": 2
+     },
+     {
+      "digest": "0e216d14",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a version the target lost: the section moved, the read is answered whole, it expects none, and the next heartbeat's read, answered unchanged, settles it",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/9"
+       }
+      ],
+      "section": {
+       "digest": "97c237b6",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": {
+      "whole": {
+       "kind": "put",
+       "version": "0007/9"
+      }
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/9"
+       }
+      ],
+      "section": {
+       "digest": "97c237b6",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 3,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/9"
+       }
+      ],
+      "section": {
+       "digest": "97c237b6",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "read",
+     "whole",
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     null,
+     null,
+     {
+      "digest": "97c237b6",
+      "live": 2
+     },
+     {
+      "digest": "97c237b6",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a heartbeat lost: a gap in the seqs, the section the same, and the target reads",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 3,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a heartbeat of another run, the section the same: the sequence starts again, and the target reads",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 5,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0022",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0022",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "the same run value at the other width is another run",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 5,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "00000021",
+      "seq": 6,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "read"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     null
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a heartbeat of another revision is not read: the target expects none and makes no read for it; the next one it reads follows a gap",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "read": "revision"
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "revision",
+     "read"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     null,
+     null
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a refused heartbeat: the same",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "read": "refused"
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "refused",
+     "read"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     null,
+     null
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "an older heartbeat changes nothing, and moves no sequence",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 4,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 3,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/1"
+       }
+      ],
+      "section": {
+       "digest": "fa6c2dc9",
+       "live": 1
+      }
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 4,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/1"
+       }
+      ],
+      "section": {
+       "digest": "fa6c2dc9",
+       "live": 1
+      }
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 5,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "older",
+     "older",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "no section, the collection's map bit 0: the target expects none and makes no read; the next section makes it read",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "section": null
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "no_section",
+     "read"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     null,
+     null
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a read outstanding: a moved section makes no second read; answered unchanged, the target expects the section of the heartbeat that made it read, so the next heartbeat makes it read again",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/8"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "0e216d14",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/8"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "0e216d14",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 3,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/8"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "0e216d14",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "outstanding",
+     "unchanged",
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "0e216d14",
+      "live": 2
+     },
+     {
+      "digest": "0e216d14",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a read that ends at its timeout is no verdict: what the target expects does not change, and the next heartbeat is its next trigger",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "timeout"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "no_answer",
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     null,
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a timeout after a moved section: the target still expects the section it had, so the next heartbeat makes it read",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/8"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "0e216d14",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "timeout"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/8"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "0e216d14",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "read",
+     "no_answer",
+     "read",
+     "unchanged"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "0e216d14",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a held stamp the target did not send is no answer",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "held"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "no_answer",
+     "read"
+    ],
+    "expects": [
+     null,
+     null,
+     null
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "its own change heard live, moved by the target: a put over a put; the author's next section is the one it expects, and nothing is read",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heard": {
+      "kind": "put",
+      "version": "0007/9"
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/9"
+       }
+      ],
+      "section": {
+       "digest": "97c237b6",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "moved",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "97c237b6",
+      "live": 2
+     },
+     {
+      "digest": "97c237b6",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "the same, by a target that does not move what it expects: one read at the next heartbeat",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": false,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heard": {
+      "kind": "put",
+      "version": "0007/9"
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/9"
+       }
+      ],
+      "section": {
+       "digest": "97c237b6",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/9"
+       }
+      ],
+      "section": {
+       "digest": "97c237b6",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "kept",
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "97c237b6",
+      "live": 2
+     },
+     {
+      "digest": "97c237b6",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a delete heard live: the old value out, the live count down by 1",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heard": {
+      "kind": "delete",
+      "version": "0007/9"
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       }
+      ],
+      "section": {
+       "digest": "985336d4",
+       "live": 1
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "moved",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "985336d4",
+      "live": 1
+     },
+     {
+      "digest": "985336d4",
+      "live": 1
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a put over a delete: the new value in, the live count up by 1",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "delete",
+    "version": "0007/4"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       }
+      ],
+      "section": {
+       "digest": "985336d4",
+       "live": 1
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heard": {
+      "kind": "put",
+      "version": "0008/0"
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0008/0"
+       }
+      ],
+      "section": {
+       "digest": "4f3608aa",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "moved",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "985336d4",
+      "live": 1
+     },
+     {
+      "digest": "4f3608aa",
+      "live": 2
+     },
+     {
+      "digest": "4f3608aa",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a new run of the author heard live, moved: the member's value reads its run's width, so 0008 and 00000008 give two digests",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heard": {
+      "kind": "put",
+      "version": "00000008/0"
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0008/0"
+       }
+      ],
+      "section": {
+       "digest": "4f3608aa",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "moved",
+     "read"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "d7aaaa0b",
+      "live": 2
+     },
+     {
+      "digest": "d7aaaa0b",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "answered unchanged, but the target holds another version by then, heard while its read was out: it expects none",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "heard": {
+      "kind": "put",
+      "version": "0007/9"
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/9"
+       }
+      ],
+      "section": {
+       "digest": "97c237b6",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "kept",
+     "unchanged",
+     "read"
+    ],
+    "expects": [
+     null,
+     null,
+     null,
+     null
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "the heartbeat's seq is a stream key's: 0 follows 16,777,215 in sequence",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 16777215,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "unmoved",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "never a confirmation: heartbeats alone, whatever their sections, leave a last-known version last-known; here neither read drew an answer",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3",
+    "last_known": true
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "timeout"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "held"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "no_answer",
+     "read",
+     "no_answer"
+    ],
+    "expects": [
+     null,
+     null,
+     null,
+     null
+    ],
+    "last_known": true
+   }
+  },
+  {
+   "note": "an unchanged answer is the author's own word, and confirms it",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3",
+    "last_known": true
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a target that holds nothing reads with no held stamp; answered with no entry, it expects none, and reads at each heartbeat until it holds a version",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": null,
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       }
+      ],
+      "section": {
+       "digest": "985336d4",
+       "live": 1
+      }
+     }
+    },
+    {
+     "answer": {
+      "whole": {
+       "kind": "no_entry"
+      }
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       }
+      ],
+      "section": {
+       "digest": "985336d4",
+       "live": 1
+      }
+     }
+    },
+    {
+     "answer": {
+      "whole": {
+       "kind": "put",
+       "version": "0007/3"
+      }
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 3,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "whole",
+     "read",
+     "whole",
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     null,
+     null,
+     null,
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "three members, the digest their XOR whatever their order",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/third",
+        "version": "00a1b2c3/7"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "741c0521",
+       "live": 3
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/third",
+        "version": "00a1b2c3/7"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       }
+      ],
+      "section": {
+       "digest": "741c0521",
+       "live": 3
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "unmoved"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "741c0521",
+      "live": 3
+     },
+     {
+      "digest": "741c0521",
+      "live": 3
+     }
+    ],
+    "last_known": false
+   }
+  }
+ ]
+}
