@@ -434,7 +434,11 @@ pub struct Confirmation {
     pub heartbeat: zenkey_model::wire::Stamp,
     /// Read in the subscriber's callback, on this host's monotonic clock.
     pub arrival: Instant,
-    /// The owner's clock when it wrote it (`None`: unknown).
+    /// The owner's word of its clock when it wrote it, as the heartbeat
+    /// carries it (core §7.5): an instant, the unknown time, or the ahead
+    /// time while its clock guard held (`freshness.v2` §2.10). `None`
+    /// where the view has read no time. It takes no part in what the
+    /// heartbeat confirms (§2.5).
     pub owner_time: Option<zenkey_model::heartbeat::Time>,
 }
 
@@ -458,7 +462,11 @@ pub struct HeartbeatRead {
     pub heartbeat: zenkey_model::wire::Stamp,
     /// Read in the subscriber's callback, on this host's monotonic clock.
     pub arrival: Instant,
-    /// The owner's clock when it wrote it (`None`: unknown).
+    /// The owner's word of its clock when it wrote it, as the heartbeat
+    /// carries it (core §7.5): an instant, the unknown time, or the ahead
+    /// time while its clock guard held (`freshness.v2` §2.10). `None`
+    /// where the view has read no time. It takes no part in what the
+    /// heartbeat confirms (§2.5).
     pub owner_time: Option<zenkey_model::heartbeat::Time>,
     /// Its key's seqs skipped since the last heartbeat this view read:
     /// one or more were lost.

@@ -432,12 +432,9 @@ fn clock_ahead(log: &[Rec], beats: &Beats) -> bool {
         })
         .collect();
     heard.extend(beats.lock().unwrap().iter().map(|b| {
-        let h = if b.hb.time == Time::Unknown {
-            hm::Heard::HeartbeatHeld
-        } else {
-            hm::Heard::Heartbeat
-        };
-        (b.at, h)
+        // Under `health.v1` a time that is no instant, ahead or unknown,
+        // answers nothing alone (text 0.11 §2.5).
+        (b.at, hm::Heard::heartbeat(b.hb.time))
     }));
     heard.sort_by_key(|(at, _)| *at);
     let heard: Vec<hm::Heard> = heard.into_iter().map(|(_, h)| h).collect();
@@ -932,9 +929,9 @@ async fn s3_the_checks_bound() {
 /// §4, steps 1 to 3: a clock 2 s ahead: `clock_ahead` at the first hold,
 /// re-stamped by R1 ([moved clock], the module doc), again within a
 /// heartbeat period; the status not held (#978's F6): put while the guard
-/// holds, vouched for by every heartbeat, their time unknown, and healthy
-/// at 65 s; after the correction, a heartbeat with its time known and no
-/// more faults.
+/// holds, vouched for by every heartbeat, their time the ahead time (core
+/// 0.113 §7.5), and healthy at 65 s; after the correction, a heartbeat
+/// whose time is an instant and no more faults.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s4_clock_ahead() {
     let (r1, ep) = router(None).await;
@@ -1033,8 +1030,8 @@ async fn s4_clock_ahead() {
     assert!(
         during
             .iter()
-            .all(|b| vouches(b) && b.hb.time == Time::Unknown),
-        "each vouches for the status, its time unknown (freshness.v2 §2.10)"
+            .all(|b| vouches(b) && b.hb.time == Time::Ahead),
+        "each vouches for the status, its time the ahead time (freshness.v2 §2.10, core §7.5)"
     );
     assert!(clock_ahead(&held, &beats), "is its clock ahead? yes");
 
@@ -1055,7 +1052,7 @@ async fn s4_clock_ahead() {
         .lock()
         .unwrap()
         .iter()
-        .find(|b| b.at > released && b.hb.time != Time::Unknown)
+        .find(|b| b.at > released && b.hb.time.is_instant())
         .map(|b| b.at)
         .expect("a heartbeat with its time known again");
     assert!(

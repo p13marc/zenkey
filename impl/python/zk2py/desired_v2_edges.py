@@ -99,7 +99,7 @@ def edge_done(rp: Report, impl: str) -> dict[str, Any]:
     try:
         target, s7 = _setup(bus, p, impl)
         rp.check(sec, "setup: converged on v1 at (R, 7)", target.report() == converged(s7, 1), str(target.report()))
-        acts0, n0 = target.acts(), p.count()
+        acts0 = target.acts()
         p.script = [("snapshot", None, ASOF)]
         ok = _wait(lambda: bus.run_doc() == BASELINE, 8.0, 0.05)
         time.sleep(0.5)

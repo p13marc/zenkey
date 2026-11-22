@@ -140,10 +140,13 @@ class Group:
 @dataclass(frozen=True)
 class OwnerHeartbeat:
     """An owner heartbeat's body read with no contract: its time (a
-    heartbeat's ``{"s", "ms"}``, None for the unknown time) and its groups in
-    the order read, ascending by index."""
+    heartbeat's: ``{"s", "ms"}``, None for the unknown time,
+    :data:`heartbeat.AHEAD` for the ahead time, core 0.113: "The time is a
+    heartbeat's, with its unknown time, its ahead time and its unused codes.
+    It is the owner's word of its clock, so it is one time for every group")
+    and its groups in the order read, ascending by index."""
 
-    time: dict[str, int] | None
+    time: dict[str, int] | str | None
     groups: tuple[Group, ...]
 
     def group(self, index: int) -> Group | None:
@@ -215,12 +218,12 @@ class _Bits(heartbeat._Bits):
         raise Refused("leb128", f"{what}'s fifth byte has its high bit set")
 
 
-def read_body(body: bytes) -> OwnerHeartbeat:
+def read_body(body: bytes, time_reader: Any = None) -> OwnerHeartbeat:
     """The first reading of a body, after its envelope: the fields in order,
     each read whole, then judged; then ``trailing``, then ``pad``."""
     b = _Bits(bytes(body))
     try:
-        time = heartbeat.read_time(b)
+        time = (time_reader or heartbeat.read_time)(b)   # ``time_reader``: as :func:`heartbeat.read`'s
     except heartbeat.Refused as e:
         raise Refused(e.token, str(e).split(": ", 1)[1]) from None
     count = b.take(COUNT_BITS, "the count of groups")
@@ -242,7 +245,7 @@ def read_body(body: bytes) -> OwnerHeartbeat:
     return OwnerHeartbeat(time, tuple(groups))
 
 
-def read(payload: bytes, key_token: str | None = None, enveloped: bool = True) -> Put:
+def read(payload: bytes, key_token: str | None = None, enveloped: bool = True, time_reader: Any = None) -> Put:
     """The first reading of a put's payload on an owner heartbeat's key.
     "The envelope's parse comes first (above), then the put's form
     (``form``, below)": both are :func:`zk2py.heartbeat.put_of`'s, the
@@ -257,7 +260,7 @@ def read(payload: bytes, key_token: str | None = None, enveloped: bool = True) -
         raise Refused("tag", f"CH's tag is {env.tag}, and an owner heartbeat's is 0")
     stamp = env.stamp
     assert stamp is not None
-    return Put(stamp, read_body(env.record or b""))
+    return Put(stamp, read_body(env.record or b"", time_reader))
 
 
 # -- the second reading: one group's sections, with its revision --------------------
@@ -344,7 +347,7 @@ def _size_bits(n: int) -> str:
     return "".join(format(byte, "08b") for byte in raw)
 
 
-def body_bits(time: dict[str, int] | None, groups: Iterable[Group]) -> str:
+def body_bits(time: dict[str, int] | str | None, groups: Iterable[Group]) -> str:
     """The body's bits before its pad. The groups are written "in ascending
     order of their indices"; :class:`ValueError` for what no owner heartbeat
     holds: no group, more than 15, an index twice, an index or a tag beyond
@@ -368,14 +371,14 @@ def body_bits(time: dict[str, int] | None, groups: Iterable[Group]) -> str:
     return "".join(out)
 
 
-def write_body(time: dict[str, int] | None, groups: Iterable[Group]) -> bytes:
+def write_body(time: dict[str, int] | str | None, groups: Iterable[Group]) -> bytes:
     """The body's bytes: its bits, then zero bits to the next whole byte."""
     bits = body_bits(time, groups)
     bits += "0" * (-len(bits) % 8)
     return int(bits, 2).to_bytes(len(bits) // 8, "big")
 
 
-def write(stamp: zk2c.InBand, time: dict[str, int] | None, groups: Iterable[Group]) -> bytes:
+def write(stamp: zk2c.InBand, time: dict[str, int] | str | None, groups: Iterable[Group]) -> bytes:
     """A put's payload: form 6, CH's tag 0, the run and the seq, the body."""
     return zk2c.write("heartbeat", stamp.width, stamp.run, stamp.seq, 0, write_body(time, groups))
 

@@ -25,8 +25,8 @@ and fails when a row's is stale.
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|---|
 | [`hostid.v1`](hostid/v1.md) | 0.9 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.40 | 4 only: derivation-only | A system name minted from the machine id, so that one host is one system across every zk2 application (core §1.5) |
-| [`freshness.v2`](freshness/v2.md) | 0.11 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.108 | 1: [`freshness.v2.toml`](freshness/freshness.v2.toml); 2: `freshness.ttl_s`, as `freshness.v1`'s; 4 through `uses` | `freshness.v1`'s horizon, confirmed by one heartbeat per interface in place of re-puts: core §7.5's form 6 every half the shortest horizon, a bit per member while its owner vouches for it, puts with no Zenoh timestamp, and a GET's snapshot entries each carrying its confirmation, vouched for at the snapshot's time or its last; a reader confirms a member only where a section's digest is its view's, reads a gap in the heartbeat's seqs as a lost delivery, and re-reads a collection after two divergences; a crossing heartbeat is never downsampled and is liveness evidence (core §4.3, §7.5, §8.5, R7) |
-| [`health.v1`](health/v1.md) | 0.10 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.100 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v2`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
+| [`freshness.v2`](freshness/v2.md) | 0.12 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.108 | 1: [`freshness.v2.toml`](freshness/freshness.v2.toml); 2: `freshness.ttl_s`, as `freshness.v1`'s; 4 through `uses` | `freshness.v1`'s horizon, confirmed by one heartbeat per interface in place of re-puts: core §7.5's form 6 every half the shortest horizon, a bit per member while its owner vouches for it, puts with no Zenoh timestamp, and a GET's snapshot entries each carrying its confirmation, vouched for at the snapshot's time or its last; a reader confirms a member only where a section's digest is its view's, reads a gap in the heartbeat's seqs as a lost delivery, and re-reads a collection after two divergences; a crossing heartbeat is never downsampled and is liveness evidence (core §4.3, §7.5, §8.5, R7) |
+| [`health.v1`](health/v1.md) | 0.11 | draft | zensight, zenoh-modem, tcgui; zenwatch | 0.100 | 1: [`health.v1.toml`](health/health.v1.toml); 4 through `uses` (`freshness.v2`) | How well a service serves: a status in three levels, its checks and its faults; healthy, unhealthy, stale, or unestablished, and never "absent means failed" (core §4.3, §8.2, R7) |
 | [`config.v1`](config/v1.md) | 0.14 | draft | zenoh-modem | 0.99 | 1: [`config.v1.toml`](config/config.v1.toml); 4 through `uses` (`freshness.v2`) | Changing a running service's configuration without locking it out: groups with classes, a change that can cut the link applied only under a window and undone once unless confirmed, persistence as a separate act, and the compact status a constrained face can afford (core §5, §6, O7) |
 | [`config.v2`](config/v2.md) | 0.5 | draft | zenoh-modem | 0.99 | 1: a standard schema, [`config.v2.json`](config/config.v2.json); 2: `config.groups`; 4 through `uses` (`freshness.v2`) | `config.v1` by reference, on a packed wire: each configured kind of device declares its groups in its own contract (`config.groups`: a class, a packed type of `int` and `bool` parameters, units, sensitive names), from which `Record`, one `Set<T>` per hot or reach group, `Control` and `Error` are derived and linted; one record replaces the view and the status, put before every reply, which answers it in core §7.5's value form or refuses in its error form; a contract group has no `set`; tokens are the run and a 16-bit counter, a new run before it ends; times are whole seconds from the deployment epoch, rounded up; a retry's first answer is replayed byte for byte; a sensitive value has no bit on the wire (core §5, §7.5, §7.6, O7) |
 | [`link.v1`](link/v1.md) | 0.20 | draft | zenoh-modem | 0.32 | 2: `link.exposure`; 4 through `uses` | What crosses a constrained face: a deployment's face policy, one per router, and the contract's exposure, compiled into named denies, one downsampling rule per concrete key, the attachment, window floors and liveness evidence; `@zk` never crosses, and no other principal's credentials get across it (core §8.5, R7, S3) |
@@ -42,13 +42,16 @@ and fails when a row's is stale.
 No adopter's mapping and no shipped service uses these, yet or any
 longer. Their texts, fixtures, runtimes and tools are as complete as the
 others'. Only the walkthrough exercises them, or for `freshness.v1` and
-`desired.v2` their scenarios' own contracts. A profile leaves this table when one does
+`desired.v2` their scenarios' own contracts. `health.v2` has its
+standard contract. It is a text and its fixtures so far. No
+implementation runs it yet. A profile leaves this table when one does
 (the process, below).
 
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|---|
 | [`freshness.v1`](freshness/v1.md) | 0.6 | experimental | none | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
 | [`desired.v2`](desired/v2.md) | 0.1 | experimental | none | 0.112 | 1: a standard schema, [`desired.v2.json`](desired/desired.v2.json); 2: `target_param`, `report`, `pointers`, `details`; 4 through `uses` | `desired.v1` by reference, on a wire a far target can afford: a document's version is its put's in-band stamp, a run and a seq, so the desired resource carries no Zenoh timestamp and is answered by snapshot; a target orders by seq within a run, admits another run, and never acts on an older version of one of the 16 runs it remembers; its re-read is conditional, answered unchanged by the held stamp alone, and where its author's heartbeat reaches it, it reads only when that heartbeat's digest moves, after a gap or after another run, never taking an unmoved digest for a confirmation; across a face it waits the face's reply timeout, one read at a time; a snapshot with no entry reverts under the held version's run and is no verdict under another; the report is a packed record of 3 to 27 bytes, its role named by `desired.report`, a refusal's place and line indices into two tables of the target's contract (core §4.2, §4.3, §7.5, §7.6, S7) |
+| [`health.v2`](health/v2.md) | 0.1 | experimental | none | 0.113 | 1: [`health.v2.toml`](health/health.v2.toml), typed by the packed [`health.v2.json`](health/health.v2.json); 2: `reasons`, `details`, `codes`; 4 through `uses` (`freshness.v2`) | `health.v1` by reference, in packed records: a status and a check of 6 bytes and a fault of 8, put on change only and confirmed by the owner's heartbeat; a reason, a detail and a fault's code are numbers, 1 to 31 named by the profile's tables and 32 to 62 by the service's own, declared in a contract of its own, a word no table names staying in the owner's log; `unknown` and a refused record read unknown, never `ok`; the puts' order is stated by seq, and a break is reportable from one GET whose two snapshots share a run and an asof; while its clock guard holds, an owner's heartbeat carries the ahead time and it publishes `clock_ahead` once, so a reader answers the clock question from one heartbeat; an instance implements one major, and a reader reads either (core §4.2, §4.3, §7.5, §7.6) |
 | [`timing.v1`](timing/v1.md) | 0.10 | experimental | none | 0.83 | 2: `period_ms`, `deadline_ms`, `lifespan_ms`; 4 through `uses` | A stream's cadence, its deadline and its lifespan: the owner publishes each member at its period and no runtime repeats a sample; a reader reports a member missed when more than its deadline passes between two arrivals on its own monotonic clock, seen within max(deadline/50, 1 ms), and met at its next, a member never heard judged only when known and its owner present, and a miss never "down"; a sample arrives expired by its owner's stamp only against a clock bound ε the deployment states, never the HLC's delta, and with none nothing is discarded (core §2.7, §4.1, §8.1, R6) |
 | [`arbitration.v1`](arbitration/v1.md) | 0.6 | experimental | none | 0.83 | 2: `policy`, on a requirement; 4 through `uses` | One commander at a time: an arbitrated role follows the first provider, in its binding's order, whose stream arrives within its `timing.v1` deadline and whose interface token it has not heard withdrawn, and holds the dead-man when none is left, the safe value the application's; a withdrawal makes a provider ineligible at once, never absent, and only its token or a read re-admits it, never a sample; no hysteresis; a move of the consumer's own watch hands no authority over; the source from the key, never the payload (core R1, R3, R6, §8.1, §8.2) |
 
@@ -57,14 +60,14 @@ others'. Only the walkthrough exercises them, or for `freshness.v1` and
 ```text
 profiles/
   README.md               this file: the index, the template, the process
-  .history/               published revisions of the profiles' standard contracts (health.v1, config.v1, alarms.v1, freshness.v2)
+  .history/               published revisions of the profiles' standard contracts (health.v1, health.v2, config.v1, alarms.v1, freshness.v2)
   <name>/
     v<major>.md           the normative text of one wire major
     CHANGELOG.md          the versions of that text, and of a later major's beside it
     scenarios.md          the rules a fixture cannot check; scenarios-v<major>.md for a later major
     conformance/          fixtures; each file states its format in its description; v<major>/ for a later major
     <name>.v<major>.toml  the standard contract, for a profile that defines one
-    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, desired.v2, config.v2)
+    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, desired.v2, config.v2); for health.v2, its standard contract's packed types
 ```
 
 ## The template
@@ -210,6 +213,9 @@ thing in the same place.
     §4.2's list of per-key resources name a desired resource only where
     its contract does not use it. Its packed report needed no change:
     it uses §7.6's kinds as they stand;
+  - `health.v2`: that §7.5 gives a heartbeat's time a code for a clock
+    ahead. Its clock question reads it. Also that Appendix D publishes
+    its vocabulary. Its packed records needed no change;
   - `redundancy.v1`: that a descriptor marks a standby (`"standby":
     true`, D012 when tokenless), and that the core defines what a standby
     holds and exposes. Also that a standby taking over and an incumbent

@@ -580,8 +580,8 @@ class Subscriber:
                 answer = view.heartbeat(env.tag, env.stamp, env.record or b"", arrival)
                 if "read" in answer:
                     # health.v1 §2.5 (0.9): the clock question reads "the
-                    # time of each heartbeat", all ones while the guard
-                    # holds (freshness.v2 §2.10, 0.4)
+                    # time of each heartbeat", the ahead time while the
+                    # guard holds (freshness.v2 §2.10, 0.12)
                     from . import heartbeat
 
                     answer = {**answer, "time": heartbeat.read(view.layout, env.record or b"")["time"]}

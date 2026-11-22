@@ -1,8 +1,207 @@
-# `health.v1` changelog
+# `health` changelog
 
-Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
-what deliberately did not, and why. A breaking change is a new major, a new
-file, never an entry here ([`../README.md`](../README.md)).
+Versions of the texts of [`v1.md`](v1.md) (`health.v1`) and
+[`v2.md`](v2.md) (`health.v2`). Each entry records what changed, what
+deliberately did not, and why. A breaking change is a new major, a new
+file, never an entry here ([`../README.md`](../README.md)). An entry
+headed `health.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
+`v1.md`'s.
+
+## health.v2 0.1 — 2026-11-22: a new major: packed records sent on change only, words by table, and a clock question a heartbeat answers alone (#986)
+
+**What it saves is small, and that is said first.** `health.v1`'s
+revision 1.1 already stopped putting its status again: its owner's
+heartbeat confirms it (#978). So on W2, four status changes a day cost
+232 B under `health.v1` and 148 B here. `health.v2` saves about 84 B a
+day. Health's periodic bytes are its heartbeat's, 118 KB a day, which
+this major does not touch.
+
+**What it buys is one wire.**
+- **Packed records of one size.** A status and a check are 6 bytes, a
+  fault 8, where `health.v1`'s measured 27, 37 and 50 before their
+  envelope.
+- **No protobuf and no text on a small owner.** A reason, a detail and
+  a fault's code are 6-bit numbers.
+- **A clock question a heartbeat answers alone,** with core 0.113's
+  ahead time. The owner publishes its `clock_ahead` fault once.
+
+`health.v2` is a new file, [`v2.md`](v2.md), and no entry of `v1.md`'s:
+it changes what a conforming owner puts on the wire. It restates
+`health.v1` 0.11 by reference, and is written against core 0.113 and
+`freshness.v2` 0.12. Its status is `experimental`: no adopter's mapping
+uses it yet.
+
+**What it replaces.**
+- **§2.3 and §3, the records.** `Status`, `Check` and `Fault` are packed
+  types of a standard schema, `health.v2.json`. `since` and `at` are
+  whole seconds from the deployment epoch, and optional. A fault's
+  detail is a 16-bit `argument`.
+- **§2.5, the clock.** The heartbeat's ahead time says it. The fault is
+  published once per hold, and carries no Zenoh timestamp. §5's
+  question reads the last heartbeat read, and no fault.
+- **§2.6, unknown.** `unknown` is the record's code 0, and a record core
+  §7.6 refuses is unknown too.
+- **§2.10, words.** Three kinds of word, each a number: 0 none, 1 to 31
+  the profile's, 32 to 62 the service's own, and `out_of_range`.
+- **§2.2, the order,** is restated by seq, and a reading of two
+  snapshots under one run and one asof is one instant.
+
+**New keyword rules, each with its evidence.**
+- §2.2: an owner MUST order its puts so that at each seq the status is
+  not better than the worst current check. `[Sc: §3]`
+- §2.2: an owner SHOULD build both snapshots of one GET at one asof. A
+  tool MAY report a break from one reading that is one instant, and
+  SHOULD see it in two readings otherwise. `[F: v2/snapshots.json]`
+  `[Sc: §7]`
+- §2.3: an owner MUST NOT implement both majors in one instance.
+  `[Sc: §1]`
+- §2.5: an owner MUST publish one `clock_ahead` fault when its guard
+  begins to hold, and SHOULD NOT publish it again while it holds.
+  `[Sc: §4]`
+- §2.5: a reader MUST answer the clock question as the fixture does.
+  `[F: v2/clock.json]` `[Sc: §4]`
+- §2.6: a reader MUST read `unknown`, and a record it refuses, as
+  unknown, never as `ok`. `[F: v2/records.json, v2/judgements.json]`
+- §2.10: a reader MUST read a contract's tables as the fixture does. An
+  owner MUST write, and a reader MUST read, each word as the fixture
+  does. A reader MUST NOT show a name from a revision the descriptor
+  does not name. A later revision SHOULD append to a table.
+  `[F: v2/tables.json]` `[Sc: §9]`
+- §2.11, §2.12: a reader MUST judge as the fixture does, by the major
+  the descriptor lists, `health.v2` where it lists both.
+  `[F: v2/judgements.json]` `[Sc: §1]`
+- Restated from v1 with this major's evidence: absent is never a level
+  (§2.1), a stale status is never a level (§2.4), and providers are
+  found by descriptor, never by token (§2.7).
+
+**The three guarantees hold.**
+- **The status is never better than its worst current check:** the same
+  order of puts, now checkable from one GET.
+- **Absent is never `failed`:** presence's word, and no record takes
+  part.
+- **Unknown is never `ok`:** `unknown`, a refused record, no status
+  held, a status not confirmed within 60 s, and nothing crossed, each as
+  v1 had it.
+
+**What is narrowed.**
+- **A reason and a detail in words.** A word no table names is
+  `out_of_range` on the wire, and stays in the owner's log. `health.v1`
+  carried any text.
+- **A fault's detail** is one 16-bit number.
+- **A time** is to the second.
+
+**Settled here, where the design left a choice.**
+- **The profile's first tables** are the design's proposal: eight
+  reasons, five details, and the code `clock_ahead`. They are drawn from
+  the words the reference and the scenarios use, not from a survey of
+  adopters. A later text adds words without a new contract.
+- **`clock_ahead`'s argument** is the offset in whole seconds, rounded
+  up, so that an offset above 0 never reads 0. It is 65,534 for that or
+  more, and `not_available` where none was measured.
+- **The fault answers nothing of the clock question.** It is published
+  once, so it says that a hold began, never that it lasts. `health.v1`
+  answered yes from a fault. Here a reader shows the fault as an
+  occurrence, and answers from the last heartbeat it read. A face that
+  lets the faults cross alone gives the occurrences, and the question
+  is unobservable there.
+- **Which heartbeats count:** a read heartbeat covering `health.v2`, or
+  a read owner heartbeat of the `host` class, whatever its sections say.
+  `health.v1` asked that the status's section be in step with the view.
+  A late joiner that only subscribes has no view yet.
+- **A fault carries no Zenoh timestamp.** Core §4.3's table lists
+  `health.v1`'s fault alone, and this text leaves it so.
+- **A table's names** are identifiers, `[a-z][a-z0-9_]*`, in all three
+  kinds. A contract's table is the one list its resources carry, and an
+  instance's the one list among its contracts. Two that differ are none,
+  and the owner then writes `out_of_range`.
+- **A descriptor that lists both majors** is read as `health.v2`.
+- **One instant** needs both snapshots complete, one run, one asof, and
+  no entry or tombstone of that run above the asof.
+
+**Evidence.** [`conformance/v2/`](conformance/v2/) holds six files.
+- `records.json`: 3 layouts, 42 writes, 49 reads and 8 arguments.
+- `tables.json`: the profile's 3 tables, 23 declarations, 9 instances,
+  20 writes, 23 reads and 8 growths.
+- `snapshots.json`: 25 readings. `judgements.json`: 60.
+- `clock.json`: 16 heartbeats and 37 cases. `schema.json`: 4.
+- **Computed twice.** One script read the text into code and wrote the
+  files. A second, written from the finished text, computed every
+  expectation again. They share no code, and agree on all 327 cases.
+  Both are the drafter's, kept out of the repository. No file was
+  blessed.
+- **Checked against what the repository holds.** The first script's
+  packed records agree with the core's `packed/vectors.json` for the
+  kinds these types use, its digests with `heartbeat/digests.json`, and
+  its pages with 26 writes of `snapshot/bodies.json`. The schema's
+  artifact id is the one the reference's `zk2 contract bundle` states.
+- [`scenarios-v2.md`](scenarios-v2.md) holds 9 sections: v1's eight
+  restated, and §9 for the words.
+- **`judgements.json` takes the status's freshness as judged.** Its
+  cases state `freshness.v2`'s verdict and reason, where `health.v1`'s
+  state the observations. The freshness judgement has its own fixtures.
+
+**The bytes, recomputed** from these layouts through the wire
+baseline's model. Each matches the design's figure.
+- A status and a check are 42 bits, 6 bytes, a 12-byte payload in a
+  37-byte SDU. A fault is 58 bits, 8 bytes, 14 and 39.
+- W2's four status changes a day are 148 B, where `health.v1`'s are
+  232 B.
+- A late joiner's status snapshot is 28 bytes, where it was 49.
+- The heartbeat covering `health.v2` is a 16-byte payload: 118 KB a day
+  at 28.5 s, as `health.v1`'s.
+- An hour of a clock ahead is one fault, 39 B, where `health.v1`
+  published 10.2 KB of them.
+
+**What a reader built before this major does.** It finds no `health.v1`
+in the descriptor, and answers not asked, `not_listed`. That is safe,
+and blind. Readers move first.
+
+**Not verified.**
+- **No implementation has run a fixture or a scenario.** The reference
+  implements none of this yet.
+- **No byte crossed a wire.** Every `health.v2` figure is computed.
+- **The contract is not yet in `spec/profiles/.history/`.** §3 states
+  its fingerprint, which the reference's `zk2 contract fingerprint`
+  computed. Publishing it is the code half's.
+- **That an owner builds both snapshots of one GET at one asof** was
+  seen in two runs of the reference and read in its comments, as the
+  design says. §2.2 asks it as a SHOULD.
+
+**What deliberately did not change.** Three resources and their QoS,
+`faults` a stream. The status's horizon, 60 s, and its heartbeat. Stale
+is not a level, and a fresh status vouches for the checks. §2.11's
+steps, verdicts and reasons, and the roll-up. The standard contract
+exposes nothing `link`.
+
+## 0.11 — 2026-11-22: editorial: a heartbeat's time while the guard holds is the ahead time, read as the unknown time was, no rule changed (#986)
+
+`freshness.v2` 0.12 has an owner write core 0.113's ahead time as its
+heartbeat's time while its clock guard holds, where it wrote all ones.
+This text said "its time unknown" of that heartbeat in five places.
+
+**Changed: wording.**
+- **§2.5** says the heartbeat's time is the ahead time while the guard
+  holds. Its "Nothing else does" names a heartbeat whose time is no
+  instant: the ahead time or the unknown time.
+- **§5's clock question** reads "no instant, ahead or unknown" where it
+  read "unknown". The reason keeps its token, `time_unknown`.
+- **`scenarios.md` §4**, Expected 2 and 4, names the ahead time.
+- **`clock.json`**: `heartbeat_held` is a heartbeat whose time is no
+  instant, ahead or unknown. Four notes follow. No case's `heard` and no
+  expectation moved: 29 cases.
+
+**Deliberately not changed: every answer.** Under this major a
+heartbeat's ahead time answers nothing alone, as the unknown time it
+replaced answered nothing. The fault answers, and the owner still
+publishes it again each period (§2.5).
+- **`health.v2` reads it as a yes** (its §2.5), and has its owner
+  publish the fault once. That is a new major's rule, not this one's.
+- **Not taken here:** answering yes from the ahead time under
+  `health.v1` too. It would change `clock.json`'s cases 21 and 25 and
+  what a `health.v1` reader derives.
+
+**Written against** core 0.100 still. The entry restates one sentence
+over core 0.113 and `freshness.v2` 0.12.
 
 ## 0.10 — 2026-11-07: editorial: the scenarios read a GET's answer as snapshots, no rule changed (#977, #609)
 

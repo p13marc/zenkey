@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.112** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.113** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1538,8 +1538,9 @@ time a profile reads (the table below).
       - A snapshot carries each as a time: the timestamp's instant, to the
         millisecond, counted from the deployment epoch (§7.6). A heartbeat
         carries its own so.
-      - While the clock guard holds ("Ahead", below), a heartbeat's time is
-        unknown.
+      - While the clock guard holds ("Ahead", below), a heartbeat's time
+        is no instant. It is §7.5's ahead time, which says the guard
+        holds.
   - **Order and id.** Two such timestamps with one id order by time. A
     timestamp under another id is another session's.
   - **Catch-up**, which profiles cite, is the last such timestamp an owner
@@ -1570,8 +1571,9 @@ time a profile reads (the table below).
     events and streams. A put or a delete that carries no Zenoh timestamp
     gives a router no time of the owner's to re-stamp or drop. On a
     session without timestamping, a state of a contract that uses
-    `freshness.v2` is one: its heartbeat goes on vouching for it, with its
-    time unknown ([`freshness.v2`](profiles/freshness/v2.md) §2.10). Its
+    `freshness.v2` is one: its heartbeat goes on vouching for it, and
+    carries §7.5's ahead time
+    ([`freshness.v2`](profiles/freshness/v2.md) §2.10). Its
     snapshots carry their times and confirmations from the clock ahead,
     which no router reads (§4.1). `[Sc: state.md §7]`
     `[Sc: profiles/freshness/scenarios-v2.md §2]`
@@ -1586,6 +1588,10 @@ time a profile reads (the table below).
     ([`profiles/health/v1.md`](profiles/health/v1.md) §2.5). Its status is
     a `freshness.v2` state, which the guard does not hold, so the status
     says nothing of the clock. `[Sc: profiles/health/scenarios.md §4]`
+    - An owner that sends heartbeats reports it in their time too, by
+      §7.5's ahead time. A `health.v2` owner publishes the sample once,
+      and its reader answers from one heartbeat
+      ([`profiles/health/v2.md`](profiles/health/v2.md) §2.5).
     - Where the owner stamps the sample from its clock, which is ahead
       (the table above), a router re-stamps it, or drops it under
       `timestamping.drop_future_timestamp`, which loses the report.
@@ -2538,9 +2544,31 @@ pad        zero bits up to the next whole byte, fewer than 8
 ```
 
 - **The time** is §7.6's `time` field with `ms`. It counts 32 bits of
-  seconds from the deployment epoch, then 10 bits of milliseconds.
-- **Unknown.** All 42 bits set say the owner's clock is unknown. Any
-  other millisecond code from 1000 up is unused.
+  seconds from the deployment epoch, then 10 bits of milliseconds. Two
+  of its codes carry no instant.
+- **Unknown.** All 42 bits set say the owner's clock is unknown.
+- **Ahead.** The seconds all ones, with the millisecond code 1022, say
+  the owner's clock is ahead: its clock guard holds (§4.3, "Ahead"). It
+  is the unknown time with its last bit clear.
+  - **It carries no instant.** An owner whose guard holds does not
+    trust its clock, and neither does its reader.
+  - **Who writes it** is
+    [`freshness.v2`](profiles/freshness/v2.md) §2.10's to say, and what
+    a reader concludes from it.
+  - **Only a heartbeat's time has it,** and an owner heartbeat's
+    (below). A frame's time (§7.7), an event's and a snapshot's have
+    none.
+- **Unused.** Every other millisecond code from 1000 up is unused: 1000
+  to 1021 under any seconds, and 1022 or 1023 under seconds that are not
+  all ones.
+- **Three readings.** An implementation that reads a heartbeat's time
+  MUST read it as an instant, as unknown or as ahead, as these items
+  say. `[F: heartbeat/times.json, bodies.json]` An implementation MUST
+  NOT read the ahead time as unknown, nor as an instant.
+  `[F: heartbeat/times.json, bodies.json]`
+  - **A reader that knows no ahead time** reads it as an unused code,
+    and refuses the body (`code`, below). To it the heartbeat confirms
+    nothing.
 - **A map bit of 0** says nothing of its collection. Its section is left
   out.
 - **Vouched.** A bit set vouches for its member: the owner holds the
@@ -2573,8 +2601,8 @@ body for the first of these that applies, in this order, naming the
 refusal:
 - reading the fields in order:
   - the body ends before a bit its fields need (`short`);
-  - a code is unused (`code`): a millisecond code from 1000 up but the
-    unknown time's, a live count above c, a count above the live count, or
+  - a code is unused (`code`): an unused millisecond code (above), a
+    live count above c, a count above the live count, or
     a rank not below the live count or not above the rank before it;
 - the body holds a byte after its pad (`trailing`);
 - a bit of the pad is 1 (`pad`).
@@ -2624,8 +2652,9 @@ pad        zero bits up to the next whole byte, fewer than 8
 
 - **The fields** are bit fields, most significant bit first, with no
   padding between them, as a heartbeat's body's are.
-- **The time** is a heartbeat's, with its unknown time and its unused
-  codes.
+- **The time** is a heartbeat's, with its unknown time, its ahead time
+  and its unused codes. It is the owner's word of its clock, so it is
+  one time for every group.
 - **The count** of groups is 4 bits, so an owner heartbeat holds at most
   15 groups. A count of 0 is unused.
 - **The groups** come in ascending order of their indices, and no index
@@ -2681,8 +2710,8 @@ refusal:
 - reading the body's fields in order:
   - the body ends before a bit its fields need, a size's or a group's
     sections' among them (`short`);
-  - a code is unused (`code`): a millisecond code from 1000 up but the
-    unknown time's, or a count of 0 groups;
+  - a code is unused (`code`): an unused millisecond code, as a
+    heartbeat's, or a count of 0 groups;
   - a group's index is not above the index of the group before it
     (`order`);
   - a size is refused as a snapshot's integer is (`leb128`): its fifth
@@ -6042,6 +6071,7 @@ profile's own table replaces its interim one.
 | `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 |
 | `telemetry` | `kind`, `unit`, `buckets`, `semantic`; `telemetry.v2` §4 adds `series` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, [`profiles/telemetry/v2.md`](profiles/telemetry/v2.md) §4 |
 | `desired` | `target_param`; `desired.v2` §4 adds `report`, `pointers` and `details` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4, [`profiles/desired/v2.md`](profiles/desired/v2.md) §4 |
+| `health` | `health.v2` §4: `reasons`, `details`, `codes`. `health.v1` publishes no table | [`profiles/health/v2.md`](profiles/health/v2.md) §4 |
 | `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 |
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` | [`profiles/timing/v1.md`](profiles/timing/v1.md) §4 |
 | `arbitration` | `policy`, on a requirement | [`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4 |
@@ -6061,6 +6091,13 @@ A contract that writes `alarms.<key>` draws W105.
 already says which identity fills each target parameter (R2), and no
 contract wrote it, so it is outside `desired.v1`'s published table, and a
 contract that writes it draws W105. `[F: contracts/w105-desired-target]`
+
+`health.v2` publishes three keys, each a service's own table of words:
+`reasons`, `details` and `codes`, which a contract writes once on
+`[defaults]` (`health.v2` §2.10). W105 reads them for a contract that
+lists `health.v2`. `health.v1` publishes no table and had no interim
+one, so a key `health.<key>` in a contract that lists `health.v1` draws
+no W105, as before (`health.v1` §1).
 
 `redundancy.v1` publishes the interim `redundancy` row's one key
 unchanged: `election`, `claim` or `external`, which a contract
@@ -6215,8 +6252,9 @@ brief:
   - **`digests.json`:** members, each a key, a run and a seq → each
     one's 32-bit value and their collection's digest.
   - **`times.json`:** a deployment epoch and an instant → the 42-bit
-    time, the unknown time where the instant has no code. An epoch and a
-    time's bytes → the instant.
+    time, the unknown time where the instant has no code, and the ahead
+    time while the clock guard holds. An epoch and a time's bytes → the
+    instant, unknown or ahead.
   - **`owner.json`** holds the owner heartbeat. A value → the body's
     bits, its pad and the put's payload (`writes`). A payload → the
     value, its groups' sections unread, or the refusal (`reads`). A put

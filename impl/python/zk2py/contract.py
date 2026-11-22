@@ -106,8 +106,14 @@ VOCABULARY = {**INTERIM_VOCABULARY, **PUBLISHED_VOCABULARY}
 #: ``desired.v2`` §4 (text 0.1, core 0.112's Appendix D row): "W105 reads
 #: this table for a contract that lists desired.v2 (core §10). Any other key
 #: desired.<key>, desired.target included, is outside it."
+#: ``health.v2`` §4 (text 0.1, core 0.113's Appendix D row): "W105 reads
+#: this table for a contract that lists health.v2 (core §10). Any other key
+#: health.<key> is outside it." "health.v1 publishes no table and had no
+#: interim one, so a key health.<key> in a contract that lists health.v1
+#: draws no W105, as before": ``health`` has no row in the tables above.
 VOCABULARY_BY_MAJOR = {"telemetry.v2": {"kind", "unit", "buckets", "semantic", "series"},
-                       "desired.v2": {"target_param", "report", "pointers", "details"}}
+                       "desired.v2": {"target_param", "report", "pointers", "details"},
+                       "health.v2": {"reasons", "details", "codes"}}
 
 # -- §2.4 / §9.3: built-in defaults -----------------------------------------
 
@@ -363,7 +369,8 @@ class _Loader:
                     if u.name == profile and f"{u.name}.v{u.major}" in VOCABULARY_BY_MAJOR:
                         vocab = VOCABULARY_BY_MAJOR[f"{u.name}.v{u.major}"]
                 if vocab is not None and key not in vocab:
-                    which = "published" if profile in PUBLISHED_VOCABULARY else "interim"
+                    which = "interim" if profile in INTERIM_VOCABULARY and profile not in PUBLISHED_VOCABULARY \
+                        else "published"
                     self.diag("W105", f"{where}: {k!r} is outside the {which} vocabulary", resource)
 
     def check_history_depth(self, value: Any, where: str, resource: str | None = None) -> None:

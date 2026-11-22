@@ -30,9 +30,12 @@
 //!   Zenoh timestamp, so each heartbeat vouches as at any other time. On a
 //!   session that stamps every write, a `redundancy.v1` candidate's (core
 //!   §8.2), it holds them all, and a held write clears its member's bit
-//!   until a write of it goes through (F-461). Its time is unknown while
-//!   the guard holds: the owner's clock is ahead, and the time is its word
-//!   of it.
+//!   until a write of it goes through (F-461). Its time is core §7.5's
+//!   ahead time while the guard holds, on a heartbeat and on an owner
+//!   heartbeat, whatever the clock reads (v2 0.12, core 0.113; #986's Q0):
+//!   the owner's clock is ahead, and the time is its word of it. It is
+//!   never the unknown time, which says only that the clock reads no
+//!   instant the epoch codes.
 //! - **The owner heartbeat** (v2 §2.4, text 0.9; #1110's H3), behind
 //!   [`crate::ServiceConfig::owner_heartbeat()`], off unless the deployment
 //!   sets it: one put per class of exposure on
@@ -53,7 +56,8 @@
 //!   v2 §2.4, #1080): the catalog's the service was given, the one its
 //!   frames and packed records count from, else 0 (Unix seconds). An
 //!   instant with no code under it, before the epoch or 2^32 s or more
-//!   after it, is written as the unknown time, all ones.
+//!   after it, is written as the unknown time, all ones, while the guard
+//!   does not hold.
 
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -179,17 +183,23 @@ pub(crate) fn cover(mut candidates: Vec<(u16, IfaceId, Vec<Class>)>) -> Vec<(Ifa
     covered
 }
 
-/// A heartbeat's time for the owner's clock reading `wall`, under the
-/// deployment epoch `epoch` in Unix seconds (v2 §2.4): unknown, all ones,
-/// for an instant with no code, before the epoch or 2^32 s or more after
-/// it (core §7.6), a clock before the Unix epoch included.
+/// A heartbeat's time, and an owner heartbeat's, for the owner's clock
+/// reading `wall` under the deployment epoch `epoch` in Unix seconds
+/// ([`Time::written`]).
+///
+/// - **While the clock guard holds** (`guard`, core §4.3's "Ahead") it is
+///   core §7.5's ahead time, whatever `wall` reads, never the unknown time
+///   (v2 §2.10).
+/// - **Otherwise** it is `wall`'s instant, or unknown, all ones, for an
+///   instant with no code: before the epoch or 2^32 s or more after it
+///   (core §7.6), a clock before the Unix epoch included (v2 §2.4).
 #[must_use]
-pub(crate) fn time_at(wall: std::time::SystemTime, epoch: i64) -> Time {
-    wall.duration_since(std::time::UNIX_EPOCH)
+pub(crate) fn time_at(guard: bool, wall: std::time::SystemTime, epoch: i64) -> Time {
+    let at = wall
+        .duration_since(std::time::UNIX_EPOCH)
         .ok()
-        .and_then(|d| i128::try_from(d.as_millis()).ok())
-        .and_then(|ms| Time::from_unix_ms(ms, epoch))
-        .unwrap_or(Time::Unknown)
+        .and_then(|d| i128::try_from(d.as_millis()).ok());
+    Time::written(guard, at, epoch)
 }
 
 /// One covered interface's heartbeat, as its task sends it.
@@ -218,14 +228,15 @@ impl Beat {
         // One instant, taken before the put: the body's time, and the last
         // confirmation the replies of each member it vouches for carry
         // (S2), so a reply never claims a confirmation later than the
-        // heartbeat's. While the clock guard holds, the time is unknown
-        // (v2 §2.10), and the replies' stamp is from the clock ahead.
+        // heartbeat's. While the clock guard holds, the time is the ahead
+        // time (v2 §2.10, core §7.5), and the replies' stamp is from the
+        // clock ahead.
         let at = self.minter.time();
-        let time = if self.minter.is_ahead() {
-            Time::Unknown
-        } else {
-            time_at(at.get_time().to_system_time(), self.epoch)
-        };
+        let time = time_at(
+            self.minter.is_ahead(),
+            at.get_time().to_system_time(),
+            self.epoch,
+        );
         let iface = self.layout.iface.to_string();
         let Some((hb, vouched)) = self.store.heartbeat(&iface, &self.exposed, time) else {
             return;
@@ -338,14 +349,15 @@ impl OwnerBeat {
                 }
             }
         }
-        // One instant for the put, as a heartbeat's: the body's time, and
-        // the confirmation of each member any group vouches for.
+        // One instant for the put, as a heartbeat's: the body's time, the
+        // ahead time while the clock guard holds (v2 §2.10), one for every
+        // group, and the confirmation of each member any group vouches for.
         let at = self.minter.time();
-        let time = if self.minter.is_ahead() {
-            Time::Unknown
-        } else {
-            time_at(at.get_time().to_system_time(), self.epoch)
-        };
+        let time = time_at(
+            self.minter.is_ahead(),
+            at.get_time().to_system_time(),
+            self.epoch,
+        );
         let class = self.class;
         let mut groups = Vec::with_capacity(serving.len());
         let mut vouched = Vec::new();
@@ -460,31 +472,54 @@ mod tests {
         let e = 1_767_225_600;
         let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(ms);
         assert_eq!(
-            time_at(at(1_794_062_759_123), e),
+            time_at(false, at(1_794_062_759_123), e),
             Time::At {
                 secs: 26_837_159,
                 ms: 123
             }
         );
         assert_eq!(
-            time_at(at(1_794_062_759_123), 0),
+            time_at(false, at(1_794_062_759_123), 0),
             Time::At {
                 secs: 1_794_062_759,
                 ms: 123
             },
             "no catalog: Unix seconds"
         );
-        assert_eq!(time_at(at(1_767_225_599_999), e), Time::Unknown);
-        assert_eq!(time_at(at(0), e), Time::Unknown, "a clock with no RTC");
+        assert_eq!(time_at(false, at(1_767_225_599_999), e), Time::Unknown);
         assert_eq!(
-            time_at(at(6_062_192_896_000), e),
+            time_at(false, at(0), e),
+            Time::Unknown,
+            "a clock with no RTC"
+        );
+        assert_eq!(
+            time_at(false, at(6_062_192_896_000), e),
             Time::Unknown,
             "2^32 s on"
         );
         assert_eq!(
-            time_at(UNIX_EPOCH - Duration::from_millis(1), 0),
+            time_at(false, UNIX_EPOCH - Duration::from_millis(1), 0),
             Time::Unknown,
             "before the Unix epoch, with no catalog"
+        );
+    }
+
+    /// v2 0.12 §2.10 (#986 Q0): while the clock guard holds the time is
+    /// the ahead time, whatever the clock reads, as `times.json`'s three
+    /// writes under `guard` have it: an instant the epoch codes, no
+    /// catalog, and an instant with no code, never the unknown time.
+    #[test]
+    fn a_time_is_ahead_while_the_guard_holds_whatever_the_clock_reads() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let e = 1_767_225_600;
+        let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(ms);
+        assert_eq!(time_at(true, at(1_794_062_761_123), e), Time::Ahead);
+        assert_eq!(time_at(true, at(1_794_062_761_123), 0), Time::Ahead);
+        assert_eq!(time_at(true, at(6_062_192_896_000), e), Time::Ahead);
+        assert_eq!(
+            time_at(true, UNIX_EPOCH - Duration::from_millis(1), e),
+            Time::Ahead,
+            "a clock that reads no instant, under the guard"
         );
     }
 

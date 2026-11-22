@@ -397,8 +397,8 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
     .await;
 
     // 4. A clock ahead: the guard holds no write of beacon.v2's, which
-    // carries no Zenoh timestamp, and the heartbeats go on vouching, the
-    // time unknown (§2.10). S2 judges `status` fresh past its horizon; G,
+    // carries no Zenoh timestamp, and the heartbeats go on vouching, their
+    // time the ahead time (§2.10, core §7.5). S2 judges `status` fresh past its horizon; G,
     // on the deployment's word, finds the reply stamped ahead of its clock.
     let tick = client(&ep).await;
     let ahead_session = client(&ep).await;
@@ -433,7 +433,11 @@ async fn s2_a_vouch_withdrawn_goes_stale() {
     let held = beats_after(&beats, detected + Duration::from_millis(1200));
     assert!(held.len() >= 2, "heartbeats go on: {}", held.len());
     for b in &held {
-        assert_eq!(b.hb.time, Time::Unknown, "the time unknown while held");
+        assert_eq!(
+            b.hb.time,
+            Time::Ahead,
+            "the ahead time while held, never the unknown time (§2.10)"
+        );
         assert!(
             b.hb.sections[0].is_some() && b.hb.sections[1].is_none(),
             "the map 1 0 1"
@@ -495,7 +499,7 @@ async fn stamping(ep: &str) -> zenoh::Session {
 
 /// §2 step 6 (F-461): a candidate's session stamps every write (core
 /// §8.2), so its clock guard holds a put of `status`. Its heartbeats go on,
-/// the time unknown, and clear `status`'s bit from the held put until a
+/// their time the ahead time, and clear `status`'s bit from the held put until a
 /// put goes through (§2.10), the guard's release alone setting nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s2_a_candidates_held_put_clears_its_bit() {
@@ -534,7 +538,7 @@ async fn s2_a_candidates_held_put_clears_its_bit() {
     let section = |b: &Beat| b.hb.sections[0].clone().expect("status's section");
 
     // Its put of `up`, then the drift detected: no write held yet, so the
-    // heartbeats vouch for it, the time unknown.
+    // heartbeats vouch for it, their time the ahead time.
     let up = status.put("up").await.unwrap().stamp;
     eventually("the drift is detected", || async {
         tick.put("clock/heartbeat", "tick").await.unwrap();
@@ -545,11 +549,11 @@ async fn s2_a_candidates_held_put_clears_its_bit() {
     eventually("a heartbeat while the guard holds", || async {
         beats_after(&beats, detected + JITTER)
             .iter()
-            .any(|b| b.hb.time == Time::Unknown)
+            .any(|b| b.hb.time == Time::Ahead)
     })
     .await;
     for b in beats_after(&beats, detected + JITTER) {
-        assert_eq!(b.hb.time, Time::Unknown, "the time unknown while held");
+        assert_eq!(b.hb.time, Time::Ahead, "the ahead time while held");
         assert_eq!(
             section(&b).members,
             Members::One { vouched: true },
@@ -572,7 +576,7 @@ async fn s2_a_candidates_held_put_clears_its_bit() {
         after_hold.len()
     );
     for b in &after_hold {
-        assert_eq!(b.hb.time, Time::Unknown, "the time unknown while held");
+        assert_eq!(b.hb.time, Time::Ahead, "the ahead time while held");
         let s = section(b);
         assert_eq!(
             s.members,
@@ -582,7 +586,8 @@ async fn s2_a_candidates_held_put_clears_its_bit() {
         assert_eq!(s.digest, Digest::of([(STATUS_OF, up)]), "the value held");
     }
 
-    // The guard releases: the time is known again, the bit still clear.
+    // The guard releases: the time is an instant again, the bit still
+    // clear.
     svc.minter().simulate_offset(0);
     eventually("the drift is gone", || async {
         tick.put("clock/heartbeat", "tick").await.unwrap();
@@ -594,7 +599,7 @@ async fn s2_a_candidates_held_put_clears_its_bit() {
     let after_release = beats_after(&beats, released + JITTER);
     assert!(after_release.len() >= 2, "{}", after_release.len());
     for b in &after_release {
-        assert_ne!(b.hb.time, Time::Unknown, "the time known again");
+        assert!(b.hb.time.is_instant(), "an instant again: {:?}", b.hb.time);
         assert_eq!(
             section(b).members,
             Members::One { vouched: false },
@@ -2248,6 +2253,115 @@ async fn the_owner_heartbeat_is_off_unless_the_deployment_sets_it() {
         0,
         "no token of an instance that never started"
     );
+}
+
+/// v2 0.12 §2.10 (#986's Q0): while its clock guard holds, an owner writes
+/// core §7.5's ahead time as its owner heartbeat's time, one time for
+/// every group, never the unknown time. Each group goes on vouching, and a
+/// subscriber reads the group as under any other time: it confirms, and
+/// the time it is handed is the ahead time (§2.5, "The time takes no
+/// part"). Before the guard holds and after it releases the time is an
+/// instant.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_owner_heartbeat_says_ahead_while_the_guard_holds() {
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let hs = client(&ep).await;
+    let ss = client(&ep).await;
+    let tick = client(&ep).await;
+    let cat = w2_catalog();
+    let (_hh, host) = owner_heartbeats(&hs, W2_HOST).await;
+    let none = Bindings::new();
+
+    // The owner: `dial.v1` and `pulse.v1` covered by the `host` key, its
+    // clock 2 s ahead, watching the clock reference.
+    let mut cfg = config(W2).owner_heartbeat();
+    cfg.clock_reference = Some("clock/heartbeat".to_owned());
+    let mut b = ServiceBuilder::new(&os, cfg);
+    b.catalog(cat.clone()).unwrap();
+    for name in ["dial.v1", "pulse.v1"] {
+        b.implement(imp(name)).unwrap();
+    }
+    b.minter().simulate_offset(2000);
+    let dial = b
+        .declare_state_writer(&"dial.v1".parse().unwrap(), "state/config", &none)
+        .await
+        .unwrap();
+    let pulse = b
+        .declare_state_writer(&"pulse.v1".parse().unwrap(), STATUS, &none)
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    let s_pulse = follow(&ss, "pulse.v1", STATUS, &cat).await;
+    following(&s_pulse, "S follows pulse.v1's status").await;
+    dial.put("x").await.unwrap();
+    pulse.put("ok").await.unwrap();
+    let pulse_key = "zk2/lab/w2/pulse.v1/state/status";
+    let confirms = |h: &HeartbeatRead| matches!(&h.section, HeartbeatSection::Confirmed(keys) if keys == &[pulse_key.to_owned()]);
+    let groups = |b: &OwnerBeat| indices(&b.hb) == [1, 2];
+
+    // Before the drift is detected: an instant.
+    let t0 = Instant::now();
+    eventually("an owner heartbeat before the hold", || async {
+        !owner_beats_after(&host, t0).is_empty()
+    })
+    .await;
+    assert!(
+        !svc.minter().is_ahead(),
+        "no sample of the clock reference yet: the guard does not hold"
+    );
+    for b in owner_beats_after(&host, t0) {
+        assert!(b.hb.time.is_instant(), "an instant: {:?}", b.hb.time);
+    }
+
+    // The guard holds: the ahead time on every owner heartbeat from the
+    // detection on, both groups in each.
+    eventually("the drift is detected", || async {
+        tick.put("clock/heartbeat", "tick").await.unwrap();
+        svc.minter().is_ahead()
+    })
+    .await;
+    let detected = Instant::now();
+    until(detected, Duration::from_millis(3200)).await;
+    let held = owner_beats_after(&host, detected + JITTER);
+    assert!(held.len() >= 2, "owner heartbeats go on: {}", held.len());
+    for b in &held {
+        assert_eq!(
+            b.hb.time,
+            Time::Ahead,
+            "the ahead time while held, never the unknown time (§2.10)"
+        );
+        assert!(groups(b), "one time for both groups: {:?}", b.hb);
+    }
+    let read = s_pulse.reads_after(detected + JITTER);
+    assert!(read.len() >= 2, "S reads them: {}", read.len());
+    for h in &read {
+        assert_eq!(h.owner_time, Some(Time::Ahead), "read as ahead");
+        assert!(confirms(h), "it confirms as under any time (§2.5): {h:?}");
+    }
+    assert!(svc.minter().is_ahead(), "the guard still holds");
+
+    // The guard releases: an instant again.
+    svc.minter().simulate_offset(0);
+    eventually("the drift is gone", || async {
+        tick.put("clock/heartbeat", "tick").await.unwrap();
+        !svc.minter().is_ahead()
+    })
+    .await;
+    let released = Instant::now();
+    until(released, Duration::from_millis(2500)).await;
+    let after = owner_beats_after(&host, released + JITTER);
+    assert!(after.len() >= 2, "{}", after.len());
+    for b in &after {
+        assert!(b.hb.time.is_instant(), "an instant again: {:?}", b.hb.time);
+    }
+    let read = s_pulse.reads_after(released + JITTER);
+    assert!(
+        read.iter()
+            .all(|h| h.owner_time.is_some_and(Time::is_instant) && confirms(h)),
+        "{read:?}"
+    );
+    svc.close().await.unwrap();
 }
 
 /// Which interfaces is the owner's choice, interface by interface (v2

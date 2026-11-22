@@ -537,7 +537,7 @@ def section4(report: Report) -> None:
         q = h.clock_from(s, "lab/ahead")
         # every heartbeat from the detection on (one already on its way excepted)
         held_beats = _beats(s, "lab/ahead", t_det + 200_000_000)
-        all_held = bool(held_beats) and all(b.get("time") is None and _vouches(b, sk) for _, b in held_beats)
+        all_held = bool(held_beats) and all(b.get("time") == heartbeat.AHEAD and _vouches(b, sk) for _, b in held_beats)
         report.check(sec, "step 2: the guard does not hold the status: the owner's put succeeds, and S receives it; "
                           "the fault again within 31 s; the tokens stay present",
                      put_ok == "ok" and len(ahead_put) == 1 and gap is not None and gap <= 31
@@ -545,8 +545,8 @@ def section4(report: Report) -> None:
                      f"put {put_ok}, {len(ahead_put)} 'ahead' put(s) received of {len(puts_after)} after the "
                      f"detection, fault gap {gap if gap is None else round(gap, 2)} s, tokens "
                      f"{len(pres.instances)}+{len(pres.alive)}")
-        report.check(sec, "step 2: every heartbeat from the detection on vouches for the status, its time unknown, "
-                          "all ones (freshness.v2 §2.10); at 65 s S judges healthy, ok; the faults and the heartbeats "
+        report.check(sec, "step 2: every heartbeat from the detection on vouches for the status, its time the ahead "
+                          "time (freshness.v2 §2.10, 0.12); at 65 s S judges healthy, ok; the faults and the heartbeats "
                           "answer \"is its clock ahead?\" yes",
                      all_held and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "yes",
                      f"{len(held_beats)} heartbeats, each held and vouching {all_held}; {_answer(a)}, clock ahead: {q}"
@@ -560,7 +560,7 @@ def section4(report: Report) -> None:
         t_rel = time.monotonic_ns()
         _sleep_until(t_fix + 35 * fr.NS)
         reput = _puts([x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_put + fr.NS])
-        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if b.get("time") is not None and _vouches(b, sk)]
+        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if heartbeat.reading_of(b.get("time")) == heartbeat.INSTANT and _vouches(b, sk)]
         first = (known[0] - t_fix) / fr.NS if known else None
         faults_after = [x for x, f in ((x, h.decode_fault(x.payload)) for x in s.of(fk))
                         if f and f["code"] == "clock_ahead" and known and x.arrival_ns > known[0]]
@@ -645,22 +645,22 @@ def section4r(report: Report) -> None:
         a = h.judge(r)
         q = h.clock_from(s, "lab/ahead")
         held_beats = _beats(s, "lab/ahead", t_det + 200_000_000)
-        all_held = bool(held_beats) and all(b.get("time") is None and _vouches(b, sk) for _, b in held_beats)
+        all_held = bool(held_beats) and all(b.get("time") == heartbeat.AHEAD and _vouches(b, sk) for _, b in held_beats)
         report.check(sec, "step 2: the guard does not hold the status: the owner's put succeeds, and S receives it; "
                           "the fault again within 31 s; the tokens stay present",
                      not got.startswith("refused") and len(ahead_put) == 1 and gap is not None and gap <= 31
                      and len(pres.instances) == 1,
                      f"put {got!r}, {len(ahead_put)} 'ahead' put(s) of {len(puts_after)} after the detection, fault "
                      f"gap {gap if gap is None else round(gap, 2)} s, tokens {len(pres.instances)}+{len(pres.alive)}")
-        report.check(sec, "step 2: every heartbeat from the detection on vouches for the status, its time unknown, "
-                          "all ones; at 65 s S judges healthy, ok; the clock question answers yes",
+        report.check(sec, "step 2: every heartbeat from the detection on vouches for the status, its time the ahead "
+                          "time (freshness.v2 0.12); at 65 s S judges healthy, ok; the clock question answers yes",
                      all_held and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "yes",
                      f"{len(held_beats)} heartbeats, each held and vouching {all_held}; {_answer(a)}, clock ahead: {q}")
         t_fix = time.monotonic_ns()
         fixed = p.command("clock-offset 0") or ""
         _sleep_until(t_fix + 35 * fr.NS)
         reput = _puts([x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_put + fr.NS])
-        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if b.get("time") is not None and _vouches(b, sk)]
+        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if heartbeat.reading_of(b.get("time")) == heartbeat.INSTANT and _vouches(b, sk)]
         first = (known[0] - t_fix) / fr.NS if known else None
         faults_after = [x for x in ahead_faults() if known and x.arrival_ns > known[0]]
         r, _ = bus.read("lab/ahead", s, get=False)
@@ -721,7 +721,7 @@ def section4m(report: Report) -> None:
             o.set_status(h.OK, "ahead")  # step 2 (0.9): not held
             time.sleep(1.0 if not drop else 3.0)
             if drop:
-                # the next heartbeat covering health.v1, its time unknown: the
+                # the next heartbeat covering health.v1, its time the ahead time: the
                 # heartbeat beats at 28.5 s in revision 1.1
                 deadline = time.monotonic() + 31
                 while time.monotonic() < deadline and not _beats(s, "lab/ahead", t_det + 200_000_000):

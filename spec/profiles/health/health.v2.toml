@@ -1,0 +1,35 @@
+# health.v2's standard contract (spec/profiles/health/v2.md §3): health.v1's
+# three resources on a packed wire. A status, a check and a fault are records
+# of 6, 6 and 8 bytes, put on change only, and their words are numbers that
+# the profile's tables and the service's own name (§2.10).
+# An instance implements health.v1 or health.v2, never both (§2.3).
+# Doc strings are outside the fingerprint (core §9.5), and so are comments.
+[interface]
+name    = "health"
+major   = 2
+minor   = 0
+summary = "The health of one service, in packed records"
+uses    = ["freshness.v2"]
+
+[schemas]
+packed = ["health.v2.json"]
+
+[resources.status]
+kind        = "state"
+type        = "packed:Status"
+annotations = { "freshness.ttl_s" = 60 }
+doc         = "The service's level, never better than its worst current check (health.v2 §2.2). Put before the service's tokens, then on change, vouched for by its owner's heartbeat at least every 30 s (§2.3, freshness.v2 §2.4)."
+
+[resources."checks/{check}"]
+kind        = "state"
+type        = "packed:Check"
+params      = { check = "string" }
+cardinality = 64
+doc         = "One named check of the service: put on change, deleted when retired (health.v2 §2.3). No horizon of its own: the status vouches for it (§2.4)."
+
+[resources.faults]
+kind        = "stream"
+type        = "packed:Fault"
+reliability = "reliable"
+congestion  = "block"
+doc         = "Occurrences a level would lose, clock_ahead first, published once (health.v2 §2.3, §2.5, §2.10)."

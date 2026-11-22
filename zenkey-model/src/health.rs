@@ -20,11 +20,33 @@
 //! of the latest value) and the checks, and hands them over as values. The
 //! owner's puts, its heartbeats and its `clock_ahead` fault are the
 //! runtime's.
+//!
+//! **Two majors** (#986's Q1). [`v2`] is `health.v2`'s
+//! (`spec/profiles/health/v2.md`): packed records, words by table, and a
+//! clock question a heartbeat answers alone. It restates this text by
+//! reference, so what a reader concludes is one set for both:
+//!
+//! ```text
+//! Major::of(interfaces)  ─▶ the major a descriptor's reading is judged under: v2 where it lists both
+//! judge_status(…)        ─▶ §2.11's five steps from the status's freshness as judged, either major's
+//! rollup · agrees        ─▶ over verdicts and levels of either major
+//! ```
+//!
+//! A `health.v2` record's `unknown` is [`Read::Unspecified`], and one a
+//! reader refuses [`Read::Undecodable`] ([`v2::level_read`]): unknown is
+//! never `OK` under either. The clock question is each major's own
+//! ([`clock_ahead`], [`v2::clock_ahead`]).
+
+pub mod v2;
 
 use std::fmt;
 use std::time::Duration;
 
 use crate::freshness::{self, Horizon, Observation};
+
+/// The profile's name, as an annotation key's prefix carries it. Only
+/// `health.v2` publishes a vocabulary ([`v2::VOCABULARY`]).
+pub const NAME: &str = "health";
 
 /// The profile's id, which is also its standard contract's interface id.
 pub const PROFILE: &str = "health.v1";
@@ -61,6 +83,56 @@ pub const CODES: &[&str] = &[CLOCK_AHEAD];
 #[must_use]
 pub fn status_horizon() -> Horizon {
     Horizon::Within(STATUS_TTL)
+}
+
+/// Which major of the profile a service's health is read under
+/// (`health.v2` §2.11's step 2, §2.12). The two are two interfaces: an
+/// instance implements one, and a reader reads either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Major {
+    /// `health.v1`: protobuf records with free text.
+    V1,
+    /// `health.v2`: packed records, their words numbers ([`v2`]).
+    V2,
+}
+
+impl Major {
+    /// The major's interface id, which is its standard contract's.
+    #[must_use]
+    pub const fn iface(self) -> &'static str {
+        match self {
+            Major::V1 => IFACE,
+            Major::V2 => v2::IFACE,
+        }
+    }
+
+    /// The major an interface id names: the deployment's word across a
+    /// constrained face, where no descriptor crosses (§2.8). `None` for
+    /// any other interface.
+    #[must_use]
+    pub fn named(iface: &str) -> Option<Major> {
+        [Major::V2, Major::V1]
+            .into_iter()
+            .find(|m| m.iface() == iface)
+    }
+
+    /// The major a descriptor is read by, from the interface ids its
+    /// `interfaces` holds: `health.v2` where it lists it, `health.v1`
+    /// where it lists that and not `health.v2`, and `None` where it lists
+    /// neither, which is not asked (`not_listed`). One that lists both
+    /// breaks `health.v2` §2.3, and is read as `health.v2`.
+    #[must_use]
+    pub fn of<'a>(interfaces: impl IntoIterator<Item = &'a str>) -> Option<Major> {
+        let mut found = None;
+        for iface in interfaces {
+            match Major::named(iface) {
+                Some(Major::V2) => return Some(Major::V2),
+                Some(Major::V1) => found = Some(Major::V1),
+                None => {}
+            }
+        }
+        found
+    }
 }
 
 /// A level (§2.1). The order is the declaration's: `Ok` < `Degraded` <
@@ -109,12 +181,14 @@ impl fmt::Display for Level {
 pub enum Read {
     /// `OK`, `DEGRADED` or `FAILED`.
     Level(Level),
-    /// `LEVEL_UNSPECIFIED`, 0: unknown, never `OK`.
+    /// `LEVEL_UNSPECIFIED`, 0: unknown, never `OK`. A `health.v2` record's
+    /// `unknown` is this (`health.v2` §0, §2.6).
     Unspecified,
     /// A number the enum does not list, which proto3 keeps (its enums are
     /// open): unknown, never `OK`.
     Unlisted(i32),
-    /// A payload that does not decode as the message: unknown.
+    /// A payload that does not decode as the message: unknown. So is a
+    /// `health.v2` record its reader refuses (`health.v2` §2.6).
     Undecodable,
 }
 
@@ -388,9 +462,32 @@ impl Judged {
 /// level, then the checks it vouches for.
 #[must_use]
 pub fn judge(r: &Reading<'_>) -> Judged {
+    let status = freshness::judge_all(&status_horizon(), r.status);
+    judge_status(r.presence, status, r.level, r.checks)
+}
+
+/// §2.11's five steps from the status's freshness as judged, for a reader
+/// that holds `freshness.v2`'s verdict over its observations of
+/// `state/status` at the standard contract's horizon rather than the
+/// observations: presence, the descriptor, that verdict, the level of the
+/// latest status read (`None` where no value was read), then the checks
+/// the owner answered (`None` where they were not read).
+///
+/// Either major's reading is judged so (`health.v2` §2.11): the steps,
+/// the verdicts and the reasons are one set. For `health.v2` the
+/// presence's [`Listing`] says whether the descriptor lists a major
+/// ([`Major::of`]), and a level is read from a record
+/// ([`v2::level_read`]).
+#[must_use]
+pub fn judge_status(
+    presence: Presence,
+    status: freshness::Judged,
+    level: Option<Read>,
+    checks: Option<&[Read]>,
+) -> Judged {
     use Reason as R;
     // 1. Presence; 2. the descriptor.
-    match r.presence {
+    match presence {
         Presence::Absent => return Judged::not_asked(R::Absent),
         Presence::Incomplete => return Judged::unobservable(R::PresenceIncomplete),
         Presence::AcrossFace {
@@ -404,7 +501,7 @@ pub fn judge(r: &Reading<'_>) -> Judged {
         | Presence::Present(Listing::Listed { .. }) => {}
     }
     // 3. The status's freshness.
-    let f = freshness::judge_all(&status_horizon(), r.status);
+    let f = status;
     match f.verdict {
         freshness::Verdict::Fresh => {}
         // A present, listed owner holds a status (§2.3), so silence ages
@@ -412,7 +509,7 @@ pub fn judge(r: &Reading<'_>) -> Judged {
         // crosses (`freshness.v1` §2.5, "a member it knows").
         freshness::Verdict::Stale
             if f.reason == freshness::Reason::NoDelivery
-                && matches!(r.presence, Presence::AcrossFace { .. }) =>
+                && matches!(presence, Presence::AcrossFace { .. }) =>
         {
             return Judged::unobservable(R::NothingCrossed);
         }
@@ -431,8 +528,8 @@ pub fn judge(r: &Reading<'_>) -> Judged {
         }
     }
     // 4. The status's level; 5. the checks, current with a fresh status.
-    let worst = worst_check(r.checks.unwrap_or(&[])).map(|(_, l)| l);
-    match r.level.and_then(Read::level) {
+    let worst = worst_check(checks.unwrap_or(&[])).map(|(_, l)| l);
+    match level.and_then(Read::level) {
         Some(status) => match worst {
             Some(w) if w > status => Judged::unhealthy(R::Inconsistent, w),
             _ => match status {
@@ -443,7 +540,7 @@ pub fn judge(r: &Reading<'_>) -> Judged {
         },
         None => match worst {
             Some(w) if w > Level::Ok => Judged::unhealthy(R::Check, w),
-            _ => Judged::unobservable(match r.level {
+            _ => Judged::unobservable(match level {
                 Some(Read::Unspecified | Read::Unlisted(_)) => R::UnknownLevel,
                 // A fresh status always carries a value; a level not read
                 // from it is a payload not read.
@@ -570,8 +667,10 @@ pub enum Heard {
     /// set or clear), whose time is known: the guard did not hold when the
     /// owner wrote it (`freshness.v2` §2.10).
     Heartbeat,
-    /// The same, whose time is unknown, all ones: the guard holds, or the
-    /// owner does not know its time. No evidence either way.
+    /// The same, whose time is no instant: the ahead time, as while the
+    /// guard holds (core §7.5, `freshness.v2` §2.10), or the unknown time,
+    /// all ones. Under this major neither answers alone: the fault does
+    /// (text 0.11; `health.v2` §2.5 reads the ahead time as a yes).
     HeartbeatHeld,
     /// A put of `state/status`: the guard does not hold it, so it says
     /// nothing of the clock.
@@ -586,9 +685,29 @@ pub enum Heard {
     Fault,
 }
 
+impl Heard {
+    /// A heartbeat read in step, by the time it carries (core §7.5):
+    /// [`Heard::Heartbeat`] for an instant, [`Heard::HeartbeatHeld`] for
+    /// the ahead time and for the unknown time. Under this major the ahead
+    /// time is read exactly as the unknown time it replaced was, so core
+    /// 0.113 moved no answer of [`clock_ahead`] (text 0.11).
+    #[must_use]
+    pub fn heartbeat(time: crate::heartbeat::Time) -> Heard {
+        if time.is_instant() {
+            Heard::Heartbeat
+        } else {
+            Heard::HeartbeatHeld
+        }
+    }
+}
+
 /// Why §5's last question has its answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClockReason {
+    /// Yes, under `health.v2` alone ([`v2::clock_of`]): the last heartbeat
+    /// read carries the ahead time, so its owner's guard held when it
+    /// wrote it (`health.v2` §2.5).
+    Ahead,
     /// Yes: a `clock_ahead` fault, and no heartbeat whose time is known
     /// heard since.
     ClockAhead,
@@ -597,7 +716,8 @@ pub enum ClockReason {
     /// when the owner wrote it.
     Confirmed,
     /// Unobservable: no `clock_ahead` fault heard since the last heartbeat
-    /// whose time is known, and the last heartbeat's time unknown.
+    /// whose time is known, and the last heartbeat's time no instant,
+    /// ahead or unknown.
     TimeUnknown,
     /// Unobservable: no `clock_ahead` fault and no heartbeat heard within
     /// the reader's window. Never "no" from the faults' silence.
@@ -613,6 +733,7 @@ impl ClockReason {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Ahead => "ahead",
             Self::ClockAhead => "clock_ahead",
             Self::Confirmed => "confirmed",
             Self::TimeUnknown => "time_unknown",
@@ -626,6 +747,7 @@ impl ClockReason {
     #[must_use]
     pub fn says(self) -> &'static str {
         match self {
+            Self::Ahead => "its last heartbeat's time was ahead: its clock guard held",
             Self::ClockAhead => {
                 "a clock_ahead fault was heard, and no heartbeat with its time known since"
             }
@@ -634,8 +756,8 @@ impl ClockReason {
                  none heard"
             }
             Self::TimeUnknown => {
-                "its last heartbeat's time was unknown, and no clock_ahead fault was heard since \
-                 one with its time known"
+                "its last heartbeat's time was no instant, ahead or unknown, and no clock_ahead \
+                 fault was heard since one with its time known"
             }
             Self::NothingHeard => "no clock_ahead fault and no heartbeat was heard in the window",
             Self::Absent => "it is absent: presence's word",
@@ -663,7 +785,8 @@ pub struct Clock {
 /// heartbeat whose time is known heard since; *no* when the last heartbeat
 /// heard has its time known and came after the last fault, or with none
 /// heard; unobservable otherwise, since the faults' silence is their
-/// normal state (core O5) and a time unknown proves nothing alone. A put
+/// normal state (core O5) and a time that is no instant, ahead or unknown,
+/// answers nothing alone under this major. A put
 /// or a delete of the status says nothing of the clock: the guard holds
 /// neither (§2.5). Not asked as the first question's: absent, or not
 /// listing `health.v1`. Whatever else presence says, a fault heard is the
@@ -714,13 +837,19 @@ impl Code<'_> {
     }
 }
 
+/// Whether `s` has a code's form (§2.10): `[a-z][a-z0-9_]*`, the whole
+/// of it. `health.v2`'s names have it too ([`v2::is_name`]).
+#[must_use]
+pub fn is_code_form(s: &str) -> bool {
+    let mut bytes = s.bytes();
+    bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
 /// Reads a fault's code (§2.10), exactly: no trimming, no case folding.
 #[must_use]
 pub fn code(s: &str) -> Code<'_> {
-    let mut bytes = s.bytes();
-    let well_formed = bytes.next().is_some_and(|b| b.is_ascii_lowercase())
-        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-    if !well_formed {
+    if !is_code_form(s) {
         return Code::Malformed(s);
     }
     match CODES.iter().find(|c| **c == s) {
@@ -862,11 +991,75 @@ mod tests {
             "a time unknown since: no longer no, and no fault to say yes"
         );
         assert_eq!(a(&[ClockAhead, HeartbeatHeld, Heartbeat]), Answer::No);
+        // Core 0.113's ahead time reads as the unknown time did (text
+        // 0.11): no instant, so no evidence either way under this major.
+        use crate::heartbeat::Time;
+        assert_eq!(Heard::heartbeat(Time::Ahead), HeartbeatHeld);
+        assert_eq!(Heard::heartbeat(Time::Unknown), HeartbeatHeld);
+        assert_eq!(Heard::heartbeat(Time::At { secs: 7, ms: 0 }), Heartbeat);
+        assert_eq!(
+            clock_ahead(p, &[Heartbeat, Heard::heartbeat(Time::Ahead)]).reason,
+            ClockReason::TimeUnknown,
+            "the ahead time alone answers nothing under health.v1"
+        );
         assert_eq!(a(&[Fault]), Answer::Unobservable, "never from silence");
         assert_eq!(a(&[]), Answer::Unobservable);
         assert_eq!(
             clock_ahead(Presence::Absent, &[ClockAhead]).answer,
             Answer::NotAsked
+        );
+    }
+
+    /// `health.v2` §2.11's step 2 and §2.12: a reader reads a service by
+    /// the major its descriptor lists, `health.v2` where it lists both.
+    #[test]
+    fn a_descriptor_is_read_by_the_major_it_lists_and_v2_where_it_lists_both() {
+        assert_eq!(Major::of(["freshness.v2", "health.v1"]), Some(Major::V1));
+        assert_eq!(Major::of(["health.v2", "freshness.v2"]), Some(Major::V2));
+        assert_eq!(Major::of(["health.v1", "health.v2"]), Some(Major::V2));
+        assert_eq!(Major::of(["health.v2", "health.v1"]), Some(Major::V2));
+        assert_eq!(Major::of(["tc.v1"]), None, "not listed: not asked");
+        assert_eq!(Major::of([]), None);
+        assert_eq!(Major::named("health.v2"), Some(Major::V2));
+        assert_eq!(Major::named("health.v3"), None);
+        assert_eq!((Major::V1.iface(), Major::V2.iface()), (IFACE, v2::IFACE));
+    }
+
+    /// A status's freshness as judged gives what its observations give:
+    /// [`judge`] is [`judge_status`] over `freshness.v2`'s verdict.
+    #[test]
+    fn a_reading_is_judged_alike_from_its_observations_and_from_their_verdict() {
+        let o = fresh();
+        let status = freshness::judge_all(&status_horizon(), &o);
+        assert_eq!(status.verdict, freshness::Verdict::Fresh);
+        let checks = [Read::Level(Level::Degraded)];
+        for level in [
+            Some(Read::Level(Level::Ok)),
+            Some(Read::Unspecified),
+            Some(Read::Undecodable),
+            None,
+        ] {
+            let r = Reading {
+                presence: present(),
+                status: &o,
+                level,
+                checks: Some(&checks),
+            };
+            assert_eq!(
+                judge(&r),
+                judge_status(present(), status, level, Some(&checks))
+            );
+        }
+        // A `health.v2` record at `unknown`, and one refused: never ok.
+        let unknown = judge_status(present(), status, Some(Read::Unspecified), None);
+        assert_eq!(
+            (unknown.verdict, unknown.reason),
+            (Verdict::Unobservable, Reason::UnknownLevel)
+        );
+        let refused = judge_status(present(), status, Some(Read::Undecodable), None);
+        assert_eq!(
+            (refused.verdict, refused.reason),
+            (Verdict::Unobservable, Reason::Undecodable)
         );
     }
 

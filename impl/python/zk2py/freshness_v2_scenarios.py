@@ -731,11 +731,11 @@ def section2(report: Report, pairing: str) -> None:
             want = None if last is None else f"{heartbeat.digest([(ahead_key, last.width, last.run, last.seq)]):08x}"
             vals = [x.value for x in h2.answers(held + 1_100_000_000) if x.value is not None]
             exposed = {"state/status", "state/peer/{peer}"} | ({"state/route"} if impl == "rust" else set())
-            ok = bool(vals) and all(x["time"] is None and set(x["sections"]) == exposed
+            ok = bool(vals) and all(x["time"] == heartbeat.AHEAD and set(x["sections"]) == exposed
                                     and x["sections"]["state/status"]["vouched"] is True
                                     and x["sections"]["state/status"]["digest"] == want for x in vals)
             report.check(pairing, sec, "step 4: S2 receives the second put; H2 hears heartbeats while the guard "
-                                       "holds, the time unknown (all 42 bits set), the map as §1's, each vouching "
+                                       "holds, the time the ahead time (freshness.v2 0.12), the map as §1's, each vouching "
                                        "for status, its digest over the second put's stamp",
                          len(puts) == 1 and ok,
                          f"{len(puts)} put heard after the guard held, {last}; {len(vals)} heartbeats: "
@@ -835,7 +835,7 @@ def step6(report: Report, pairing: str, bus: Bus, impl: str, reader: str, beat: 
         while time.monotonic() < deadline and released_at is None:
             if reader == "py":
                 known = [x.arrival_ns for x in h3.answers(right_at) if x.value is not None
-                         and x.value["time"] is not None]
+                         and heartbeat.reading_of(x.value["time"]) == heartbeat.INSTANT]
                 released_at = known[0] if known else None
             elif impl == "py" and not oc.ahead():
                 released_at = time.monotonic_ns()
@@ -883,16 +883,16 @@ def step6(report: Report, pairing: str, bus: Bus, impl: str, reader: str, beat: 
         post = bodies(released_at, third_at)
         late = bodies(third_at + 1_100_000_000, end)
         sec_of = lambda b: b["sections"]["state/status"]  # noqa: E731
-        report.check(pairing, sec, "step 6: before the second put, its heartbeats vouch for status, the time unknown",
-                     bool(pre) and all(b["time"] is None and sec_of(b)["vouched"] is True for b in pre),
+        report.check(pairing, sec, "step 6: before the second put, its heartbeats vouch for status, the time the ahead time",
+                     bool(pre) and all(b["time"] == heartbeat.AHEAD and sec_of(b)["vouched"] is True for b in pre),
                      f"{len(pre)} heartbeats: {pre[-1] if pre else None}")
         report.check(pairing, sec, "step 6: from the second put on, each heartbeat vouches for nothing, its time "
-                                   "unknown, status's digest still over the first put's stamp",
-                     bool(mid) and all(b["time"] is None and sec_of(b)["vouched"] is False
+                                   "the ahead time, status's digest still over the first put's stamp",
+                     bool(mid) and all(b["time"] == heartbeat.AHEAD and sec_of(b)["vouched"] is False
                                        and sec_of(b)["digest"] == d1 for b in mid),
                      f"{len(mid)} heartbeats: {mid[-1] if mid else None} (want digest {d1})")
-        report.check(pairing, sec, "step 6: after the release the time is known, and the bit stays clear",
-                     bool(post) and all(b["time"] is not None and sec_of(b)["vouched"] is False for b in post),
+        report.check(pairing, sec, "step 6: after the release the time is an instant, and the bit stays clear",
+                     bool(post) and all(heartbeat.reading_of(b["time"]) == heartbeat.INSTANT and sec_of(b)["vouched"] is False for b in post),
                      f"{len(post)} heartbeats: {post[-1] if post else None}")
         report.check(pairing, sec, "step 6: the third put goes on, and a heartbeat after it vouches for status, its "
                                    "digest over that put's stamp",

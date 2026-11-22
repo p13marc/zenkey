@@ -35,6 +35,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import heartbeat
 from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
@@ -97,7 +98,8 @@ def run(owner: str) -> list[tuple[str, bool, str]]:
                     bool(desc) and desc[0].get("catalog") == cid and got.startswith("put"),
                     f"{[d.get('catalog') for d in desc]}; {got}"))
         now_s = time.time()
-        beats = [x for x in sub.heartbeats if x.value is not None and x.value["time"] is not None]
+        beats = [x for x in sub.heartbeats if x.value is not None
+                 and heartbeat.reading_of(x.value["time"]) == heartbeat.INSTANT]
         secs = [x.value["time"]["s"] for x in beats]
         out.append((f"{owner}: each heartbeat's time counts from the catalog's epoch: its seconds the clock less "
                     f"{EPOCH}, within 5 s, never Unix seconds (freshness.v2 0.6 §2.4)",

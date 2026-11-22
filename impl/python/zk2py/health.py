@@ -253,8 +253,10 @@ def heard_from(subscriber: Any, address: str) -> list[str]:
     (:meth:`zk2py.freshness.Subscriber.follow`) whose status section it read
     in step with its view, its bit set or clear (§2.5: "A heartbeat counts
     where the reader read the status's section in step with its view"), by
-    its time known or unknown; and ``clock_ahead`` or ``fault`` from the
-    faults."""
+    its time an instant or none (0.11: "No instant is the ahead time or the
+    unknown time (core §7.5)"; under this major the ahead time answers
+    nothing alone, as the unknown time did); and ``clock_ahead`` or
+    ``fault`` from the faults."""
     status_key = f"zk2/{address}/{IFACE}/state/status"
     faults_key = f"zk2/{address}/{IFACE}/stream/faults"
     out: list[tuple[int, str]] = []
@@ -265,7 +267,10 @@ def heard_from(subscriber: Any, address: str) -> list[str]:
     for t, answer in getattr(subscriber, "beats", {}).get((address, IFACE), []):
         sec = answer.get("read", {}).get("sections", {}).get("state/status")
         if isinstance(sec, dict):
-            out.append((t, "heartbeat" if answer.get("time") is not None else "heartbeat_held"))
+            from . import heartbeat as _hb
+
+            instant = _hb.reading_of(answer.get("time")) == _hb.INSTANT
+            out.append((t, "heartbeat" if instant else "heartbeat_held"))
     for x in subscriber.of(faults_key):
         f = decode_fault(x.payload)
         out.append((x.arrival_ns, "clock_ahead" if f is not None and f["code"] == "clock_ahead" else "fault"))

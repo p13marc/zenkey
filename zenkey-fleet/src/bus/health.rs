@@ -759,19 +759,20 @@ impl Window {
                     });
                 },
                 // A heartbeat read in step, its bit set or clear: §5's clock
-                // question reads its time, unknown while the owner's guard
-                // holds (`freshness.v2` §2.10), so one whose time is known
-                // after a `clock_ahead` fault says the guard released.
+                // question reads its time, the ahead time while the owner's
+                // guard holds (`freshness.v2` §2.10, core §7.5), so one whose
+                // time is an instant after a `clock_ahead` fault says the
+                // guard released. Under `health.v1` a time that is no
+                // instant, ahead or unknown, answers nothing alone (v1 §2.5):
+                // both are `HeartbeatHeld`, as the unknown time was.
                 move |c: zenkey::consumer::Confirmation| {
-                    let known = c
+                    let time = c
                         .owner_time
-                        .is_some_and(|t| t != zenkey::model::heartbeat::Time::Unknown);
+                        .unwrap_or(zenkey::model::heartbeat::Time::Unknown);
                     let mut all = confirmed.lock().expect("not poisoned");
-                    all.entry(c.provider).or_default().push(if known {
-                        Heard::Heartbeat
-                    } else {
-                        Heard::HeartbeatHeld
-                    });
+                    all.entry(c.provider)
+                        .or_default()
+                        .push(Heard::heartbeat(time));
                 },
             )
             .await

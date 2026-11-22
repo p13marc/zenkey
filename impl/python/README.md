@@ -75,7 +75,7 @@ case name. It exits with:
 | packed | §7.6, §7.5 (0.75, 0.76) | `packed`, `zk2c` | `packed/vectors.json`: each layout's form, sha256, tag, items and bit bounds; each write's bits, pad and bytes, or the writer's refusal; each read's JSON reading, or the first refusal in §7.6's order. Every accepted write is sealed in the envelope, opened and read back; every read is made through the envelope too. Live against the reference: `python -m zk2py.packed_live` (the mend after round 94). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
 | freshness | profiles/freshness §2.1–§2.8 | `freshness` | every file of `spec/profiles/freshness/conformance/`: `horizons.json` (a resource's horizon), `judgements.json` (one member's combined verdict, seconds read exactly to the nanosecond) and `clock-trust.json` (a measured clock's trust over one reading, 0.2). An unknown file there fails. |
-| health | profiles/health §2.2, §2.10, §2.11 | `health` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. |
+| health | profiles/health §2.2, §2.10, §2.11; `v2.md` §2.2 to §2.12, §3 | `health`, `health_v2` | every file of `spec/profiles/health/conformance/`: `judgements.json` (§2.11's procedure over one reading), `rollups.json` (a tool's roll-up), `codes.json` (fault codes) and `clock.json` (§5's clock question, 0.3). An unknown file there fails. And `conformance/v2/`, six files and 327 cases (round 120: `schema.json`, `records.json`, `tables.json`, `snapshots.json`, `judgements.json`, `clock.json`), through `health_v2_fixtures`. |
 | config | profiles/config §2.2–§2.19, `v2.md` §2–§3 | `config`, `config_v2` | every file of `spec/profiles/config/conformance/`: `validation.json` (§2.5's, §2.10's and §2.13's orders of refusals), `window.json` (§2.8's window and deadline), `lifecycle.json` (the owner as a state machine: each step's reply, device acts, events and state), `desired.json` (§2.18) and `redaction.json` (§2.15); and config.v2's (round 102): `v2/`'s six files, `derive.json` (the declaration, the derived types and their layouts, the contract's lint), `records.json`, `validation.json`, `window.json`, `lifecycle.json` and `redaction.json`, and `contracts/rfcfg.v1`, lint-clean. An unknown file there fails. |
 | snapshot | §7.5 (0.97) | `snapshot`, `zk2c` | every file of `snapshot/`: `bodies.json`'s `writes` (each page's bytes and size, or the writer's refusal, read back to its value), `reads` (each page, written back, or the first refusal in the reading's order) and `pages` (each snapshot's pages and sizes, or the refusal, read back complete, and cut a second way by arithmetic). An unknown file there fails. |
 | frame | §7.7, observer §7.6 | `frame` | every file of `frame/`: `layouts.json` (the frame form, its tag, the widths and the span), `bodies.json` (each write's bits, pad and bytes or its refusal, each read's value or its first refusal, every accepted one written back and sealed in form 5) and `apply.json` (round 97: one key's frames through `frame.Reader`, from each body's value and as a sealed put, envelope first). An unknown file there fails. |
@@ -8737,6 +8737,168 @@ Round 119 found F-588 to F-592: one contradiction, one gap, one
 ambiguity and two minor errors. F-569 to F-587 stay open. See "At
 desired.v2 0.1, against the reference" in `SPEC-FINDINGS.md`.
 
+## Core 0.113, `freshness.v2` 0.12 and `health.v2` 0.1: the ahead time and a new major, each part written before its fixture (round 120)
+
+Round 120 read this tree at 08f3600a (#986).
+- **Core 0.113:** a heartbeat's time has a third reading, **ahead**: the
+  seconds all ones with the millisecond code 1022. An owner writes it
+  while its clock guard holds (`freshness.v2` 0.12 §2.10).
+- **`health.v2` 0.1,** a new major: a status, a check and a fault as
+  packed records of 6, 6 and 8 bytes, their words numbers into tables,
+  and a clock question the heartbeat answers alone.
+- **`health.v1` 0.11** is editorial.
+
+`RULES.md` lists 297 rules, two more, both static. The walk gave each a
+verdict: 310 rows, none without one.
+
+**`just py-conformance`: 8103 of 8103** on this tree, after the mend
+below (8101 before it). Of them, `heartbeat` 361, `freshness` 303,
+`health` 587 and `readings` 1141.
+
+### Written from the text, then run
+
+**No case was missed on a first run,** of the ahead time's 22 new or
+changed cases or of `health.v2`'s 327.
+
+| Part | In | Commit | First run |
+|---|---|---|---|
+| The ahead time, read and written | `heartbeat` | db4a8f1d | `times` 34, `bodies` 60, `owner` 61 writes and reads, `apply` 39: all pass |
+| The records, the schema | `health_v2` | 56eda629 | `schema` 4 of 4, `records` 102 of 102 |
+| The words and tables | `health_v2` | b9a8edf5 | `tables` 83 of 83 |
+| A late joiner, one instant | `health_v2` | 8bfcd8ce | `snapshots` 25 of 25 |
+| The judgement | `health_v2` | 445c89fe | `judgements` 60 of 60 |
+| The clock question | `health_v2` | adeb60a0 | `clock` 53 of 53 |
+
+- **`earlier` is right about zk2py.** Round 119's reader, taken from its
+  commit, refuses each of the six cases that state one, `code`.
+- **What came after a file was opened** is its format, and two changes
+  no case pins: the freshness of a status never observed, and the clock
+  question of a service that lists `health.v1` alone (F-600). Both were
+  zk2py's errors. `SPEC-FINDINGS.md` says each plainly.
+- **Seven places took "time is not None" for a known time.** Each now
+  asks `heartbeat.reading_of`. `health.v1`'s reader was one: it would
+  have read an ahead heartbeat as a *no*.
+
+**The five answers, given from the text first** (`SPEC-FINDINGS.md`):
+1. **Ahead is `0x3fffffffffe`,** the unknown time with its last bit
+   clear. Unused: 1000 to 1021 under any seconds, 1022 and 1023 under
+   seconds that are not all ones.
+2. **Round 119's reader refuses it, `code`,** and an owner heartbeat
+   whole.
+3. **The clock question counts any read heartbeat,** whatever its
+   sections say.
+4. **A contract that lists `health.v1` and carries the tables loads,
+   and reads `not_used`.** The text's "A contract that loads cannot
+   hold it" is wrong (F-593).
+5. **A status better than its worst check, read in one GET,** is a
+   finding about the owner only from one instant. Otherwise it takes two
+   readings.
+
+### What changed in zk2py
+
+- **`heartbeat`:** `AHEAD`, `reading_of`, `shown`, and `time_of` under a
+  guard. `owner_heartbeat` reads the time through it.
+- **The owner** writes the ahead time in its heartbeats and its owner
+  heartbeats while its guard holds.
+- **`health_v2`, new,** session-free: the records through `packed`'s
+  codec, `clock_ahead_argument`, the three tables, `contract_table`,
+  `instance_table`, `write_word`, `read_word`, `growth`, `one_instant`,
+  `late_joiner`, `judge`, `ClockReader` and `clock_question`.
+- **`health_v2_fixtures`, new:** the runner of `conformance/v2/`.
+- **`health_v2_live`, new:** the owner and the reader on a bus.
+  **`health_v2_owner`** is the owner as a process, and
+  **`health_v2_scenarios`** the runner.
+- **`ahead_live`, new:** the ahead time with the reference.
+- **W105** reads `health.v2`'s three keys.
+- **`interop/health-v2/`** holds scenario §9's `tc.v1`, the earlier
+  revision T2 holds, and `tcd.v1`, zk2py's own, with a table of details.
+
+### Live
+
+```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.health_v2_scenarios [--only 1|2|3|4|5|6|7|8|8w|9|epoch]...
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.ahead_live [--only rust-owner|rust-owner-heartbeat|py-owner]...
+```
+
+**`health.v2`: both parties are zk2py's own processes.** The reference's
+runtime does not serve `health.v2` at 08f3600a, so this shows which
+sections can be run as written, and no interop.
+
+| Section | Result |
+|---|---|
+| §1 to §7, §9 | 8, 3, 4, 14, 2, 2, 4 and 6 checks, all passing |
+| §8, on a face that lets cross what each run says crosses | 10 of 10 |
+| §8, on the denies as worded (`--only 8w`) | 5 of 10: the scenario's (F-596) |
+
+- **53 of 53,** each section run whole once.
+- **§4:** one `clock_ahead` fault per hold, its argument 3. Every
+  heartbeat of the hold carries the ahead time and vouches for the
+  status. A late joiner answers yes from its first heartbeat.
+- **§7:** 50 of 50 readings of a flipping owner were one instant.
+- **§8 as worded** denies state keys alone. The heartbeat and the faults
+  are stream keys, and cross.
+
+**The ahead time against the reference** (`owner` and `zenctl` of
+08f3600a, run and never read):
+
+| Direction | Result |
+|---|---|
+| The reference's owner, its guard holding, read by zk2py | 5 of 5: its heartbeat's time is `0x3fffffffffe`, read as ahead |
+| The same, by owner heartbeat under a catalog | 6 of 6 |
+| zk2py's owner, read by `zenctl echo` | 3 of 3: `"time": "ahead"`, then an instant, dated |
+
+- **`freshness.v2`'s scenario §2,** whose steps 4 and 6 now expect the
+  ahead time: 14 of 14 with the reference's owner, and 14 of 14 with
+  zk2py's.
+- **`health.v1`'s scenario §4:** 5 of 5 with the reference's owner
+  (`--only 4r`), and 6 of 6 with zk2py's.
+
+**The standard contract's fingerprint** is `sha256:b447f613…05b1` four
+times: §3's text, `.history/health.v2/`, zk2py and `zk2 contract
+fingerprint`.
+
+**Not run:**
+- any `health.v2` scenario against the reference;
+- §7 step 3's `lab/two`; §4 with a moved system clock; §6 with the
+  reference's `archive`;
+- §8 on a `link.v2` face;
+- a `health.v2` owner heartbeat on a bus;
+- zenohd: `bin/current` holds none.
+
+### The mend
+
+review-bot's notes on this round's PR, each fixed.
+1. **One helper writes every record of zk2py's `health.v2` owner,**
+   `HealthV2Owner._record`: its word through the instance's table, its
+   time under the owner's epoch. A check held before the tokens
+   (`hold_check`) goes through it at `start`, as `set_check` does later.
+   - **What the fix showed:** the owner wrote under `packed_epoch`, which
+     is 0 for an owner given a catalog. Its records counted from 1970
+     while its heartbeat counted from the catalog's epoch. It now writes
+     under `Owner.writing_epoch`. No scenario gives a catalog, so none
+     caught it.
+2. **The reader holds an epoch:** `Listener(epoch=…)`, and `read_near`
+   reads the records, the snapshot's time and the entry's conf under it.
+   `health_v2_scenarios --only epoch` runs an owner under a catalog's
+   epoch against such a reader, and against one that holds 0.
+3. **`heartbeat.read` and `owner_heartbeat.read` take their time
+   decoder,** `time_reader`. The fixtures' `earlier` reader is handed in,
+   and no module global is swapped.
+4. **`ahead_live`'s owner heartbeat covers two interfaces,** and the
+   check compares each put's groups with the catalog's indices of the
+   interfaces that have a `host` collection: `[0, 1]`, 17 puts in a hold.
+5. **`zk2 catalog new`'s exit code is a check.**
+6. Round 119's two nits: a `Sequence[str]` default, and an unread `n0`.
+
+**After the mend,** on the final code: `health_v2_scenarios` whole, 55 of
+55 in one run (the 53 above and the two under a catalog);
+`ahead_live` whole, 15 of 15.
+
+Round 120 found F-593 to F-602: one contradiction, one gap, two
+ambiguities and six minor errors. None is a blocker. F-569 to F-592 stay
+open. See "At core 0.113, freshness.v2 0.12 and health.v2 0.1" in
+`SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -9003,6 +9165,14 @@ impl/python/
                                 owner (round 117)
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
+    health_v2.py      health.v2 the packed records, the words and tables, one instant, §2.11's reader, the clock
+                      question (round 120)
+    health_v2_fixtures.py health.v2 the runner of conformance/v2/
+    health_v2_live.py health.v2 the owner and the reader on a bus
+    health_v2_owner.py health.v2 the owner as a process
+    health_v2_scenarios.py health.v2 scenarios-v2.md §1 to §9 between two zk2py processes, and an owner under a
+                      catalog's epoch (`--only epoch`)
+    ahead_live.py     core §7.5's ahead time in both directions with the reference (round 120)
     config.py         config.v1 time, values, the orders of refusals, desired state, redaction, Core,
                                 ConfigOwner (fed through desired.v1 too, its re-mint a restart or refused), SimDevice,
                                 the reader of §5

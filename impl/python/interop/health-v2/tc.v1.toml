@@ -1,0 +1,16 @@
+# scenarios-v2.md §9's `tc.v1`: a contract of the owner's own, which lists
+# health.v2 in `uses` and declares two tables on [defaults] (health.v2 §2.10).
+[interface]
+name    = "tc"
+major   = 1
+minor   = 1
+summary = "zk2py's transcription of health.v2 scenarios §9's tc.v1"
+uses    = ["health.v2"]
+
+[defaults.annotations]
+"health.reasons" = ["tc_netns_gone", "tc_qdisc_missing"]
+"health.codes"   = ["tc_netns_restarted"]
+
+[resources.rates]
+kind = "stream"
+type = { raw = "application/octet-stream" }

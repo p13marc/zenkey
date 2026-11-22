@@ -689,3 +689,24 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   and, `#[ignore]`d, `an_owner_built_before_core_0_110_answers_a_conditional_read_whole`,
   which drives an owner black box named by `ZK2_OWNER_BEFORE_0_110`
   (passed against `bin/547d202a/owner`).
+  A heartbeat's ahead time (#986's Q0, core 0.113, `freshness.v2` 0.12
+  §2.10): `heartbeat::time_at(guard, wall, epoch)` is
+  `zenkey_model::heartbeat::Time::written`, and both writers call it with
+  `Minter::is_ahead()`: `Beat::once` (a heartbeat) and `OwnerBeat::once`
+  (an owner heartbeat, one time for every group). While the clock guard
+  holds the time is `Time::Ahead`, whatever the clock reads, never
+  `Time::Unknown`, which is left to a clock the epoch does not code. A
+  frame's, an event's and a snapshot's times have no ahead code and are
+  unchanged (`EventWriter::now` still writes unknown under the guard).
+  `consumer::Confirmation::owner_time` and `HeartbeatRead::owner_time`
+  hand the time over as read, `Some(Time::Ahead)` among them; it takes no
+  part in what a heartbeat confirms. Tests:
+  `heartbeat::tests::a_time_is_ahead_while_the_guard_holds_whatever_the_clock_reads`;
+  `tests/profile_freshness_v2.rs`'s `s2_a_vouch_withdrawn_goes_stale`
+  (§2 step 4) and `s2_a_candidates_held_put_clears_its_bit` (step 6)
+  assert the ahead time while held and an instant after the release, and
+  `an_owner_heartbeat_says_ahead_while_the_guard_holds` the same of the
+  `host` key's put, its two groups confirming to a subscriber that is
+  handed `Some(Time::Ahead)`; `tests/profile_health.rs`'s
+  `s4_clock_ahead` (health.v1 §4) reads the heartbeats through
+  `health::Heard::heartbeat`, and its answers are as before.

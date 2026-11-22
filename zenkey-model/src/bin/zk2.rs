@@ -27,8 +27,10 @@
 //! the contract unlinted, since it lints only once they are there.
 //!
 //! `contract lint` runs a profile's contract lint where the profile has
-//! one the model implements: config.v2's (its §2.2), whose findings are
-//! errors.
+//! one the model implements: config.v2's (its §2.2), desired.v2's (its
+//! §2.2 and §2.10, a desired resource's and a report resource's
+//! declarations) and health.v2's (its §2.10, a service's own word tables),
+//! whose findings are errors.
 //!
 //! Exit codes follow zenctl's contract: 0 asked and clean, 1 asked and a
 //! finding (an invalid contract, a review or breaking change, a history
@@ -107,7 +109,8 @@ fn lint(files: &[&str]) -> ExitCode {
         match load(f) {
             // config.v2 §2.2: its lint's findings are errors. So is an
             // invalid declaration of a contract that lists desired.v2
-            // (desired.v2 §2.2, §2.10).
+            // (desired.v2 §2.2, §2.10), and an invalid table of one that
+            // lists health.v2 (health.v2 §2.10).
             Some(c) => {
                 let mut findings: Vec<String> = zenkey_model::config::v2::lint_contract(&c)
                     .iter()
@@ -118,6 +121,15 @@ fn lint(files: &[&str]) -> ExitCode {
                         .iter()
                         .map(|x| format!("error[desired.v2 {}] {}: {}", x.token, x.at, x.says)),
                 );
+                findings.extend(zenkey_model::health::v2::lint_contract(&c).iter().map(|x| {
+                    format!(
+                        "error[health.v2 {}] {}: {}: {}",
+                        x.reason,
+                        x.at,
+                        x.key,
+                        x.reason.says()
+                    )
+                }));
                 if findings.is_empty() {
                     println!("{f}: {} {}", c.iface, Fingerprint::of(&c));
                 } else {
