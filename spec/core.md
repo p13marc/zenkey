@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.111** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.112** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1072,7 +1072,7 @@ interface it exposes, with its members (§7.5).
   lists, each read by a profile for the time its replies carry:
   - a state that declares `freshness.ttl_s` above 0, of a contract that
     does not use `freshness.v2`;
-  - a `desired.v1` desired resource;
+  - a desired resource of a contract that does not use `desired.v2`;
   - a state that is a metric resource of `telemetry.v1` or `telemetry.v2`;
   - every state of an interface whose contract uses `redundancy.v1`.
 
@@ -1477,7 +1477,9 @@ time a profile reads (the table below).
   - **A profile's order.** A profile MAY order a consumer's values more
     strictly. A `desired.v1` target refuses an older version of an id it
     remembers, whichever id it holds ([`desired.v1`](profiles/desired/v1.md)
-    §2.6).
+    §2.6). A `desired.v2` target refuses an older version of a run it
+    remembers, whichever run it holds
+    ([`desired.v2`](profiles/desired/v2.md) §2.6).
 - **Nothing orders two runs.** A reader compares two runs for equality,
   never as numbers: a run names a span of an owner's writing, not when it
   began. Ordering two runs is left to a later version.
@@ -1505,12 +1507,15 @@ time a profile reads (the table below).
   | Resource | Read for | Carried as |
   |---|---|---|
   | A state whose contract declares `freshness.ttl_s` above 0, and does not use `freshness.v2` | a reply's age ([`freshness.v1`](profiles/freshness/v1.md) §2.4, §2.6) | S1, S2 |
-  | A `desired.v1` desired resource | the order of an author's versions ([`desired.v1`](profiles/desired/v1.md) §2.4, §2.6, §2.11) | S1, S2 |
+  | A desired resource of a contract that does not use `desired.v2` | the order of an author's versions ([`desired.v1`](profiles/desired/v1.md) §2.4, §2.6, §2.11) | S1, S2 |
   | A state that is a metric resource of `telemetry.v1`, or of `telemetry.v2` and no frame resource | a rate's time base ([`telemetry.v1`](profiles/telemetry/v1.md) §2.11, which [`telemetry.v2`](profiles/telemetry/v2.md) §0 restates) | S1, S2 |
   | A stream that declares a `timing.v1` lifespan | a sample's age ([`timing.v1`](profiles/timing/v1.md) §2.6) | that section says |
   | A `health.v1` fault | nothing a reader concludes ([`health.v1`](profiles/health/v1.md) §2.5) | where the owner sets one, as that section allows |
   | Every put of a `redundancy.v1` candidate | which instance is the incumbent ([`redundancy.v1`](profiles/redundancy/v1.md) §2.10) | by the candidate session's HLC, as that section says |
 
+  - **A `desired.v2` desired resource** carries none. Its version is
+    its in-band stamp, and a GET of it is answered by snapshot
+    ([`desired.v2`](profiles/desired/v2.md) §2.4).
   - **Minting.** zenoh 1.10.1 keeps `Session::hlc()` internal. So an
     owner mints each such timestamp as the greater of
     `Session::new_timestamp()` and the last it issued plus one tick. Its
@@ -6036,7 +6041,7 @@ profile's own table replaces its interim one.
 | `link` | `exposure` | [`profiles/link/v1.md`](profiles/link/v1.md) §4 |
 | `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 |
 | `telemetry` | `kind`, `unit`, `buckets`, `semantic`; `telemetry.v2` §4 adds `series` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, [`profiles/telemetry/v2.md`](profiles/telemetry/v2.md) §4 |
-| `desired` | `target_param` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4 |
+| `desired` | `target_param`; `desired.v2` §4 adds `report`, `pointers` and `details` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4, [`profiles/desired/v2.md`](profiles/desired/v2.md) §4 |
 | `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 |
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` | [`profiles/timing/v1.md`](profiles/timing/v1.md) §4 |
 | `arbitration` | `policy`, on a requirement | [`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4 |
