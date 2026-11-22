@@ -897,3 +897,221 @@ class TargetRole:
 
 #: v1 §2.10: "`apply` for a failure".
 FAILURE_CODE = "apply"
+
+
+# -- order.json's steps (its format, written after the file was opened) ---------------------------
+
+def sample_of(x: dict[str, Any]) -> Sample | NoEntry:
+    """order.json's ``sample``: a put's ``document`` (decoded JSON) or
+    ``bytes`` (hex), a delete, or "a member's snapshot with no entry, its
+    header's run and its asof"."""
+    if x["kind"] == "no_entry":
+        run = Run.parse(x["snapshot"]["run"])
+        assert run is not None
+        return NoEntry(run, int(x["snapshot"]["asof"]))
+    version = None if x["version"] is None else Version.parse(x["version"])
+    if x["kind"] == "delete":
+        return Sample(x["from"], True, version)
+    payload = v1.Payload(value=x["document"]) if "document" in x else v1.Payload(data=bytes.fromhex(x["bytes"]))
+    rev = x.get("revision")
+    return Sample(x["from"], False, version, payload, None if rev is None else int(rev))
+
+
+def run_steps(steps: list[dict[str, Any]]) -> tuple[list[str], dict[str, Any]]:
+    """order.json: one role's steps -> each step's word, and the report
+    after the last, as its record's fields. A step's Refusal carries
+    indices, so the role's tables play no part."""
+    t = TargetRole()
+    words: list[str] = []
+    for s in steps:
+        if "sample" in s:
+            x = sample_of(s["sample"])
+            words.append(t.receive_no_entry(x) if isinstance(x, NoEntry) else t.receive(x))
+        elif "finish" in s:
+            f = s["finish"]
+            if f == "done":
+                words.append(t.finish(Finish(DONE)))
+            elif f == "check":
+                # "the running act's put ends as §2.4's bound judges it"
+                words.append(t.finish(Finish(REFUSED, "invalid") if t.must_refuse() else Finish(DONE)))
+            else:
+                (how, refusal), = f.items()
+                words.append(t.finish(Finish(how, refusal.get("code"))))
+                _indices(t, how, refusal)
+        elif s.get("call"):
+            words.append(t.call())
+        elif s.get("restart"):
+            words.append(t.restart())
+        else:
+            raise ValueError(f"an unknown step {s!r}")
+    return words, t.report()
+
+
+def _indices(t: TargetRole, how: str, refusal: dict[str, Any]) -> None:
+    """Put a step's indices in the refusal the act's end just recorded. The
+    refusal is still that act's unless an act that waited has started, which
+    changes no report field."""
+    if t.refusal is None:
+        return
+    t.refusal = {"code": refusal.get("code") if refusal.get("code") in CODES or refusal.get("code") is None
+                 else None}
+    if refusal.get("code") is None and how == FAILED and "code" not in refusal:
+        t.refusal["code"] = FAILURE_CODE
+    for k in ("pointer", "detail"):
+        if refusal.get(k) is not None:
+            t.refusal[k] = refusal[k]
+
+
+# -- §2.5: the watch ------------------------------------------------------------------------------
+#
+# Written from §2.5 before conformance/v2/watch.json was opened (round 118).
+
+#: The decisions §2.5's rule names: ``no_section``, ``unmoved``, ``read``,
+#: ``outstanding``, and ``older`` (step 2). Step 1 names no token:
+#: ``not_read`` is zk2py's.
+NOT_READ, NO_SECTION, UNMOVED, READ, OUTSTANDING = "not_read", "no_section", "unmoved", "read", "outstanding"
+SEQ_MOD = 1 << 24
+
+
+@dataclass(frozen=True)
+class Section:
+    """§0: "the part of a heartbeat that covers one collection: its digest
+    and its live count (core §7.5)"."""
+
+    digest: int
+    live: int
+
+
+def serial_after(new: int, old: int) -> bool:
+    """Core §4.3 "Serial order": "s′ is newer when (s′ − s) mod 2^24 is from
+    1 to 2^23 − 1"."""
+    return 1 <= (new - old) % SEQ_MOD <= (1 << 23) - 1
+
+
+class Watch:
+    """§2.5 "The watch": "A far target can let its author's heartbeat say
+    when to read, in place of a period." One target's watch of one author's
+    desired collection, session-free.
+
+    "The target keeps the section it expects: a digest and a live count, or
+    none. It starts with none." It reads the section "for one thing: whether
+    it moved": nothing here confirms a version, and nothing here ages one
+    ("Never a confirmation")."""
+
+    def __init__(self) -> None:
+        self.expects: Section | None = None
+        #: The last read heartbeat's run and seq (step 3).
+        self.last: tuple[Run, int] | None = None
+        self.outstanding = False
+        #: "the section of the heartbeat that made it read", None for a read
+        #: no heartbeat made (a seed, a period).
+        self.made_by: Section | None = None
+
+    def heartbeat(self, run: Run, seq: int, section: Section | None, read: bool = True) -> str:
+        """One heartbeat of the author's, or one group of its owner
+        heartbeat: "It takes the first of these that answers".
+
+        ``read`` False is a heartbeat ``freshness.v2`` §2.5's steps do not
+        read for another reason than its age: "of another revision
+        (``revision``), a refused one (``refused``)", and "A group whose
+        sections freshness.v2 §2.5 does not read". ``section`` None is "The
+        collection's map bit is 0", and "An owner heartbeat with no group
+        for the author's interface"."""
+        # 1. "Not read. After a heartbeat of another revision or a refused
+        # one, the target expects none. It makes no read for it, and the
+        # heartbeat moves no sequence."
+        if not read:
+            self.expects = None
+            return NOT_READ
+        # 2. "Older. In the last read one's run, its seq is not after that
+        # one's, by core §4.3's serial order. Nothing changes, and it moves no
+        # sequence."
+        if self.last is not None and self.last[0] == run and not serial_after(seq, self.last[1]):
+            return OLDER
+        # 3. "Out of sequence. Any other heartbeat is read, and is the last
+        # read one from then on. One of another run than the last read one's,
+        # or whose seq is not that one's plus 1 modulo 2^24, follows a change
+        # the target did not see. The target expects none, and goes on to
+        # step 4."
+        last, self.last = self.last, (run, seq)
+        if last is not None and (last[0] != run or seq != (last[1] + 1) % SEQ_MOD):
+            self.expects = None
+        # 4. "No section. The collection's map bit is 0. The target expects
+        # none, and makes no read for it."
+        if section is None:
+            self.expects = None
+            return NO_SECTION
+        # 5. "Unmoved. The section is the one it expects. Nothing is read."
+        if section == self.expects:
+            return UNMOVED
+        # 6. "Moved. The section differs, or the target expects none. It
+        # makes one conditional read of its slice (read). Where a read is
+        # outstanding it makes none (outstanding)."
+        if self.outstanding:
+            return OUTSTANDING
+        self.outstanding = True
+        self.made_by = section
+        return READ
+
+    def reading(self) -> bool:
+        """A read no heartbeat made begins: the seed, "A seed made again", a
+        period's. False where one is outstanding ("A target MUST NOT read
+        its slice while a read of it is outstanding")."""
+        if self.outstanding:
+            return False
+        self.outstanding = True
+        self.made_by = None
+        return True
+
+    def unchanged(self, still_holds: bool) -> None:
+        """"Unchanged: the target expects the section of the heartbeat that
+        made it read, where it still holds the version it sent. Where it
+        holds another by then, it expects none." A read no heartbeat made
+        has no such section: what the target expects stays, unless it holds
+        another version."""
+        self.outstanding = False
+        if not still_holds:
+            self.expects = None
+        elif self.made_by is not None:
+            self.expects = self.made_by
+        self.made_by = None
+
+    def whole(self) -> None:
+        """"Whole: it judges the entry (§2.6), and expects none. The next
+        heartbeat makes it read once more, and that read settles what it
+        expects.\""""
+        self.outstanding = False
+        self.expects = None
+        self.made_by = None
+
+    def no_answer(self) -> None:
+        """"No answer, a timeout or a held stamp it did not send: what it
+        expects does not change. The next heartbeat is its next trigger.\""""
+        self.outstanding = False
+        self.made_by = None
+
+    def own_change(self, key: str, old: tuple[Version, bool] | None, new: tuple[Version, bool]) -> bool:
+        """"Its own change costs nothing. A target that admits a version of
+        its slice heard live MAY move the digest it expects itself", each
+        version given with whether it is a delete. "It moves it only where
+        it expects a section and holds a version." True when it moved."""
+        from . import heartbeat
+
+        if self.expects is None or old is None:
+            return False
+
+        def value(v: Version) -> int:
+            return heartbeat.member_value(key, v.run.width, v.run.value, v.seq)
+
+        (was, was_delete), (now, now_delete) = old, new
+        digest, live = self.expects.digest, self.expects.live
+        if not was_delete and not now_delete:    # "A put over a put XORs the old value out and the new one in."
+            digest ^= value(was) ^ value(now)
+        elif not was_delete and now_delete:      # "A delete XORs the old value out, and the live count falls by 1."
+            digest ^= value(was)
+            live -= 1
+        elif was_delete and not now_delete:      # "A put over a delete XORs the new value in, and the count rises by 1."
+            digest ^= value(now)
+            live += 1
+        self.expects = Section(digest, live)
+        return True
