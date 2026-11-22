@@ -1,0 +1,17 @@
+# health.v2's scenario §9 (#986; spec/profiles/health/scenarios-v2.md): the
+# contract of its own in which `lab/tc` names its words. It lists health.v2
+# in `uses`, and writes each table once, on [defaults], where it reaches
+# every resource (health.v2 §2.10): the name at index i is the word 32 + i.
+[interface]
+name  = "tc"
+major = 1
+minor = 1
+uses  = ["health.v2"]
+
+[defaults.annotations]
+"health.reasons" = ["tc_netns_gone", "tc_qdisc_missing"]
+"health.codes"   = ["tc_netns_restarted"]
+
+[resources.qdisc]
+kind = "state"
+type = { raw = "text/plain" }

@@ -630,6 +630,8 @@ pub struct Beat {
     pub tag: zenkey::model::wire::Tag,
     pub stamp: zenkey::model::wire::Stamp,
     pub hb: zenkey::model::heartbeat::Heartbeat,
+    /// The put's payload's length in bytes, its envelope included.
+    pub len: usize,
 }
 
 /// The heartbeats a [`heartbeats`] subscriber heard, in arrival order.
@@ -659,6 +661,7 @@ pub async fn heartbeats(
                 tag: e.tag,
                 stamp: e.stamp,
                 hb,
+                len: bytes.len(),
             });
         })
         .await
