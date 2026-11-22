@@ -533,6 +533,19 @@ class LateJoiner:
         self.completed: list[tuple[str, int, bool]] = []
         #: S4's consolidation, ``None``; a scenario's control sets another
         self.consolidation: Any = None
+        #: core §4.2 (0.110), "A conditional read": the one concrete key of
+        #: the GET in flight and the held stamp it carried, or None for a GET
+        #: that carried none
+        self._asked_held: tuple[str, zk2c.InBand] | None = None
+        #: each held stamp sent, (key, stamp)
+        self.held_asked: list[tuple[str, zk2c.InBand]] = []
+        #: each held stamp read as unchanged, (key, stamp, what the reader
+        #: held by then: ``held`` the mutation it names, heard again by the
+        #: GET; ``later`` another value, which stands; ``nothing``)
+        self.unchanged: list[tuple[str, zk2c.InBand, str]] = []
+        #: the keys to read again, with no held stamp: "Where the reader
+        #: holds nothing for the member by then, its GET gave it no value"
+        self.again: list[str] = []
 
     @property
     def state(self) -> "OrderedDict[str, Entry]":
@@ -612,9 +625,60 @@ class LateJoiner:
         key, deleted, payload, enc = str(s.key_expr), s.kind == zenoh.SampleKind.DELETE, s.payload.to_bytes(), \
             str(s.encoding)
         if not deleted and zk2c.carries(key, enc) and payload[:1] and payload[0] >> 5 == 7:
+            from . import held as held_stamp
+
+            # core §7.5 (0.110): "Where that parse accepts a snapshot's
+            # envelope with no byte after its seq, the reply carries a held
+            # stamp, never a page", refused `tag` where its tag is not 0.
+            r = held_stamp.read_reply_on(key, enc, payload)
+            if r.held and r.stamp is not None:
+                self._held_locked(key, via, r.stamp)
+                return
+            if r.refusal == "tag" and r.envelope is not None:
+                self.undecodable.append((key, via, "tag"))
+                self.applied.append(Applied(key, via, False, None, "undecodable", self.merge.rule, None, "tag"))
+                return
             self._snapshot_locked(key, via, payload, enc)
             return
         self._merge_locked(key, via, deleted, payload, enc, s.timestamp, None if att is None else att.to_bytes())
+
+    def _held_locked(self, key: str, via: str, stamp: zk2c.InBand) -> None:
+        """A held stamp (core §4.2, 0.110). "A held stamp is the owner's
+        answer only as a reply to the GET that carried the same one, on that
+        GET's one concrete key … A consumer or a tool MUST NOT read any other
+        held stamp as unchanged": one "that differs from the one its GET
+        carried, one in reply to a GET that carried none, one on another key,
+        and one heard on a subscription … establishes nothing. The reader
+        merges nothing for it. It counts it undecodable, refused as
+        ``held``." Unchanged, "the reader keeps what it holds":
+        - the mutation it names, still held, "counts as … heard again, by the
+          GET", so the omission rule's guard spares it from then;
+        - "another value by then, heard while its GET was out", stands;
+        - nothing held "by then", at this arrival: "It reads again, with no
+          held stamp" (``again``)."""
+        from . import seed_held
+
+        asked = self._asked_held
+        got = seed_held.reading(None if asked is None else asked[0], None if asked is None else asked[1], key,
+                                "get" if via == "reply" else via, stamp)
+        if got != seed_held.UNCHANGED:
+            self.undecodable.append((key, via, seed_held.REFUSED))
+            self.applied.append(Applied(key, via, False, None, "undecodable", self.merge.rule, stamp,
+                                        seed_held.REFUSED))
+            return
+        mine = self.merge.held.get(key)
+        if mine is None:
+            what = "nothing"
+            if key not in self.again:
+                self.again.append(key)
+        elif mine.inband is not None and (mine.inband.width, mine.inband.run, mine.inband.seq) \
+                == (stamp.width, stamp.run, stamp.seq):
+            what = "held"
+            mine.after_get = True
+        else:
+            what = "later"
+        self.unchanged.append((key, stamp, what))
+        self.applied.append(Applied(key, via, False, None, "unchanged", self.merge.rule, stamp))
 
     def _snapshot_locked(self, key: str, via: str, payload: bytes, encoding: str) -> None:
         """A snapshot's page (core §4.2, §7.5, 0.100): heard live, neither
@@ -722,12 +786,24 @@ class LateJoiner:
 
         self.sub = self.session.declare_subscriber(self.selector, zenoh.handlers.Callback(self._sample))
 
-    def get(self, selector: str | None = None) -> None:
+    def get(self, selector: str | None = None, conditional: bool = False, payload: bytes | None = None,
+            encoding: str | None = None) -> None:
         """S4's GET (core 0.100): target ``All``, consolidation ``None``, set
         explicitly. The GET is marked asked first, so every arrival after it
         is "heard after it asked the GET". The descriptors that map a
-        snapshot's index are read before it (:class:`ByDescriptor`)."""
+        snapshot's index are read before it (:class:`ByDescriptor`).
+
+        ``conditional`` makes it a conditional read (core 0.110): on one
+        concrete key, it carries "the in-band stamp of the mutation it holds
+        for that member, as the owner wrote it", and no other. "A reader that
+        holds nothing for the member sends none, and neither does one that
+        holds a value with no envelope." ``payload`` and ``encoding`` send
+        other bytes instead, for a scenario's GET whose payload is no held
+        stamp; such a GET carried none."""
         import zenoh
+
+        from . import held as held_stamp
+        from . import seed_held
 
         sel = selector or self.get_selector
         prepare = getattr(self.collections, "prepare", None)
@@ -735,12 +811,50 @@ class LateJoiner:
             prepare(self.session, sel)
         self._done.clear()
         self.seed = Seed()
+        kw: dict[str, Any] = {}
         with self.lock:
             self._asked = False
+            self._asked_held = None
+            if sel in self.again:
+                self.again.remove(sel)
+            if conditional:
+                mine = self.merge.held.get(sel)
+                stamp = seed_held.ask(sel, None if mine is None else mine.inband)
+                if stamp is not None:
+                    self._asked_held = (sel, stamp)
+                    self.held_asked.append((sel, stamp))
+                    kw = {"payload": held_stamp.write(stamp), "encoding": zk2c.ENCODING}
+            elif payload is not None:
+                kw = {"payload": payload, "encoding": encoding or zk2c.ENCODING}
         self._arrive(("asked", None))
         self.session.get(sel, zenoh.handlers.Callback(self._reply, self._ended),
                          target=zenoh.QueryTarget.ALL,
-                         consolidation=self.consolidation or zenoh.ConsolidationMode.NONE, timeout=self.timeout)
+                         consolidation=self.consolidation or zenoh.ConsolidationMode.NONE, timeout=self.timeout, **kw)
+
+    def conditional_read(self, key: str, timeout: float | None = None) -> str:
+        """One conditional read of ``key``, and the read "again, with no held
+        stamp" where it left nothing held. What it came to: ``unchanged``,
+        ``whole`` (a snapshot in answer, merged "as any member read's"),
+        ``again`` (it read again), ``silent`` or ``none`` (it held nothing to
+        name, and read with no held stamp)."""
+        with self.lock:
+            before = len(self.unchanged)
+        self.get(key, conditional=True)
+        self.wait(timeout)
+        with self.lock:
+            sent = self._asked_held is not None
+            again = key in self.again
+            unchanged = len(self.unchanged) > before
+            replies = self.seed.replies
+        if again:
+            self.get(key)
+            self.wait(timeout)
+            return "again"
+        if not sent:
+            return "none"
+        if unchanged:
+            return "unchanged"
+        return "whole" if replies else "silent"
 
     def read_again(self, timeout: float | None = None, selector: str | None = None) -> bool:
         """Core §4.2: over an incomplete snapshot a late joiner "SHOULD read

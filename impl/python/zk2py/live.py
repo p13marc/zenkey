@@ -2243,10 +2243,21 @@ class StateReading:
     errors: list[str] = field(default_factory=list)
     snapshots: list[Any] = field(default_factory=list)
     arrivals: list[tuple[str, str, str | None]] = field(default_factory=list)
+    #: core §4.2 (0.110): each held stamp the GET brought, ``(key, stamp,
+    #: reading)``, ``unchanged`` where it answers this GET's own held stamp on
+    #: its one concrete key, else ``held``: "establishes nothing … It counts
+    #: it undecodable, refused as ``held``". A held stamp merges no value:
+    #: what the caller held stands
+    held: list[tuple[str, Any, str]] = field(default_factory=list)
 
     @property
     def silent(self) -> bool:
         return not self.arrivals and not self.errors
+
+    @property
+    def unchanged(self) -> bool:
+        """Whether the owner answered this GET's held stamp with it alone."""
+        return any(r == "unchanged" for _, _, r in self.held)
 
     def complete_for(self, key: str) -> list[Any]:
         """The complete snapshots heard on ``key`` or above it (core §4.2:
@@ -2256,7 +2267,8 @@ class StateReading:
 
 
 def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOUT_S,
-              across: Any = None, revision: Any = None) -> StateReading:
+              across: Any = None, revision: Any = None, held: Any = None, payload: bytes | None = None,
+              encoding: str | None = None) -> StateReading:
     """S4 (core 0.100): "a state GET MUST be addressed to the owner's keys,
     with target All and consolidation None set explicitly. The consumer MUST
     merge the GET's replies per key, each snapshot's entries among them, as a
@@ -2279,7 +2291,15 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
     the run of its stamp) is "no owner's answer": it is counted undecodable,
     refused as ``form``, and never merged as a deletion. Without the owner's
     revision every ``reply_del`` is merged, as the text says a reader then
-    does. The descriptors are read before the GET."""
+    does. The descriptors are read before the GET.
+
+    **A conditional read** (core 0.110 §4.2): ``held``, the in-band stamp of
+    the mutation the caller holds for the member at ``selector``, one
+    concrete key, rides the GET as a held stamp (§7.5). A held stamp in
+    answer is read ``unchanged`` only "as a reply to the GET that carried the
+    same one, on that GET's one concrete key"; a snapshot in answer is
+    merged "as any member read's". ``payload`` and ``encoding`` send other
+    bytes, for a GET whose payload is no held stamp."""
     from . import seed as sd
     from . import seed_snapshot as ss
     from . import snapshot as snap_mod
@@ -2288,21 +2308,30 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
         timeout = across.get_timeout_s(timeout)
     if revision is not None and hasattr(revision, "prepare"):
         revision.prepare(session, selector)
+    from . import held as held_stamp
+    from . import seed_held
+
     q: queue.Queue = queue.Queue()
+    kw: dict[str, Any] = {}
+    asked_held = seed_held.ask(selector, held)
+    if asked_held is not None:
+        kw = {"payload": held_stamp.write(asked_held), "encoding": zk2c.ENCODING}
+    elif payload is not None:
+        kw = {"payload": payload, "encoding": encoding or zk2c.ENCODING}
     session.get(selector, zenoh.handlers.Callback(q.put, lambda: q.put(_DONE)),
                 target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
-                timeout=timeout)
+                timeout=timeout, **kw)
     out = StateReading()
     tracker = ss.Tracker()
-    held: dict[str, StateReply] = {}
+    kept: dict[str, StateReply] = {}
     marks: dict[str, Any] = {}
 
     def merge(r: StateReply, mark: Any) -> None:
-        if r.key in held:
+        if r.key in kept:
             rel = sd.relation(mark, marks[r.key], sd.kind_of(r.key))
             if rel not in ("greater", "unordered"):
                 return
-        held[r.key] = r
+        kept[r.key] = r
         marks[r.key] = mark
 
     while True:
@@ -2325,6 +2354,20 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
         att = None if s.attachment is None else s.attachment.to_bytes()
         deleted = s.kind == zenoh.SampleKind.DELETE
         if not deleted and read.form == "snapshot":
+            hr = held_stamp.read_reply_on(key, str(s.encoding), raw)
+            if hr.held:
+                got = seed_held.reading(selector, asked_held, key, "get", hr.stamp)
+                out.arrivals.append((key, got, None if ts is None else str(ts)))
+                out.held.append((key, hr.stamp, got))
+                if got != seed_held.UNCHANGED:
+                    out.replies.append(StateReply(key, False, b"", str(s.encoding), None, None, None, hr.stamp,
+                                                  seed_held.REFUSED, raw, att))
+                continue
+            if hr.refusal == "tag" and hr.envelope is not None:
+                out.arrivals.append((key, "refused", None if ts is None else str(ts)))
+                out.replies.append(StateReply(key, False, b"", str(s.encoding), None, None, None, None, "tag", raw,
+                                              att))
+                continue
             try:
                 page = ss.read_page_of(key, raw)
             except (snap_mod.Refused, zk2c.Refused) as e:
@@ -2363,7 +2406,7 @@ def get_state(session: zenoh.Session, selector: str, timeout: float = GET_TIMEOU
             continue
         out.every.append(r)
         merge(r, sd.Mark(read.stamp, sd.Stamp.of(ts)))
-    out.replies.extend(held.values())
+    out.replies.extend(kept.values())
     out.snapshots = list(tracker.heard)
     return out
 
