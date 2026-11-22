@@ -1115,3 +1115,151 @@ class Watch:
             live += 1
         self.expects = Section(digest, live)
         return True
+
+
+# -- §2.2, §2.10: the declarations ----------------------------------------------------------------
+#
+# Written from §2.2 and §2.10 before conformance/v2/declarations.json was
+# opened (round 118).
+
+#: §2.2 "Only under freshness.v2": "The declaration is invalid,
+#: ``horizon_v1``. It is checked last, after v1 §2.2's seven reasons, and
+#: skipped where the resource is ``not_state``."
+HORIZON_V1 = "horizon_v1"
+FRESHNESS_V2 = "freshness.v2"
+
+
+def declare(kind: str, template: str, annotations: dict[str, Any], params: dict[str, str],
+            uses: Any) -> v1.Declaration:
+    """§2.2: "v1 §2.2 holds, and ``desired.target_param`` means what it means
+    there", with "Its horizon" replaced: "A desired resource that declares
+    ``freshness.ttl_s`` above 0 MUST be of a contract that lists
+    ``freshness.v2`` in ``uses``." ``uses`` is the contract's."""
+    from . import freshness as fr
+
+    d = v1.declare(kind, template, annotations, params)
+    if d.declaration == v1.NOT_THIS or "not_state" in d.reasons:
+        return d
+    above = fr.KEY in annotations and fr.horizon("state", annotations).horizon == "within"
+    if above and FRESHNESS_V2 not in (uses or ()):
+        return v1.Declaration(v1.INVALID, d.reasons + (HORIZON_V1,), horizon=d.horizon)
+    return d
+
+
+#: §2.10 "A declaration is invalid for each of these, in this order."
+REPORT_REASONS = ("not_state", "value", "not_a_role", "not_a_param", "rest_param", "param_not_role", "not_report",
+                  "pointers", "details", "two_reports")
+ROLE, PARAM = "role", "param"
+
+
+def report_value(value: Any) -> tuple[str, str] | None:
+    """§2.10 "Its value is a string, in one of two forms. A name holds at
+    least one character, and no brace. A value in neither form names
+    nothing": ``(role, name)`` for "a role's name", ``(param, name)`` for
+    "a parameter in braces, as ``{topic}``", else None."""
+    if not isinstance(value, str):
+        return None
+    if value.startswith("{") and value.endswith("}") and len(value) >= 2:
+        name = value[1:-1]
+        return (PARAM, name) if name and "{" not in name and "}" not in name else None
+    return (ROLE, value) if value and "{" not in value and "}" not in value else None
+
+
+@dataclass(frozen=True)
+class ReportResource:
+    """One resource of a target's contract as §2.10's declaration reads it:
+    its kind token, its template, its resolved annotations, and whether its
+    type is "the profile's ``Report`` (§3)", by its artifact's id."""
+
+    token: str
+    template: str
+    annotations: dict[str, Any]
+    is_report: bool
+
+    @property
+    def holds_key(self) -> bool:
+        return REPORT_KEY in self.annotations
+
+    @property
+    def named(self) -> tuple[str, str] | None:
+        return report_value(self.annotations.get(REPORT_KEY)) if self.holds_key else None
+
+
+@dataclass(frozen=True)
+class ReportDeclaration:
+    declaration: str
+    reasons: tuple[str, ...] = ()
+    #: declared: ``role`` with the role's name, or ``param`` with the
+    #: parameter's.
+    form: str | None = None
+    name: str | None = None
+    pointers: tuple[str, ...] = DEFAULT_POINTERS
+    details: tuple[str, ...] = DEFAULT_DETAILS
+
+
+def _report_resource(r: ReportResource) -> bool:
+    """§0 "Report resource: a state resource of a target's contract whose
+    resolved annotations hold ``desired.report``.\""""
+    return r.holds_key and r.token in ("state", "@state")
+
+
+def declare_report(r: ReportResource, roles: Any, others: Any = ()) -> ReportDeclaration:
+    """§2.10 "The report resource". ``roles`` are the requirements of the
+    resource's contract, by name; ``others`` the contract's other resources.
+
+    "A resource without the key is no report resource. On it,
+    ``desired.pointers`` and ``desired.details`` mean nothing." "After
+    ``value``, no later check reads the value. After ``not_a_param`` or
+    ``rest_param``, ``param_not_role`` is skipped\""""
+    from . import templates
+
+    if not r.holds_key:
+        return ReportDeclaration(v1.NOT_THIS)
+    t = templates.parse_template(r.template)
+    single = [s.text for s in t.segments if s.kind == templates.PARAM]
+    rest = [s.text for s in t.segments if s.kind == templates.REST]
+    reasons: list[str] = []
+    if r.token not in ("state", "@state"):
+        reasons.append("not_state")
+    named = r.named
+    if named is None:
+        reasons.append("value")
+    else:
+        form, name = named
+        skip = False
+        if form == ROLE and name not in roles:
+            reasons.append("not_a_role")
+        if form == PARAM and name not in single and name not in rest:
+            reasons.append("not_a_param")
+            skip = True
+        if form == PARAM and name in rest:
+            reasons.append("rest_param")
+            skip = True
+        # "a role's name ... The resource has no parameter"; "a parameter in
+        # braces ...: the resource's one parameter"
+        if not skip and any(p != name or form == ROLE for p in t.param_names):
+            reasons.append("param_not_role")
+    if not r.is_report:
+        reasons.append("not_report")
+    ann = r.annotations
+    if POINTERS_KEY in ann and not pointers_ok(ann[POINTERS_KEY]):
+        reasons.append("pointers")
+    if DETAILS_KEY in ann and not details_ok(ann[DETAILS_KEY]):
+        reasons.append("details")
+    # "two_reports: another report resource of the contract names the same
+    # role, or one of the two names a parameter." It reads the value, so it
+    # is skipped after `value`; another whose value names nothing names no
+    # role.
+    if named is not None:
+        for o in others:
+            if o is r or not _report_resource(o) or o.named is None:
+                continue
+            if PARAM in (named[0], o.named[0]) or named[1] == o.named[1]:
+                reasons.append("two_reports")
+                break
+    if reasons:
+        return ReportDeclaration(v1.INVALID, tuple(reasons))
+    assert named is not None
+    return ReportDeclaration(v1.DECLARED, (), named[0], named[1],
+                             tuple(ann.get(POINTERS_KEY, DEFAULT_POINTERS)),
+                             tuple(ann.get(DETAILS_KEY, DEFAULT_DETAILS)))
