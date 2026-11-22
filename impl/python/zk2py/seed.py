@@ -835,10 +835,11 @@ class LateJoiner:
         """One conditional read of ``key``, and the read "again, with no held
         stamp" where it left nothing held. What it came to: ``unchanged``,
         ``whole`` (a snapshot in answer, merged "as any member read's"),
-        ``again`` (it read again), ``silent`` or ``none`` (it held nothing to
-        name, and read with no held stamp)."""
+        ``again`` (it read again), ``refused`` (replies it merged nothing
+        for, a held stamp that is no answer among them), ``silent`` or
+        ``none`` (it held nothing to name, and read with no held stamp)."""
         with self.lock:
-            before = len(self.unchanged)
+            before, applied = len(self.unchanged), len(self.applied)
         self.get(key, conditional=True)
         self.wait(timeout)
         with self.lock:
@@ -846,6 +847,8 @@ class LateJoiner:
             again = key in self.again
             unchanged = len(self.unchanged) > before
             replies = self.seed.replies
+            merged = any(a.outcome != "undecodable" for a in self.applied[applied:]) or bool(
+                self.trackers and self.trackers[-1].heard)
         if again:
             self.get(key)
             self.wait(timeout)
@@ -854,7 +857,9 @@ class LateJoiner:
             return "none"
         if unchanged:
             return "unchanged"
-        return "whole" if replies else "silent"
+        if not replies:
+            return "silent"
+        return "whole" if merged else "refused"
 
     def read_again(self, timeout: float | None = None, selector: str | None = None) -> bool:
         """Core §4.2: over an incomplete snapshot a late joiner "SHOULD read
