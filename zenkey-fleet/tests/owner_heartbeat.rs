@@ -448,24 +448,24 @@ fn the_host_key_is_in_no_faces_scope() {
 // --- `.zrec`: a capture that holds owner heartbeats (#1110's H2c) -------------
 
 /// The capture zenctl's trycmd reads (`echo --from`, `timeline --from`,
-/// `replay --dry-run`): four rows on `lab/trio`'s two class keys.
+/// `replay --dry-run`): five rows on `lab/trio`'s two class keys, the last
+/// an owner heartbeat written while its owner's clock guard holds, its
+/// time the ahead time (core 0.113 §7.5, #986's Q0).
 const ZREC: &str = "zenctl/tests/cmd/fixtures/owner-heartbeat.zrec";
 /// The catalog its header names, as `--catalog` takes it.
 const ZREC_CATALOG: &str = "zenctl/tests/cmd/fixtures/owner-heartbeat.catalog.json";
 
 /// The capture's rows: the key's class, the put's seq and its bytes.
 fn zrec_rows() -> Vec<(Class, u32, Vec<u8>)> {
-    let at = |seq: u32, groups: Vec<Group>| {
-        OwnerHeartbeat {
-            time: Time::Unknown,
-            groups,
-        }
-        .envelope(Stamp {
-            run: Run::U16(7),
-            seq: Seq::new(seq).unwrap(),
-        })
-        .unwrap()
+    let under = |time: Time, seq: u32, groups: Vec<Group>| {
+        OwnerHeartbeat { time, groups }
+            .envelope(Stamp {
+                run: Run::U16(7),
+                seq: Seq::new(seq).unwrap(),
+            })
+            .unwrap()
     };
+    let at = |seq: u32, groups: Vec<Group>| under(Time::Unknown, seq, groups);
     // charlie.v1's `reach`, its `link` collection, on the `link` key.
     let all = contracts(&IFACES);
     let layout = Layout::of(revision(&all, "charlie.v1").contract());
@@ -508,6 +508,11 @@ fn zrec_rows() -> Vec<(Class, u32, Vec<u8>)> {
             at(0, vec![Group::of(2, &layout, &reach).unwrap()]),
         ),
         (Class::Host, 6, refused),
+        (
+            Class::Host,
+            7,
+            under(Time::Ahead, 7, vec![group(0, "alpha.v1", 0x0a)]),
+        ),
     ]
 }
 
@@ -596,7 +601,7 @@ fn a_capture_of_owner_heartbeats_reads_through_the_headers_catalog() {
             other => panic!("only samples: {other:?}"),
         }
     }
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 5);
     let read = |given: Option<&Catalog>| -> Vec<Result<Value, String>> {
         let (catalogs, _) = reader_catalogs(&header, given).expect("the header's catalog");
         let recorded = Recorded::of(&header, contracts(&IFACES));
@@ -644,9 +649,31 @@ fn a_capture_of_owner_heartbeats_reads_through_the_headers_catalog() {
         )]
     );
     assert_eq!(given[3], Err("the owner heartbeat is refused: tag".into()));
+    // The guard held: the time is shown as ahead, never as unknown (`null`)
+    // and never as an instant, and the group is read as under any time
+    // (`freshness.v2` §5).
+    let ahead = given[4].as_ref().unwrap();
+    assert_eq!(
+        (&ahead["time"], &ahead["seq"], ahead.get("dated")),
+        (&json!("ahead"), &json!(7), None)
+    );
+    assert_eq!((&given[0].as_ref().unwrap()["time"]), &json!(null));
+    assert!(
+        groups(ahead)
+            .iter()
+            .all(|(_, covers, read)| covers.is_some() && read.is_ok()),
+        "{ahead}"
+    );
+    assert_eq!(
+        zenkey_fleet::model::inband::owner_heartbeat_lines(ahead).expect("lines")[0],
+        "host, run 0007, seq 7, time ahead, 1 group"
+    );
     // The header alone holds no entry to read an index by.
     let alone = read(None);
-    for v in alone[..3].iter().map(|v| v.as_ref().unwrap()) {
+    for v in [&alone[0], &alone[1], &alone[2], &alone[4]]
+        .into_iter()
+        .map(|v| v.as_ref().unwrap())
+    {
         assert!(
             groups(v)
                 .iter()

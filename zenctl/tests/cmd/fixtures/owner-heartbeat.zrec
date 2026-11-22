@@ -3,3 +3,4 @@
 {"bytes":"wAAHAAAF///////IALIoAAAAV4SyKAAAAFw=","delete":false,"encoding":"zenoh/bytes","key":"zk2/lab/trio/freshness.v2/stream/heartbeats/host","qos_axes":"data/drop/reliable","t":2000000}
 {"bytes":"wAAHAAAA///////EAhI4AAAAcg==","delete":false,"encoding":"zenoh/bytes","key":"zk2/lab/trio/freshness.v2/stream/heartbeats/link","qos_axes":"data/drop/reliable","t":3000000}
 {"bytes":"xQAHAAAG///////EALIoAAAAVA==","delete":false,"encoding":"zenoh/bytes","key":"zk2/lab/trio/freshness.v2/stream/heartbeats/host","qos_axes":"data/drop/reliable","t":4000000}
+{"bytes":"wAAHAAAH//////+EALIoAAAAVA==","delete":false,"encoding":"zenoh/bytes","key":"zk2/lab/trio/freshness.v2/stream/heartbeats/host","qos_axes":"data/drop/reliable","t":5000000}

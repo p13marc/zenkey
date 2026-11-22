@@ -430,6 +430,11 @@ fn sections_value(
 
 /// A heartbeat's time as a tool shows it, and its date after the number
 /// (the tooling guide's O8), from the epoch in force for its owner, named.
+///
+/// The three readings stay three (core §7.5, `freshness.v2` §5): an
+/// instant is `{"s", "ms"}` with its date, the unknown time `null`, never
+/// the epoch, and the ahead time `"ahead"`, never `null` and never an
+/// instant. Neither of the last two has a date.
 fn time_value(
     time: zenkey_model::heartbeat::Time,
     dating: crate::model::deployment::Dating,
@@ -437,12 +442,17 @@ fn time_value(
     use zenkey_model::heartbeat::Time;
     match time {
         Time::Unknown => (serde_json::Value::Null, None),
+        Time::Ahead => (serde_json::Value::String(TIME_AHEAD.to_owned()), None),
         Time::At { secs, ms } => (
             serde_json::json!({"s": secs, "ms": ms}),
             Some(dating.dated_from(i128::from(secs) * 1000 + i128::from(ms))),
         ),
     }
 }
+
+/// How a tool spells a heartbeat's ahead time (core §7.5): its owner's
+/// clock guard held when it wrote the heartbeat (`freshness.v2` §2.10).
+pub const TIME_AHEAD: &str = "ahead";
 
 /// What a tool holds of the revision an owner heartbeat's group names
 /// (observer 0.34 §7.5, "An owner heartbeat"): what `revision` answers a
@@ -570,12 +580,18 @@ pub fn group_unread_words(token: &str) -> &'static str {
 /// #900, tag 11, 34 bits: unread, unknown_index: the catalog holds no entry at its index (core §8.6)
 /// ```
 ///
+/// The head line's time is `t=<s>.<ms>` with its date for an instant,
+/// `time unknown` for the unknown time and `time ahead` for the ahead time
+/// (`freshness.v2` §5).
+///
 /// A templated section says its live count and the ranks it vouches for.
 /// `None` for a value that is no owner heartbeat's reading.
 #[must_use]
 pub fn owner_heartbeat_lines(value: &serde_json::Value) -> Option<Vec<String>> {
     let groups = value.get("groups")?.as_array()?;
     let time = match (value.get("time"), value.get("dated")) {
+        // The owner's clock guard held: no instant, and never "unknown".
+        (Some(t), _) if t.as_str() == Some(TIME_AHEAD) => "time ahead".to_owned(),
         (Some(t), dated) if !t.is_null() => {
             let at = format!(
                 "t={}.{:03}",
