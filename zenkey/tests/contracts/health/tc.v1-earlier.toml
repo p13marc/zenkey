@@ -1,0 +1,17 @@
+# health.v2's scenario §9 (#986): the earlier revision of `tc.v1` that the
+# tool T2 holds alone. Its reasons are the later revision's in another
+# order, so a reader that took its table for an owner on the later revision
+# would show the wrong word (health.v2 §2.10, "Never another revision's
+# table"). No owner of the scenario implements it.
+[interface]
+name  = "tc"
+major = 1
+minor = 0
+uses  = ["health.v2"]
+
+[defaults.annotations]
+"health.reasons" = ["tc_qdisc_missing", "tc_netns_gone"]
+
+[resources.qdisc]
+kind = "state"
+type = { raw = "text/plain" }
