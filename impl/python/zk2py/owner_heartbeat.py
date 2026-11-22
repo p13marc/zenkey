@@ -218,12 +218,12 @@ class _Bits(heartbeat._Bits):
         raise Refused("leb128", f"{what}'s fifth byte has its high bit set")
 
 
-def read_body(body: bytes) -> OwnerHeartbeat:
+def read_body(body: bytes, time_reader: Any = None) -> OwnerHeartbeat:
     """The first reading of a body, after its envelope: the fields in order,
     each read whole, then judged; then ``trailing``, then ``pad``."""
     b = _Bits(bytes(body))
     try:
-        time = heartbeat.read_time(b)
+        time = (time_reader or heartbeat.read_time)(b)   # ``time_reader``: as :func:`heartbeat.read`'s
     except heartbeat.Refused as e:
         raise Refused(e.token, str(e).split(": ", 1)[1]) from None
     count = b.take(COUNT_BITS, "the count of groups")
@@ -245,7 +245,7 @@ def read_body(body: bytes) -> OwnerHeartbeat:
     return OwnerHeartbeat(time, tuple(groups))
 
 
-def read(payload: bytes, key_token: str | None = None, enveloped: bool = True) -> Put:
+def read(payload: bytes, key_token: str | None = None, enveloped: bool = True, time_reader: Any = None) -> Put:
     """The first reading of a put's payload on an owner heartbeat's key.
     "The envelope's parse comes first (above), then the put's form
     (``form``, below)": both are :func:`zk2py.heartbeat.put_of`'s, the
@@ -260,7 +260,7 @@ def read(payload: bytes, key_token: str | None = None, enveloped: bool = True) -
         raise Refused("tag", f"CH's tag is {env.tag}, and an owner heartbeat's is 0")
     stamp = env.stamp
     assert stamp is not None
-    return Put(stamp, read_body(env.record or b""))
+    return Put(stamp, read_body(env.record or b"", time_reader))
 
 
 # -- the second reading: one group's sections, with its revision --------------------

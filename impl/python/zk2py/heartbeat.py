@@ -386,12 +386,15 @@ def read_sections(layout: Layout, b: _Bits) -> dict[str, Any]:
     return out
 
 
-def read(layout: Layout, data: bytes) -> dict[str, Any]:
+def read(layout: Layout, data: bytes, time_reader: Any = None) -> dict[str, Any]:
     """A body read with its covered revision's layout, or :class:`Refused`
     for the first reason that applies, in §7.5's order. A templated
-    section's value names the ``form`` it was read in."""
+    section's value names the ``form`` it was read in. ``time_reader`` reads
+    the 42-bit time in :func:`read_time`'s place: a reader built before
+    core 0.113, for the fixtures' ``earlier`` members, handed in rather
+    than swapped into this module."""
     b = _Bits(bytes(data))
-    out: dict[str, Any] = {"time": read_time(b)}
+    out: dict[str, Any] = {"time": (time_reader or read_time)(b)}
     out["sections"] = read_sections(layout, b)
     used = (b.pos + 7) // 8
     if len(b.data) > used:

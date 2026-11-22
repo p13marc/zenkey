@@ -1,6 +1,6 @@
 """The ``health.v2`` scenarios (``spec/profiles/health/scenarios-v2.md``, text
 0.1) between two zk2py processes: ``python -m zk2py.health_v2_scenarios
-[--only 1|2|3|4|5|6|7|8|8w|9]...`` (#609, round 120).
+[--only 1|2|3|4|5|6|7|8|8w|9|epoch]...`` (#609, round 120).
 
 **Both parties are zk2py's.** The reference's runtime does not serve
 ``health.v2`` at 08f3600a, so this shows which sections can be run as
@@ -53,6 +53,10 @@ INTEROP = REPO / "impl" / "python" / "interop" / "health-v2"
 NAV = REPO / "examples" / "zk2" / "walkthrough" / "nav.v2.toml"
 NS = 1_000_000_000
 JITTER_S = 0.5
+#: scenarios-v2.md, Conventions: "No owner is given a catalog, so the
+#: deployment epoch is 0: a record's since and at are Unix seconds".
+#: Every reader of §1 to §9 holds it; :func:`under_a_catalog` holds another.
+EPOCH = 0
 
 
 class Report:
@@ -130,8 +134,8 @@ class Bus:
         self.procs.append(p)
         return p
 
-    def listener(self, address: str, selectors: list[str] | None = None) -> hl.Listener:
-        s = hl.Listener(self.s, address, selectors)
+    def listener(self, address: str, selectors: list[str] | None = None, epoch: int = EPOCH) -> hl.Listener:
+        s = hl.Listener(self.s, address, selectors, epoch=epoch)
         self.extra.append(s)
         return s
 
@@ -217,7 +221,7 @@ def section1(report: Report) -> None:
                     for i in sorted(snap.pages):
                         pg = snap.pages[i]
                         for e in pg["live"]:
-                            r = h2.read(h2.STATUS, pg["tag"], bytes.fromhex(e["record"]), 0)
+                            r = h2.read(h2.STATUS, pg["tag"], bytes.fromhex(e["record"]), EPOCH)
                             out.append((r.expect(), format(pg["run"], "04x" if pg["run_width"] == 16 else "08x"),
                                         e["confirmation"]))
             return out
@@ -651,7 +655,8 @@ def section6(report: Report) -> None:
             if rep.ok is None:
                 continue
             att = json.loads(rep.ok.attachment.to_bytes()) if rep.ok.attachment is not None else {}
-            rec = h2.read_put(h2.STATUS, rep.ok.payload.to_bytes(), 0, zk2c.envelope_encoding(str(rep.ok.encoding)))
+            rec = h2.read_put(h2.STATUS, rep.ok.payload.to_bytes(), EPOCH,
+                              zk2c.envelope_encoding(str(rep.ok.encoding)))
             shown.append({"last_known": hl.shown(rec, info3["tables"]), "confirmed": att.get("confirmed")})
         a3 = h2.judge(r3)
         st = info3.get("state")
@@ -916,6 +921,57 @@ def section9(report: Report) -> None:
         bus.close()
 
 
+def under_a_catalog(report: Report) -> None:
+    """zk2py's own, beside the scenarios (review-bot on round 120): an owner
+    given a catalog writes every record's time from the catalog's epoch, the
+    checks it holds before its tokens too, and a word of its own table there
+    as later; a reader that holds the catalog's epoch reads them back, and
+    one that holds 0 reads another instant."""
+    from .contract import load_contract
+
+    sec = "under a catalog's epoch (zk2py's own)"
+    epoch = 1767225600
+    bus = Bus()
+    try:
+        std, tc = hl.standard(), load_contract(INTEROP / "tcd.v1.toml")
+        path = os.path.join(bus.tmp, "catalog.json")
+        Path(path).write_text(json.dumps({"format": "zk2-catalog/1", "epoch": epoch, "entries": [
+            {"index": 0, "iface": std.interface, "contract": std.fingerprint}]}), encoding="utf-8")
+        s = bus.listener("lab/cat", epoch=epoch)
+        o = bus.owner("lab/cat", "--level", "degraded", "--reason", "serving", "--liar", "--catalog", path,
+                      "--contract", str(INTEROP / "tcd.v1.toml"), "--check", "disk=degraded:tcd_slow")
+        time.sleep(0.5)
+        now_ms = time.time_ns() // 1_000_000
+        o.cmd("check net degraded tcd_slow")
+        time.sleep(0.5)
+        held = {std.fingerprint: std.canonical, tc.fingerprint: tc.canonical}
+        r, info = hl.read_near(bus.t, "lab/cat", listener=s, held=held)
+        r0, _ = hl.read_near(bus.g, "lab/cat", held=held, epoch=0)
+        j = info["joined"]
+        doc = info.get("descriptor", {})
+        first = [s.record(x) for x in s.of("state/checks/disk") if x["kind"] == "put"]
+        later = [s.record(x) for x in s.of("state/checks/net") if x["kind"] == "put"]
+        near = lambda ms: ms is not None and abs(ms - now_ms) <= 5000  # noqa: E731
+        report.check(sec, "the owner's descriptor states the catalog, and its status's since, read under the "
+                          "catalog's epoch, is this instant; read under 0 it is an instant in 1970",
+                     doc.get("catalog") is not None and r.status is not None and near(r.status.at_ms)
+                     and r0.status is not None and r0.status.at_ms is not None
+                     and r.status.at_ms - r0.status.at_ms == epoch * 1000,
+                     f"catalog {doc.get('catalog')}; since {r.status and r.status.at_ms} under {epoch}, "
+                     f"{r0.status and r0.status.at_ms} under 0; now {now_ms}")
+        report.check(sec, "the check held before the tokens and the one put later count their at from the one "
+                          "epoch, and each carries the detail 32, its instance's own word, never out_of_range",
+                     len(first) == 1 and len(later) == 1 and near(first[0].at_ms) and near(later[0].at_ms)
+                     and first[0].word == 32 and later[0].word == 32
+                     and {k: (c.word, near(c.at_ms)) for k, c in j.checks.items()}
+                     == {"disk": (32, True), "net": (32, True)}
+                     and hl.shown(j.checks["disk"], info["tables"]) == "degraded, tcd_slow",
+                     f"before the tokens {[c.expect() for c in first]}; later {[c.expect() for c in later]}; "
+                     f"the GET's {[(k, c.expect()) for k, c in j.checks.items()]}; log {o.state()['log']}")
+    finally:
+        bus.close()
+
+
 def section8_worded(report: Report) -> None:
     section8(report, face="worded")
 
@@ -923,7 +979,7 @@ def section8_worded(report: Report) -> None:
 #: ``8w`` is §8 on the face as the text words it, which its Expected do not
 #: hold on (F-596): opt-in, never part of a whole run.
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
-            "7": section7, "8": section8, "9": section9, "8w": section8_worded}
+            "7": section7, "8": section8, "9": section9, "8w": section8_worded, "epoch": under_a_catalog}
 
 
 def main(argv: list[str] | None = None) -> int:

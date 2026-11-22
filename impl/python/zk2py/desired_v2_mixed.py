@@ -40,7 +40,7 @@ import json
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, Sequence
 
 from . import desired_v2 as d2, zk2c
 from .alarms_scenarios import Report
@@ -80,7 +80,7 @@ def _py(module: str, endpoint: str, flags: list[str], address: str) -> Proc:
     return Proc("zk2py", [sys.executable, "-m", module, "--connect", endpoint, *flags, address], address)
 
 
-def _rust(endpoint: str, flags: list[str], address: str, files: list[str] = ()) -> Proc:
+def _rust(endpoint: str, flags: list[str], address: str, files: Sequence[str] = ()) -> Proc:
     return Proc("rust", [str(BLACKBOX / "owner"), "--connect", endpoint, *flags, address, *files], address)
 
 

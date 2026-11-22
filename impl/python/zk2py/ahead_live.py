@@ -45,6 +45,8 @@ from .health_v2_scenarios import NS, Bus, Report
 REPO = Path(__file__).resolve().parents[3]
 HEALTH_V1 = REPO / "spec" / "profiles" / "health" / "health.v1.toml"
 FRESHNESS_V2 = REPO / "spec" / "profiles" / "freshness" / "freshness.v2.toml"
+#: a second covered interface, so that an owner heartbeat holds two groups
+BEACON = REPO / "impl" / "python" / "interop" / "freshness" / "beacon.v2.toml"
 REF = "zk2py/ahead/reference"
 AHEAD_BODY = "ffffffffff"       # the time's first 40 bits; the last two are 1 and 0
 
@@ -84,13 +86,32 @@ def _rust_owner(report: Report, owner_heartbeat: bool) -> None:
         lo = heartbeat.layout_of(hc.canonical, hc.fingerprint)
         flags = ["--health", "--health-status", "OK:serving", "--clock-reference", REF, "--clock-offset-ms", "2000"]
         key = heartbeat.heartbeat_key("lab", "ahead", "health.v1")
+        contracts: list[Path] = []
+        expected: list[int] = []
         if owner_heartbeat:
             path = os.path.join(bus.tmp, "catalog.json")
-            made = subprocess.run([str(BLACKBOX / "zk2"), "catalog", "new", str(HEALTH_V1), str(FRESHNESS_V2)],
+            files = [HEALTH_V1, BEACON, FRESHNESS_V2]
+            made = subprocess.run([str(BLACKBOX / "zk2"), "catalog", "new", *map(str, files)],
                                   capture_output=True, text=True, timeout=30)
+            if not report.check(sec, "`zk2 catalog new` made the catalog", made.returncode == 0,
+                                f"exit {made.returncode}; {made.stderr.strip()[-400:]}"):
+                return
             Path(path).write_text(made.stdout, encoding="utf-8")
             flags += ["--catalog", path, "--owner-heartbeat"]
+            contracts = [BEACON]
             key = "zk2/lab/ahead/freshness.v2/stream/heartbeats/host"
+            # the groups a `host` owner heartbeat holds (freshness.v2 §2.4):
+            # "one group for each covered interface whose revision has a
+            # collection of that class", each by its index in the catalog
+            from . import freshness_v2 as f2
+
+            catalog = cat.read(made.stdout)
+            by_fp = {c.fingerprint: c for c in map(load_contract, files)}
+            for index, (_, fp) in enumerate(catalog.entries):
+                c = by_fp[fp]
+                names = {col.resource for col in heartbeat.layout_of(c.canonical, c.fingerprint).collections}
+                if any(cls == "host" for r, cls in f2.classes_of(c.canonical).items() if r in names):
+                    expected.append(index)
         wires: list[tuple[int, bytes]] = []
         faults: list[tuple[int, Any]] = []
         subs = [bus.s.declare_subscriber(key, zenoh.handlers.Callback(
@@ -98,7 +119,7 @@ def _rust_owner(report: Report, owner_heartbeat: bool) -> None:
                 bus.s.declare_subscriber("zk2/lab/ahead/health.v1/stream/faults", zenoh.handlers.Callback(
                     lambda smp: faults.append((time.monotonic_ns(), smp))))]
         time.sleep(0.3)
-        p = Exe(BLACKBOX / "owner", "lab/ahead", [], connect=bus.endpoint, flags=flags)
+        p = Exe(BLACKBOX / "owner", "lab/ahead", contracts, connect=bus.endpoint, flags=flags)
         if p.wait_for("ready ", 120) is None:
             report.check(sec, "the owner example started", False, f"{p.stderr[-3:]}")
             return
@@ -137,10 +158,12 @@ def _rust_owner(report: Report, owner_heartbeat: bool) -> None:
                      f"{[earlier(w) for w in held[:2]]}")
         if owner_heartbeat:
             groups = [[g.index for g in oh.read(w, "stream").body.groups] for w in held]
-            c = cat.read(Path(os.path.join(bus.tmp, "catalog.json")).read_text(encoding="utf-8"))
-            report.check(sec, "one ahead time for every group: each owner heartbeat holds the groups its catalog "
-                              "indexes, under one time",
-                         bool(groups) and all(g for g in groups), f"groups' indices {groups[:2]}; catalog {c.id}")
+            report.check(sec, "one ahead time for every group: each owner heartbeat holds a group for each interface "
+                              "of the catalog that has a collection of the host class, by its index there, and no "
+                              "other, all under its one time",
+                         bool(groups) and len(expected) >= 2 and all(g == expected for g in groups),
+                         f"groups' indices {groups[:2]}; the catalog's host interfaces {expected}; catalog "
+                         f"{catalog.id} {[i for i, _ in catalog.entries]}")
         t_fix = time.monotonic_ns()
         fixed = p.command("clock-offset 0") or ""
         time.sleep(32.0)

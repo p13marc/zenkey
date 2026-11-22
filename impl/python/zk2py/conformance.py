@@ -4594,6 +4594,7 @@ def _round120_readings(root: Path) -> list[tuple[str, Any, Any]]:
     import re
     import tempfile
 
+    from . import conformance as me
     from . import health as h1, health_v2 as h2, heartbeat, owner_heartbeat as oh, zk2c
     from .contract import load_contract
     from .echo_tool import heartbeat_of
@@ -4789,6 +4790,38 @@ def _round120_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  h2.instance_table(h2.REASON, ["a", "b"], {"a": empty, "b": h2.Declared(None)}).expect(),
                  h2.read_word(h2.REASON, 32, h2.instance_table(h2.REASON, None, {"a": some})).expect()],
                 [{"table": None, "reason": "differ"}, {"table": []}, {"number": 32}]))
+    # -- the mend after round 120 (review-bot on its PR) --------------------------------------
+    from . import catalog as cat
+    from .health_v2_live import HealthV2Owner
+
+    interop = spec.parent / "impl" / "python" / "interop" / "health-v2"
+    epoch, t_ms = 1767225600, 1_800_000_000_123
+    o = HealthV2Owner("lab", "cat", contracts=[load_contract(interop / "tcd.v1.toml")], level="degraded",
+                      reason="serving", clock_ms=lambda: t_ms, liar=True, connect="tcp/127.0.0.1:1")
+    o.owner.catalog = cat.read(json.dumps({"format": "zk2-catalog/1", "epoch": epoch, "entries": [
+        {"index": 0, "iface": "health.v2", "contract": h2.FINGERPRINT}]}))
+    o.hold_check("disk", "degraded", "tcd_slow")
+    held0 = o.initial()
+    later = o._record(h2.CHECK, "degraded", "tcd_slow", t_ms)[1]
+    first = h2.read(h2.CHECK, 3, held0["health.v2/state/checks/disk"], epoch)
+    out.append(("the mend after round 120: zk2py's health.v2 owner writes every record through one helper, under "
+                "its catalog's epoch and its instance's tables: a check held before the tokens is the bytes a later "
+                "put of it is, its at the clock's second and its detail 32, never out_of_range; the status's since "
+                "the same; read under 0 each is another instant",
+                [held0["health.v2/state/checks/disk"] == later, first.expect(),
+                 h2.read(h2.STATUS, 3, held0["health.v2/state/status"], epoch).at_ms,
+                 h2.read(h2.CHECK, 3, later, 0).at_ms, o.epoch, o.log],
+                [True, {"level": "degraded", "detail": 32, "at": t_ms - t_ms % 1000}, t_ms - t_ms % 1000,
+                 t_ms - t_ms % 1000 - epoch * 1000, epoch, []]))
+    before = heartbeat.read_time
+    refused = [me._earlier_body(lo, bodies["ahead"]),
+               me._earlier_owner(oh.write(zk2c.InBand(16, 9, 0), heartbeat.AHEAD, [other]))]
+    out.append(("the mend after round 120: the fixtures' `earlier` reader is handed to heartbeat.read and "
+                "owner_heartbeat.read as their time decoder: each refuses the ahead time, code; the module's own "
+                "read_time is never swapped, and reads the same bytes as ahead after",
+                [refused, heartbeat.read_time is before, heartbeat.read(lo, bodies["ahead"])["time"],
+                 oh.read(oh.write(zk2c.InBand(16, 9, 0), heartbeat.AHEAD, [other])).body.time],
+                [[{"refused": "code"}, {"refused": "code"}], True, "ahead", "ahead"]))
     return out
 
 
@@ -15993,29 +16026,24 @@ def _earlier_time(b: Any) -> dict[str, int] | None:
 
 def _earlier_body(lo: Any, raw: bytes) -> dict[str, Any]:
     """A heartbeat's body through the earlier reader: its refusal, or its
-    value."""
-    from unittest import mock
-
+    value. The reader is handed its time decoder: no module global is
+    swapped, so another thread's reads are not touched."""
     from . import heartbeat
 
-    with mock.patch.object(heartbeat, "read_time", _earlier_time):
-        try:
-            return heartbeat.read(lo, raw)
-        except heartbeat.Refused as e:
-            return {"refused": e.token}
+    try:
+        return heartbeat.read(lo, raw, time_reader=_earlier_time)
+    except heartbeat.Refused as e:
+        return {"refused": e.token}
 
 
 def _earlier_owner(raw: bytes) -> dict[str, Any]:
     """An owner heartbeat's put through the earlier reader."""
-    from unittest import mock
+    from . import owner_heartbeat as oh
 
-    from . import heartbeat, owner_heartbeat as oh
-
-    with mock.patch.object(heartbeat, "read_time", _earlier_time):
-        try:
-            return _owner_value(oh.read(raw))
-        except oh.Refused as e:
-            return {"refused": e.token}
+    try:
+        return _owner_value(oh.read(raw, time_reader=_earlier_time))
+    except oh.Refused as e:
+        return {"refused": e.token}
 
 
 def _heartbeat_times(data: dict[str, Any], layouts: dict[str, Any]) -> list[Result]:
