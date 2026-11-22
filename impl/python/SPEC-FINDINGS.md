@@ -29801,7 +29801,7 @@ given. No `link.v2` policy, and so no deny, stood between R1 and R2.
 |---|---|---|
 | §1 Converge after an outage | 7 of 7 | Yes. |
 | §2 Never an older version | 6 of 6 | Yes. X needs the document type's tag for its envelope, 0 for a JSON type. |
-| §3 A delete, within the window and past it | 5 of 5 | Yes. Step 4's report is 5 bytes of record. |
+| §3 A delete, within the window and past it | 5 of 5 | Yes. Step 4's report is 5 bytes of record. (Round 119: it is 3, `200000`. The runner cut the envelope at 6 bytes, and the target's 32-bit run makes it 8.) |
 | §4 A refused document | 6 of 6 | Yes. Expected 6 does not say `in_force`: it is `none`, after step 5's failure. |
 | §5 A restart acts again | 3 of 3 | Yes. |
 | §6 The author's restart | 6 of 6 | But for two things. "Its clock is 5 s behind" has nothing to set in an author that reads no clock. Step 3 needs the author told that its run's record is gone (F-578). |
@@ -29851,6 +29851,10 @@ made in three parts, two checks failed, both the runner's:
 - **Fix:** "every report a target of this text writes", or the two
   exceptions named.
 - **Changes:** nothing a target writes.
+- **Round 119, live.** Each record either target put in the two cross
+  pairings reads with no finding and writes back to its bytes. One does
+  not: zk2py's own failed revert of F-577, which reads malformed. No
+  record of a later text, and no `code` past 4, was met on a bus. Open.
 
 ### F-577 · ambiguity · `desired.v2` §2.10 and §2.8: a revert on a snapshot with no entry that fails
 
@@ -29877,6 +29881,22 @@ made in three parts, two checks failed, both the runner's:
   (§2.17).
 - **Fix:** one sentence in §2.8's "Its report", and a case.
 - **Changes:** whether a tool can read a target after one failed act.
+- **Round 119, live: the two implementations differ**
+  (`desired_v2_edges --only failed`). Each target converged on v1 at
+  (R, 7), its drive was set to fail, and P answered a snapshot with no
+  entry under R, asof 9.
+  - **zk2py** put 3 bytes, `1800c0`: `baseline`, `failed`, `apply`,
+    `in_force` `none`, no observed version. Its own reader finds
+    `observed_outcome`, and a tool answers all four questions
+    unobservable, `report_invalid`.
+  - **The reference** put 13 bytes, `188020a00000f000000010c7fc`: the
+    same, with the observed version `0041/7` and `revision` 1, the
+    document it was reverting, and `detail` `out_of_range`. It reads
+    with no finding. A tool answers converged not yet, `behind`; refused
+    yes, `failed`; in force no, `baseline`.
+  - So the reference took the first reading, against "A revert on a
+    snapshot with no entry has no observed version". The text has to
+    decide. Open.
 
 ### F-578 · gap · core §4.3 and `scenarios-v2.md` §6: a run's record that is gone
 
@@ -29906,6 +29926,17 @@ made in three parts, two checks failed, both the runner's:
   and an owner that finds none where it was told one draws a 32-bit
   run. Or the same in §6's step.
 - **Changes:** whether a target converges after its author loses a file.
+- **Round 119, live: both implementations take run 0000 again**
+  (`desired_v2_edges --only record`). Each author put v1 at `0000/0` and
+  v2 at `0000/1`, ended without closing, lost the file of its run's
+  record, and started again on the same path. Each then put v3 at
+  `0000/0`.
+  - The other implementation's target, converged on v2 at `0000/1`,
+    acted on neither v3 nor v4 (`0000/1`). It acted on v5 (`0000/2`).
+  - Two documents were never acted on, in both cross pairings, and no
+    report said so.
+  - The reference's record is 2 bytes, zk2py's a JSON object. Neither
+    can tell a lost file from a first start. Open.
 
 ### F-579 · minor · `desired/conformance/v2/`: seven shapes the files do not hold
 
@@ -29929,6 +29960,9 @@ made in three parts, two checks failed, both the runner's:
 - **What zk2py does:** each as the sentence quoted says.
 - **Fix:** a case for each.
 - **Changes:** the fixtures.
+- **Round 119.** Not moved. Two of the seven shapes ran on a bus, in
+  `desired_v2_edges`: a version at and below a remembered asof, and
+  F-577's failed revert. Open.
 
 ### F-580 · ambiguity · `desired.v2` §0 and §2.10: whether a resource of another kind that holds `desired.report` is a report resource
 
@@ -29953,6 +29987,8 @@ made in three parts, two checks failed, both the runner's:
 - **Fix:** "a resource … whose resolved annotations hold
   `desired.report`" in §0, or "state" in `two_reports`.
 - **Changes:** whether a tool reads one report.
+- **Round 119.** `zk2 contract lint` of e1c2d9c4 still says
+  `two_reports` on both, and zk2py on the stream alone. Open.
 
 ### F-581 · ambiguity · `desired.v2` §2.5: the stamp a read carries around a snapshot with no entry
 
@@ -29975,6 +30011,13 @@ made in three parts, two checks failed, both the runner's:
 - **What zk2py does:** none, in both cases.
 - **Fix:** "a snapshot with no entry it admitted is no version: it
   sends none".
+- **Round 119, live: the two agree** (`desired_v2_edges`). Both
+  targets' re-reads carry no stamp in each of three states: while the
+  revert a snapshot with no entry began is held at its start, after it
+  is done, and after it failed.
+  - The reference sends none after a failed one too, though its report
+    then states an observed version (F-577).
+  - The text still names neither case. Open.
 
 ### F-582 · minor · `desired.v2` §2.6 step 4 against §2.8: a version at the asof
 
@@ -29991,6 +30034,11 @@ made in three parts, two checks failed, both the runner's:
   description.
 - **What zk2py does:** older.
 - **Fix:** step 4: "or at a snapshot's asof it remembers".
+- **Round 119, live: the two agree on what a bus shows.** After a
+  revert on a snapshot of asof 9 under R, neither target acted on X's
+  put at (R, 8) or at (R, 9), and both acted on (R, 10). Neither put a
+  report for the first two. Which word a target gives (R, 9) is not on
+  the wire. Open.
 
 ### F-583 · ambiguity · `desired.v2` §2.2 and §2.10: what a linter does with an invalid declaration
 
@@ -30009,6 +30057,8 @@ made in three parts, two checks failed, both the runner's:
   reads the declaration beside. Its target refuses to start on one.
 - **Fix:** one sentence in §2.2 and §2.10, saying which.
 - **Changes:** whether such a contract has a bundle.
+- **Round 119.** Unchanged at e1c2d9c4: `error[desired.v2
+  horizon_v1]`, exit 1, no fingerprint. Open.
 
 ### F-584 · minor · `scenarios-v2.md` §13 and Appendix B: "v1's document was 44"
 
@@ -30022,6 +30072,9 @@ made in three parts, two checks failed, both the runner's:
 - **What zk2py does:** P answers its own bytes, and the runner prints
   both lengths.
 - **Fix:** "where v1's document was 40", or the figure dropped.
+- **Round 119.** P's v1 was 45 bytes against either target, and 40
+  with no space. zk2py's author puts it as 40, its canonical form, as the
+  reference's archive showed (`bytes=40`). Open.
 
 ### F-585 · gap · `desired.v2` §2.17 and §5: a target that reverted on a snapshot with no entry is never read converged
 
@@ -30045,6 +30098,13 @@ made in three parts, two checks failed, both the runner's:
   answers "yes, `reverted`" for `reverted` with no observed version
   beside a snapshot with no entry, and says it cannot tell the run.
 - **Changes:** what an operator sees after a delete past the window.
+- **Round 119, live: the two agree, and round 118's size was wrong.**
+  After §3 step 4 both targets' report is 3 bytes of record, `200000`:
+  `baseline`, `reverted`, and nothing more.
+  - Round 118 said 5 bytes. It cut the envelope at 6 bytes, and a target
+    under a 32-bit run writes 8.
+  - A tool beside the author's snapshot with no entry answers converged
+    unobservable, `author_silent`, of either target's report. Open.
 
 ### F-586 · minor · `desired.v2` §2.17: no slice, and the author's presence possibly incomplete
 
@@ -30057,6 +30117,7 @@ made in three parts, two checks failed, both the runner's:
   case 12 pins v1's answer with no GET made.
 - **What zk2py does:** v1's order, as the case.
 - **Fix:** "and otherwise as step 6 says of a GET not made".
+- **Round 119.** Not run: no tool reads `desired.v2` on a bus. Open.
 
 ### F-587 · minor · core §4.3 and `link.v2` §2.11: a `desired.v2` desired resource of a contract that uses `redundancy.v1`
 
@@ -30077,6 +30138,9 @@ made in three parts, two checks failed, both the runner's:
   `redundancy.v1` in `uses` after the `desired.v2` clause.
 - **No case:** `v2/plan.json`'s case 49 uses no `redundancy.v1`.
 - **Fix:** "unless its contract uses `redundancy.v1`" in each sentence.
+- **Round 119.** Not run live. A reading now holds the plan's side:
+  `plans/{vehicle}` under `desired.v2` beside `redundancy.v1` keeps its
+  floor (`readings`). Open.
 
 ### Read cold: the two other changelogs
 
@@ -30127,5 +30191,390 @@ made in three parts, two checks failed, both the runner's:
   None is a blocker.
 - **Open:** F-437 to F-441; F-569 to F-575, whose answers are not on
   this branch; F-576 to F-587.
+
+  F-365 stays open as #965's.
+
+## At desired.v2 0.1, against the reference
+
+Round 119 read the branch `chunk-986-j3` at e1c2d9c4. **No rule moved**
+since round 118: `desired.v2` 0.1, core 0.112, `link.v2` 0.23.
+- **What moved in the texts zk2py reads** is one paragraph of
+  `scenarios-v2.md`'s intro. "No implementation runs them yet" became
+  "The reference runs the runtime's. §1 to §8 and §10 to §15 are tests
+  of `zenkey` … §9 is to run as a test of `zenctl`, and no
+  implementation runs it yet."
+- **How that was checked.** zk2py compared the blob ids of every file
+  under `spec/`, `examples/zk2/` and `zenkey/tests/contracts/` between
+  round 118's base, 87040493, and this tree, by name. Two differ:
+  `scenarios-v2.md` and `spec/CLAUDE.md`. It then read the first beside
+  its earlier text. It read no diff of `spec/`, and the barrier keeps
+  `spec/CLAUDE.md` unread.
+- **The walk needed no new key.** `just py-conformance` passed whole,
+  7566 of 7566, before any line of this round. It passes 7569 of 7569
+  with three readings more. `RULES.md` holds 295 rules, and the walk's
+  308 rows keep their verdicts.
+
+**The reference's runtime speaks `desired.v2` since e1c2d9c4.** Its
+owner example has `--desired-v2`, `--desired-ttl` and
+`--desired-timeout-ms`, learnt from its `--help`. So this round is the
+two implementations' first meeting on this major. Every router is
+zenoh-python's, zenoh 1.10.1, and every listener took port 0.
+
+### The scenarios, in both cross pairings
+
+`desired_v2_scenarios --author <a> --target <t>`, on the final tree,
+each pairing run whole once.
+
+| Section | The reference's author, zk2py's target | zk2py's author, the reference's target |
+|---|---|---|
+| §1 Converge after an outage | 7 of 7 | 7 of 7 |
+| §2 Never an older version | 6 of 6 | 6 of 6 |
+| §3 A delete, within the window and past it | 5 of 5 | 5 of 5 |
+| §4 A refused document | 6 of 6 | 6 of 6. One report differs (below). |
+| §5 A restart acts again | 3 of 3 | 3 of 3 |
+| §6 The author's restart | 6 of 6, step 1 under `--clock-offset-ms -5000` | 6 of 6. Step 1's clock not set: zk2py's author reads none. |
+| §7 Last-known from an archive | Not run: zk2py's target reads no archive. | 3 of 3, with the reference's `archive` |
+| §8 The kill switch | 1 of 1 | 1 of 1 |
+| §10 Last-known confirmed | Not run, as §7. | 5 of 5, with the reference's `archive` |
+| §13 A conditional re-read | 8 of 8. P plays the author, so this is zk2py's target alone. | 8 of 8. P and the reference's target. |
+| §14 The watch, by the heartbeat | 6 of 6, and 2 of 2 for a target that does not move what it expects | 6 of 6. The reference's target has no word for not moving it. |
+| §14 The watch, by an owner heartbeat under a catalog | 7 of 7 | 7 of 7 |
+| §15 A delete past the window, then a restart | 3 of 3 | 3 of 3 |
+| **In all** | **60 of 60** | **67 of 67** |
+
+**Every Expected that was run was met, in both pairings.**
+
+**The reports, side by side.** The runner reads `Rp` by a GET after each
+numbered Expected and prints its record. That is 51 records with zk2py's
+target and 56 with the reference's.
+- **None has a finding,** and each writes back to its bytes.
+- **Fifty are of one section and step in both pairings.** Forty-nine
+  hold the same fields but for run and seq, and 41 are the same bytes.
+- **One differs: §4 step 5,** the act that fails after the rate.
+
+  | Target | Record | Reads |
+  |---|---|---|
+  | zk2py | 12 bytes, `588000a000005000000050c0` | `desired`, `failed`, the observed version `0001/2`, `revision` 5, `in_force` `none`, `code` `apply` |
+  | The reference | 14 bytes, `588000a000005000000050c80ffc` | the same, and `pointer` 1, `/mode`, and `detail` `out_of_range` |
+
+  Both meet Expected 5, which names no place and no line (F-592).
+- **Each target's put has CH `0x1c`:** tag 12 under a 32-bit run. Neither
+  target keeps a run's record.
+
+**What the first run showed, said plainly.** Made before the face
+below, it failed 1 of 60 and 3 of 59. None was a difference between
+the implementations.
+- **§15 step 1, zk2py's target, one run in three:** its seed at the
+  author's appearance drew nothing, and it made none again. The token
+  had reached R2 before the route to the author's queryable. v1 §2.5
+  allows "A seed that draws nothing at an appearance MAY be made again,
+  a few times and soon", and §2.5 here keeps it "for a GET that ended
+  with no reply before its timeout". zk2py's v2 target lacked it. It
+  makes it again now, up to four times, and the section passed four
+  runs in four.
+- **§4 step 5, the runner's:** it asked for zk2py's own record, byte
+  for byte. It now asks for what Expected 5 states.
+- **§14 step 5, the reference's target, twice:** two GETs where the
+  text has one. The relay let presence cross, so that target saw its
+  author's new instance token and seeded, as off a face it should. That
+  is the runner's bus, not the target.
+
+### A face, for §14
+
+§14 says "no presence crosses, so the target never sees its author's
+instance token appear". zk2py's target can be told so. The reference's
+has no such word, and follows presence wherever it crosses.
+- **So the runner's bus got a face of one rule.** R1 denies
+  `zk2/**/@zk/**`, every message, both flows, on the link to R2 alone,
+  told by its protocol. That is the first deny of a `link.v2` plan
+  (`zk`), as `link.plan` writes it.
+- **It is that rule and no other.** No `adv` or `admin` deny, no kind's
+  deny, no transport block, and R2 names no region. A full `link.v2`
+  face was not run.
+- **With it, both targets seed at their start and never on a token.**
+  §14 passes whole in the four pairings, zk2py against itself and the
+  reference against itself among them.
+
+### The watch across the two
+
+Each direction, each form, on that face, over about 50 s.
+
+| The heartbeat | The reference's author, zk2py's target | zk2py's author, the reference's target |
+|---|---|---|
+| Covering `tasking.v2`, on `…/stream/heartbeat/tasking.v2` | 6 of 6 | 6 of 6 |
+| An owner heartbeat's group, on `…/stream/heartbeats/host`, under a catalog | 7 of 7 | 7 of 7 |
+
+- **Each target read the other's heartbeats:** one read at its first,
+  answered with the held stamp alone; one for another member's change;
+  one after the gap, answered whole, then one more, answered unchanged;
+  one for the new run; none for an unmoved section, and none while the
+  author was stopped past its horizon.
+- **Both move what they expect at their own change:** no GET at step 3.
+- **Under a catalog** the author sent no heartbeat of `tasking.v2`
+  beside its owner heartbeats. The catalog lists `tasking.v2`, watched,
+  then `freshness.v2`. Across the face no descriptor crosses, so each
+  target read the index through the catalog it was given.
+- **zk2py's target gained this in round 119.** Round 118's counted an
+  owner heartbeat and read none.
+
+### The four edges
+
+`desired_v2_edges`. For the first three P plays the author under R,
+`0041`, so both targets are given the same bytes. Each target converges
+on v1 at (R, 7). P then answers a snapshot with no entry, asof 9.
+
+| Edge | zk2py | The reference | The same? |
+|---|---|---|---|
+| The report after that revert (F-585) | 3 bytes, `200000` | 3 bytes, `200000` | Yes. |
+| What a tool concludes of it (F-585) | converged unobservable, `author_silent` | the same | Yes. |
+| The stamp of its re-reads after it (F-581) | none | none | Yes. |
+| The stamp while the revert is held at its start (F-581) | none | none | Yes. |
+| X's put at (R, 8), at (R, 9), at (R, 10) (F-582) | no act, no act, an act | the same | Yes, as far as a bus shows. |
+| The report of that revert, failed (F-577) | 3 bytes, `1800c0`: no observed version. Malformed, `observed_outcome`. | 13 bytes, `188020a00000f000000010c7fc`: the observed version `0041/7`, `revision` 1, `detail` `out_of_range`. No finding. | **No.** |
+| What a tool concludes of it (F-577) | all four unobservable, `report_invalid` | converged not yet, `behind`; refused yes, `failed`; in force no, `baseline` | **No.** |
+| The stamp of its re-reads after the failed revert | none | none | Yes. |
+| A run's record that is gone (F-578) | run 0000 again: v3 at `0000/0` | run 0000 again: v3 at `0000/0` | Yes. Both lose documents. |
+
+- **F-577 is where they differ, and the text has to decide.** zk2py
+  wrote what §2.10 says of such a revert, and its report breaks
+  §2.10's own check. The reference kept the reverted document's version
+  as observed, against "A revert on a snapshot with no entry has no
+  observed version", and its report is consistent.
+- **F-578 is where they agree, and both are wrong by core §4.3.** "An
+  owner MUST NOT write under a run that it, or another instance of its
+  service, wrote under before." Each author's target then missed two
+  documents.
+
+### Both majors side by side
+
+`desired_v2_mixed`, 28 of 28. A check there states what was seen. In
+every case the two implementations did the same thing.
+
+**A target built for `desired.v1`, under an author of `desired.v2`.**
+The author's interface is `tasking.v1` at minor 1, its `uses` moved to
+`desired.v2` (`interop/desired-mixed/tasking.v1.toml`). The target is
+`worker.v1`'s. The author makes two puts and a delete.
+
+| The router's timestamping | Each author's puts on S | Each v1 target |
+|---|---|---|
+| Off | No Zenoh timestamp | **Inert, as §2.18 says:** no act, the baseline's report. The reference warns of an unstamped sample for each. |
+| On, zenoh's default for a router | The router's id on each put; none on the delete | **Not inert:** it acts on both puts, under the router's id. It ignores the delete. It stays converged on the deleted v2, and runs it. |
+
+That is F-588. Four pairings each, eight runs.
+
+**A target built for `desired.v2`, under an author of `desired.v1`.**
+The author's interface is `tasking.v2` in a revision that uses
+`desired.v1` (`interop/desired-mixed/tasking.v2.toml`). Each author
+then sets its own Zenoh timestamp on each put and its delete, and a GET
+draws a reply per key. The target is `worker.v2`'s, and declares the
+packed `Report` alone.
+
+| The target | zk2py | The reference |
+|---|---|---|
+| Told its author's revision | Does not start, exit 1: "its author's revision of tasking.v2 does not use desired.v2, and this target declares no desired.v1.Report resource" | Does not start, exit 1: "a JSON Schema value for a resource whose type is not one" |
+| Not told: it holds the scenarios' `tasking.v2` | Orders the author's versions by their in-band run and seq, acts on each, and reports `reverted` under `<run>/2` in a packed `Report` | The same |
+
+That is F-589 and F-590.
+
+**The reference's owner example as a `desired.v2` author of
+`tasking.v1`.** `--desired-author --desired-v2` with that file serves
+`tasking.v2` beside it, and authors there. `--desired-author` alone with
+the file authors `tasking.v1`, and its runtime reads the revision's
+`uses`: no timestamp of its own, and a snapshot. The runs above use the
+second.
+
+### F-588 · contradiction · `desired.v2` §2.18 against core §4.2, "Observing S1": a target built before this major is not inert through a router that timestamps
+
+> `desired.v2` §2.18: "**Targets first.** A target built before this
+> major, bound to an author of it, reads every version as unstamped
+> (v1 §2.6). It acts on none. That is safe, and inert."
+> Core §4.2: "**Outside §4.3's table,** the owner's puts arrive with no
+> Zenoh timestamp through a router whose timestamping is disabled.
+> Through one with it enabled they arrive with the router's zid. Its
+> deletes and replies arrive with none either way (§4.1)."
+> v1 §2.6: "**Unstamped:** a sample with no timestamp."
+
+- **The contradiction.** A `desired.v2` desired resource is outside
+  §4.3's table. So through a router that timestamps, its author's puts
+  reach a v1 target with a timestamp, the router's. A v1 target reads
+  a stamp, an id it has not seen, and admits it.
+- **Measured, eight runs** (`desired_v2_mixed --only v1-target`): each
+  implementation's v1 target under each implementation's v2 author.
+  - **Timestamping off:** no act, the baseline's report. As the text
+    says.
+  - **Timestamping on:** the target acted on v1 and on v2. Its report
+    is `converged`, `observed` `{stamp: <time>/<R1's zid>, revision:
+    2}`. The author's delete arrived with no timestamp, and the target
+    ignored it. It ran v2 after its author had deleted it.
+- **So it is neither inert nor safe.** Such a target follows its
+  author's puts and never reverts, by a delete or by a tombstone: a
+  reply carries no timestamp either way.
+  - Its seed adds nothing. The reference's v1 target reads no reply in a
+    snapshot (`answered=0`). zk2py's reads the entry, which carries no
+    timestamp, and ignores it.
+- **A router's timestamping is on unless a deployment turns it off.**
+  §1's Expected 2 of this major's own scenarios says "Where it carries a
+  Zenoh timestamp, the id is R1's".
+- **What zk2py does:** its v1 target is v1's, unchanged. It acts.
+- **Fix:** one of these. "Targets first" becomes a rule: an author MUST
+  NOT move to this major while a target built before it is bound. Or
+  the sentence is narrowed to a deployment none of whose routers
+  timestamps. Or the author's revision takes a new major of its
+  interface, which a v1 target's requirement does not name.
+- **Changes:** whether a deployment can move an author before its
+  targets.
+
+### F-589 · gap · `desired.v2` §2.18: a target that declares this major's report alone, bound to an author of `desired.v1`
+
+> "It orders a `desired.v1` author's versions by v1 §2.6, and a
+> `desired.v2` author's by §2.6 here." And: "A role bound to a
+> `desired.v1` author is reported in a `desired.v1.Report`, and one
+> bound to a `desired.v2` author in a `Report`. Neither carries the
+> other's version. A target that serves both declares a report resource
+> of each. It puts the one of its author's major."
+
+- **The gap.** The text speaks of a target that serves both. The
+  scenarios' `worker.v2` declares the packed `Report` alone. Bound to an
+  author whose revision uses `desired.v1`, it has no resource for the
+  report §2.18 asks. No sentence says what it does.
+- **Measured.** Told that revision, neither implementation's target
+  starts, exit 1.
+  - zk2py refuses by its own reading, as an invalid binding is refused.
+  - The reference says "a JSON Schema value for a resource whose type
+    is not one", which names no role and no rule.
+- **Fix:** a sentence in §2.18. Such a role's binding is invalid, refused
+  at the target's start with a reason; or the role is reported as
+  unbound.
+- **Changes:** what an operator sees when one author stays on v1.
+
+### F-590 · ambiguity · `desired.v2` §2.18: "by its descriptor or the deployment's word", where the two differ
+
+> "**A target reads its author's revision,** by its descriptor or the
+> deployment's word, as core §4.2 reads which resources are per key."
+
+- **Two sources, and no order between them.** A target that holds a
+  revision of its author's interface, the deployment's word, can meet an
+  author whose descriptor names another, by its fingerprint.
+- **Measured** (`desired_v2_mixed --only v2-target`, not told). Each
+  implementation's `desired.v2` target held the scenarios' `tasking.v2`.
+  Its author served `tasking.v2` in a revision that uses `desired.v1`,
+  and its descriptor said so: another `contract`, and `profiles` with
+  `desired.v1`.
+  - Each target ordered that author's versions by their in-band run and
+    seq, acted on both puts and on the delete, and put a packed `Report`
+    naming `<run>/2`.
+  - That is a `desired.v1` author's role in a `Report` of this major,
+    with this major's version: what "Neither carries the other's
+    version" excludes.
+- **It works by accident.** A `desired.v1` author's puts carry an
+  in-band stamp too (core S1), and its replies come per key, which both
+  targets read.
+- **What zk2py does:** the deployment's word. It reads no descriptor.
+- **Fix:** which source decides, and that a target MUST check the
+  fingerprint its author's descriptor names against the revision it
+  holds, where the descriptor reaches it.
+- **Changes:** whether a stale deployment is caught at the target.
+
+### F-591 · minor · `link` `v2/plan.json`: no case holds the other side of §2.11's new sentence
+
+> `link.v2` §2.11: "**A `desired.v2` desired resource has no floor,**
+> unless its template's first chunk is a parameter."
+
+- **The gap in the fixture.** Case 49 holds `plans/{vehicle}`, which has
+  no floor. No case holds a `desired.v2` desired resource templated as
+  `{vehicle}/plan`, which keeps one, nor one of a contract that uses
+  `redundancy.v1` (F-587).
+- **Checked.** A plan that gives no `desired.v2` desired resource a
+  floor, whatever its template, passes `v2/` whole, 175 of 175.
+- **How it was found:** review-bot read zk2py's `_per_key` as that
+  plan. It was not: the "unless" is §2.11's list's last item, "a
+  template whose first chunk is a parameter", which zk2py reads of every
+  state. `desired.v2` §2.8 and §2.14 say the same. The text decides, and
+  the two sentences agree.
+- **What zk2py does:** `link.keeps_floor`, and a reading on case 49 with
+  its template changed (`readings`).
+- **Fix:** two cases.
+
+### F-592 · minor · `scenarios-v2.md` §4, Expected 5: a failed act's place and line
+
+> "5. `Run` holds `rate_hz` 20 and `mode` `run`. The report is `source`
+> `desired`, `outcome` `failed`, the observed version `s5`, `code`
+> `apply`, and `in_force` `none`."
+
+- **Unsaid:** whether that report carries a `pointer` and a `detail`.
+  The Conventions give the worker's two refusals, each with its index
+  and its line, and nothing for the act that fails. v1's Expected 5
+  wrote `refusal: {code: apply, …}`.
+- **Measured:** the two targets put different bytes for the one state.
+  zk2py's holds neither, 12 bytes. The reference's holds `pointer` 1,
+  `/mode`, and `detail` `out_of_range`, 14 bytes. Both meet the Expected.
+- **Fix:** "with `pointer` 1 and a line its table does not hold", or
+  "and no place".
+- **Changes:** whether two implementations of the scenarios' worker
+  agree byte for byte.
+
+### F-576 to F-587, after the live run
+
+Each entry above holds a "Round 119" line. In short:
+
+| Finding | What the bus showed |
+|---|---|
+| F-576 | 107 records read, none with a finding, each writing back. Open. |
+| F-577 | **The two differ.** Open: the text decides. |
+| F-578 | Both reuse run 0000, and a target then misses two documents. Open. |
+| F-579 | Not moved. |
+| F-580 | Unchanged at e1c2d9c4: the lint and zk2py differ. Open. |
+| F-581 | The two agree: no stamp. The text is still silent. Open. |
+| F-582 | The two agree on what a bus shows. Open. |
+| F-583 | Unchanged: an error, exit 1. Open. |
+| F-584 | Unchanged. |
+| F-585 | The two agree. Round 118's "5 bytes" was 3. Open. |
+| F-586, F-587 | Not run live. |
+
+### F-569 to F-575
+
+**They stay open.** Nothing of this round bears on them.
+
+### The mend
+
+review-bot's four notes on round 118 (#1153).
+1. **Should fix, `link.py`.** The code did what the text says, and its
+   docstring did not say why. `_per_key` never dropped a `desired.v2`
+   resource: it leaves the list's second item alone, and each other item
+   still reads it. `keeps_floor` now states §2.11's two levels, and a
+   reading pins four shapes on case 49 (F-591).
+2. **`_round118_readings`.** Each changed reader is a subclass, or a
+   function handed to its file's runner. No machine of the module is
+   reassigned.
+3. **`_desired_v2_declarations`** builds its resource with
+   `_desired_v2_resource`.
+4. **`desired_v2_owner`** refuses an unknown command before any role is
+   asked for.
+
+### Not run
+
+- **§9:** no tool of either implementation reads `desired.v2` on a bus.
+- **§11 and §12:** not written for this major.
+- **§7 and §10 with zk2py's target:** it reads no archive.
+- **§6 step 1's clock with zk2py's author:** it reads none.
+- **A full `link.v2` face:** the `zk` deny alone stood between R1 and R2.
+  Which way a heartbeat crosses a real face was not checked.
+- **`desired.v2` under `redundancy.v1`,** and `config.v1` or `config.v2`
+  as a target (§2.16).
+- **F-586 and F-587, live.**
+- **zenohd:** `bin/current` holds none.
+- **The reference against itself** was run for §2, §8 and §14 only, as a
+  check of the runner.
+
+### Counts at desired.v2 0.1, against the reference
+
+592 entries.
+- **New: F-588 to F-592:**
+  - one contradiction: F-588;
+  - one gap: F-589;
+  - one ambiguity: F-590;
+  - two minor errors: F-591 and F-592.
+  F-588 is the one to settle first: it bears on a deployment's safety.
+- **Open:** F-437 to F-441; F-569 to F-592.
 
   F-365 stays open as #965's.

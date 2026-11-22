@@ -908,11 +908,14 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   never blessed. The reference then ran every case as written
   (`zenkey-model/tests/profiles/desired_v2.rs`, a runner per file, none
   able to bless), and all 293 pass with no case, sentence or count
-  moved. Its model is J2's alone: no runtime and no tool speaks the
-  major yet, and no implementation has run `scenarios-v2.md` (J3's
-  `zenkey/tests/profile_desired_v2.rs`, over
-  `zenkey/tests/contracts/{tasking,worker}.v2.toml`, which are in the
-  tree and lint clean). Three things the text does not say, which the
+  moved. Since J3 the runtime speaks the major, and
+  `zenkey/tests/profile_desired_v2.rs` runs `scenarios-v2.md` §1 to §8
+  and §10 to §15 as written, over
+  `zenkey/tests/contracts/{tasking,worker}.v2.toml`: no step, sentence or
+  expectation moved, and only the scenarios' intro says who runs them.
+  No tool reads the major yet (J4), so §9 has not run. §13's Expected 1
+  gives v1's document as 44 bytes, an illustration: the reference's
+  serializes to 40. Three things the text does not say, which the
   model settles and a second implementation would meet: a revert on a
   snapshot with no entry that cannot finish (§2.10 gives it no observed
   version, and calls `failed` with none stated malformed: the model

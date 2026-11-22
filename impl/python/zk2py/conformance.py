@@ -1753,7 +1753,7 @@ def _desired_v2_reports(path: Path) -> list[Result]:
     return out
 
 
-def _desired_v2_order(path: Path) -> list[Result]:
+def _desired_v2_order(path: Path, role: Any = None) -> list[Result]:
     """desired.v2 §2.4, §2.6 to §2.10: one target's steps -> each step's
     word, and the report after the last. Each report the machine builds is
     also written, read back and checked (§2.10: "A target's report MUST be
@@ -1763,7 +1763,7 @@ def _desired_v2_order(path: Path) -> list[Result]:
     out: list[Result] = []
     for i, c in enumerate(_load_json(path)["cases"]):
         name = f"v2 order #{i}: {c['note']}"
-        words, fields = d2.run_steps(c["steps"])
+        words, fields = d2.run_steps(c["steps"], role)
         out.append(_check(name, {"steps": words, "report": d2.reading_of_fields(fields)}, c["expect"]))
         back = d2.read_report(d2.REPORT_TAG, d2.write_report(fields))
         out.append(_check(f"{name} (its report reads back, with no finding)",
@@ -1771,7 +1771,7 @@ def _desired_v2_order(path: Path) -> list[Result]:
     return out
 
 
-def _desired_v2_watch(path: Path) -> list[Result]:
+def _desired_v2_watch(path: Path, watch: Any = None) -> list[Result]:
     """desired.v2 §2.5, the watch: one target's heartbeats, live versions
     and answers -> what each does, the section it expects after each, and
     whether the version it holds is still last-known. The file's holder of
@@ -1787,7 +1787,7 @@ def _desired_v2_watch(path: Path) -> list[Result]:
     out: list[Result] = []
     for i, c in enumerate(_load_json(path)["cases"]):
         name = f"v2 watch #{i}: {c['note']}"
-        w = d2.Watch()
+        w = (watch or d2.Watch)()
         held = None if c["held"] is None else [d2.Version.parse(c["held"]["version"]), c["held"]["kind"] == "delete",
                                                bool(c["held"].get("last_known"))]
         sent: Any = None
@@ -1842,7 +1842,7 @@ def _desired_v2_watch(path: Path) -> list[Result]:
     return out
 
 
-def _desired_v2_declarations(path: Path) -> list[Result]:
+def _desired_v2_declarations(path: Path, declare_report: Any = None) -> list[Result]:
     """desired.v2 §2.2, §2.10: a resolved resource -> its declaration as a
     desired resource (v1's reading and ``horizon_v1``), and as a report
     resource. An explicit state is read as its kind token, ``@state``."""
@@ -1858,14 +1858,10 @@ def _desired_v2_declarations(path: Path) -> list[Result]:
         got = d2.declare(token(r), r["template"], r["annotations"], r["params"], c["uses"]).expect()
         out.append(_check(f"v2 declarations, resource #{i}: {c['note']}", got, c["expect"]))
     for i, c in enumerate(data["reports"]):
-        r = c["resource"]
-        ty = r["type"]
-        mine = d2.ReportResource(token(r), r["template"], r["annotations"],
-                                 ty["kind"] == "packed" and ty["name"] == d2.REPORT_TYPE
-                                 and d2.is_published(ty["artifact"]))
+        mine = _desired_v2_resource(c["resource"])
         # the file gives the other resources by their desired.report values alone
         others = [d2.ReportResource("state", "", {d2.REPORT_KEY: v}, True) for v in c["others"]]
-        d = d2.declare_report(mine, set(c["requires"]), others)
+        d = (declare_report or d2.declare_report)(mine, set(c["requires"]), others)
         if d.declaration == ds.NOT_THIS:
             got = {"declaration": ds.NOT_THIS}
         elif d.declaration == ds.INVALID:
@@ -1887,7 +1883,7 @@ def _desired_v2_resource(r: dict[str, Any]) -> Any:
                              and d2.is_published(ty["artifact"]))
 
 
-def _desired_v2_slices(path: Path) -> list[Result]:
+def _desired_v2_slices(path: Path, names: Any = None) -> list[Result]:
     """desired.v2 §2.10: a tool's finding of one role's report, among the
     replies of S4's GET over the target's state. The file gives each reply
     as its CH tag and its record, which the runner puts back in an envelope
@@ -1900,7 +1896,7 @@ def _desired_v2_slices(path: Path) -> list[Result]:
         replies = [(x["key"], zk2c.write("mutation", 16, 0, 0, x["tag"], bytes.fromhex(x["hex"])))
                    for x in rd["replies"]]
         f = d2.find_report(rd["target"], rd["iface"], [_desired_v2_resource(r) for r in rd["resources"]],
-                           set(rd["requires"]), rd["role"], replies)
+                           set(rd["requires"]), rd["role"], replies, names)
         got: dict[str, Any] = {"found": f.found, "key": f.key, "reasons": list(f.reasons)}
         if f.found == d2.FOUND_UNREADABLE:
             got["why"] = f.why
@@ -4325,7 +4321,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
-        + _round104_readings(root) + _round118_readings(root)
+        + _round104_readings(root) + _round118_readings(root) + _round119_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4465,97 +4461,89 @@ def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
     def failing(run: Any, path: Path) -> list[int]:
         return [i for i, r in enumerate(run(path)) if not r[1]]
 
+    # Each changed reader is a subclass, or a function of its own, handed to
+    # the file's runner: the module's machines are never reassigned
+    # (review-bot on round 118).
     T, W = d2.TargetRole, d2.Watch
-    kept = (T.receive, T._judge_no_entry, T.finish, W.heartbeat, W.own_change, d2.declare_report, d2.names_role)
     got: dict[str, Any] = {}
-    try:
-        def at_asof_same(self: Any, s: Any) -> str:
+
+    class AtAsofSame(T):
+        def receive(self, s: Any) -> str:
             if s.version is not None:
                 latest = self.remembered.get(s.version.run)
                 held = self.current is not None and self.current.version is not None
                 if latest and latest[1] and s.version.seq == latest[0] and not (
                         held and self.current.version.run == s.version.run):
                     return d2.SAME_VERSION
-            return kept[0](self, s)
+            return super().receive(s)
 
-        T.receive = at_asof_same  # type: ignore[method-assign]
-        got["order: a version at a remembered asof is the same version"] = [i // 2 for i in failing(
-            me._desired_v2_order, base / "order.json")]
-        T.receive = kept[0]  # type: ignore[method-assign]
+    got["order: a version at a remembered asof is the same version"] = [i // 2 for i in failing(
+        lambda path: me._desired_v2_order(path, AtAsofSame), base / "order.json")]
 
-        def asof_at_seq_older(n: Any, held: Any) -> Any:
-            r = kept[1](n, held)
+    class AsofAtSeqOlder(T):
+        @staticmethod
+        def _judge_no_entry(n: Any, held: Any) -> Any:
+            r = T._judge_no_entry(n, held)
             return d2.OLDER if r is None and n.asof == held.version.seq else r
 
-        T._judge_no_entry = staticmethod(asof_at_seq_older)  # type: ignore[method-assign,assignment]
-        got["order: an asof equal to the held version's seq is older, where the text reverts"] = failing(
-            me._desired_v2_order, base / "order.json")
-        T._judge_no_entry = staticmethod(kept[1])  # type: ignore[method-assign,assignment]
+    got["order: an asof equal to the held version's seq is older, where the text reverts"] = failing(
+        lambda path: me._desired_v2_order(path, AsofAtSeqOlder), base / "order.json")
 
-        def failed_keeps_observed(self: Any, f: Any) -> str:
+    class FailedKeepsObserved(T):
+        def finish(self, f: Any) -> str:
             h, prev = self.current, self.observed
-            word = kept[2](self, f)
+            word = super().finish(f)
             if h.no_entry is not None and self.outcome == d2.FAILED and self.observed is None:
                 self.observed = prev
             return word
 
-        T.finish = failed_keeps_observed  # type: ignore[method-assign]
-        got["order: a failed revert on a snapshot with no entry keeps the version it held as observed"] = failing(
-            me._desired_v2_order, base / "order.json")
-        T.finish = kept[2]  # type: ignore[method-assign]
+    got["order: a failed revert on a snapshot with no entry keeps the version it held as observed"] = failing(
+        lambda path: me._desired_v2_order(path, FailedKeepsObserved), base / "order.json")
 
-        def not_read_moves(self: Any, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
+    class NotReadMoves(W):
+        def heartbeat(self, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
             if not read:
                 self.expects = None
                 self.lasts[key] = (run, seq)
                 return d2.NOT_READ
-            return kept[3](self, run, seq, section, read, key)
+            return super().heartbeat(run, seq, section, read, key)
 
-        W.heartbeat = not_read_moves  # type: ignore[method-assign]
-        got["watch: a heartbeat not read moves the sequence"] = failing(me._desired_v2_watch, base / "watch.json")
+    got["watch: a heartbeat not read moves the sequence"] = failing(
+        lambda path: me._desired_v2_watch(path, NotReadMoves), base / "watch.json")
 
-        def half_apart_read(self: Any, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
+    class HalfApartRead(W):
+        def heartbeat(self, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
             last = self.lasts.get(key)
             if read and last is not None and last[0] == run and (seq - last[1]) % d2.SEQ_MOD == 1 << 23:
                 del self.lasts[key]
-            return kept[3](self, run, seq, section, read, key)
+            return super().heartbeat(run, seq, section, read, key)
 
-        W.heartbeat = half_apart_read  # type: ignore[method-assign]
-        got["watch: a seq exactly 2^23 after the last read one's is read"] = failing(
-            me._desired_v2_watch, base / "watch.json")
-        W.heartbeat = kept[3]  # type: ignore[method-assign]
+    got["watch: a seq exactly 2^23 after the last read one's is read"] = failing(
+        lambda path: me._desired_v2_watch(path, HalfApartRead), base / "watch.json")
 
-        def moves_holding_none(self: Any, key: str, old: Any, new: Any) -> bool:
-            return kept[4](self, key, (new[0], True) if old is None else old, new)
+    class MovesHoldingNone(W):
+        def own_change(self, key: str, old: Any, new: Any) -> bool:
+            return super().own_change(key, (new[0], True) if old is None else old, new)
 
-        W.own_change = moves_holding_none  # type: ignore[method-assign]
-        got["watch: it moves what it expects while it holds no version"] = failing(
-            me._desired_v2_watch, base / "watch.json")
-        W.own_change = kept[4]  # type: ignore[method-assign]
+    got["watch: it moves what it expects while it holds no version"] = failing(
+        lambda path: me._desired_v2_watch(path, MovesHoldingNone), base / "watch.json")
 
-        def two_reports_skipped(r: Any, roles: Any, others: Any = ()) -> Any:
-            x = kept[5](r, roles, others)
-            if {"not_state", "not_a_role", "not_a_param", "rest_param"} & set(x.reasons):
-                return d2.ReportDeclaration(x.declaration, tuple(k for k in x.reasons if k != "two_reports"))
-            return x
+    def two_reports_skipped(r: Any, roles: Any, others: Any = ()) -> Any:
+        x = d2.declare_report(r, roles, others)
+        if {"not_state", "not_a_role", "not_a_param", "rest_param"} & set(x.reasons):
+            return d2.ReportDeclaration(x.declaration, tuple(k for k in x.reasons if k != "two_reports"))
+        return x
 
-        d2.declare_report = two_reports_skipped
-        got["declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param"] = failing(
-            me._desired_v2_declarations, base / "declarations.json")
-        d2.declare_report = kept[5]
+    got["declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param"] = failing(
+        lambda path: me._desired_v2_declarations(path, two_reports_skipped), base / "declarations.json")
 
-        def any_kind_names(r: Any, role: str) -> bool:
-            if not r.holds_key or r.named is None:
-                return False
-            return r.named[0] == d2.PARAM or r.named[1] == role
+    def any_kind_names(r: Any, role: str) -> bool:
+        if not r.holds_key or r.named is None:
+            return False
+        return r.named[0] == d2.PARAM or r.named[1] == role
 
-        d2.names_role = any_kind_names
-        got["slices: a resource of another kind that holds desired.report names the role"] = failing(
-            me._desired_v2_slices, base / "slices.json")
-    finally:
-        T.receive, T.finish, W.heartbeat, W.own_change = kept[0], kept[2], kept[3], kept[4]  # type: ignore[method-assign]
-        T._judge_no_entry = staticmethod(kept[1])  # type: ignore[method-assign,assignment]
-        d2.declare_report, d2.names_role = kept[5], kept[6]
+    got["slices: a resource of another kind that holds desired.report names the role"] = failing(
+        lambda path: me._desired_v2_slices(path, any_kind_names), base / "slices.json")
     out.append(("conformance/v2/, what its files tell apart (F-579): a reader changed in one place fails order.json's "
                 "case 26 for a version at a remembered asof, and no case for each of the other seven",
                 got,
@@ -4579,6 +4567,63 @@ def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "- `declarations.json`: 12 desired resources and 34 report resources.",
                           "- `slices.json`: 16. `conclusions.json`: 39. `schema.json`: 3."),
                 [[22, 57, 12, 6], 67, 25, [12, 34], 16, 39, 3]))
+    return out
+
+
+def _round119_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """No rule moved between round 118 and round 119 (#609, round 119;
+    #986 J3): desired.v2 0.1, core 0.112, link.v2 0.23. One paragraph of
+    ``scenarios-v2.md``'s intro did. And review-bot's should-fix on round
+    118: link.v2 §2.11's "unless its template's first chunk is a
+    parameter", read on the plan. No session is opened."""
+    import copy
+
+    from . import link, link_v2
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    sc, v2, l2 = flat("profiles/desired/scenarios-v2.md"), flat("profiles/desired/v2.md"), flat("profiles/link/v2.md")
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("scenarios-v2.md's intro at round 119: the reference runs the runtime's sections, §1 to §8 and §10 "
+                "to §15, and no implementation runs §9; round 118's sentence is gone",
+                [q in sc for q in ("**The reference runs the runtime's.** §1 to §8 and §10 to §15 are tests of "
+                                   "`zenkey`",
+                                   "§9 is to run as a test of `zenctl`, and no implementation runs it yet.",
+                                   "**No implementation runs them yet.**")],
+                [True, True, False]))
+    out.append(("link.v2 §2.11 and desired.v2 §2.8, §2.14: the three sentences the floor of a desired.v2 desired "
+                "resource is read from",
+                [q in t for t, q in ((l2, "- a template whose first chunk is a parameter, which has no snapshot key "
+                                          "(core §4.2)."),
+                                     (l2, "- **A `desired.v2` desired resource has no floor,** unless its template's "
+                                          "first chunk is a parameter."),
+                                     (v2, "- **A template whose first chunk is a parameter** has no snapshot key "
+                                          "(core §4.2), and keeps its floor across a face"),
+                                     (v2, "- **The window has no floor** for a desired resource of this major with a "
+                                          "snapshot key"))],
+                [True, True, True, True]))
+    case = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"][49]
+
+    def windows(template: str, uses: list[str]) -> Any:
+        c = copy.deepcopy(case)
+        entry = c["interfaces"]["plan.v1"]
+        entry["resources"][0]["template"] = template
+        entry["uses"] = uses
+        return link_v2.plan(c["policy"], c["implements"], _link_interfaces(c), c.get("catalog"),
+                            users=c.get("users"))["faces"][0]["windows"]
+
+    floor = [{"service": "lab/radio-a", "min_s": 86400}]
+    out.append(("link.v2 §2.11 on v2/plan.json's case 49, its one resource changed in one place: plans/{vehicle} of "
+                "a desired.v2 contract has no floor; {vehicle}/plan keeps one, by the list's last item; "
+                "plans/{vehicle} keeps one under desired.v1, and under desired.v2 beside redundancy.v1 (the list's "
+                "fourth item, F-587)",
+                [windows("plans/{vehicle}", ["desired.v2"]), windows("{vehicle}/plan", ["desired.v2"]),
+                 windows("plans/{vehicle}", ["desired.v1"]), windows("plans/{vehicle}", ["desired.v2", "redundancy.v1"]),
+                 link.keeps_floor({"template": "{vehicle}/plan", "annotations": {"desired.target_param": "vehicle"}},
+                                  ["desired.v2"]),
+                 link._per_key({"template": "{vehicle}/plan", "annotations": {"desired.target_param": "vehicle"}},
+                               ["desired.v2"])],
+                [[], floor, floor, floor, True, False]))
     return out
 
 

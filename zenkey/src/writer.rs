@@ -265,8 +265,9 @@ impl PackedType {
 /// [`crate::timing`]) is stamped from its service's clock, the stamp's id
 /// the session's zid, which the descriptor states as `meta.zid`, so a
 /// reader can age the sample against its owner's clock; a state with a
-/// horizon above 0, a `desired.v1` desired resource and a `telemetry.v1`
-/// state metric resource on every mutation. On a session whose
+/// horizon above 0, a `desired.v1` desired resource (never a `desired.v2`
+/// one, whose version is its in-band stamp) and a `telemetry.v1` state
+/// metric resource on every mutation. On a session whose
 /// timestamping is enabled, every put is (core §8.2). Its period is the
 /// application's to keep (§2.4): the writer publishes only what it is
 /// given, and never a sample again on its own.
@@ -303,11 +304,12 @@ pub struct Writer {
 
 /// Whether `r` is a resource core §4.3's table lists for every mutation of
 /// it: a state with a horizon above 0 whose contract does not use
-/// `freshness.v2` (`v2`: its heartbeats confirm it instead), a `desired.v1`
-/// desired resource, or a stream that declares a `timing.v1` lifespan. A
-/// `telemetry.v1` state metric resource is the fourth, known once its
-/// writer is metered ([`Writer::metered`]).
-fn in_table(r: &Resource, v2: bool) -> bool {
+/// `freshness.v2` (`v2`: its heartbeats confirm it instead), a desired
+/// resource whose contract does not use `desired.v2` (`versioned`: its
+/// version is its in-band stamp, core 0.112), or a stream that declares a
+/// `timing.v1` lifespan. A `telemetry.v1` state metric resource is the
+/// fourth, known once its writer is metered ([`Writer::metered`]).
+fn in_table(r: &Resource, v2: bool, versioned: bool) -> bool {
     let state = matches!(r.token, KindToken::State | KindToken::ExplicitState);
     // Row 1 is freshness.v1's: under freshness.v2 a heartbeat confirms the
     // state, and its puts carry no Zenoh timestamp (#978's F3).
@@ -316,10 +318,11 @@ fn in_table(r: &Resource, v2: bool) -> bool {
             zenkey_model::freshness::horizon_of(r),
             zenkey_model::freshness::Horizon::Within(_)
         );
-    let desired = matches!(
-        zenkey_model::desired::declaration_of(r),
-        zenkey_model::desired::Declaration::Declared(_)
-    );
+    let desired = !versioned
+        && matches!(
+            zenkey_model::desired::declaration_of(r),
+            zenkey_model::desired::Declaration::Declared(_)
+        );
     let lifespan = zenkey_model::timing::declaration_of(r)
         .declared()
         .is_some_and(|t| t.lifespan.is_some());
@@ -408,7 +411,11 @@ impl Writer {
         if r.token == KindToken::ExplicitStream {
             crate::shm::warn_if_memlock_low();
         }
-        let timed = in_table(r, minter.covers(key.as_str())) || minter.session_timestamping();
+        let timed = in_table(
+            r,
+            minter.covers(key.as_str()),
+            minter.versions_in_band(key.as_str()),
+        ) || minter.session_timestamping();
         Ok(Self {
             owned: key.clone(),
             key: zenoh::key_expr::KeyExpr::from(key),

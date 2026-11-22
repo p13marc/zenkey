@@ -199,6 +199,10 @@ pub struct Minter {
     /// states with a horizon leave §4.3's table (row 1), their heartbeats
     /// confirming them instead.
     covered: Mutex<std::collections::BTreeSet<String>>,
+    /// The interfaces whose contracts use `desired.v2`, by id: their
+    /// desired resources leave §4.3's table (core 0.112), a document's
+    /// version its in-band stamp (`desired.v2` §2.4).
+    versioned: Mutex<std::collections::BTreeSet<String>>,
 }
 
 /// What hears a run change within an instance: the descriptor, which states
@@ -245,7 +249,25 @@ impl Minter {
             store: Mutex::new(None),
             served: Mutex::new(None),
             covered: Mutex::new(std::collections::BTreeSet::new()),
+            versioned: Mutex::new(std::collections::BTreeSet::new()),
         }
+    }
+
+    /// `iface`'s contract uses `desired.v2` (#986's J3): its desired
+    /// resources carry no Zenoh timestamp on their puts and deletes (core
+    /// §4.3's table, as 0.112 narrowed it; `desired.v2` §2.4).
+    pub(crate) fn version_in_band(&self, iface: &zenkey_model::grammar::IfaceId) {
+        self.versioned
+            .lock()
+            .expect("not poisoned")
+            .insert(iface.to_string());
+    }
+
+    /// Whether `key`'s interface's contract uses `desired.v2`.
+    pub(crate) fn versions_in_band(&self, key: &str) -> bool {
+        key.split('/')
+            .nth(3)
+            .is_some_and(|i| self.versioned.lock().expect("not poisoned").contains(i))
     }
 
     /// `iface`'s contract uses `freshness.v2` (#978's F3): its states with
@@ -843,6 +865,23 @@ fn snapshot_time(t: &Timestamp, epoch: i64) -> zenkey_model::collection::Time {
         .unwrap_or(zenkey_model::collection::Time::Unknown)
 }
 
+/// How many GETs of a concrete key a [`Store`] keeps for
+/// [`Store::reads_of`].
+const ASKED_READS: usize = 1024;
+
+/// One state GET of one concrete key, as its owner answered it (core §4.2,
+/// "A conditional read"; #986's J3): what `desired.v2`'s scenarios observe
+/// of a target's read ([`crate::desired::Author::reads`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Asked {
+    /// The held stamp the GET carried (core §7.5): `None` for a GET with
+    /// no payload, and for one whose payload §7.5 refuses.
+    pub held: Option<wire::Stamp>,
+    /// Whether the owner answered with that stamp alone: the member's last
+    /// mutation carries it. `false`: answered whole, by snapshot.
+    pub unchanged: bool,
+}
+
 /// The owner's state, as its queryables answer it (S2, S3).
 pub struct Store {
     map: Mutex<HashMap<OwnedKeyExpr, Entry>>,
@@ -851,6 +890,11 @@ pub struct Store {
     /// of them: what [`Store::asked_reaching`] counts (`desired.v1`'s
     /// scenarios §8, text 0.4).
     asked: Mutex<HashMap<OwnedKeyExpr, u64>>,
+    /// The latest GETs of one concrete key answered, at most
+    /// [`ASKED_READS`] of them, oldest first: what [`Store::reads_of`]
+    /// lists (`desired.v2`'s scenarios, "What a section observes of a
+    /// read").
+    reads: Mutex<std::collections::VecDeque<(OwnedKeyExpr, Asked)>>,
     /// Each interface whose contract uses `freshness.v2`, by id: its
     /// collections as its heartbeats read them. Lock order: `map`, then
     /// this.
@@ -868,6 +912,7 @@ impl Store {
             map: Mutex::new(HashMap::new()),
             window,
             asked: Mutex::new(HashMap::new()),
+            reads: Mutex::new(std::collections::VecDeque::new()),
             books: Mutex::new(BTreeMap::new()),
             collections: Mutex::new(BTreeMap::new()),
             page_bytes,
@@ -1032,6 +1077,39 @@ impl Store {
             .sum()
     }
 
+    /// The GETs of the one concrete key `key` this store answered, oldest
+    /// first: the held stamp each carried and whether it was answered with
+    /// that stamp alone. The latest [`ASKED_READS`] over every key.
+    pub(crate) fn reads_of(&self, key: &zenoh::key_expr::keyexpr) -> Vec<Asked> {
+        self.reads
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .filter(|(k, _)| &**k == key)
+            .map(|(_, a)| *a)
+            .collect()
+    }
+
+    fn note_read(&self, q: &Query, unchanged: bool) {
+        let qk: &zenoh::key_expr::keyexpr = q.key_expr();
+        if qk.is_wild() {
+            return;
+        }
+        let encoding = q
+            .encoding()
+            .map_or_else(|| wire::ENCODING.to_owned(), ToString::to_string);
+        let payload = q.payload().map(|p| p.to_bytes().into_owned());
+        let held = wire::read_get(&encoding, payload.as_deref())
+            .ok()
+            .flatten()
+            .map(|h| h.stamp);
+        let mut reads = self.reads.lock().expect("not poisoned");
+        if reads.len() == ASKED_READS {
+            reads.pop_front();
+        }
+        reads.push_back((qk.to_owned(), Asked { held, unchanged }));
+    }
+
     /// Records a put. A covered member's (`freshness.v2`) is vouched for
     /// or not as `vouched` says, and confirmed at `confirmed`, the
     /// mutation's time (v2 §2.4).
@@ -1170,7 +1248,9 @@ impl Store {
         // A conditional read (core 0.110 §4.2): the held stamp alone, where
         // the member's last mutation carries exactly the stamp the GET
         // names. Every other GET is answered whole, below.
-        if let Some(held) = Self::held_answer(q, &collections, &map) {
+        let held = Self::held_answer(q, &collections, &map);
+        self.note_read(q, held.is_some());
+        if let Some(held) = held {
             let _ = q
                 .reply(qk.to_owned(), held.write())
                 .encoding(Encoding::ZENOH_BYTES)

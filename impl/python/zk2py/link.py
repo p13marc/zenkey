@@ -519,14 +519,22 @@ def heartbeat_of(entry: Any, resources: list["Resource"]) -> bool:
 
 
 def _per_key(r: dict[str, Any], uses: list[str]) -> bool:
-    """link.v2 0.9 §2.11's per-key resources (core §4.2): "a state that
-    declares ``freshness.ttl_s`` above 0, of a contract that does not use
-    ``freshness.v2``; one whose resolved annotations hold
-    ``desired.target_param``, "of a contract that does not use
-    ``desired.v2``" (link.v2 0.23: "A desired.v2 desired resource has no
-    floor, unless its template's first chunk is a parameter"); a metric resource of ``telemetry.v1`` or
+    """link.v2 §2.11's per-key resources (core §4.2), its list's first
+    level: "a state that declares ``freshness.ttl_s`` above 0, of a contract
+    that does not use ``freshness.v2``; one whose resolved annotations hold
+    ``desired.target_param``, of a contract that does not use
+    ``desired.v2``; a metric resource of ``telemetry.v1`` or
     ``telemetry.v2``, of a contract that uses one; or any state of a
-    contract that uses ``redundancy.v1``"."""
+    contract that uses ``redundancy.v1``".
+
+    **A desired.v2 desired resource** (link.v2 0.23) leaves the second item
+    alone. It is not dropped from the list: each other item still reads it.
+    So one of a contract that uses ``redundancy.v1`` is per key by the
+    fourth, as ``desired.v2`` §2.4 says ("keeps a reply per key"), though
+    §2.11's new sentence is stated of every such resource (F-587). The
+    sentence's own exception, "unless its template's first chunk is a
+    parameter", is no item of this list: it is §2.11's second level, read
+    by :func:`tombstone_only`."""
     ann = r.get("annotations") or {}
     if freshness.horizon("state", ann).horizon == "within" and HEARTBEAT_IFACE not in uses:
         return True
@@ -537,20 +545,41 @@ def _per_key(r: dict[str, Any], uses: list[str]) -> bool:
     return "redundancy.v1" in uses
 
 
+def no_snapshot_key(r: dict[str, Any]) -> bool:
+    """link.v2 §2.11: "a template whose first chunk is a parameter, which
+    has no snapshot key (core §4.2)". The item is stated of every ``state``
+    or ``@state`` resource, whatever its contract uses."""
+    return r["template"].split("/")[0].startswith("{")
+
+
+def keeps_floor(r: dict[str, Any], uses: list[str]) -> bool:
+    """link.v2 §2.11 "Which they are": whether one ``state`` or ``@state``
+    resource is one "whose deletes only a tombstone proves": "a per-key
+    resource (core §4.2)" or "a template whose first chunk is a parameter".
+
+    **A desired.v2 desired resource** (0.23): "has no floor, unless its
+    template's first chunk is a parameter." The two halves are the list's
+    two levels. Such a resource is no per-key resource by the item that
+    names desired resources, so ``plans/{vehicle}`` has no floor
+    (``v2/plan.json`` case 49). One templated ``{vehicle}/plan`` keeps its
+    floor from the list's last item, as §2.14 of ``desired.v2`` says: "The
+    window has no floor for a desired resource of this major with a
+    snapshot key". No case of ``v2/plan.json`` holds that side (round
+    119)."""
+    return no_snapshot_key(r) or _per_key(r, uses)
+
+
 def tombstone_only(entry: Any) -> bool:
     """link.v2 0.9 §2.11 "Which they are": whether an interface, its
     revisions read together ("The plan reads each from the revisions given,
     every revision of an interface together: the resource's kind, its
     template and resolved annotations, and its revision's ``uses``"), has a
-    ``state`` or ``@state`` resource whose deletes only a tombstone proves:
-    a per-key resource, or "a template whose first chunk is a parameter,
-    which has no snapshot key". Each revision is read with its own ``uses``,
-    and one that makes a resource such is enough."""
+    ``state`` or ``@state`` resource whose deletes only a tombstone proves
+    (:func:`keeps_floor`). Each revision is read with its own ``uses``, and one
+    that makes a resource such is enough."""
     for rev, uses in zip(revisions_of(entry), uses_of(entry)):
         for r in rev:
-            if r["token"] not in ("state", "@state"):
-                continue
-            if r["template"].split("/")[0].startswith("{") or _per_key(r, uses):
+            if r["token"] in ("state", "@state") and keeps_floor(r, uses):
                 return True
     return False
 

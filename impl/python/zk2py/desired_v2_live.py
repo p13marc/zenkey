@@ -66,13 +66,28 @@ def contract(name: str, watched: bool = False) -> Any:
     return load_contract((WATCHED if watched else CONTRACTS) / f"{name}.toml", spec_dir=REPO / "spec")
 
 
-def slice_key(author: str, target: str) -> str:
+def slice_key(author: str, target: str, iface: str = AUTHOR_IFACE) -> str:
     system, service = target.split("/")
-    return desired.slice_key(author, AUTHOR_IFACE, False, TEMPLATE, {"system": system, "service": service})
+    return desired.slice_key(author, iface, False, TEMPLATE, {"system": system, "service": service})
+
+
+def contract_file(path: str) -> Any:
+    """A contract of the caller's own, by its file: a revision of the
+    author's interface other than the scenarios' (round 119's mixed
+    majors)."""
+    return load_contract(Path(path), spec_dir=REPO / "spec")
 
 
 def version_of(ib: Any) -> d2.Version | None:
     return None if ib is None else d2.Version.of(ib.width, ib.run, ib.seq)
+
+
+def stamp_text(x: Any) -> str:
+    """What the owner returned for a mutation, as text: a version,
+    ``<run>/<seq>``, for a desired resource of this major. A revision that
+    still uses ``desired.v1`` (round 119's mixed majors) is per key, and its
+    owner returns the Zenoh timestamp it set: shown as it writes itself."""
+    return version_of(x).text if hasattr(x, "width") else str(x)
 
 
 def inband_of(v: d2.Version | None) -> Any:
@@ -86,9 +101,13 @@ class Author:
 
     def __init__(self, address: str, endpoint: str, *, record: str | None = None, run_record: str | None = None,
                  window_s: float = 60.0, tasking: Any = None, watched: bool = False,
-                 tokenless: tuple[str, ...] = ()) -> None:
+                 tokenless: tuple[str, ...] = (), catalog: str | None = None,
+                 owner_heartbeat: bool = False) -> None:
         self.address, self.endpoint = address, endpoint
         self.tokenless = set(tokenless)
+        #: core §8.6's catalog, by its file's path, and whether the author
+        #: confirms its interface by owner heartbeats (freshness.v2 §2.4)
+        self.catalog, self.owner_heartbeat = catalog, owner_heartbeat
         self.record_path = None if record is None else Path(record)
         #: core §4.3: "A 16-bit run is a counter in a record the owner keeps
         #: ... An owner that cannot keep such a record draws 32-bit runs."
@@ -109,6 +128,11 @@ class Author:
         self.owner = Owner(system, service, [self.contract], connect=self.endpoint, tombstone_s=self.window_s,
                            before_tokens=self._adopt, run_record=self.run_record, tokenless=self.tokenless)
         owner = self.owner
+        if self.catalog is not None:
+            from . import catalog as cat
+
+            owner.catalog = cat.read(Path(self.catalog).read_bytes())
+            owner.owner_heartbeats = True if self.owner_heartbeat else None
 
         def answered(query: Any) -> None:
             from . import held as held_stamp
@@ -130,7 +154,7 @@ class Author:
         return owner.instance_key
 
     def key(self, target: str) -> str:
-        return slice_key(self.address, target)
+        return slice_key(self.address, target, self.contract.interface)
 
     def gets(self, target: str) -> list[dict[str, Any]]:
         """scenarios-v2, "What a section observes of a read": each GET that
@@ -184,14 +208,14 @@ class Author:
                     self.adoption["expired"].append(target)
                 continue  # v1 §2.11: "its record SHOULD drop a delete once that window has passed"
             stamp = owner.delete_state(self.key(target), elapsed_s=elapsed_s)
-            self.deletes[target] = {"version": version_of(stamp).text, "at_ms": int(at_ms)}
+            self.deletes[target] = {"version": stamp_text(stamp), "at_ms": int(at_ms)}
             if adopting:
                 self.adoption["redeleted"].append(target)
         for target, e in sorted(docs.items()):
             if not isinstance(e, dict) or "document" not in e:
                 continue
             stamp = owner.set_state(self.key(target), canonical(e["document"]))
-            self.documents[target] = {"version": version_of(stamp).text, "document": e["document"]}
+            self.documents[target] = {"version": stamp_text(stamp), "document": e["document"]}
             if adopting:
                 self.adoption["reput"].append(target)
         self._write_record()
@@ -213,11 +237,11 @@ class Author:
             held = self.documents.get(target)
             if held is not None and desired.jcs_equal(held["document"], document):
                 return "unchanged", key, None
-            v = version_of(self.owner.set_state(key, canonical(document)))
-            self.documents[target] = {"version": v.text, "document": document}
+            v = stamp_text(self.owner.set_state(key, canonical(document)))
+            self.documents[target] = {"version": v, "document": document}
             self.deletes.pop(target, None)
             self._write_record()
-        return "put", key, v.text
+        return "put", key, v
 
     def delete(self, target: str, force: bool = False) -> tuple[str, str, str | None]:
         """A delete of the target's document. ``force`` makes one "though it
@@ -227,11 +251,11 @@ class Author:
         with self.lock:
             if target not in self.documents and not force:
                 return "none", key, None
-            v = version_of(self.owner.delete_state(key))
+            v = stamp_text(self.owner.delete_state(key))
             self.documents.pop(target, None)
-            self.deletes[target] = {"version": v.text, "at_ms": int(time.time() * 1000)}
+            self.deletes[target] = {"version": v, "at_ms": int(time.time() * 1000)}
             self._write_record()
-        return "deleted", key, v.text
+        return "deleted", key, v
 
     def new_epoch(self) -> str:
         """A re-mint in its own session: "A new instance takes a new run
@@ -259,8 +283,16 @@ class Target:
                  presence_watch: bool = False, reread_ms: int | None = None, hold: bool = False, poll_ms: int = 500,
                  timeout: float = 1.0, across: bool = False, reply_timeout_ms: int | None = None, watch: bool = False,
                  moves: bool = True, worker: Any = None, tasking: Any = None, watched: bool = False,
-                 run_record: str | None = None) -> None:
+                 run_record: str | None = None, catalog: str | None = None) -> None:
         self.address, self.endpoint, self.author = address, endpoint, author
+        #: the catalogs the target holds (core §8.6), and the id its author
+        #: names, read once it is needed
+        self.catalogs: list[Any] = []
+        if catalog is not None:
+            from . import catalog as cat
+
+            self.catalogs = [cat.read(Path(catalog).read_bytes())]
+        self._named: str | None = None
         self.unbound, self.presence_watch = unbound, presence_watch
         self.reread_s = None if reread_ms is None else reread_ms / 1000
         self.poll_s = poll_ms / 1000
@@ -274,13 +306,13 @@ class Target:
         self.author_contract = tasking or contract("tasking.v2", watched)
         self.run_record = run_record
         self.task_schema = json.loads((CONTRACTS / "tasking.json").read_text())
-        self.key = None if unbound else slice_key(author, address)
+        self.key = None if unbound else slice_key(author, address, self.author_contract.interface)
         self.rp = f"zk2/{address}/{TARGET_IFACE}/state/desired/task"
         self.run = f"zk2/{address}/{TARGET_IFACE}/state/running"
         self.role = d2.TargetRole()
         self.watch = d2.Watch()
         self.lock = threading.RLock()
-        self._seed_due = False
+        self._seed_due: Any = False
         self.running_doc: Any = dict(BASELINE)
         self.acts = 0
         self.reads = 0
@@ -323,6 +355,16 @@ class Target:
         if self.unbound:
             return
         a = self.author_contract.canonical
+        if d2.PROFILE not in a["uses"]:
+            # §2.18: "A target reads its author's revision ... It orders a
+            # desired.v1 author's versions by v1 §2.6", and "A role bound to
+            # a desired.v1 author is reported in a desired.v1.Report". This
+            # target declares the Report of this major alone, so it has no
+            # report to put for such a role. The text names no outcome for a
+            # target that serves one major: zk2py refuses the start, as an
+            # invalid binding is refused (round 119).
+            raise OwnerRefused(f"role {ROLE!r}: its author's revision of {a['interface']} does not use desired.v2, "
+                               "and this target declares no desired.v1.Report resource (desired.v2 §2.18)")
         rr = (c.get("requires") or {}).get(ROLE) or {}
         named = desired.desired_named([{"kind": r.get("kind"), "template": r.get("template"),
                                         "annotations": r.get("annotations") or {}} for r in a["resources"]],
@@ -443,7 +485,8 @@ class Target:
         with self.lock:
             if not self.watch.reading():
                 if why in ("seed", "appearance"):
-                    self._seed_due = True
+                    # an appearance that waits is still one when it is made
+                    self._seed_due = "appearance" if why == "appearance" or self._seed_due == "appearance" else True
                     return "waits"
                 return "outstanding"
         return self._reads(why)
@@ -451,12 +494,31 @@ class Target:
     def _reads(self, why: str) -> str:
         """The read the watch's flag already stands for, then the seed that
         fell due while it was out."""
+        appearance = why == "appearance"
         while True:
+            t0 = time.monotonic()
             word = self._read_once(why)
+            again = 0
+            # v1 §2.5, which §2.5 keeps "for a GET that ended with no reply
+            # before its timeout": "A seed that draws nothing at an
+            # appearance MAY be made again, a few times and soon: a token
+            # can reach the target's router before the route to its author's
+            # queryable does ... up to four times, 100 ms more apart each
+            # time". One that ended at its timeout is not made again: "at
+            # its next trigger, a period or a heartbeat, never sooner".
+            while (appearance and word == "silent" and again < 4
+                   and time.monotonic() - t0 < 0.9 * self.timeout and not self._stop.is_set()):
+                again += 1
+                time.sleep(0.1 * again)
+                with self.lock:
+                    if not self.watch.reading():
+                        return word
+                t0 = time.monotonic()
+                word = self._read_once("again")
             with self.lock:
                 if not self._seed_due or self._stop.is_set():
                     return word
-                self._seed_due = False
+                appearance, self._seed_due = self._seed_due == "appearance", False
                 if not self.watch.reading():
                     return word
             why = "seed"
@@ -508,11 +570,12 @@ class Target:
         # "A held stamp it did not send is no answer (core §4.2, held)"; "No
         # reply at all is still no verdict (core O5)"; "A read that ends at
         # its timeout is no verdict".
+        drew = "held" if st.held else "silent"
         with self.lock:
             self.role.asked = None
             self.watch.no_answer()
-            self.read_log.append((why, None if sent is None else sent.text, "held" if st.held else "silent"))
-        return "silent"
+            self.read_log.append((why, None if sent is None else sent.text, drew))
+        return drew
 
     @staticmethod
     def _sample(origin: str, deleted: bool, ib: Any, payload: bytes) -> d2.Sample:
@@ -562,24 +625,88 @@ class Target:
 
     def _watch_heartbeats(self, s: Any) -> None:
         """"A target subscribes to both forms' keys, as a freshness.v2
-        subscriber does". It reads the heartbeat covering its author's
-        interface "with the author's revision". It holds no catalog, so an
-        owner heartbeat's group is one "in a group whose catalog it does not
-        hold": counted, and not read."""
+        subscriber does": the heartbeat covering its author's interface, and
+        the owner heartbeat key of its collection's class (freshness.v2
+        §2.5, "one for each class that the collections it follows have").
+        It reads each "with the author's revision"."""
         from . import freshness_v2 as f2
 
         self.layout = heartbeat.layout_of(self.author_contract.canonical, self.author_contract.fingerprint)
         system, service = self.author.split("/")
-        hb = heartbeat.heartbeat_key(system, service, AUTHOR_IFACE)
+        hb = heartbeat.heartbeat_key(system, service, self.author_contract.interface)
         self._entities.append(s.declare_subscriber(hb, zenoh.handlers.Callback(self._heartbeat)))
-        for cls in f2.CLASSES:
-            self._entities.append(s.declare_subscriber(
-                f2.owner_heartbeat_key(system, service, cls),
-                zenoh.handlers.Callback(lambda smp, c=cls: self._owner_heartbeat(c))))
+        cls = f2.classes_of(self.author_contract.canonical)[self.resource]
+        self._entities.append(s.declare_subscriber(
+            f2.owner_heartbeat_key(system, service, cls),
+            zenoh.handlers.Callback(lambda smp, c=cls: self._owner_heartbeat(c, smp))))
 
-    def _owner_heartbeat(self, cls: str) -> None:
+    def _catalog_named(self) -> str | None:
+        """The catalog the author names: its descriptor's (core §3.3), or
+        across a face, where no descriptor is read, the one the target was
+        provisioned (core §8.6)."""
+        if self._named is None and self.catalogs:
+            if self.across:
+                self._named = self.catalogs[0].id
+            else:
+                from . import freshness_v2 as f2
+
+                assert self.owner is not None and self.owner.session is not None
+                self._named = f2.descriptor_catalog(self.owner.session, self.author)
+        return self._named
+
+    def _owner_heartbeat(self, cls: str, sample: Any) -> None:
+        """§2.5: "A group of an owner heartbeat is read as a heartbeat is,
+        its sequence the owner heartbeat key's. A group whose sections
+        freshness.v2 §2.5 does not read is a heartbeat not read. An owner
+        heartbeat with no group for the author's interface has no section."
+        With no catalog it is one "in a group whose catalog it does not
+        hold": counted, never read, and "the deployment's period stands"."""
+        from . import catalog as cat, owner_heartbeat as oh
+
+        if sample.kind != zenoh.SampleKind.PUT:
+            return
+        if not self.catalogs:
+            with self.lock:
+                self.heartbeat_log.append((cls, "no_catalog"))
+            return
+        why, section, stamp = None, None, None
+        try:
+            put = oh.read(sample.payload.to_bytes(), enveloped=zk2c.envelope_encoding(str(sample.encoding)))
+            stamp = put.stamp
+        except (oh.Refused, zk2c.Refused, heartbeat.Refused):
+            why = "refused"
+        if why is None:
+            named = self._catalog_named()
+            mine, unresolved = None, False
+            for g in put.body.groups:
+                try:
+                    entry = cat.resolve(self.catalogs, named, g.index).entry
+                except cat.Refused:
+                    unresolved = True  # this group may be the author's interface's: it cannot tell
+                    continue
+                if entry is not None and entry[0] == self.author_contract.interface:
+                    mine = (g, entry)
+            if mine is None:
+                why = "no_catalog" if unresolved else None  # else: no group for the interface, no section
+            else:
+                g, entry = mine
+                if entry[1] != self.layout.fingerprint or g.tag != self.layout.tag:
+                    why = "revision"
+                else:
+                    try:
+                        sec = oh.read_sections(self.layout, g.bits).get(self.resource)
+                        if sec is not None:
+                            section = d2.Section(int(sec["digest"], 16), sec["live"])
+                    except oh.Refused:
+                        why = "refused"
         with self.lock:
-            self.heartbeat_log.append((cls, "no_catalog"))
+            if why is not None or stamp is None:
+                word = self.watch.heartbeat(d2.Run(16, 0), 0, None, read=False, key=cls)
+            else:
+                word = self.watch.heartbeat(d2.Run(stamp.width, stamp.run), stamp.seq, section, key=cls)
+            self.heartbeat_log.append((cls, word if why is None else f"{word}:{why}"))
+        if word == d2.READ:
+            threading.Thread(target=self._reads, args=("heartbeat",), daemon=True).start()
 
     def _heartbeat(self, sample: Any) -> None:
         if sample.kind != zenoh.SampleKind.PUT:
@@ -692,11 +819,13 @@ class Target:
         with self.lock:
             e, last = self.watch.expects, self.watch.last
             words: dict[str, int] = {}
-            for _, w in self.heartbeat_log:
+            by_key: dict[str, dict[str, int]] = {}
+            for k, w in self.heartbeat_log:
                 words[w] = words.get(w, 0) + 1
+                by_key.setdefault(k, {})[w] = by_key.setdefault(k, {}).get(w, 0) + 1
             return {"expects": None if e is None else {"digest": format(e.digest, "08x"), "live": e.live},
                     "last": None if last is None else [last[0].text, last[1]],
-                    "outstanding": self.watch.outstanding, "heartbeats": words,
+                    "outstanding": self.watch.outstanding, "heartbeats": words, "by_key": by_key,
                     "reads": [{"why": w, "held": s, "drew": d} for w, s, d in self.read_log]}
 
     def close(self) -> None:
