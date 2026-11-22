@@ -28,7 +28,7 @@
 //! | [`alarms`]: `alarms.v1`'s owner, its standard contract embedded: the acts keyed by the recipe, confirmations every 450 s, the bound, adoption at a restart from the owner's record or an archive | `alarms.v1` §2.1–§2.9; §2.7, §4.3, §4.4 |
 //! | [`config_v1`]: `config.v1`'s owner, its standard contract embedded: the five operations over a device, the view and the status, the change events, the deadline timer, the persisted layer, desired state | `config.v1` §2.1–§2.19; §2.6–§2.7, §5, §8.2 |
 //! | [`config_v2`]: `config.v2`'s owner over the service's config contract: the record put as the model stamps it, the operations in the value and error forms, tokens from the minter's runs | `config.v2` §2.1–§2.18; §4.3, §5.1, §5.2, §8.2 |
-//! | [`desired`]: `desired.v1`'s author and target: documents put only on a change and again at a restart from the author's record; the target's subscription, seeds, last-known read, acts on the application's handler and report; `config.v1` as a target | `desired.v1` §2.2–§2.16; §4.2, §4.4, §8.1 |
+//! | [`desired`]: `desired.v1`'s author and target: documents put only on a change and again at a restart from the author's record; the target's subscription, seeds, last-known read, acts on the application's handler and report; `config.v1` as a target. `desired.v2`'s beside it, by the author's revision: a version the put's in-band stamp, each re-read conditional, the watch on the author's heartbeat, the packed report | `desired.v1` §2.2–§2.16; `desired.v2` §2.4–§2.11, §2.18; §4.2, §4.4, §8.1 |
 //! | [`redundancy`]: `redundancy.v1`'s candidate: the claim, the reads on a session of their own, the watch, the acts of an [`zenkey_model::redundancy::Elector`]: a governed interface's resources declared only while it serves, its writes refused while it stands by | `redundancy.v1` §2.2–§2.14; §6, §8.1–§8.2 |
 //! | [`archive`]: last-known state, recorded and aligned; the explicit read | §4.4, S5–S6 |
 //! | [`codec`]: a Rust type and how it is carried; [`typed`]: the handles generated code is written against (#611) | §7.2 |
@@ -80,7 +80,9 @@
 //! subscribed, seeded at start and whenever its author appears, read from
 //! an archive with its author absent, and acted on once per version through
 //! the application's handler, through [`ServiceBuilder::desired_target`]
-//! (`config.v1`'s owner through [`ServiceBuilder::desired_config`]);
+//! (`config.v1`'s owner through [`ServiceBuilder::desired_config`]); an
+//! author or a role whose author's contract lists `desired.v2` speaks that
+//! major through the same three calls (#986);
 //! `redundancy.v1` is [`redundancy`] (#841): through
 //! [`ServiceBuilder::redundancy`], every governed interface the service
 //! implements is claimed at its start (its descriptor marking it standby,

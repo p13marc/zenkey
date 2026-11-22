@@ -1,5 +1,24 @@
 //! `desired.v1` in the runtime: desired documents, from their author to
-//! their target (`spec/profiles/desired/v1.md`, #840).
+//! their target (`spec/profiles/desired/v1.md`, #840), and `desired.v2`
+//! beside it (`spec/profiles/desired/v2.md`, #986's J3).
+//!
+//! **Both majors, by the author's revision** (`desired.v2` §2.18). An
+//! author whose contract lists `desired.v2` writes each document with no
+//! Zenoh timestamp, its version the put's in-band stamp
+//! ([`Written::PutV2`]); its clock orders nothing, so nothing is caught up
+//! at a restart, and its new instance's new run orders what it puts again;
+//! its record holds no stamp; and its GETs are answered by snapshot, a
+//! conditional read by the held stamp alone ([`Author::reads`]). A role
+//! bound to such an author reads through [`zenkey_model::desired::v2`]'s
+//! machine: each read conditional, one at a time, the watch on its
+//! author's heartbeat in place of its period, a snapshot with no entry
+//! judged by its run, and its report the packed `Report`
+//! ([`Target::report_v2`], [`Target::watching`]). That half is in the `v2`
+//! submodule, whose table lists its rules. The calls are the same three,
+//! and so is the [`Handler`]: it refuses in words, which a `desired.v2`
+//! report carries as indices into the report resource's two tables. What
+//! follows is `desired.v1`'s, which a `desired.v2` role keeps wherever its
+//! text says "v1 §n holds".
 //!
 //! Both halves of the profile's runtime. Every rule a fixture can check is
 //! `zenkey-model`'s ([`zenkey_model::desired`]): the declaration, the
@@ -103,6 +122,7 @@ use zenkey_model::authoring::Encoding as WireEncoding;
 use zenkey_model::bundle::Bundle;
 use zenkey_model::contract::{Body, Contract, Resource};
 use zenkey_model::desired as model;
+use zenkey_model::desired::v2 as model2;
 use zenkey_model::grammar::{Addr, IfaceId, KindToken, data_key};
 use zenkey_model::schema::TypeId;
 use zenkey_model::template::Bindings;
@@ -110,11 +130,14 @@ use zenoh::query::{ConsolidationMode, QueryTarget, Reply};
 use zenoh::sample::{Sample, SampleKind};
 use zenoh::time::Timestamp;
 
+pub use zenkey_model::desired::v2::Major;
 pub use zenkey_model::desired::{
     APPLY, Ended, INVALID, Outcome, REACH, Refusal, Report, SENSITIVE, Source, UNDECODABLE,
     Version, Via,
 };
 pub use zenkey_model::seed::Stamp;
+
+pub use crate::state::Asked;
 
 use crate::budget::Budget;
 use crate::call::BoxFuture;
@@ -122,8 +145,12 @@ use crate::config_v1::DesiredEnd;
 use crate::error::{Error, Result, zenoh};
 use crate::implementation::{Implementation, resource_name};
 use crate::service::ServiceBuilder;
-use crate::state::{Minter, StateWriter, Store};
+use crate::state::{Minter, Stamped, StateWriter, Store};
 use crate::writer::Writer;
+
+mod v2;
+
+pub use v2::{REVISION_LINE, REVISION_POINTER, Watching};
 
 /// How often a target without a watch session reads its author's instance
 /// tokens (the module doc), by default.
@@ -147,7 +174,7 @@ pub fn stamp(ts: &Timestamp) -> Stamp {
 /// The Zenoh timestamp a desired document's write carries: a desired
 /// resource is on core §4.3's table, so its writer gives every write one,
 /// which orders the author's versions (§2.4, §2.6).
-fn time(s: crate::state::Stamped) -> Result<Timestamp> {
+fn time(s: Stamped) -> Result<Timestamp> {
     s.time.ok_or_else(|| {
         Error::Contract(
             "desired.v1: a desired resource's write carried no Zenoh timestamp, which core \
@@ -165,18 +192,42 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// A resource's declaration (§2.2), refused unless valid.
-fn declared(iface: &IfaceId, r: &Resource) -> Result<Vec<model::TargetParam>> {
-    match model::declaration_of(r) {
+/// The major of the profile a revision's desired resources are of
+/// (`desired.v2` §2.18): `desired.v2` where its contract lists it in
+/// `uses`, else `desired.v1`.
+fn major_of(c: &Contract) -> Major {
+    Major::of(c).unwrap_or(Major::V1)
+}
+
+/// The profile's id, for a message.
+fn profile(major: Major) -> &'static str {
+    match major {
+        Major::V1 => model::PROFILE,
+        Major::V2 => model2::PROFILE,
+    }
+}
+
+/// A resource's declaration (§2.2), refused unless valid: `desired.v1`'s
+/// reading, and under `desired.v2` its one reason more, a horizon above 0
+/// outside `freshness.v2` (`horizon_v1`).
+fn declared(c: &Contract, r: &Resource) -> Result<Vec<model::TargetParam>> {
+    let iface = &c.iface;
+    let major = major_of(c);
+    let p = profile(major);
+    let declaration = match major {
+        Major::V1 => model::declaration_of(r),
+        Major::V2 => model2::declaration_of(c, r),
+    };
+    match declaration {
         model::Declaration::Declared(t) => Ok(t),
         model::Declaration::NotThisProfiles => Err(Error::Contract(format!(
             "{iface} {:?} declares no desired.target_param: it is no desired resource \
-             (desired.v1 §2.2)",
+             ({p} §2.2)",
             resource_name(r)
         ))),
         model::Declaration::Invalid(why) => Err(Error::Contract(format!(
             "{iface} {:?}: its desired.target_param is invalid ({}), and no role is bound to \
-             it (desired.v1 §2.2)",
+             it ({p} §2.2)",
             resource_name(r),
             why.iter()
                 .map(|w| w.as_str())
@@ -197,7 +248,8 @@ fn json_wire(r: &Resource) -> bool {
 // --- the author (§2.11) -----------------------------------------------------------
 
 /// One document as a record keeps it (§2.11): its payload as put, and the
-/// stamp it was put under.
+/// stamp it was put under: `None` under `desired.v2`, whose record holds no
+/// stamp.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeptDocument {
     pub payload: Vec<u8>,
@@ -205,7 +257,8 @@ pub struct KeptDocument {
 }
 
 /// One delete as a record keeps it (§2.11): when it was made, on this
-/// host's clock in milliseconds since the Unix epoch, and its stamp.
+/// host's clock in milliseconds since the Unix epoch, and its stamp, `None`
+/// under `desired.v2`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeptDelete {
     pub at_ms: u64,
@@ -218,6 +271,10 @@ pub struct KeptDelete {
 pub struct Kept {
     pub documents: BTreeMap<String, KeptDocument>,
     pub deletes: BTreeMap<String, KeptDelete>,
+    /// The major its author writes under. `Some(Major::V2)`: a
+    /// `desired.v2` author's record, which holds no stamp (`desired.v2`
+    /// §2.11). `None`: `desired.v1`'s, as before.
+    pub major: Option<Major>,
 }
 
 impl Kept {
@@ -249,7 +306,9 @@ pub trait Record: Send + Sync + 'static {
 /// {<target>: {"stamp": "<time>/<id>", "document": <JSON>}}, "deletes":
 /// {<target>: {"stamp": …, "at_ms": <n>}}}`. A document that is not JSON is
 /// kept as `"hex": "<its bytes>"` instead of `"document"`. A missing file is
-/// no record; it is written whole, through a temporary file renamed.
+/// no record; it is written whole, through a temporary file renamed. A
+/// `desired.v2` author's says `"profile": "desired.v2"` and holds no
+/// `"stamp"` (`desired.v2` §2.11).
 #[derive(Debug, Clone)]
 pub struct FileRecord {
     path: PathBuf,
@@ -270,12 +329,20 @@ impl FileRecord {
     /// The file `kept` makes.
     #[must_use]
     pub fn render(kept: &Kept) -> Value {
-        let stamp = |s: &Option<Timestamp>| s.map_or(Value::Null, |t| Value::String(t.to_string()));
+        let v2 = kept.major == Some(Major::V2);
+        // desired.v2 §2.11: the record holds no stamp.
+        let stamped = |s: &Option<Timestamp>| {
+            if v2 {
+                serde_json::json!({})
+            } else {
+                serde_json::json!({"stamp": s.map_or(Value::Null, |t| Value::String(t.to_string()))})
+            }
+        };
         let documents: serde_json::Map<String, Value> = kept
             .documents
             .iter()
             .map(|(t, d)| {
-                let mut entry = serde_json::json!({"stamp": stamp(&d.stamp)});
+                let mut entry = stamped(&d.stamp);
                 match serde_json::from_slice::<Value>(&d.payload) {
                     Ok(doc) => entry["document"] = doc,
                     Err(_) => {
@@ -290,13 +357,13 @@ impl FileRecord {
             .deletes
             .iter()
             .map(|(t, d)| {
-                (
-                    t.clone(),
-                    serde_json::json!({"stamp": stamp(&d.stamp), "at_ms": d.at_ms}),
-                )
+                let mut entry = stamped(&d.stamp);
+                entry["at_ms"] = serde_json::json!(d.at_ms);
+                (t.clone(), entry)
             })
             .collect();
-        serde_json::json!({"profile": model::PROFILE, "documents": documents, "deletes": deletes})
+        let profile = profile(if v2 { Major::V2 } else { Major::V1 });
+        serde_json::json!({"profile": profile, "documents": documents, "deletes": deletes})
     }
 
     /// What a record's file holds. Members other than `documents` and
@@ -317,7 +384,11 @@ impl FileRecord {
                 _ => Err(format!("{t}: the stamp is not a string")),
             }
         };
-        let mut kept = Kept::default();
+        let mut kept = Kept {
+            major: (v.get("profile").and_then(Value::as_str) == Some(model2::PROFILE))
+                .then_some(Major::V2),
+            ..Kept::default()
+        };
         if let Some(docs) = v.get("documents") {
             let docs = docs.as_object().ok_or("\"documents\" is not an object")?;
             for (t, e) in docs {
@@ -497,14 +568,32 @@ pub struct Adoption {
 /// What a write did (§2.11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Written {
-    /// Put, under this stamp.
+    /// Put, under this stamp: a `desired.v1` author's version, its Zenoh
+    /// timestamp.
     Put(Timestamp),
     /// Nothing put: the same document is held (§2.11).
     Unchanged,
-    /// Deleted, under this stamp.
+    /// Deleted, under this stamp (`desired.v1`).
     Deleted(Timestamp),
     /// Nothing deleted: no document is held for the target.
     Nothing,
+    /// Put by a `desired.v2` author, under this version: the run and the
+    /// seq its envelope carries (`desired.v2` §2.4). It carries no Zenoh
+    /// timestamp.
+    PutV2(model2::Version),
+    /// Deleted by a `desired.v2` author, under this version.
+    DeletedV2(model2::Version),
+}
+
+impl Written {
+    /// The version a `desired.v2` author wrote under (`desired.v2` §2.4).
+    #[must_use]
+    pub fn version(&self) -> Option<model2::Version> {
+        match self {
+            Self::PutV2(v) | Self::DeletedV2(v) => Some(*v),
+            _ => None,
+        }
+    }
 }
 
 /// One target's slice, as the author holds it.
@@ -542,6 +631,8 @@ pub struct Author {
 
 struct AuthorInner {
     iface: IfaceId,
+    /// Which major its contract uses (`desired.v2` §2.18).
+    major: Major,
     resource: Resource,
     targets: Vec<model::TargetParam>,
     session: zenoh::Session,
@@ -567,18 +658,19 @@ impl Author {
         startup: AuthorStartup,
     ) -> Result<Self> {
         let addr = b.address()?.clone();
-        let r = b
+        let imp = &b
             .impls()
             .iter()
             .find(|s| s.imp.iface() == iface)
             .ok_or_else(|| Error::NotImplemented(iface.clone()))?
-            .imp
-            .resource(resource)?
-            .clone();
-        let targets = declared(iface, &r)?;
+            .imp;
+        let r = imp.resource(resource)?.clone();
+        let major = major_of(imp.contract());
+        let targets = declared(imp.contract(), &r)?;
         if !matches!(r.token, KindToken::State | KindToken::ExplicitState) {
             return Err(Error::Contract(format!(
-                "{iface} {resource:?} is not state (desired.v1 §2.2)"
+                "{iface} {resource:?} is not state ({} §2.2)",
+                profile(major)
             )));
         }
         b.expose(iface, resource)?;
@@ -592,6 +684,7 @@ impl Author {
         let a = Self {
             inner: Arc::new(AuthorInner {
                 iface: iface.clone(),
+                major,
                 json: json_wire(&r),
                 resource: r,
                 targets,
@@ -622,6 +715,24 @@ impl Author {
     #[must_use]
     pub fn resource(&self) -> String {
         resource_name(&self.inner.resource)
+    }
+
+    /// Which major of the profile its contract uses (`desired.v2` §2.18).
+    /// Under `desired.v2` a document's version is its in-band stamp: its
+    /// writes carry no Zenoh timestamp, its clock orders nothing, and its
+    /// GETs are answered by snapshot (`desired.v2` §2.4).
+    #[must_use]
+    pub fn major(&self) -> Major {
+        self.inner.major
+    }
+
+    /// The Zenoh timestamp a write's version is under `desired.v1`; none
+    /// under `desired.v2`, whose version is the write's in-band stamp.
+    fn zenoh_time(&self, s: Stamped) -> Result<Option<Timestamp>> {
+        match self.inner.major {
+            Major::V1 => time(s).map(Some),
+            Major::V2 => Ok(None),
+        }
     }
 
     /// What the restart did (§2.11).
@@ -681,6 +792,16 @@ impl Author {
         Ok(self.inner.store.asked_reaching(&key))
     }
 
+    /// The GETs of `target`'s one document key the service answered, oldest
+    /// first: for each, the held stamp it carried, or none, and whether the
+    /// author answered with that stamp alone (`desired.v2` §2.5, a
+    /// conditional re-read; `scenarios-v2.md`, "What a section observes of
+    /// a read"). The latest 1,024 over every key the service was asked.
+    pub fn reads(&self, target: &str) -> Result<Vec<Asked>> {
+        let key = zenoh::key_expr::OwnedKeyExpr::try_from(self.key(target)?).map_err(zenoh)?;
+        Ok(self.inner.store.reads_of(&key))
+    }
+
     /// The documents held now, by target, each as put.
     pub async fn documents(&self) -> BTreeMap<String, Vec<u8>> {
         let slots = self.inner.slots.lock().await;
@@ -719,7 +840,8 @@ impl Author {
             Some(s) => Arc::clone(&s.writer),
             None => Arc::new(self.writer(target).await?),
         };
-        let stamp = time(writer.put(payload.clone()).await?)?;
+        let put = writer.put(payload.clone()).await?;
+        let stamp = self.zenoh_time(put)?;
         slots.insert(
             target.to_owned(),
             Slot {
@@ -727,13 +849,13 @@ impl Author {
                 state: SlotState::Put {
                     payload,
                     content,
-                    stamp: Some(stamp),
+                    stamp,
                     pending: false,
                 },
             },
         );
         self.save(&slots).await;
-        Ok(Written::Put(stamp))
+        Ok(stamp.map_or(Written::PutV2(put.stamp), Written::Put))
     }
 
     /// [`Author::put`] of a value of the resource's JSON Schema type, encoded
@@ -764,13 +886,43 @@ impl Author {
         if matches!(slot.state, SlotState::Deleted { .. }) {
             return Ok(Written::Nothing);
         }
-        let stamp = time(slot.writer.delete().await?)?;
+        let deleted = slot.writer.delete().await?;
+        let stamp = self.zenoh_time(deleted)?;
         slot.state = SlotState::Deleted {
             at_ms: now_ms(),
-            stamp: Some(stamp),
+            stamp,
         };
         self.save(&slots).await;
-        Ok(Written::Deleted(stamp))
+        Ok(stamp.map_or(Written::DeletedV2(deleted.stamp), Written::Deleted))
+    }
+
+    /// Deletes `target`'s key whether or not this instance holds a document
+    /// there: a delete it puts on the bus under its run, kept in the record
+    /// as any delete is. [`Author::delete`] puts nothing where no document
+    /// is held. This heals `desired.v2` §2.8's residual, a target cut off
+    /// across both a delete past the window and its author's restart, which
+    /// keeps the deleted document in force until it hears a delete under
+    /// the new run (`scenarios-v2.md` §15 step 2).
+    pub async fn delete_unheld(&self, target: &str) -> Result<Written> {
+        let mut slots = self.inner.slots.lock().await;
+        let writer = match slots.get(target) {
+            Some(s) => Arc::clone(&s.writer),
+            None => Arc::new(self.writer(target).await?),
+        };
+        let deleted = writer.delete().await?;
+        let stamp = self.zenoh_time(deleted)?;
+        slots.insert(
+            target.to_owned(),
+            Slot {
+                writer,
+                state: SlotState::Deleted {
+                    at_ms: now_ms(),
+                    stamp,
+                },
+            },
+        );
+        self.save(&slots).await;
+        Ok(stamp.map_or(Written::DeletedV2(deleted.stamp), Written::Deleted))
     }
 
     /// A writer on `target`'s slice, as the service's own state writers are
@@ -798,7 +950,10 @@ impl Author {
     fn kept(&self, slots: &BTreeMap<String, Slot>) -> Kept {
         let now = now_ms();
         let window = u64::try_from(self.inner.window.as_millis()).unwrap_or(u64::MAX);
-        let mut kept = Kept::default();
+        let mut kept = Kept {
+            major: (self.inner.major == Major::V2).then_some(Major::V2),
+            ..Kept::default()
+        };
         for (t, s) in slots {
             match &s.state {
                 SlotState::Put { payload, stamp, .. } => {
@@ -831,7 +986,7 @@ impl Author {
         };
         if let Err(e) = r.save(&self.kept(slots)).await {
             tracing::warn!(
-                "desired.v1: the author's record was not saved, so a restart may not put again \
+                "desired: the author's record was not saved, so a restart may not put again \
                  what this instance holds (§2.11): {e}"
             );
         }
@@ -847,7 +1002,7 @@ impl Author {
                 Ok(Some(k)) => return (Found::Record, k, unstamped),
                 Ok(None) => {}
                 Err(e) => tracing::warn!(
-                    "desired.v1: the author's record could not be read, so it is read as none \
+                    "desired: the author's record could not be read, so it is read as none \
                      (§2.11): {e}"
                 ),
             }
@@ -880,7 +1035,7 @@ impl Author {
                                 let Some(t) = lk.timestamp else {
                                     tracing::warn!(
                                         target,
-                                        "desired.v1: the archive holds a delete with no stamp, \
+                                        "desired: the archive holds a delete with no stamp, \
                                          which is not made again: it cannot be dated within \
                                          its window (§2.11), and an unstamped sample is never \
                                          acted on (core S1)"
@@ -909,7 +1064,7 @@ impl Author {
                     }
                 }
                 Err(e) => tracing::warn!(
-                    "desired.v1: the archive at {archive} could not be read, so nothing is taken \
+                    "desired: the archive at {archive} could not be read, so nothing is taken \
                      from it (§2.11): {e}"
                 ),
             }
@@ -964,7 +1119,12 @@ impl Author {
     /// paced, [`Pace::Spread`]); the clock caught up first.
     async fn adopt(&self, startup: &AuthorStartup) -> Result<()> {
         let (found, kept, unstamped) = self.load(startup).await;
-        if let Some(last) = kept.latest() {
+        // desired.v1 §2.11: never a stamp at or below its last. Under
+        // desired.v2 no rule orders an author's stamps by its clock, and
+        // core §4.3's catch-up plays no part: its new run orders them.
+        if self.inner.major == Major::V1
+            && let Some(last) = kept.latest()
+        {
             self.inner.minter.catch_up(last);
         }
         let mut report = Adoption {
@@ -983,7 +1143,7 @@ impl Author {
             }
             let done = async {
                 let w = Arc::new(self.writer(target).await?);
-                let stamp = time(w.delete_aged(Duration::from_millis(age)).await?)?;
+                let stamp = self.zenoh_time(w.delete_aged(Duration::from_millis(age)).await?)?;
                 Ok::<_, Error>((w, stamp))
             };
             match done.await {
@@ -994,14 +1154,14 @@ impl Author {
                             writer,
                             state: SlotState::Deleted {
                                 at_ms: d.at_ms,
-                                stamp: Some(stamp),
+                                stamp,
                             },
                         },
                     );
                     report.redeleted.push(target.clone());
                 }
                 Err(e) => {
-                    tracing::warn!(target, "desired.v1: a kept delete was not made again: {e}");
+                    tracing::warn!(target, "desired: a kept delete was not made again: {e}");
                     report.failed.push((target.clone(), e.to_string()));
                 }
             }
@@ -1033,7 +1193,11 @@ impl Author {
                 report.reput.push(target.clone());
                 continue;
             }
-            match writer.put(d.payload.clone()).await.and_then(time) {
+            match writer
+                .put(d.payload.clone())
+                .await
+                .and_then(|s| self.zenoh_time(s))
+            {
                 Ok(stamp) => {
                     slots.insert(
                         target.clone(),
@@ -1042,7 +1206,7 @@ impl Author {
                             state: SlotState::Put {
                                 payload: d.payload.clone(),
                                 content,
-                                stamp: Some(stamp),
+                                stamp,
                                 pending: false,
                             },
                         },
@@ -1050,7 +1214,7 @@ impl Author {
                     report.reput.push(target.clone());
                 }
                 Err(e) => {
-                    tracing::warn!(target, "desired.v1: a kept document was not put again: {e}");
+                    tracing::warn!(target, "desired: a kept document was not put again: {e}");
                     report.failed.push((target.clone(), e.to_string()));
                 }
             }
@@ -1062,7 +1226,7 @@ impl Author {
                 redeleted = report.redeleted.len(),
                 expired = report.expired.len(),
                 failed = report.failed.len(),
-                "desired.v1: the previous instance's documents, put again (§2.11)"
+                "desired: the previous instance's documents, put again (§2.11)"
             );
             // A failed step keeps its document in the record for the next
             // start: saved with what is held, and what failed as found.
@@ -1077,7 +1241,7 @@ impl Author {
             if let Some(r) = &self.inner.record
                 && let Err(e) = r.save(&k).await
             {
-                tracing::warn!("desired.v1: the author's record was not saved (§2.11): {e}");
+                tracing::warn!("desired: the author's record was not saved (§2.11): {e}");
             }
         }
         drop(slots);
@@ -1117,16 +1281,18 @@ impl Author {
                 if !*pending {
                     continue;
                 }
-                match slot.writer.put(payload.clone()).await.and_then(time) {
+                match slot
+                    .writer
+                    .put(payload.clone())
+                    .await
+                    .and_then(|s| self.zenoh_time(s))
+                {
                     Ok(s) => {
-                        *stamp = Some(s);
+                        *stamp = s;
                         *pending = false;
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            target,
-                            "desired.v1: a kept document was not put again: {e}"
-                        );
+                        tracing::warn!(target, "desired: a kept document was not put again: {e}");
                     }
                 }
                 self.save(&slots).await;
@@ -1150,12 +1316,12 @@ impl Author {
                     pending,
                     ..
                 } => {
-                    *stamp = Some(time(slot.writer.put(payload.clone()).await?)?);
+                    *stamp = self.zenoh_time(slot.writer.put(payload.clone()).await?)?;
                     *pending = false;
                 }
                 SlotState::Deleted { at_ms, stamp } if now.saturating_sub(*at_ms) < window => {
                     let age = Duration::from_millis(now.saturating_sub(*at_ms));
-                    *stamp = Some(time(slot.writer.delete_aged(age).await?)?);
+                    *stamp = self.zenoh_time(slot.writer.delete_aged(age).await?)?;
                 }
                 SlotState::Deleted { .. } => {}
             }
@@ -1265,8 +1431,15 @@ impl TargetStartup {
 pub struct Document {
     /// The slice's key.
     pub key: String,
-    /// Its version (§2.4).
+    /// Its version under `desired.v1` (§2.4): its author's Zenoh timestamp,
+    /// and its own revision. Under `desired.v2` a version has no Zenoh
+    /// timestamp: `stamp` is zero here, `revision` the document's own, and
+    /// [`Document::inband`] the version.
     pub version: Version,
+    /// Its version under `desired.v2` (`desired.v2` §2.4): the run and the
+    /// seq its put carried. `None` for a role bound to a `desired.v1`
+    /// author.
+    pub inband: Option<model2::Version>,
     /// Read from an archive (§2.9).
     pub last_known: bool,
     /// Its payload, as put.
@@ -1310,6 +1483,17 @@ pub trait Handler: Send + Sync + 'static {
     /// (§2.8). Never refused; one that could not finish is
     /// [`Ended::Failed`].
     fn revert<'a>(&'a self, version: &'a Version) -> BoxFuture<'a, Ended>;
+
+    /// [`Handler::revert`] for a role bound to a `desired.v2` author
+    /// (`desired.v2` §2.8): `version` is the delete's, or the tombstone's,
+    /// and `None` for a snapshot with no entry under the held version's
+    /// run, which names none. By default it is [`Handler::revert`] of a
+    /// version with a zero stamp: a baseline rarely reads which delete
+    /// brought it back.
+    fn revert_v2<'a>(&'a self, version: Option<&'a model2::Version>) -> BoxFuture<'a, Ended> {
+        let _ = version;
+        self.revert(&v2::NO_STAMP)
+    }
 }
 
 /// What a seed read of the author's presence (core §8.1, 0.37).
@@ -1354,6 +1538,9 @@ enum Why {
     Withdrawn,
     /// The deployment's period.
     Reread,
+    /// `desired.v2`'s watch: its author's heartbeat's section moved, or it
+    /// expects none (`desired.v2` §2.5).
+    Watch,
 }
 
 /// One sample or reply of the slice, as received: a document under a zk2c
@@ -1365,6 +1552,12 @@ struct Incoming {
     via: Via,
     put: bool,
     stamp: Option<Timestamp>,
+    /// Its in-band stamp (core §4.3), when its envelope gave one: a
+    /// `desired.v2` author's version (`desired.v2` §2.4).
+    inband: Option<zenkey_model::wire::Stamp>,
+    /// Heard on the slice's subscription, never read: what a `desired.v2`
+    /// watch moves the digest it expects at.
+    live: bool,
     payload: Vec<u8>,
     encoding: String,
     /// A put whose envelope was refused: undecodable (§2.7), its bytes
@@ -1379,12 +1572,18 @@ impl Incoming {
     fn of(s: &Sample, via: Via) -> Self {
         let read = crate::inband::read(s.clone());
         let (refused, tag) = (read.undecodable(), read.tag());
+        let inband = match &read {
+            crate::inband::Read::Enveloped { stamp, .. } => Some(*stamp),
+            _ => None,
+        };
         let s = read.sample();
         let put = s.kind() == SampleKind::Put;
         Self {
             via,
             put,
             stamp: s.timestamp().copied(),
+            inband,
+            live: false,
             payload: if put {
                 s.payload().to_bytes().into_owned()
             } else {
@@ -1402,6 +1601,12 @@ enum Event {
     Seed(Why),
     Ended(Ended),
     Called,
+    /// `desired.v2`: a read of the slice ended, with what it drew.
+    Read(v2::Read),
+    /// `desired.v2`: an act ended, its refusal indexed.
+    EndedV2(model2::Ended),
+    /// `desired.v2`: a heartbeat of the author's.
+    Beat(v2::Heard),
 }
 
 /// One role a target holds on a desired resource (§2.5–§2.10), from
@@ -1417,6 +1622,10 @@ pub struct Target {
 
 struct TargetInner {
     role: String,
+    /// Which major the author's revision uses (`desired.v2` §2.18).
+    major: Major,
+    /// `desired.v2`'s half, for a role bound to an author of it.
+    v2: Option<v2::V2>,
     /// The slice's key; `None` for the kill switch.
     key: Option<String>,
     author: Option<Addr>,
@@ -1472,7 +1681,10 @@ impl Target {
             )));
         }
         let r = author.resource(resource)?.clone();
-        let targets = declared(&contract.iface, &r)?;
+        // desired.v2 §2.18: a target reads which major its author's
+        // revision uses, and orders its versions by that major's rule.
+        let major = major_of(contract);
+        let targets = declared(contract, &r)?;
         let binding = b.config().bindings.get(role).cloned().unwrap_or_default();
         let slice = model::Slice {
             iface: &contract.iface,
@@ -1510,11 +1722,12 @@ impl Target {
                 // invalid declaration: `start()` refuses too, so a service
                 // never starts without the role (§2.1, text 0.7, F-224).
                 let why = format!(
-                    "role {role:?}: its binding is invalid ({}) (desired.v1 §2.3)",
+                    "role {role:?}: its binding is invalid ({}) ({} §2.3)",
                     why.iter()
                         .map(|w| w.as_str())
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join(", "),
+                    profile(major)
                 );
                 b.refused.push(why.clone());
                 return Err(Error::NotExposed(why));
@@ -1536,6 +1749,29 @@ impl Target {
             zenkey_model::decode::type_of(bd, &r.token.to_string(), r.template.as_str(), "type")
                 .cloned()
         });
+        // desired.v2 §2.5: a period below the read's timeout is refused at
+        // the start, as an invalid binding is: such a target would always
+        // hold a read outstanding.
+        if major == Major::V2
+            && key.is_some()
+            && let Some(period) = startup.reread
+            && period < startup.timeout
+        {
+            let why = format!(
+                "role {role:?}: its period of re-reads, {period:?}, is below its read's \
+                 timeout, {:?} (desired.v2 §2.5)",
+                startup.timeout
+            );
+            b.refused.push(why.clone());
+            return Err(Error::NotExposed(why));
+        }
+        // desired.v2 §2.10: the report resource's declaration, and its two
+        // tables, read before anything is declared.
+        let tables = match (&report, major) {
+            (Some(at), Major::V2) => Some(v2::tables_of(b, role, at)?),
+            (None, Major::V2) => Some(model2::Tables::default()),
+            (_, Major::V1) => None,
+        };
         // §2.10: the first report before the tokens, the baseline's.
         let report = match report {
             Some(at) => {
@@ -1548,12 +1784,18 @@ impl Target {
         };
         let m = model::Target::new(key.clone());
         if let Some(w) = &report {
-            w.put_value(&m.report().to_json()).await?;
+            match major {
+                Major::V1 => w.put_value(&m.report().to_json()).await?,
+                Major::V2 => w.put(v2::record(&model2::Report::baseline())?).await?,
+            };
         }
+        let v2 = tables.map(|t| v2::V2::new(b, contract, &r, key.as_deref(), t));
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let t = Self {
             inner: Arc::new(TargetInner {
                 role: role.to_owned(),
+                major,
+                v2,
                 key,
                 author: author_addr,
                 json: json_wire(&r),
@@ -1601,9 +1843,55 @@ impl Target {
         self.inner.author.as_ref()
     }
 
-    /// The report as the target holds it now (§2.10).
+    /// Which major the role's author uses (`desired.v2` §2.18): what
+    /// orders its versions, how its slice is read, and which report the
+    /// target puts.
+    #[must_use]
+    pub fn major(&self) -> Major {
+        self.inner.major
+    }
+
+    /// The report as the target holds it now (§2.10), for a role bound to
+    /// a `desired.v1` author. For one bound to a `desired.v2` author it
+    /// stays the baseline's: that role's is [`Target::report_v2`].
     pub async fn report(&self) -> Report {
         self.inner.core.lock().await.model.report().clone()
+    }
+
+    /// The report of a role bound to a `desired.v2` author, as the target
+    /// holds it now (`desired.v2` §2.10): what its packed `Report` says.
+    /// `None` for a role bound to a `desired.v1` author.
+    pub async fn report_v2(&self) -> Option<model2::Report> {
+        let v2 = self.inner.v2.as_ref()?;
+        Some(v2.core.lock().await.model.report())
+    }
+
+    /// The stamp the target's next conditional read carries (`desired.v2`
+    /// §2.5): that of the latest version it admitted, `None` where it
+    /// holds none, and for a role bound to a `desired.v1` author.
+    pub async fn held(&self) -> Option<model2::Version> {
+        let v2 = self.inner.v2.as_ref()?;
+        v2.core.lock().await.model.held()
+    }
+
+    /// What the target's watch of its author's heartbeat holds
+    /// (`desired.v2` §2.5): the section it expects, the heartbeats it
+    /// read, the reads it asked for, and whether it reads none, so that
+    /// the deployment's period stands. `None` for a role bound to a
+    /// `desired.v1` author, and for the kill switch.
+    pub async fn watching(&self) -> Option<Watching> {
+        self.inner.key.as_ref()?;
+        Some(self.inner.v2.as_ref()?.watching().await)
+    }
+
+    /// The GETs of its slice a role bound to a `desired.v2` author made
+    /// so far, each a conditional read where it held a version.
+    #[must_use]
+    pub fn reads(&self) -> u64 {
+        self.inner
+            .v2
+            .as_ref()
+            .map_or(0, |v| v.gets.load(Ordering::Relaxed))
     }
 
     /// The seeds made so far.
@@ -1624,8 +1912,17 @@ impl Target {
         self.inner.last_seed.lock().expect("not poisoned").clone()
     }
 
-    /// Sets the deployment's period of re-reads (§2.5); `None`: none.
+    /// Sets the deployment's period of re-reads (§2.5); `None`: none. A
+    /// role bound to a `desired.v2` author keeps the period it had when
+    /// given one below its read's timeout (`desired.v2` §2.5), and says so.
     pub fn set_reread(&self, period: Option<Duration>) {
+        if self.inner.major == Major::V2
+            && let Some(p) = period
+            && p < self.inner.startup.timeout
+        {
+            tracing::warn!(role = %self.inner.role, "desired.v2: a period of re-reads of {p:?} is below the read's timeout, {:?}, and is not taken (§2.5)", self.inner.startup.timeout);
+            return;
+        }
         self.inner.reread.send_replace(period);
     }
 
@@ -1670,14 +1967,16 @@ impl TargetInner {
             .callback(move |s: Sample| {
                 // R6: a sample on any key but the slice's is discarded.
                 if s.key_expr().as_str() == slice {
-                    let _ = tx.send(Event::Sample(Incoming::of(&s, Via::Owner)));
+                    let mut heard = Incoming::of(&s, Via::Owner);
+                    heard.live = true;
+                    let _ = tx.send(Event::Sample(heard));
                 }
             })
             .await;
         let _sub = match sub {
             Ok(s) => s,
             Err(e) => {
-                tracing::error!(role = %self.role, "desired.v1: the slice's subscription failed, so nothing is read: {e}");
+                tracing::error!(role = %self.role, "desired: the slice's subscription failed, so nothing is read: {e}");
                 return;
             }
         };
@@ -1708,7 +2007,7 @@ impl TargetInner {
                 match sub {
                     Ok(s) => _watch = Some(s),
                     Err(e) => {
-                        tracing::warn!(role = %self.role, "desired.v1: the watch on the author failed: {e}")
+                        tracing::warn!(role = %self.role, "desired: the watch on the author failed: {e}")
                     }
                 }
                 // Core §8.1: one round trip on the watch session before the
@@ -1717,12 +2016,12 @@ impl TargetInner {
                 match crate::presence::Barrier::new(w, sel, self.startup.timeout).await {
                     Ok(b) => {
                         if !b.establish().await {
-                            tracing::warn!(role = %self.role, "desired.v1: the watch session's barrier was not established: presence reads are possibly incomplete until it is");
+                            tracing::warn!(role = %self.role, "desired: the watch session's barrier was not established: presence reads are possibly incomplete until it is");
                         }
                         *self.barrier.lock().expect("not poisoned") = Some(b);
                     }
                     Err(e) => {
-                        tracing::warn!(role = %self.role, "desired.v1: the watch session's barrier could not be kept: {e}")
+                        tracing::warn!(role = %self.role, "desired: the watch session's barrier could not be kept: {e}")
                     }
                 }
             }
@@ -1731,6 +2030,9 @@ impl TargetInner {
             }
             _ => {}
         }
+        // desired.v2 §2.5: the author's heartbeat, where its desired
+        // resource declares a horizon, in both forms' keys.
+        let _beats = self.watch_heartbeats().await;
         let _ = self.tx.send(Event::Seed(Why::Start));
         let mut reread = self.reread.subscribe();
         let mut next = (*reread.borrow()).map(|p| tokio::time::Instant::now() + p);
@@ -1764,7 +2066,11 @@ impl TargetInner {
                     self.seed_soon(Why::Appeared);
                 }
                 () = tick => {
-                    self.seed_soon(Why::Reread);
+                    // desired.v2 §2.5: the watch in place of the period,
+                    // where the author's heartbeat reaches the target.
+                    if self.period_stands().await {
+                        self.seed_soon(Why::Reread);
+                    }
                     next = (*reread.borrow()).map(|p| tokio::time::Instant::now() + p);
                 }
                 changed = reread.changed() => {
@@ -1908,6 +2214,9 @@ impl TargetInner {
     /// author's presence, and with the author absent by a complete read, the
     /// archive's last-known.
     async fn seed(self: &Arc<Self>, why: Why) {
+        if self.v2.is_some() {
+            return self.seed_v2(why).await;
+        }
         let Some(key) = self.key.clone() else { return };
         self.seeds.fetch_add(1, Ordering::Relaxed);
         let mut attempt = 0;
@@ -1947,6 +2256,8 @@ impl TargetInner {
                         via: Via::Archive,
                         put,
                         stamp: lk.timestamp,
+                        inband: lk.inband,
+                        live: false,
                         payload: lk.value.unwrap_or_default(),
                         encoding: lk.encoding.map(|e| e.to_string()).unwrap_or_default(),
                         refused: None,
@@ -2042,7 +2353,12 @@ impl TargetInner {
     }
 
     async fn handle(self: &Arc<Self>, ev: Event) {
+        if self.v2.is_some() {
+            return self.handle_v2(ev).await;
+        }
         match ev {
+            // desired.v2's alone.
+            Event::Read(_) | Event::EndedV2(_) | Event::Beat(_) => {}
             Event::Seed(why) => self.seed_soon(why),
             Event::Called => {
                 let report = {
@@ -2107,6 +2423,20 @@ impl TargetInner {
         }
     }
 
+    /// The revision a put's document carries (§2.4), when its type carries
+    /// one.
+    fn revision_of(&self, i: &Incoming) -> Option<u64> {
+        if self.json {
+            model::revision_of_text(&i.payload)
+        } else {
+            self.decoded(i)
+                .ok()
+                .flatten()
+                .as_ref()
+                .and_then(model::revision_of_value)
+        }
+    }
+
     /// Starts one act on a task of its own (§2.7); its end comes back as an
     /// event.
     fn act(self: &Arc<Self>, act: model::Act, doc: Option<Incoming>) {
@@ -2163,6 +2493,7 @@ impl TargetInner {
                 let doc = Document {
                     key: self.key.clone().unwrap_or_default(),
                     version,
+                    inband: None,
                     last_known: act.via == Via::Archive,
                     payload: i.payload,
                     encoding: i.encoding,
@@ -2331,6 +2662,45 @@ mod tests {
         assert_eq!(back.latest(), Some(ts));
         assert!(FileRecord::parse("[]").is_ok_and(|k| k == Kept::default()));
         assert!(FileRecord::parse(r#"{"documents": {"x": {}}}"#).is_err());
+    }
+
+    /// `desired.v2` §2.11: an author's record holds no stamp, and says its
+    /// major, which it reads back.
+    #[test]
+    fn a_desired_v2_record_holds_no_stamp() {
+        let ts: zenoh::time::Timestamp = "7386690599959157260/33".parse().unwrap();
+        let mut kept = Kept {
+            major: Some(super::Major::V2),
+            ..Kept::default()
+        };
+        kept.documents.insert(
+            "lab/worker".into(),
+            KeptDocument {
+                payload: br#"{"mode":"run"}"#.to_vec(),
+                // A stamp a v1 record carried over is not written either.
+                stamp: Some(ts),
+            },
+        );
+        kept.deletes.insert(
+            "lab/spare".into(),
+            KeptDelete {
+                at_ms: 1_760_000_000_000,
+                stamp: None,
+            },
+        );
+        let file = FileRecord::render(&kept);
+        assert_eq!(
+            file,
+            serde_json::json!({
+                "profile": "desired.v2",
+                "documents": {"lab/worker": {"document": {"mode": "run"}}},
+                "deletes": {"lab/spare": {"at_ms": 1_760_000_000_000_u64}},
+            })
+        );
+        let back = FileRecord::parse(&file.to_string()).unwrap();
+        assert_eq!(back.major, Some(super::Major::V2));
+        assert_eq!(back.latest(), None);
+        assert_eq!(back.deletes, kept.deletes);
     }
 
     #[test]
