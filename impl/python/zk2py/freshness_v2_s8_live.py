@@ -350,7 +350,7 @@ def shape(read: dict[str, Any]) -> dict[str, Any]:
         for r, s in (g.get("sections") or {}).items():
             secs[r] = {k: v for k, v in s.items() if k != "digest"}
         groups.append({k: v for k, v in g.items() if k != "sections"} | {"sections": secs})
-    return {"width": read["width"], "time_known": read["time"] is not None, "bytes": read["bytes"],
+    return {"width": read["width"], "time_known": heartbeat.reading_of(read["time"]) == heartbeat.INSTANT, "bytes": read["bytes"],
             "body_bits": read["body_bits"], "groups": groups}
 
 

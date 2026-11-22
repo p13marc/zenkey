@@ -264,7 +264,14 @@ def heartbeat_of(key: str, read: Any, size: int, held: "Held | None") -> dict[st
         return out
     try:
         out["vouches"] = heartbeat.read(lo, read.record or b"")
-        out["says"] = f"read with the held revision of {covers}'s collections (observer §7.3)"
+        # freshness.v2 0.12 §5: "A tool that shows a heartbeat's time shows
+        # the ahead time as ahead: never as unknown, and never as an
+        # instant. It shows the unknown time as unknown, never as the epoch."
+        out["clock"] = heartbeat.reading_of(out["vouches"]["time"])
+        out["says"] = (f"read with the held revision of {covers}'s collections (observer §7.3); its time is "
+                       + {"instant": "an instant", "unknown": "unknown: its owner's clock reads no instant the "
+                          "epoch codes", "ahead": "ahead: its owner's clock guard held when it wrote it"}
+                       [out["clock"]] + " (core §7.5)")
     except heartbeat.Refused as e:
         out["says"] = f"undecodable: the body is refused ({e.token}, core §7.5)"
     return out
@@ -304,6 +311,7 @@ def owner_heartbeat_of(key: str, read: Any, size: int, held: "Held | None") -> d
         out["says"] = f"undecodable: the owner heartbeat is refused whole ({e.token}, core §7.5)"
         return out
     out["time"] = body.time
+    out["clock"] = heartbeat.reading_of(body.time)   # freshness.v2 0.12 §5: ahead as ahead, unknown as unknown
     catalog = None if held is None else held.catalog
     groups = []
     for g in body.groups:

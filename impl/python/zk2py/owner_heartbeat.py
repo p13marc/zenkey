@@ -140,10 +140,13 @@ class Group:
 @dataclass(frozen=True)
 class OwnerHeartbeat:
     """An owner heartbeat's body read with no contract: its time (a
-    heartbeat's ``{"s", "ms"}``, None for the unknown time) and its groups in
-    the order read, ascending by index."""
+    heartbeat's: ``{"s", "ms"}``, None for the unknown time,
+    :data:`heartbeat.AHEAD` for the ahead time, core 0.113: "The time is a
+    heartbeat's, with its unknown time, its ahead time and its unused codes.
+    It is the owner's word of its clock, so it is one time for every group")
+    and its groups in the order read, ascending by index."""
 
-    time: dict[str, int] | None
+    time: dict[str, int] | str | None
     groups: tuple[Group, ...]
 
     def group(self, index: int) -> Group | None:
@@ -344,7 +347,7 @@ def _size_bits(n: int) -> str:
     return "".join(format(byte, "08b") for byte in raw)
 
 
-def body_bits(time: dict[str, int] | None, groups: Iterable[Group]) -> str:
+def body_bits(time: dict[str, int] | str | None, groups: Iterable[Group]) -> str:
     """The body's bits before its pad. The groups are written "in ascending
     order of their indices"; :class:`ValueError` for what no owner heartbeat
     holds: no group, more than 15, an index twice, an index or a tag beyond
@@ -368,14 +371,14 @@ def body_bits(time: dict[str, int] | None, groups: Iterable[Group]) -> str:
     return "".join(out)
 
 
-def write_body(time: dict[str, int] | None, groups: Iterable[Group]) -> bytes:
+def write_body(time: dict[str, int] | str | None, groups: Iterable[Group]) -> bytes:
     """The body's bytes: its bits, then zero bits to the next whole byte."""
     bits = body_bits(time, groups)
     bits += "0" * (-len(bits) % 8)
     return int(bits, 2).to_bytes(len(bits) // 8, "big")
 
 
-def write(stamp: zk2c.InBand, time: dict[str, int] | None, groups: Iterable[Group]) -> bytes:
+def write(stamp: zk2c.InBand, time: dict[str, int] | str | None, groups: Iterable[Group]) -> bytes:
     """A put's payload: form 6, CH's tag 0, the run and the seq, the body."""
     return zk2c.write("heartbeat", stamp.width, stamp.run, stamp.seq, 0, write_body(time, groups))
 
