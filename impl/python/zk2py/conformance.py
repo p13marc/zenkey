@@ -630,6 +630,14 @@ def _health_judgements(path: Path) -> list[Result]:
     return out
 
 
+def _health_v2(directory: Path) -> list[Result]:
+    """``conformance/v2/`` (health.v2 text 0.1, round 120), every file, an
+    unknown one failing: :mod:`zk2py.health_v2_fixtures`."""
+    from . import health_v2_fixtures
+
+    return health_v2_fixtures.run(directory)
+
+
 def _health_rollups(path: Path) -> list[Result]:
     """health.v1 §2.2, §5: judged readings -> a tool's roll-up."""
     from . import health
@@ -2200,7 +2208,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "freshness": {"horizons.json": _freshness_horizons, "judgements.json": _freshness_judgements,
                   "clock-trust.json": _freshness_clock_trust, "apply.json": _freshness_apply},
     "health": {"judgements.json": _health_judgements, "rollups.json": _health_rollups,
-               "codes.json": _health_codes, "clock.json": _health_clock},
+               "codes.json": _health_codes, "clock.json": _health_clock, "v2": _health_v2},
     "config": {"validation.json": _config_validation, "window.json": _config_window,
                "lifecycle.json": _config_lifecycle, "desired.json": _config_desired,
                "redaction.json": _config_redaction, "v2": _config_v2, "contracts": _config_v2_contracts},
