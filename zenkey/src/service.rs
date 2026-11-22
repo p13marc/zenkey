@@ -346,6 +346,11 @@ fn answered(
             per_key,
             horizon: horizon && v2,
             epoch,
+            // Only a `desired.v2` desired resource's GETs are kept, for
+            // its author's `reads` (review of #1156).
+            reads: zenkey_model::desired::v2::uses_v2(c)
+                && r.annotations
+                    .contains_key(zenkey_model::desired::TARGET_PARAM),
         });
     }
     Ok(out)

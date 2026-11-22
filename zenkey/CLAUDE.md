@@ -435,7 +435,11 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   (`new_epoch` refuses for the clock only for a `desired.v1` author), and
   `Kept::major` makes `FileRecord` write `"profile": "desired.v2"` with
   no `stamp`. `Author::reads(target)` lists each GET of the one key the
-  store answered (`state::Asked { held, unchanged }`, the latest 1,024),
+  store answered (`state::Asked { held, unchanged }`, the latest 1,024;
+  kept for a `desired.v2` desired resource's keys alone, `Answered::reads`,
+  the held stamp parsed once in `Store::held_answer` through the model's
+  `collection::answers_carried`, and recorded under no other lock of the
+  store's, review of #1156: `a_get_is_kept_only_for_a_desired_v2_resource`),
   and `Author::delete_unheld` puts a delete where no document is held
   (§2.8's residual, scenarios §15 step 2). **Target** (`desired/v2.rs`,
   over `model::desired::v2::Target`): every read of the slice is one seed

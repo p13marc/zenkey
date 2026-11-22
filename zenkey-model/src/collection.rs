@@ -1262,8 +1262,20 @@ pub fn answers_held(
     if read != StateRead::Member {
         return None;
     }
-    let held = wire::read_get(encoding, payload).ok().flatten()?;
-    (last == Some(held.stamp)).then_some(held)
+    answers_carried(read, wire::read_get(encoding, payload).ok().flatten(), last)
+}
+
+/// [`answers_held`] of a GET whose payload its owner already read
+/// ([`wire::read_get`]): `carried` is the held stamp it carries, `None`
+/// for no payload and for one §7.5 refuses. An owner that also keeps what
+/// each GET carried parses the payload once.
+#[must_use]
+pub fn answers_carried(
+    read: StateRead,
+    carried: Option<wire::HeldStamp>,
+    last: Option<wire::Stamp>,
+) -> Option<wire::HeldStamp> {
+    carried.filter(|held| read == StateRead::Member && last == Some(held.stamp))
 }
 
 /// The collection read of a GET on `selector`, a key expression over one

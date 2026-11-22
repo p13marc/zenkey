@@ -838,6 +838,11 @@ pub(crate) struct Answered {
     pub(crate) horizon: bool,
     /// The deployment epoch its times count from, in seconds (§7.6).
     pub(crate) epoch: i64,
+    /// A desired resource of a revision that uses `desired.v2`: each GET
+    /// of one of its members' keys is kept for
+    /// [`crate::desired::Author::reads`] ([`Store::reads_of`]). No other
+    /// resource's GETs are.
+    pub(crate) reads: bool,
 }
 
 impl Answered {
@@ -869,9 +874,10 @@ fn snapshot_time(t: &Timestamp, epoch: i64) -> zenkey_model::collection::Time {
 /// [`Store::reads_of`].
 const ASKED_READS: usize = 1024;
 
-/// One state GET of one concrete key, as its owner answered it (core §4.2,
-/// "A conditional read"; #986's J3): what `desired.v2`'s scenarios observe
-/// of a target's read ([`crate::desired::Author::reads`]).
+/// One state GET of one concrete key of a `desired.v2` desired resource,
+/// as its author answered it (core §4.2, "A conditional read"; #986's J3):
+/// what `desired.v2`'s scenarios observe of a target's read
+/// ([`crate::desired::Author::reads`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Asked {
     /// The held stamp the GET carried (core §7.5): `None` for a GET with
@@ -882,6 +888,16 @@ pub struct Asked {
     pub unchanged: bool,
 }
 
+/// What a state GET of one concrete key asked, read once
+/// ([`Store::held_answer`]).
+struct Conditional {
+    /// The held stamp that alone answers it (core §4.2), where one does.
+    held: Option<wire::HeldStamp>,
+    /// The GET as its author keeps it, for a `desired.v2` desired
+    /// resource's member alone.
+    asked: Option<Asked>,
+}
+
 /// The owner's state, as its queryables answer it (S2, S3).
 pub struct Store {
     map: Mutex<HashMap<OwnedKeyExpr, Entry>>,
@@ -890,10 +906,11 @@ pub struct Store {
     /// of them: what [`Store::asked_reaching`] counts (`desired.v1`'s
     /// scenarios §8, text 0.4).
     asked: Mutex<HashMap<OwnedKeyExpr, u64>>,
-    /// The latest GETs of one concrete key answered, at most
-    /// [`ASKED_READS`] of them, oldest first: what [`Store::reads_of`]
-    /// lists (`desired.v2`'s scenarios, "What a section observes of a
-    /// read").
+    /// The latest GETs answered of one concrete key of a `desired.v2`
+    /// desired resource ([`Answered::reads`]), at most [`ASKED_READS`] of
+    /// them, oldest first: what [`Store::reads_of`] lists (`desired.v2`'s
+    /// scenarios, "What a section observes of a read"). A GET of any other
+    /// resource is not kept. Taken with no other lock of the store's held.
     reads: Mutex<std::collections::VecDeque<(OwnedKeyExpr, Asked)>>,
     /// Each interface whose contract uses `freshness.v2`, by id: its
     /// collections as its heartbeats read them. Lock order: `map`, then
@@ -1079,7 +1096,9 @@ impl Store {
 
     /// The GETs of the one concrete key `key` this store answered, oldest
     /// first: the held stamp each carried and whether it was answered with
-    /// that stamp alone. The latest [`ASKED_READS`] over every key.
+    /// that stamp alone. Kept for a `desired.v2` desired resource's keys
+    /// alone, the latest [`ASKED_READS`] over every such key; empty for
+    /// any other key.
     pub(crate) fn reads_of(&self, key: &zenoh::key_expr::keyexpr) -> Vec<Asked> {
         self.reads
             .lock()
@@ -1090,24 +1109,21 @@ impl Store {
             .collect()
     }
 
-    fn note_read(&self, q: &Query, unchanged: bool) {
-        let qk: &zenoh::key_expr::keyexpr = q.key_expr();
-        if qk.is_wild() {
-            return;
-        }
-        let encoding = q
-            .encoding()
-            .map_or_else(|| wire::ENCODING.to_owned(), ToString::to_string);
-        let payload = q.payload().map(|p| p.to_bytes().into_owned());
-        let held = wire::read_get(&encoding, payload.as_deref())
-            .ok()
-            .flatten()
-            .map(|h| h.stamp);
+    /// How many GETs the store keeps, over every key.
+    #[cfg(test)]
+    pub(crate) fn reads_kept(&self) -> usize {
+        self.reads.lock().expect("not poisoned").len()
+    }
+
+    /// Keeps one GET of `key`, a `desired.v2` desired resource's member's
+    /// ([`Conditional::asked`]). The caller holds no other lock of the
+    /// store's.
+    fn note_read(&self, key: &zenoh::key_expr::keyexpr, asked: Asked) {
         let mut reads = self.reads.lock().expect("not poisoned");
         if reads.len() == ASKED_READS {
             reads.pop_front();
         }
-        reads.push_back((qk.to_owned(), Asked { held, unchanged }));
+        reads.push_back((key.to_owned(), asked));
     }
 
     /// Records a put. A covered member's (`freshness.v2`) is vouched for
@@ -1238,8 +1254,13 @@ impl Store {
         // The run and asof first, then the store read: every mutation at or
         // below asof is in the map by then, or a later one of its member.
         let mark = reached.iter().any(|c| !c.per_key).then(|| minter.as_of());
-        let mut map = self.map.lock().expect("not poisoned");
-        map.retain(|_, e| e.value.is_some() || e.at.elapsed() <= self.window);
+        let window = self.window;
+        let live = || {
+            let mut map = self.map.lock().expect("not poisoned");
+            map.retain(|_, e| e.value.is_some() || e.at.elapsed() <= window);
+            map
+        };
+        let mut map = live();
         let under_root = |k: &OwnedKeyExpr| {
             k.as_str()
                 .strip_prefix(root)
@@ -1248,14 +1269,27 @@ impl Store {
         // A conditional read (core 0.110 §4.2): the held stamp alone, where
         // the member's last mutation carries exactly the stamp the GET
         // names. Every other GET is answered whole, below.
-        let held = Self::held_answer(q, &collections, &map);
-        self.note_read(q, held.is_some());
-        if let Some(held) = held {
+        let Conditional { held, asked } = Self::held_answer(q, &collections, &map);
+        let unchanged = |held: wire::HeldStamp| {
             let _ = q
                 .reply(qk.to_owned(), held.write())
                 .encoding(Encoding::ZENOH_BYTES)
                 .wait();
-            return;
+        };
+        if let Some(asked) = asked {
+            // A `desired.v2` desired resource's GET is kept for its author
+            // (`Author::reads`), before its answer goes, and under no other
+            // lock of the store's: the decision is made, and a whole
+            // answer reads the map again. Every mutation at or below
+            // `mark` is still in it, or a later one of its member.
+            drop(map);
+            self.note_read(qk, asked);
+            if let Some(held) = held {
+                return unchanged(held);
+            }
+            map = live();
+        } else if let Some(held) = held {
+            return unchanged(held);
         }
         // Per key: a per-key resource's members alone (#977's E4).
         for (key, e) in map.iter() {
@@ -1323,17 +1357,33 @@ impl Store {
     /// at all), no member held, another stamp, and a payload §7.5 refuses,
     /// another `Encoding` among them. A live member whose bytes are no
     /// envelope is listed by no snapshot, so it answers no held stamp.
+    ///
+    /// The payload is parsed once, here: [`Conditional::asked`] is what a
+    /// GET of a `desired.v2` desired resource's member carried and how it
+    /// was answered, for its author ([`Store::reads_of`]), and `None` for
+    /// a GET of any other resource, which is not kept.
     fn held_answer(
         q: &Query,
         collections: &[Arc<Answered>],
         map: &HashMap<OwnedKeyExpr, Entry>,
-    ) -> Option<wire::HeldStamp> {
-        use zenkey_model::collection::{StateRead, answers_held};
-        let payload = q.payload()?.to_bytes();
+    ) -> Conditional {
+        use zenkey_model::collection::{StateRead, answers_carried};
+        let none = Conditional {
+            held: None,
+            asked: None,
+        };
         let qk: &zenoh::key_expr::keyexpr = q.key_expr();
-        let read = if qk.is_wild() {
-            StateRead::Wildcard
-        } else if collections.iter().find(|c| c.holds(qk.as_str()))?.per_key {
+        if qk.is_wild() {
+            return none;
+        }
+        let Some(of) = collections.iter().find(|c| c.holds(qk.as_str())) else {
+            return none;
+        };
+        let payload = q.payload().map(|p| p.to_bytes());
+        if payload.is_none() && !of.reads {
+            return none;
+        }
+        let read = if of.per_key {
             StateRead::PerKey
         } else {
             StateRead::Member
@@ -1341,6 +1391,7 @@ impl Store {
         let encoding = q
             .encoding()
             .map_or_else(|| wire::ENCODING.to_owned(), ToString::to_string);
+        let carried = wire::read_get(&encoding, payload.as_deref()).ok().flatten();
         let last = map
             .get(qk)
             .filter(|e| match &e.value {
@@ -1348,7 +1399,14 @@ impl Store {
                 None => true,
             })
             .map(|e| e.stamped.stamp);
-        answers_held(read, &encoding, Some(&payload), last)
+        let held = answers_carried(read, carried, last);
+        Conditional {
+            held,
+            asked: of.reads.then_some(Asked {
+                held: carried.map(|h| h.stamp),
+                unchanged: held.is_some(),
+            }),
+        }
     }
 
     /// The snapshot of `c` on `key`, the snapshot key or a member's, of
