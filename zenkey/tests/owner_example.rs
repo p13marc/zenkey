@@ -1317,6 +1317,159 @@ fn the_help_documents_the_telemetry_surface() {
     }
 }
 
+/// `desired.v2` in the owner example (#986's J3): `--desired-v2` on
+/// `scenarios-v2.md`'s contracts, "tasking.v2, watched" with `--desired-ttl
+/// 4`. A version is `<run>/<seq>`, the author's record holds no stamp,
+/// `desired gets` lists each read's held stamp and its answer, the target's
+/// report is the packed `Report`'s reading, and `desired watch` says what
+/// its watch holds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_implements_desired_v2() {
+    use zenkey::model::desired::v2::parse_version;
+
+    let (_r1, ep) = router(None).await;
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join("author.json").display().to_string();
+    let runs = dir.path().join("author.run").display().to_string();
+    let a = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--run-file",
+        &runs,
+        "--desired-record",
+        &record,
+        "--desired-ttl",
+        "4",
+        "lab/author",
+    ]);
+    assert_eq!(line(&a.lines).await, format!("connected {ep}"));
+    line(&a.lines).await;
+    let d = "zk2/lab/author/tasking.v2/state/tasks/lab/worker";
+    let put = a
+        .ask(r#"desired put lab/worker {"revision": 1, "mode": "run", "rate_hz": 10}"#)
+        .await;
+    let s1 = put
+        .strip_prefix(&format!("desired put {d} "))
+        .expect(&put)
+        .to_owned();
+    assert!(parse_version(&s1).is_some(), "a version, <run>/<seq>: {s1}");
+    assert_eq!(s1.find('/'), Some(4), "a 16-bit run from --run-file: {s1}");
+    let kept: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
+    assert_eq!(kept["profile"], "desired.v2");
+    assert!(kept["documents"]["lab/worker"].get("stamp").is_none());
+
+    let t = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--desired-target",
+        "lab/author",
+        "--desired-ttl",
+        "4",
+        "lab/worker",
+    ]);
+    assert_eq!(line(&t.lines).await, format!("connected {ep}"));
+    line(&t.lines).await;
+    let report = |answer: String| -> serde_json::Value {
+        serde_json::from_str(answer.strip_prefix("desired report ").expect(&answer)).unwrap()
+    };
+    let until = |what: &'static str, f: &'static (dyn Fn(&serde_json::Value) -> bool + Sync)| {
+        let t = &t;
+        async move {
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            loop {
+                let r = report(t.ask("desired report").await);
+                if f(&r) {
+                    return r;
+                }
+                assert!(std::time::Instant::now() < deadline, "never: {what}: {r}");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    };
+    let r = until("converged on v1", &|r| r["outcome"] == "converged").await;
+    assert_eq!(
+        r,
+        serde_json::json!({
+            "source": "desired", "outcome": "converged", "last_known": false,
+            "observed": {"version": s1, "revision": 1},
+            "in_force": {"version": s1, "revision": 1},
+        })
+    );
+
+    // The seed carried no held stamp and was answered whole; the watch's
+    // first read carried s1 and was answered with it alone.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let gets = a.ask("desired gets lab/worker").await;
+        let reads = gets
+            .strip_prefix(&format!("desired gets {d} "))
+            .expect(&gets)
+            .to_owned();
+        if reads.ends_with(&format!(" -=whole {s1}=unchanged")) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "never the watch's read: {gets}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let watch = t.ask("desired watch").await;
+    assert!(
+        watch.starts_with("desired watch watches=true expects=")
+            && !watch.contains("expects=none")
+            && watch.contains(" silent=false ")
+            && watch.ends_with(" reads=2"),
+        "{watch}"
+    );
+
+    // §2.4's bound: refused whole, at /revision (4) with its line (2).
+    a.ask(r#"desired put lab/worker {"revision": 4294967296, "mode": "run", "rate_hz": 10}"#)
+        .await;
+    let r = until("refused", &|r| r["outcome"] == "refused").await;
+    assert_eq!(
+        r["refusal"],
+        serde_json::json!({"code": "invalid", "pointer": 4, "detail": 2})
+    );
+    assert!(r["observed"].get("revision").is_none(), "{r}");
+
+    // A delete, and one where no document is held.
+    let del = a.ask("desired delete lab/worker").await;
+    let deleted = del
+        .strip_prefix(&format!("desired deleted {d} "))
+        .expect(&del);
+    assert!(parse_version(deleted).is_some(), "{del}");
+    until("reverted", &|r| r["outcome"] == "reverted").await;
+    assert_eq!(
+        a.ask("desired delete lab/worker").await,
+        format!("desired none {d}")
+    );
+    let again = a.ask("desired delete-unheld lab/worker").await;
+    assert!(
+        again.starts_with(&format!("desired deleted {d} ")),
+        "{again}"
+    );
+    t.stop().await;
+    a.stop().await;
+}
+
+#[test]
+fn the_help_documents_the_desired_v2_surface() {
+    for piece in [
+        "desired.v2 (spec/profiles/desired/v2.md)",
+        "--desired-v2 ",
+        "--desired-ttl <s>",
+        "--desired-timeout-ms <ms>",
+        "desired delete-unheld <target>",
+        "desired gets <target>",
+        "<held>=<unchanged|whole>",
+        "desired watch watches=<bool>",
+    ] {
+        assert!(owner::HELP.contains(piece), "the help lacks {piece:?}");
+    }
+}
+
 /// `desired.v1` in the owner example (#840, DC): `--desired-author` and
 /// `--desired-target`, two owners of one router, the scenarios' contracts
 /// embedded. The author puts a document only on a change, the target acts
