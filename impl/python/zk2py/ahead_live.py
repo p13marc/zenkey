@@ -180,8 +180,9 @@ def py_owner(report: Report) -> None:
         key = heartbeat.heartbeat_key("lab", "ahead", h2.IFACE)
 
         def echo(count: int, seconds: int) -> list[dict[str, Any]]:
-            out = subprocess.run([str(BLACKBOX / "zenctl"), "echo", key, "-c", bus.endpoint, "--contracts",
-                                  str(REPO / "spec" / "profiles"), "--format", "ndjson", "--count", str(count)],
+            out = subprocess.run([str(BLACKBOX / "zenctl"), "echo", key, "-c", bus.endpoint,
+                                  "--contracts", str(h2.CONTRACT), "--contracts", str(FRESHNESS_V2),
+                                  "--format", "ndjson", "--count", str(count)],
                                  capture_output=True, text=True, timeout=seconds)
             rows = []
             for line in out.stdout.splitlines():
@@ -203,19 +204,24 @@ def py_owner(report: Report) -> None:
         except subprocess.TimeoutExpired as e:
             rows = [{"timeout": (e.stdout or b"")[-600:].decode("utf-8", "replace") if isinstance(e.stdout, bytes)
                      else str(e.stdout)[-600:]}]
-        text = json.dumps(rows)
-        report.check(sec, "zenctl echo shows the heartbeat heard while the guard holds, and its time as ahead: "
-                          "never as unknown, and never as an instant",
-                     any("ahead" in json.dumps(r) for r in rows) and "unknown" not in text.replace("unknown_", ""),
-                     text[:1500])
+        def times(rs: list[dict[str, Any]]) -> list[Any]:
+            return [r["value"].get("time", "(no time)") for r in rs if isinstance(r.get("value"), dict)]
+
+        report.check(sec, "zenctl echo shows the heartbeat heard while the guard holds, 16 bytes, and its time as "
+                          "ahead: never as unknown, and never as an instant",
+                     times(rows) == ["ahead"] and rows[0].get("payload_bytes") == 16
+                     and rows[0].get("verdict") == "valid" and "dated" not in rows[0]["value"],
+                     json.dumps(rows)[:1500])
         o.cmd("clock 0")
         time.sleep(1.0)
         try:
             rows2 = echo(1, 40)
         except subprocess.TimeoutExpired:
             rows2 = [{"timeout": True}]
-        report.check(sec, "the clock set right: zenctl echo shows the next heartbeat's time as an instant",
-                     bool(rows2) and "ahead" not in json.dumps(rows2), json.dumps(rows2)[:1500])
+        t2 = times(rows2)
+        report.check(sec, "the clock set right: zenctl echo shows the next heartbeat's time as an instant, dated",
+                     len(t2) == 1 and isinstance(t2[0], dict) and set(t2[0]) == {"s", "ms"}
+                     and "dated" in rows2[0]["value"], json.dumps(rows2)[:1500])
     finally:
         stop.set()
         bus.close()
