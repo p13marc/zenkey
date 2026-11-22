@@ -1,0 +1,329 @@
+{
+ "description": "alarms.v2 §3: the standard schemas' published artifact ids, and the packed type's tag. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `files`: each of the profile's two schema files, its path relative to this profile's directory, its kind and `current`, its artifact's id: sha256 over the document's JCS bytes (RFC 8785; core §7.1, §9.4), as sha256:<64 lowercase hex>. `published` lists every id the profile publishes, oldest first, each with the text that published it. `types` are the profile's type names, each with the first text that defines it and, for a packed type, its tag (core §7.6: the low four bits of the last byte of the sha256 of its layout form's JCS bytes). Each case names a file (`path`, from the repository's root) or gives a document, decoded -> its id, and whether the profile publishes it.",
+ "files": [
+  {
+   "file": "alarms.v2.json",
+   "kind": "packed",
+   "current": "sha256:66140ae459da80e93c621431b87c4f698b328340322f5c5dcb25ed1c567cb56f"
+  },
+  {
+   "file": "schemas/alarms.v2.json",
+   "kind": "jsonschema",
+   "current": "sha256:a3515ad47772ac778ccfbad3850a086ac18c28a9975eb7c8288c3437db9b99de"
+  }
+ ],
+ "published": [
+  {
+   "id": "sha256:66140ae459da80e93c621431b87c4f698b328340322f5c5dcb25ed1c567cb56f",
+   "revision": "0.1",
+   "note": "alarms.v2 0.1: the packed Alarm."
+  },
+  {
+   "id": "sha256:a3515ad47772ac778ccfbad3850a086ac18c28a9975eb7c8288c3437db9b99de",
+   "revision": "0.1",
+   "note": "alarms.v2 0.1: the JSON Words."
+  }
+ ],
+ "types": [
+  {
+   "name": "Alarm",
+   "kind": "packed",
+   "since": "0.1",
+   "tag": 0
+  },
+  {
+   "name": "alarms.v2.Words",
+   "kind": "jsonschema",
+   "since": "0.1"
+  }
+ ],
+ "cases": [
+  {
+   "note": "the profile's packed file: the current revision",
+   "path": "spec/profiles/alarms/alarms.v2.json",
+   "expect": {
+    "id": "sha256:66140ae459da80e93c621431b87c4f698b328340322f5c5dcb25ed1c567cb56f",
+    "published": true
+   }
+  },
+  {
+   "note": "the profile's JSON Schema: the current revision",
+   "path": "spec/profiles/alarms/schemas/alarms.v2.json",
+   "expect": {
+    "id": "sha256:a3515ad47772ac778ccfbad3850a086ac18c28a9975eb7c8288c3437db9b99de",
+    "published": true
+   }
+  },
+  {
+   "note": "the packed file with its members in another order: JCS sorts them, so the same id",
+   "document": {
+    "types": {
+     "Alarm": {
+      "description": "state alarms/{slot}: one alarm's record. 35 bits, 5 bytes, with no optional field; 67 bits, 9 bytes, with its time; 91 bits, 12 bytes, with its labels too; 131 bits, 17 bytes, for an alarm named by words, with its time and its key.",
+      "fields": [
+       {
+        "name": "state",
+        "type": "enum",
+        "values": [
+         "firing",
+         "resolved"
+        ],
+        "description": "Whether the alarm fires. The record says the state, never the sample's kind, the heartbeat's bit or its live count."
+       },
+       {
+        "name": "severity",
+        "type": "enum",
+        "values": [
+         "info",
+         "warning",
+         "critical"
+        ],
+        "escape": true,
+        "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
+       },
+       {
+        "name": "at",
+        "type": "time",
+        "optional": true,
+        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
+       },
+       {
+        "name": "rule",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 254,
+        "reserved": [
+         "not_available"
+        ],
+        "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+       },
+       {
+        "name": "labels",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 16777215,
+        "optional": true,
+        "description": "The codes of the rule's labels, in the table's order, the first the most significant, as one integer. Present exactly where the rule declares a label."
+       },
+       {
+        "name": "argument",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 1048574,
+        "reserved": [
+         "not_available"
+        ],
+        "description": "The rule's own number: the reading that changes while the condition holds. It reads as the rule's minimum plus this code times its resolution. not_available where the rule declares none, or the reading has no code."
+       },
+       {
+        "name": "key",
+        "type": "counter",
+        "width": 64,
+        "optional": true,
+        "description": "The alert key, as the 64 bits of its hash. Present exactly where rule is not_available. It counts nothing: a counter is the one kind that holds 64 bits."
+       },
+       "..."
+      ]
+     }
+    },
+    "description": "alarms.v2's standard packed schema (spec/profiles/alarms/v2.md, section 3; core section 7.6). The standard contract alarms.v2.toml lists this file and types its resource alarms/{slot} by it. An alarm's slot is its key's last chunk, never a field. Its rule and its labels are numbers that the service's own table names (the annotation alarms.rules, section 4), or its rule is not_available and its words are on words/{slot} (section 2.4)."
+   },
+   "expect": {
+    "id": "sha256:66140ae459da80e93c621431b87c4f698b328340322f5c5dcb25ed1c567cb56f",
+    "published": true
+   }
+  },
+  {
+   "note": "the packed file with one description reworded: another id, which the profile does not publish",
+   "document": {
+    "description": "alarms.v2's standard packed schema (spec/profiles/alarms/v2.md, section 3; core section 7.6). The standard contract alarms.v2.toml lists this file and types its resource alarms/{slot} by it. An alarm's slot is its key's last chunk, never a field. Its rule and its labels are numbers that the service's own table names (the annotation alarms.rules, section 4), or its rule is not_available and its words are on words/{slot} (section 2.4).",
+    "types": {
+     "Alarm": {
+      "description": "state alarms/{slot}: one alarm's record. 35 bits, 5 bytes, with no optional field; 67 bits, 9 bytes, with its time; 91 bits, 12 bytes, with its labels too; 131 bits, 17 bytes, for an alarm named by words, with its time and its key.",
+      "fields": [
+       {
+        "name": "state",
+        "type": "enum",
+        "values": [
+         "firing",
+         "resolved"
+        ],
+        "description": "Whether the alarm fires."
+       },
+       {
+        "name": "severity",
+        "type": "enum",
+        "values": [
+         "info",
+         "warning",
+         "critical"
+        ],
+        "escape": true,
+        "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
+       },
+       {
+        "name": "at",
+        "type": "time",
+        "optional": true,
+        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
+       },
+       {
+        "name": "rule",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 254,
+        "reserved": [
+         "not_available"
+        ],
+        "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+       },
+       {
+        "name": "labels",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 16777215,
+        "optional": true,
+        "description": "The codes of the rule's labels, in the table's order, the first the most significant, as one integer. Present exactly where the rule declares a label."
+       },
+       {
+        "name": "argument",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 1048574,
+        "reserved": [
+         "not_available"
+        ],
+        "description": "The rule's own number: the reading that changes while the condition holds. It reads as the rule's minimum plus this code times its resolution. not_available where the rule declares none, or the reading has no code."
+       },
+       {
+        "name": "key",
+        "type": "counter",
+        "width": 64,
+        "optional": true,
+        "description": "The alert key, as the 64 bits of its hash. Present exactly where rule is not_available. It counts nothing: a counter is the one kind that holds 64 bits."
+       },
+       "..."
+      ]
+     }
+    }
+   },
+   "expect": {
+    "id": "sha256:1f288f5efc81ed8740dfa7be8464cd817edc1e00b125db233c44f5459a1a6f82",
+    "published": false
+   }
+  },
+  {
+   "note": "the packed file without `key`: another artifact, and another layout",
+   "document": {
+    "description": "alarms.v2's standard packed schema (spec/profiles/alarms/v2.md, section 3; core section 7.6). The standard contract alarms.v2.toml lists this file and types its resource alarms/{slot} by it. An alarm's slot is its key's last chunk, never a field. Its rule and its labels are numbers that the service's own table names (the annotation alarms.rules, section 4), or its rule is not_available and its words are on words/{slot} (section 2.4).",
+    "types": {
+     "Alarm": {
+      "description": "state alarms/{slot}: one alarm's record. 35 bits, 5 bytes, with no optional field; 67 bits, 9 bytes, with its time; 91 bits, 12 bytes, with its labels too; 131 bits, 17 bytes, for an alarm named by words, with its time and its key.",
+      "fields": [
+       {
+        "name": "state",
+        "type": "enum",
+        "values": [
+         "firing",
+         "resolved"
+        ],
+        "description": "Whether the alarm fires. The record says the state, never the sample's kind, the heartbeat's bit or its live count."
+       },
+       {
+        "name": "severity",
+        "type": "enum",
+        "values": [
+         "info",
+         "warning",
+         "critical"
+        ],
+        "escape": true,
+        "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
+       },
+       {
+        "name": "at",
+        "type": "time",
+        "optional": true,
+        "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
+       },
+       {
+        "name": "rule",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 254,
+        "reserved": [
+         "not_available"
+        ],
+        "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+       },
+       {
+        "name": "labels",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 16777215,
+        "optional": true,
+        "description": "The codes of the rule's labels, in the table's order, the first the most significant, as one integer. Present exactly where the rule declares a label."
+       },
+       {
+        "name": "argument",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 1048574,
+        "reserved": [
+         "not_available"
+        ],
+        "description": "The rule's own number: the reading that changes while the condition holds. It reads as the rule's minimum plus this code times its resolution. not_available where the rule declares none, or the reading has no code."
+       },
+       "..."
+      ]
+     }
+    }
+   },
+   "expect": {
+    "id": "sha256:c59be50fbcec133002c9334f9b5885266110eee738761bc5cfac508ab0e7b32b",
+    "published": false
+   }
+  },
+  {
+   "note": "the JSON Schema with `summary` no longer required: another id",
+   "document": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "alarms.v2.json",
+    "$comment": "The alarms.v2 profile's words (spec/profiles/alarms/v2.md, section 2.4): the text of an alarm that no table names. It carries no producer, host or source field, because the key names the publisher. The alarm's state, severity and time are in its packed record, on alarms/{slot}.",
+    "$defs": {
+     "alarms.v2.Words": {
+      "type": "object",
+      "properties": {
+       "rule": {
+        "description": "The rule's name. The first input of the key recipe.",
+        "type": "string"
+       },
+       "labels": {
+        "description": "The alarm's labels. Every label that is not host-scoped is a discriminating label and enters the key recipe.",
+        "type": "object",
+        "additionalProperties": {
+         "type": "string"
+        }
+       },
+       "summary": {
+        "description": "One human-readable line.",
+        "type": "string"
+       },
+       "category": {
+        "description": "Free text naming what produced the alarm. Not part of the key.",
+        "type": "string"
+       }
+      },
+      "required": [
+       "rule"
+      ]
+     }
+    }
+   },
+   "expect": {
+    "id": "sha256:33901f0e83ab53bb75eeb7ab2208da59fe5a5b995a1d452ca490a52fc3b29217",
+    "published": false
+   }
+  }
+ ]
+}

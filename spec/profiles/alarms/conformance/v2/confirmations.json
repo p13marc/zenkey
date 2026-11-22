@@ -1,0 +1,6860 @@
+{
+ "description": "alarms.v2 §2.7, §3: the heartbeat's bit, and the alarms' snapshot. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. The owner is lab/svc, and its alarms' keys zk2/lab/svc/alarms.v2/state/alarms/<slot>. `heartbeats`: a reader's `view` of the collection (each slot it holds, with the stamp of its record's put, <run>/<seq>, and the record's state), each record's put heard at instant 0, and one heartbeat heard 905 s later, its `payload` in hex: core §7.5's form 6 on zk2/lab/svc/freshness.v2/stream/heartbeat/alarms.v2, CH's tag 9 the standard contract's revision 2.0's, read with its one collection, state/alarms/{slot}, of cardinality 256 (a live count of 9 bits). `holds_tag` is the tag of the revision the reader holds. -> {unread: \"revision\" | \"refused\"}, or {read: {live, section, confirmed}}: the section's live count; `absent` (its map bit is 0), `diverged` (its digest or its live count is not the view's) or `confirmed`; and the slots it confirms, ascending: those whose bit is set, where the section is `confirmed`. A rank is a place in the byte order of the live members' keys, so slot 10 ranks before slot 2. Then `firing`, the number of firing records in the view, which the live count is not; and `judged`, each slot's answer to \"is this alarm firing?\" 905 s after its put, its owner present and listed and nothing lost: a resolved record is no, `resolved`, whatever its bit and its age; a firing one the heartbeat confirmed is yes, `firing`; a firing one it did not confirm was last confirmed by its put, past the 900 s horizon: unobservable, `stale`, neither firing nor resolved. `built_from` says how each payload was made. `snapshots`: a GET's reply on zk2/lab/svc/alarms.v2/state/alarms, one page in hex (core §7.5), under the deployment `epoch` -> its `size`, its run, asof and `coll` (the alarms are collection 0), and each entry: its `slot` (the id), its stamp, its `confirmation` (`time`: vouched for at the snapshot's time; `conf`: its last confirmation, `confirmed_at` in milliseconds since the Unix epoch) and its record read as records.json reads it.",
+ "heartbeats": [
+  {
+   "note": "W2's three firing alarms, each vouched for: 17 bytes, and each reads firing past the horizon",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e019984300026d9d94ac037",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2
+    ],
+    "vouched_ranks": [
+     0,
+     1,
+     2
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 3,
+     "section": "confirmed",
+     "confirmed": [
+      0,
+      1,
+      2
+     ]
+    },
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "1": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "2": {
+      "answer": "yes",
+      "reason": "firing"
+     }
+    }
+   }
+  },
+  {
+   "note": "nothing live: the heartbeat is sent all the same, 17 bytes, a live count of 0",
+   "holds_tag": 9,
+   "view": [],
+   "payload": "c9000300000e0199843000200000000000",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [],
+    "vouched_ranks": [],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 0,
+     "section": "confirmed",
+     "confirmed": []
+    },
+    "firing": 0,
+    "judged": {}
+   }
+  },
+  {
+   "note": "three firing and five resolved records kept: a live count of 8 beside 3 firing alarms. The resolved ones have their bits clear, and read resolved, never stale. 18 bytes",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    },
+    {
+     "slot": 3,
+     "stamp": "0003/9",
+     "state": "resolved"
+    },
+    {
+     "slot": 4,
+     "stamp": "0003/11",
+     "state": "resolved"
+    },
+    {
+     "slot": 5,
+     "stamp": "0003/13",
+     "state": "resolved"
+    },
+    {
+     "slot": 6,
+     "stamp": "0003/15",
+     "state": "resolved"
+    },
+    {
+     "slot": 7,
+     "stamp": "0003/17",
+     "state": "resolved"
+    }
+   ],
+   "payload": "c9000300000e01998430003663a8f1e08700",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7
+    ],
+    "vouched_ranks": [
+     0,
+     1,
+     2
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 8,
+     "section": "confirmed",
+     "confirmed": [
+      0,
+      1,
+      2
+     ]
+    },
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "1": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "2": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "3": {
+      "answer": "no",
+      "reason": "resolved"
+     },
+     "4": {
+      "answer": "no",
+      "reason": "resolved"
+     },
+     "5": {
+      "answer": "no",
+      "reason": "resolved"
+     },
+     "6": {
+      "answer": "no",
+      "reason": "resolved"
+     },
+     "7": {
+      "answer": "no",
+      "reason": "resolved"
+     }
+    }
+   }
+  },
+  {
+   "note": "a hung evaluator: slot 1's bit is clear while its record fires. It reads stale, neither firing nor resolved; a clear bit is no resolve",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e019984300026d9d94ac035",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2
+    ],
+    "vouched_ranks": [
+     0,
+     2
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 3,
+     "section": "confirmed",
+     "confirmed": [
+      0,
+      2
+     ]
+    },
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "1": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "2": {
+      "answer": "yes",
+      "reason": "firing"
+     }
+    }
+   }
+  },
+  {
+   "note": "every bit clear, an owner that evaluates nothing: three stale alarms, and none resolved",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e019984300026d9d94ac038",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2
+    ],
+    "vouched_ranks": [],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 3,
+     "section": "confirmed",
+     "confirmed": []
+    },
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "1": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "2": {
+      "answer": "unobservable",
+      "reason": "stale"
+     }
+    }
+   }
+  },
+  {
+   "note": "only resolved records live: a live count of 2 and nothing firing",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/9",
+     "state": "resolved"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/11",
+     "state": "resolved"
+    }
+   ],
+   "payload": "c9000300000e0199843000213c9c342020",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1
+    ],
+    "vouched_ranks": [],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 2,
+     "section": "confirmed",
+     "confirmed": []
+    },
+    "firing": 0,
+    "judged": {
+     "0": {
+      "answer": "no",
+      "reason": "resolved"
+     },
+     "1": {
+      "answer": "no",
+      "reason": "resolved"
+     }
+    }
+   }
+  },
+  {
+   "note": "ranks follow the keys' bytes: alarms/10, alarms/100, alarms/2, alarms/9. Slot 2 and slot 9 are vouched for at ranks 2 and 3; slot 10, at rank 0, is not, and reads stale",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 2,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 10,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 100,
+     "stamp": "0003/7",
+     "state": "resolved"
+    },
+    {
+     "slot": 9,
+     "stamp": "0003/8",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e0199843000338be0ff804180",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     10,
+     100,
+     2,
+     9
+    ],
+    "vouched_ranks": [
+     2,
+     3
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 4,
+     "section": "confirmed",
+     "confirmed": [
+      2,
+      9
+     ]
+    },
+    "firing": 3,
+    "judged": {
+     "2": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "10": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "100": {
+      "answer": "no",
+      "reason": "resolved"
+     },
+     "9": {
+      "answer": "yes",
+      "reason": "firing"
+     }
+    }
+   }
+  },
+  {
+   "note": "the same view, the bitmap's first bit set alone: slot 10's, not slot 2's",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 2,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 10,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 100,
+     "stamp": "0003/7",
+     "state": "resolved"
+    },
+    {
+     "slot": 9,
+     "stamp": "0003/8",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e0199843000338be0ff804400",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     10,
+     100,
+     2,
+     9
+    ],
+    "vouched_ranks": [
+     0
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 4,
+     "section": "confirmed",
+     "confirmed": [
+      10
+     ]
+    },
+    "firing": 3,
+    "judged": {
+     "2": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "10": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "100": {
+      "answer": "no",
+      "reason": "resolved"
+     },
+     "9": {
+      "answer": "unobservable",
+      "reason": "stale"
+     }
+    }
+   }
+  },
+  {
+   "note": "the owner holds a record the reader does not: the live count and the digest are not the view's, and nothing is confirmed. Every firing alarm of the view ages toward stale, and the reader reads the collection again",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e01998430003c6ac906804780",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "vouched_ranks": [
+     0,
+     1,
+     2,
+     3
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 4,
+     "section": "diverged",
+     "confirmed": []
+    },
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "1": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "2": {
+      "answer": "unobservable",
+      "reason": "stale"
+     }
+    }
+   }
+  },
+  {
+   "note": "the reader holds slot 1 under an older put than the owner's: the digest diverges at an equal live count",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e0199843000340b09d16037",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2
+    ],
+    "vouched_ranks": [
+     0,
+     1,
+     2
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 3,
+     "section": "diverged",
+     "confirmed": []
+    },
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "1": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "2": {
+      "answer": "unobservable",
+      "reason": "stale"
+     }
+    }
+   }
+  },
+  {
+   "note": "a map bit of 0: the owner does not expose the collection. Nothing is said, and nothing confirmed",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e019984300000",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2
+    ],
+    "vouched_ranks": [],
+    "map_bit": false
+   },
+   "expect": {
+    "read": {
+     "live": null,
+     "section": "absent",
+     "confirmed": []
+    },
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "1": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "2": {
+      "answer": "unobservable",
+      "reason": "stale"
+     }
+    }
+   }
+  },
+  {
+   "note": "another revision's tag: not read",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    }
+   ],
+   "payload": "c4000300000e019984300026d9d94ac037",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 4,
+    "live_in_key_order": [
+     0,
+     1,
+     2
+    ],
+    "vouched_ranks": [
+     0,
+     1,
+     2
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "unread": "revision",
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "1": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "2": {
+      "answer": "unobservable",
+      "reason": "stale"
+     }
+    }
+   }
+  },
+  {
+   "note": "a body with a byte after its pad: refused, and nothing confirmed",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/7",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e019984300026d9d94ac03700",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2
+    ],
+    "vouched_ranks": [
+     0,
+     1,
+     2
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "unread": "refused",
+    "firing": 3,
+    "judged": {
+     "0": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "1": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "2": {
+      "answer": "unobservable",
+      "reason": "stale"
+     }
+    }
+   }
+  },
+  {
+   "note": "256 firing alarms, every one vouched for: a bitmap of 256 bits, 49 bytes",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/1",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/2",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/3",
+     "state": "firing"
+    },
+    {
+     "slot": 3,
+     "stamp": "0003/4",
+     "state": "firing"
+    },
+    {
+     "slot": 4,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 5,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 6,
+     "stamp": "0003/7",
+     "state": "firing"
+    },
+    {
+     "slot": 7,
+     "stamp": "0003/8",
+     "state": "firing"
+    },
+    {
+     "slot": 8,
+     "stamp": "0003/9",
+     "state": "firing"
+    },
+    {
+     "slot": 9,
+     "stamp": "0003/10",
+     "state": "firing"
+    },
+    {
+     "slot": 10,
+     "stamp": "0003/11",
+     "state": "firing"
+    },
+    {
+     "slot": 11,
+     "stamp": "0003/12",
+     "state": "firing"
+    },
+    {
+     "slot": 12,
+     "stamp": "0003/13",
+     "state": "firing"
+    },
+    {
+     "slot": 13,
+     "stamp": "0003/14",
+     "state": "firing"
+    },
+    {
+     "slot": 14,
+     "stamp": "0003/15",
+     "state": "firing"
+    },
+    {
+     "slot": 15,
+     "stamp": "0003/16",
+     "state": "firing"
+    },
+    {
+     "slot": 16,
+     "stamp": "0003/17",
+     "state": "firing"
+    },
+    {
+     "slot": 17,
+     "stamp": "0003/18",
+     "state": "firing"
+    },
+    {
+     "slot": 18,
+     "stamp": "0003/19",
+     "state": "firing"
+    },
+    {
+     "slot": 19,
+     "stamp": "0003/20",
+     "state": "firing"
+    },
+    {
+     "slot": 20,
+     "stamp": "0003/21",
+     "state": "firing"
+    },
+    {
+     "slot": 21,
+     "stamp": "0003/22",
+     "state": "firing"
+    },
+    {
+     "slot": 22,
+     "stamp": "0003/23",
+     "state": "firing"
+    },
+    {
+     "slot": 23,
+     "stamp": "0003/24",
+     "state": "firing"
+    },
+    {
+     "slot": 24,
+     "stamp": "0003/25",
+     "state": "firing"
+    },
+    {
+     "slot": 25,
+     "stamp": "0003/26",
+     "state": "firing"
+    },
+    {
+     "slot": 26,
+     "stamp": "0003/27",
+     "state": "firing"
+    },
+    {
+     "slot": 27,
+     "stamp": "0003/28",
+     "state": "firing"
+    },
+    {
+     "slot": 28,
+     "stamp": "0003/29",
+     "state": "firing"
+    },
+    {
+     "slot": 29,
+     "stamp": "0003/30",
+     "state": "firing"
+    },
+    {
+     "slot": 30,
+     "stamp": "0003/31",
+     "state": "firing"
+    },
+    {
+     "slot": 31,
+     "stamp": "0003/32",
+     "state": "firing"
+    },
+    {
+     "slot": 32,
+     "stamp": "0003/33",
+     "state": "firing"
+    },
+    {
+     "slot": 33,
+     "stamp": "0003/34",
+     "state": "firing"
+    },
+    {
+     "slot": 34,
+     "stamp": "0003/35",
+     "state": "firing"
+    },
+    {
+     "slot": 35,
+     "stamp": "0003/36",
+     "state": "firing"
+    },
+    {
+     "slot": 36,
+     "stamp": "0003/37",
+     "state": "firing"
+    },
+    {
+     "slot": 37,
+     "stamp": "0003/38",
+     "state": "firing"
+    },
+    {
+     "slot": 38,
+     "stamp": "0003/39",
+     "state": "firing"
+    },
+    {
+     "slot": 39,
+     "stamp": "0003/40",
+     "state": "firing"
+    },
+    {
+     "slot": 40,
+     "stamp": "0003/41",
+     "state": "firing"
+    },
+    {
+     "slot": 41,
+     "stamp": "0003/42",
+     "state": "firing"
+    },
+    {
+     "slot": 42,
+     "stamp": "0003/43",
+     "state": "firing"
+    },
+    {
+     "slot": 43,
+     "stamp": "0003/44",
+     "state": "firing"
+    },
+    {
+     "slot": 44,
+     "stamp": "0003/45",
+     "state": "firing"
+    },
+    {
+     "slot": 45,
+     "stamp": "0003/46",
+     "state": "firing"
+    },
+    {
+     "slot": 46,
+     "stamp": "0003/47",
+     "state": "firing"
+    },
+    {
+     "slot": 47,
+     "stamp": "0003/48",
+     "state": "firing"
+    },
+    {
+     "slot": 48,
+     "stamp": "0003/49",
+     "state": "firing"
+    },
+    {
+     "slot": 49,
+     "stamp": "0003/50",
+     "state": "firing"
+    },
+    {
+     "slot": 50,
+     "stamp": "0003/51",
+     "state": "firing"
+    },
+    {
+     "slot": 51,
+     "stamp": "0003/52",
+     "state": "firing"
+    },
+    {
+     "slot": 52,
+     "stamp": "0003/53",
+     "state": "firing"
+    },
+    {
+     "slot": 53,
+     "stamp": "0003/54",
+     "state": "firing"
+    },
+    {
+     "slot": 54,
+     "stamp": "0003/55",
+     "state": "firing"
+    },
+    {
+     "slot": 55,
+     "stamp": "0003/56",
+     "state": "firing"
+    },
+    {
+     "slot": 56,
+     "stamp": "0003/57",
+     "state": "firing"
+    },
+    {
+     "slot": 57,
+     "stamp": "0003/58",
+     "state": "firing"
+    },
+    {
+     "slot": 58,
+     "stamp": "0003/59",
+     "state": "firing"
+    },
+    {
+     "slot": 59,
+     "stamp": "0003/60",
+     "state": "firing"
+    },
+    {
+     "slot": 60,
+     "stamp": "0003/61",
+     "state": "firing"
+    },
+    {
+     "slot": 61,
+     "stamp": "0003/62",
+     "state": "firing"
+    },
+    {
+     "slot": 62,
+     "stamp": "0003/63",
+     "state": "firing"
+    },
+    {
+     "slot": 63,
+     "stamp": "0003/64",
+     "state": "firing"
+    },
+    {
+     "slot": 64,
+     "stamp": "0003/65",
+     "state": "firing"
+    },
+    {
+     "slot": 65,
+     "stamp": "0003/66",
+     "state": "firing"
+    },
+    {
+     "slot": 66,
+     "stamp": "0003/67",
+     "state": "firing"
+    },
+    {
+     "slot": 67,
+     "stamp": "0003/68",
+     "state": "firing"
+    },
+    {
+     "slot": 68,
+     "stamp": "0003/69",
+     "state": "firing"
+    },
+    {
+     "slot": 69,
+     "stamp": "0003/70",
+     "state": "firing"
+    },
+    {
+     "slot": 70,
+     "stamp": "0003/71",
+     "state": "firing"
+    },
+    {
+     "slot": 71,
+     "stamp": "0003/72",
+     "state": "firing"
+    },
+    {
+     "slot": 72,
+     "stamp": "0003/73",
+     "state": "firing"
+    },
+    {
+     "slot": 73,
+     "stamp": "0003/74",
+     "state": "firing"
+    },
+    {
+     "slot": 74,
+     "stamp": "0003/75",
+     "state": "firing"
+    },
+    {
+     "slot": 75,
+     "stamp": "0003/76",
+     "state": "firing"
+    },
+    {
+     "slot": 76,
+     "stamp": "0003/77",
+     "state": "firing"
+    },
+    {
+     "slot": 77,
+     "stamp": "0003/78",
+     "state": "firing"
+    },
+    {
+     "slot": 78,
+     "stamp": "0003/79",
+     "state": "firing"
+    },
+    {
+     "slot": 79,
+     "stamp": "0003/80",
+     "state": "firing"
+    },
+    {
+     "slot": 80,
+     "stamp": "0003/81",
+     "state": "firing"
+    },
+    {
+     "slot": 81,
+     "stamp": "0003/82",
+     "state": "firing"
+    },
+    {
+     "slot": 82,
+     "stamp": "0003/83",
+     "state": "firing"
+    },
+    {
+     "slot": 83,
+     "stamp": "0003/84",
+     "state": "firing"
+    },
+    {
+     "slot": 84,
+     "stamp": "0003/85",
+     "state": "firing"
+    },
+    {
+     "slot": 85,
+     "stamp": "0003/86",
+     "state": "firing"
+    },
+    {
+     "slot": 86,
+     "stamp": "0003/87",
+     "state": "firing"
+    },
+    {
+     "slot": 87,
+     "stamp": "0003/88",
+     "state": "firing"
+    },
+    {
+     "slot": 88,
+     "stamp": "0003/89",
+     "state": "firing"
+    },
+    {
+     "slot": 89,
+     "stamp": "0003/90",
+     "state": "firing"
+    },
+    {
+     "slot": 90,
+     "stamp": "0003/91",
+     "state": "firing"
+    },
+    {
+     "slot": 91,
+     "stamp": "0003/92",
+     "state": "firing"
+    },
+    {
+     "slot": 92,
+     "stamp": "0003/93",
+     "state": "firing"
+    },
+    {
+     "slot": 93,
+     "stamp": "0003/94",
+     "state": "firing"
+    },
+    {
+     "slot": 94,
+     "stamp": "0003/95",
+     "state": "firing"
+    },
+    {
+     "slot": 95,
+     "stamp": "0003/96",
+     "state": "firing"
+    },
+    {
+     "slot": 96,
+     "stamp": "0003/97",
+     "state": "firing"
+    },
+    {
+     "slot": 97,
+     "stamp": "0003/98",
+     "state": "firing"
+    },
+    {
+     "slot": 98,
+     "stamp": "0003/99",
+     "state": "firing"
+    },
+    {
+     "slot": 99,
+     "stamp": "0003/100",
+     "state": "firing"
+    },
+    {
+     "slot": 100,
+     "stamp": "0003/101",
+     "state": "firing"
+    },
+    {
+     "slot": 101,
+     "stamp": "0003/102",
+     "state": "firing"
+    },
+    {
+     "slot": 102,
+     "stamp": "0003/103",
+     "state": "firing"
+    },
+    {
+     "slot": 103,
+     "stamp": "0003/104",
+     "state": "firing"
+    },
+    {
+     "slot": 104,
+     "stamp": "0003/105",
+     "state": "firing"
+    },
+    {
+     "slot": 105,
+     "stamp": "0003/106",
+     "state": "firing"
+    },
+    {
+     "slot": 106,
+     "stamp": "0003/107",
+     "state": "firing"
+    },
+    {
+     "slot": 107,
+     "stamp": "0003/108",
+     "state": "firing"
+    },
+    {
+     "slot": 108,
+     "stamp": "0003/109",
+     "state": "firing"
+    },
+    {
+     "slot": 109,
+     "stamp": "0003/110",
+     "state": "firing"
+    },
+    {
+     "slot": 110,
+     "stamp": "0003/111",
+     "state": "firing"
+    },
+    {
+     "slot": 111,
+     "stamp": "0003/112",
+     "state": "firing"
+    },
+    {
+     "slot": 112,
+     "stamp": "0003/113",
+     "state": "firing"
+    },
+    {
+     "slot": 113,
+     "stamp": "0003/114",
+     "state": "firing"
+    },
+    {
+     "slot": 114,
+     "stamp": "0003/115",
+     "state": "firing"
+    },
+    {
+     "slot": 115,
+     "stamp": "0003/116",
+     "state": "firing"
+    },
+    {
+     "slot": 116,
+     "stamp": "0003/117",
+     "state": "firing"
+    },
+    {
+     "slot": 117,
+     "stamp": "0003/118",
+     "state": "firing"
+    },
+    {
+     "slot": 118,
+     "stamp": "0003/119",
+     "state": "firing"
+    },
+    {
+     "slot": 119,
+     "stamp": "0003/120",
+     "state": "firing"
+    },
+    {
+     "slot": 120,
+     "stamp": "0003/121",
+     "state": "firing"
+    },
+    {
+     "slot": 121,
+     "stamp": "0003/122",
+     "state": "firing"
+    },
+    {
+     "slot": 122,
+     "stamp": "0003/123",
+     "state": "firing"
+    },
+    {
+     "slot": 123,
+     "stamp": "0003/124",
+     "state": "firing"
+    },
+    {
+     "slot": 124,
+     "stamp": "0003/125",
+     "state": "firing"
+    },
+    {
+     "slot": 125,
+     "stamp": "0003/126",
+     "state": "firing"
+    },
+    {
+     "slot": 126,
+     "stamp": "0003/127",
+     "state": "firing"
+    },
+    {
+     "slot": 127,
+     "stamp": "0003/128",
+     "state": "firing"
+    },
+    {
+     "slot": 128,
+     "stamp": "0003/129",
+     "state": "firing"
+    },
+    {
+     "slot": 129,
+     "stamp": "0003/130",
+     "state": "firing"
+    },
+    {
+     "slot": 130,
+     "stamp": "0003/131",
+     "state": "firing"
+    },
+    {
+     "slot": 131,
+     "stamp": "0003/132",
+     "state": "firing"
+    },
+    {
+     "slot": 132,
+     "stamp": "0003/133",
+     "state": "firing"
+    },
+    {
+     "slot": 133,
+     "stamp": "0003/134",
+     "state": "firing"
+    },
+    {
+     "slot": 134,
+     "stamp": "0003/135",
+     "state": "firing"
+    },
+    {
+     "slot": 135,
+     "stamp": "0003/136",
+     "state": "firing"
+    },
+    {
+     "slot": 136,
+     "stamp": "0003/137",
+     "state": "firing"
+    },
+    {
+     "slot": 137,
+     "stamp": "0003/138",
+     "state": "firing"
+    },
+    {
+     "slot": 138,
+     "stamp": "0003/139",
+     "state": "firing"
+    },
+    {
+     "slot": 139,
+     "stamp": "0003/140",
+     "state": "firing"
+    },
+    {
+     "slot": 140,
+     "stamp": "0003/141",
+     "state": "firing"
+    },
+    {
+     "slot": 141,
+     "stamp": "0003/142",
+     "state": "firing"
+    },
+    {
+     "slot": 142,
+     "stamp": "0003/143",
+     "state": "firing"
+    },
+    {
+     "slot": 143,
+     "stamp": "0003/144",
+     "state": "firing"
+    },
+    {
+     "slot": 144,
+     "stamp": "0003/145",
+     "state": "firing"
+    },
+    {
+     "slot": 145,
+     "stamp": "0003/146",
+     "state": "firing"
+    },
+    {
+     "slot": 146,
+     "stamp": "0003/147",
+     "state": "firing"
+    },
+    {
+     "slot": 147,
+     "stamp": "0003/148",
+     "state": "firing"
+    },
+    {
+     "slot": 148,
+     "stamp": "0003/149",
+     "state": "firing"
+    },
+    {
+     "slot": 149,
+     "stamp": "0003/150",
+     "state": "firing"
+    },
+    {
+     "slot": 150,
+     "stamp": "0003/151",
+     "state": "firing"
+    },
+    {
+     "slot": 151,
+     "stamp": "0003/152",
+     "state": "firing"
+    },
+    {
+     "slot": 152,
+     "stamp": "0003/153",
+     "state": "firing"
+    },
+    {
+     "slot": 153,
+     "stamp": "0003/154",
+     "state": "firing"
+    },
+    {
+     "slot": 154,
+     "stamp": "0003/155",
+     "state": "firing"
+    },
+    {
+     "slot": 155,
+     "stamp": "0003/156",
+     "state": "firing"
+    },
+    {
+     "slot": 156,
+     "stamp": "0003/157",
+     "state": "firing"
+    },
+    {
+     "slot": 157,
+     "stamp": "0003/158",
+     "state": "firing"
+    },
+    {
+     "slot": 158,
+     "stamp": "0003/159",
+     "state": "firing"
+    },
+    {
+     "slot": 159,
+     "stamp": "0003/160",
+     "state": "firing"
+    },
+    {
+     "slot": 160,
+     "stamp": "0003/161",
+     "state": "firing"
+    },
+    {
+     "slot": 161,
+     "stamp": "0003/162",
+     "state": "firing"
+    },
+    {
+     "slot": 162,
+     "stamp": "0003/163",
+     "state": "firing"
+    },
+    {
+     "slot": 163,
+     "stamp": "0003/164",
+     "state": "firing"
+    },
+    {
+     "slot": 164,
+     "stamp": "0003/165",
+     "state": "firing"
+    },
+    {
+     "slot": 165,
+     "stamp": "0003/166",
+     "state": "firing"
+    },
+    {
+     "slot": 166,
+     "stamp": "0003/167",
+     "state": "firing"
+    },
+    {
+     "slot": 167,
+     "stamp": "0003/168",
+     "state": "firing"
+    },
+    {
+     "slot": 168,
+     "stamp": "0003/169",
+     "state": "firing"
+    },
+    {
+     "slot": 169,
+     "stamp": "0003/170",
+     "state": "firing"
+    },
+    {
+     "slot": 170,
+     "stamp": "0003/171",
+     "state": "firing"
+    },
+    {
+     "slot": 171,
+     "stamp": "0003/172",
+     "state": "firing"
+    },
+    {
+     "slot": 172,
+     "stamp": "0003/173",
+     "state": "firing"
+    },
+    {
+     "slot": 173,
+     "stamp": "0003/174",
+     "state": "firing"
+    },
+    {
+     "slot": 174,
+     "stamp": "0003/175",
+     "state": "firing"
+    },
+    {
+     "slot": 175,
+     "stamp": "0003/176",
+     "state": "firing"
+    },
+    {
+     "slot": 176,
+     "stamp": "0003/177",
+     "state": "firing"
+    },
+    {
+     "slot": 177,
+     "stamp": "0003/178",
+     "state": "firing"
+    },
+    {
+     "slot": 178,
+     "stamp": "0003/179",
+     "state": "firing"
+    },
+    {
+     "slot": 179,
+     "stamp": "0003/180",
+     "state": "firing"
+    },
+    {
+     "slot": 180,
+     "stamp": "0003/181",
+     "state": "firing"
+    },
+    {
+     "slot": 181,
+     "stamp": "0003/182",
+     "state": "firing"
+    },
+    {
+     "slot": 182,
+     "stamp": "0003/183",
+     "state": "firing"
+    },
+    {
+     "slot": 183,
+     "stamp": "0003/184",
+     "state": "firing"
+    },
+    {
+     "slot": 184,
+     "stamp": "0003/185",
+     "state": "firing"
+    },
+    {
+     "slot": 185,
+     "stamp": "0003/186",
+     "state": "firing"
+    },
+    {
+     "slot": 186,
+     "stamp": "0003/187",
+     "state": "firing"
+    },
+    {
+     "slot": 187,
+     "stamp": "0003/188",
+     "state": "firing"
+    },
+    {
+     "slot": 188,
+     "stamp": "0003/189",
+     "state": "firing"
+    },
+    {
+     "slot": 189,
+     "stamp": "0003/190",
+     "state": "firing"
+    },
+    {
+     "slot": 190,
+     "stamp": "0003/191",
+     "state": "firing"
+    },
+    {
+     "slot": 191,
+     "stamp": "0003/192",
+     "state": "firing"
+    },
+    {
+     "slot": 192,
+     "stamp": "0003/193",
+     "state": "firing"
+    },
+    {
+     "slot": 193,
+     "stamp": "0003/194",
+     "state": "firing"
+    },
+    {
+     "slot": 194,
+     "stamp": "0003/195",
+     "state": "firing"
+    },
+    {
+     "slot": 195,
+     "stamp": "0003/196",
+     "state": "firing"
+    },
+    {
+     "slot": 196,
+     "stamp": "0003/197",
+     "state": "firing"
+    },
+    {
+     "slot": 197,
+     "stamp": "0003/198",
+     "state": "firing"
+    },
+    {
+     "slot": 198,
+     "stamp": "0003/199",
+     "state": "firing"
+    },
+    {
+     "slot": 199,
+     "stamp": "0003/200",
+     "state": "firing"
+    },
+    {
+     "slot": 200,
+     "stamp": "0003/201",
+     "state": "firing"
+    },
+    {
+     "slot": 201,
+     "stamp": "0003/202",
+     "state": "firing"
+    },
+    {
+     "slot": 202,
+     "stamp": "0003/203",
+     "state": "firing"
+    },
+    {
+     "slot": 203,
+     "stamp": "0003/204",
+     "state": "firing"
+    },
+    {
+     "slot": 204,
+     "stamp": "0003/205",
+     "state": "firing"
+    },
+    {
+     "slot": 205,
+     "stamp": "0003/206",
+     "state": "firing"
+    },
+    {
+     "slot": 206,
+     "stamp": "0003/207",
+     "state": "firing"
+    },
+    {
+     "slot": 207,
+     "stamp": "0003/208",
+     "state": "firing"
+    },
+    {
+     "slot": 208,
+     "stamp": "0003/209",
+     "state": "firing"
+    },
+    {
+     "slot": 209,
+     "stamp": "0003/210",
+     "state": "firing"
+    },
+    {
+     "slot": 210,
+     "stamp": "0003/211",
+     "state": "firing"
+    },
+    {
+     "slot": 211,
+     "stamp": "0003/212",
+     "state": "firing"
+    },
+    {
+     "slot": 212,
+     "stamp": "0003/213",
+     "state": "firing"
+    },
+    {
+     "slot": 213,
+     "stamp": "0003/214",
+     "state": "firing"
+    },
+    {
+     "slot": 214,
+     "stamp": "0003/215",
+     "state": "firing"
+    },
+    {
+     "slot": 215,
+     "stamp": "0003/216",
+     "state": "firing"
+    },
+    {
+     "slot": 216,
+     "stamp": "0003/217",
+     "state": "firing"
+    },
+    {
+     "slot": 217,
+     "stamp": "0003/218",
+     "state": "firing"
+    },
+    {
+     "slot": 218,
+     "stamp": "0003/219",
+     "state": "firing"
+    },
+    {
+     "slot": 219,
+     "stamp": "0003/220",
+     "state": "firing"
+    },
+    {
+     "slot": 220,
+     "stamp": "0003/221",
+     "state": "firing"
+    },
+    {
+     "slot": 221,
+     "stamp": "0003/222",
+     "state": "firing"
+    },
+    {
+     "slot": 222,
+     "stamp": "0003/223",
+     "state": "firing"
+    },
+    {
+     "slot": 223,
+     "stamp": "0003/224",
+     "state": "firing"
+    },
+    {
+     "slot": 224,
+     "stamp": "0003/225",
+     "state": "firing"
+    },
+    {
+     "slot": 225,
+     "stamp": "0003/226",
+     "state": "firing"
+    },
+    {
+     "slot": 226,
+     "stamp": "0003/227",
+     "state": "firing"
+    },
+    {
+     "slot": 227,
+     "stamp": "0003/228",
+     "state": "firing"
+    },
+    {
+     "slot": 228,
+     "stamp": "0003/229",
+     "state": "firing"
+    },
+    {
+     "slot": 229,
+     "stamp": "0003/230",
+     "state": "firing"
+    },
+    {
+     "slot": 230,
+     "stamp": "0003/231",
+     "state": "firing"
+    },
+    {
+     "slot": 231,
+     "stamp": "0003/232",
+     "state": "firing"
+    },
+    {
+     "slot": 232,
+     "stamp": "0003/233",
+     "state": "firing"
+    },
+    {
+     "slot": 233,
+     "stamp": "0003/234",
+     "state": "firing"
+    },
+    {
+     "slot": 234,
+     "stamp": "0003/235",
+     "state": "firing"
+    },
+    {
+     "slot": 235,
+     "stamp": "0003/236",
+     "state": "firing"
+    },
+    {
+     "slot": 236,
+     "stamp": "0003/237",
+     "state": "firing"
+    },
+    {
+     "slot": 237,
+     "stamp": "0003/238",
+     "state": "firing"
+    },
+    {
+     "slot": 238,
+     "stamp": "0003/239",
+     "state": "firing"
+    },
+    {
+     "slot": 239,
+     "stamp": "0003/240",
+     "state": "firing"
+    },
+    {
+     "slot": 240,
+     "stamp": "0003/241",
+     "state": "firing"
+    },
+    {
+     "slot": 241,
+     "stamp": "0003/242",
+     "state": "firing"
+    },
+    {
+     "slot": 242,
+     "stamp": "0003/243",
+     "state": "firing"
+    },
+    {
+     "slot": 243,
+     "stamp": "0003/244",
+     "state": "firing"
+    },
+    {
+     "slot": 244,
+     "stamp": "0003/245",
+     "state": "firing"
+    },
+    {
+     "slot": 245,
+     "stamp": "0003/246",
+     "state": "firing"
+    },
+    {
+     "slot": 246,
+     "stamp": "0003/247",
+     "state": "firing"
+    },
+    {
+     "slot": 247,
+     "stamp": "0003/248",
+     "state": "firing"
+    },
+    {
+     "slot": 248,
+     "stamp": "0003/249",
+     "state": "firing"
+    },
+    {
+     "slot": 249,
+     "stamp": "0003/250",
+     "state": "firing"
+    },
+    {
+     "slot": 250,
+     "stamp": "0003/251",
+     "state": "firing"
+    },
+    {
+     "slot": 251,
+     "stamp": "0003/252",
+     "state": "firing"
+    },
+    {
+     "slot": 252,
+     "stamp": "0003/253",
+     "state": "firing"
+    },
+    {
+     "slot": 253,
+     "stamp": "0003/254",
+     "state": "firing"
+    },
+    {
+     "slot": 254,
+     "stamp": "0003/255",
+     "state": "firing"
+    },
+    {
+     "slot": 255,
+     "stamp": "0003/256",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e01998430002e9b3f615007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     10,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     11,
+     110,
+     111,
+     112,
+     113,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     12,
+     120,
+     121,
+     122,
+     123,
+     124,
+     125,
+     126,
+     127,
+     128,
+     129,
+     13,
+     130,
+     131,
+     132,
+     133,
+     134,
+     135,
+     136,
+     137,
+     138,
+     139,
+     14,
+     140,
+     141,
+     142,
+     143,
+     144,
+     145,
+     146,
+     147,
+     148,
+     149,
+     15,
+     150,
+     151,
+     152,
+     153,
+     154,
+     155,
+     156,
+     157,
+     158,
+     159,
+     16,
+     160,
+     161,
+     162,
+     163,
+     164,
+     165,
+     166,
+     167,
+     168,
+     169,
+     17,
+     170,
+     171,
+     172,
+     173,
+     174,
+     175,
+     176,
+     177,
+     178,
+     179,
+     18,
+     180,
+     181,
+     182,
+     183,
+     184,
+     185,
+     186,
+     187,
+     188,
+     189,
+     19,
+     190,
+     191,
+     192,
+     193,
+     194,
+     195,
+     196,
+     197,
+     198,
+     199,
+     2,
+     20,
+     200,
+     201,
+     202,
+     203,
+     204,
+     205,
+     206,
+     207,
+     208,
+     209,
+     21,
+     210,
+     211,
+     212,
+     213,
+     214,
+     215,
+     216,
+     217,
+     218,
+     219,
+     22,
+     220,
+     221,
+     222,
+     223,
+     224,
+     225,
+     226,
+     227,
+     228,
+     229,
+     23,
+     230,
+     231,
+     232,
+     233,
+     234,
+     235,
+     236,
+     237,
+     238,
+     239,
+     24,
+     240,
+     241,
+     242,
+     243,
+     244,
+     245,
+     246,
+     247,
+     248,
+     249,
+     25,
+     250,
+     251,
+     252,
+     253,
+     254,
+     255,
+     26,
+     27,
+     28,
+     29,
+     3,
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     4,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     48,
+     49,
+     5,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     6,
+     60,
+     61,
+     62,
+     63,
+     64,
+     65,
+     66,
+     67,
+     68,
+     69,
+     7,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     8,
+     80,
+     81,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     9,
+     90,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99
+    ],
+    "vouched_ranks": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13,
+     14,
+     15,
+     16,
+     17,
+     18,
+     19,
+     20,
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27,
+     28,
+     29,
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     48,
+     49,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     60,
+     61,
+     62,
+     63,
+     64,
+     65,
+     66,
+     67,
+     68,
+     69,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     80,
+     81,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     90,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     110,
+     111,
+     112,
+     113,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     120,
+     121,
+     122,
+     123,
+     124,
+     125,
+     126,
+     127,
+     128,
+     129,
+     130,
+     131,
+     132,
+     133,
+     134,
+     135,
+     136,
+     137,
+     138,
+     139,
+     140,
+     141,
+     142,
+     143,
+     144,
+     145,
+     146,
+     147,
+     148,
+     149,
+     150,
+     151,
+     152,
+     153,
+     154,
+     155,
+     156,
+     157,
+     158,
+     159,
+     160,
+     161,
+     162,
+     163,
+     164,
+     165,
+     166,
+     167,
+     168,
+     169,
+     170,
+     171,
+     172,
+     173,
+     174,
+     175,
+     176,
+     177,
+     178,
+     179,
+     180,
+     181,
+     182,
+     183,
+     184,
+     185,
+     186,
+     187,
+     188,
+     189,
+     190,
+     191,
+     192,
+     193,
+     194,
+     195,
+     196,
+     197,
+     198,
+     199,
+     200,
+     201,
+     202,
+     203,
+     204,
+     205,
+     206,
+     207,
+     208,
+     209,
+     210,
+     211,
+     212,
+     213,
+     214,
+     215,
+     216,
+     217,
+     218,
+     219,
+     220,
+     221,
+     222,
+     223,
+     224,
+     225,
+     226,
+     227,
+     228,
+     229,
+     230,
+     231,
+     232,
+     233,
+     234,
+     235,
+     236,
+     237,
+     238,
+     239,
+     240,
+     241,
+     242,
+     243,
+     244,
+     245,
+     246,
+     247,
+     248,
+     249,
+     250,
+     251,
+     252,
+     253,
+     254,
+     255
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 256,
+     "section": "confirmed",
+     "confirmed": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      57,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      92,
+      93,
+      94,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      111,
+      112,
+      113,
+      114,
+      115,
+      116,
+      117,
+      118,
+      119,
+      120,
+      121,
+      122,
+      123,
+      124,
+      125,
+      126,
+      127,
+      128,
+      129,
+      130,
+      131,
+      132,
+      133,
+      134,
+      135,
+      136,
+      137,
+      138,
+      139,
+      140,
+      141,
+      142,
+      143,
+      144,
+      145,
+      146,
+      147,
+      148,
+      149,
+      150,
+      151,
+      152,
+      153,
+      154,
+      155,
+      156,
+      157,
+      158,
+      159,
+      160,
+      161,
+      162,
+      163,
+      164,
+      165,
+      166,
+      167,
+      168,
+      169,
+      170,
+      171,
+      172,
+      173,
+      174,
+      175,
+      176,
+      177,
+      178,
+      179,
+      180,
+      181,
+      182,
+      183,
+      184,
+      185,
+      186,
+      187,
+      188,
+      189,
+      190,
+      191,
+      192,
+      193,
+      194,
+      195,
+      196,
+      197,
+      198,
+      199,
+      200,
+      201,
+      202,
+      203,
+      204,
+      205,
+      206,
+      207,
+      208,
+      209,
+      210,
+      211,
+      212,
+      213,
+      214,
+      215,
+      216,
+      217,
+      218,
+      219,
+      220,
+      221,
+      222,
+      223,
+      224,
+      225,
+      226,
+      227,
+      228,
+      229,
+      230,
+      231,
+      232,
+      233,
+      234,
+      235,
+      236,
+      237,
+      238,
+      239,
+      240,
+      241,
+      242,
+      243,
+      244,
+      245,
+      246,
+      247,
+      248,
+      249,
+      250,
+      251,
+      252,
+      253,
+      254,
+      255
+     ]
+    },
+    "firing": 256,
+    "judged": {
+     "0": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "1": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "2": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "3": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "4": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "5": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "6": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "7": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "8": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "9": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "10": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "11": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "12": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "13": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "14": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "15": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "16": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "17": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "18": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "19": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "20": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "21": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "22": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "23": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "24": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "25": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "26": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "27": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "28": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "29": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "30": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "31": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "32": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "33": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "34": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "35": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "36": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "37": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "38": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "39": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "40": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "41": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "42": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "43": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "44": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "45": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "46": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "47": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "48": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "49": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "50": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "51": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "52": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "53": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "54": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "55": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "56": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "57": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "58": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "59": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "60": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "61": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "62": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "63": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "64": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "65": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "66": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "67": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "68": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "69": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "70": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "71": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "72": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "73": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "74": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "75": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "76": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "77": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "78": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "79": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "80": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "81": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "82": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "83": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "84": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "85": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "86": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "87": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "88": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "89": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "90": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "91": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "92": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "93": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "94": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "95": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "96": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "97": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "98": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "99": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "100": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "101": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "102": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "103": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "104": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "105": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "106": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "107": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "108": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "109": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "110": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "111": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "112": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "113": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "114": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "115": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "116": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "117": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "118": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "119": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "120": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "121": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "122": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "123": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "124": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "125": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "126": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "127": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "128": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "129": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "130": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "131": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "132": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "133": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "134": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "135": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "136": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "137": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "138": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "139": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "140": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "141": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "142": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "143": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "144": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "145": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "146": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "147": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "148": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "149": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "150": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "151": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "152": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "153": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "154": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "155": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "156": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "157": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "158": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "159": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "160": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "161": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "162": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "163": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "164": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "165": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "166": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "167": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "168": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "169": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "170": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "171": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "172": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "173": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "174": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "175": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "176": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "177": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "178": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "179": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "180": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "181": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "182": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "183": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "184": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "185": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "186": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "187": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "188": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "189": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "190": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "191": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "192": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "193": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "194": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "195": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "196": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "197": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "198": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "199": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "200": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "201": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "202": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "203": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "204": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "205": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "206": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "207": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "208": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "209": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "210": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "211": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "212": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "213": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "214": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "215": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "216": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "217": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "218": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "219": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "220": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "221": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "222": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "223": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "224": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "225": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "226": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "227": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "228": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "229": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "230": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "231": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "232": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "233": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "234": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "235": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "236": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "237": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "238": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "239": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "240": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "241": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "242": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "243": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "244": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "245": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "246": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "247": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "248": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "249": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "250": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "251": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "252": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "253": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "254": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "255": {
+      "answer": "yes",
+      "reason": "firing"
+     }
+    }
+   }
+  },
+  {
+   "note": "256 live and one vouched for: the list is shorter than the bitmap, a count of 9 bits and a rank of 8. Slot 100 ranks 3rd, after 0, 1 and 10",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0003/1",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0003/2",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0003/3",
+     "state": "firing"
+    },
+    {
+     "slot": 3,
+     "stamp": "0003/4",
+     "state": "firing"
+    },
+    {
+     "slot": 4,
+     "stamp": "0003/5",
+     "state": "firing"
+    },
+    {
+     "slot": 5,
+     "stamp": "0003/6",
+     "state": "firing"
+    },
+    {
+     "slot": 6,
+     "stamp": "0003/7",
+     "state": "firing"
+    },
+    {
+     "slot": 7,
+     "stamp": "0003/8",
+     "state": "firing"
+    },
+    {
+     "slot": 8,
+     "stamp": "0003/9",
+     "state": "firing"
+    },
+    {
+     "slot": 9,
+     "stamp": "0003/10",
+     "state": "firing"
+    },
+    {
+     "slot": 10,
+     "stamp": "0003/11",
+     "state": "firing"
+    },
+    {
+     "slot": 11,
+     "stamp": "0003/12",
+     "state": "firing"
+    },
+    {
+     "slot": 12,
+     "stamp": "0003/13",
+     "state": "firing"
+    },
+    {
+     "slot": 13,
+     "stamp": "0003/14",
+     "state": "firing"
+    },
+    {
+     "slot": 14,
+     "stamp": "0003/15",
+     "state": "firing"
+    },
+    {
+     "slot": 15,
+     "stamp": "0003/16",
+     "state": "firing"
+    },
+    {
+     "slot": 16,
+     "stamp": "0003/17",
+     "state": "firing"
+    },
+    {
+     "slot": 17,
+     "stamp": "0003/18",
+     "state": "firing"
+    },
+    {
+     "slot": 18,
+     "stamp": "0003/19",
+     "state": "firing"
+    },
+    {
+     "slot": 19,
+     "stamp": "0003/20",
+     "state": "firing"
+    },
+    {
+     "slot": 20,
+     "stamp": "0003/21",
+     "state": "firing"
+    },
+    {
+     "slot": 21,
+     "stamp": "0003/22",
+     "state": "firing"
+    },
+    {
+     "slot": 22,
+     "stamp": "0003/23",
+     "state": "firing"
+    },
+    {
+     "slot": 23,
+     "stamp": "0003/24",
+     "state": "firing"
+    },
+    {
+     "slot": 24,
+     "stamp": "0003/25",
+     "state": "firing"
+    },
+    {
+     "slot": 25,
+     "stamp": "0003/26",
+     "state": "firing"
+    },
+    {
+     "slot": 26,
+     "stamp": "0003/27",
+     "state": "firing"
+    },
+    {
+     "slot": 27,
+     "stamp": "0003/28",
+     "state": "firing"
+    },
+    {
+     "slot": 28,
+     "stamp": "0003/29",
+     "state": "firing"
+    },
+    {
+     "slot": 29,
+     "stamp": "0003/30",
+     "state": "firing"
+    },
+    {
+     "slot": 30,
+     "stamp": "0003/31",
+     "state": "firing"
+    },
+    {
+     "slot": 31,
+     "stamp": "0003/32",
+     "state": "firing"
+    },
+    {
+     "slot": 32,
+     "stamp": "0003/33",
+     "state": "firing"
+    },
+    {
+     "slot": 33,
+     "stamp": "0003/34",
+     "state": "firing"
+    },
+    {
+     "slot": 34,
+     "stamp": "0003/35",
+     "state": "firing"
+    },
+    {
+     "slot": 35,
+     "stamp": "0003/36",
+     "state": "firing"
+    },
+    {
+     "slot": 36,
+     "stamp": "0003/37",
+     "state": "firing"
+    },
+    {
+     "slot": 37,
+     "stamp": "0003/38",
+     "state": "firing"
+    },
+    {
+     "slot": 38,
+     "stamp": "0003/39",
+     "state": "firing"
+    },
+    {
+     "slot": 39,
+     "stamp": "0003/40",
+     "state": "firing"
+    },
+    {
+     "slot": 40,
+     "stamp": "0003/41",
+     "state": "firing"
+    },
+    {
+     "slot": 41,
+     "stamp": "0003/42",
+     "state": "firing"
+    },
+    {
+     "slot": 42,
+     "stamp": "0003/43",
+     "state": "firing"
+    },
+    {
+     "slot": 43,
+     "stamp": "0003/44",
+     "state": "firing"
+    },
+    {
+     "slot": 44,
+     "stamp": "0003/45",
+     "state": "firing"
+    },
+    {
+     "slot": 45,
+     "stamp": "0003/46",
+     "state": "firing"
+    },
+    {
+     "slot": 46,
+     "stamp": "0003/47",
+     "state": "firing"
+    },
+    {
+     "slot": 47,
+     "stamp": "0003/48",
+     "state": "firing"
+    },
+    {
+     "slot": 48,
+     "stamp": "0003/49",
+     "state": "firing"
+    },
+    {
+     "slot": 49,
+     "stamp": "0003/50",
+     "state": "firing"
+    },
+    {
+     "slot": 50,
+     "stamp": "0003/51",
+     "state": "firing"
+    },
+    {
+     "slot": 51,
+     "stamp": "0003/52",
+     "state": "firing"
+    },
+    {
+     "slot": 52,
+     "stamp": "0003/53",
+     "state": "firing"
+    },
+    {
+     "slot": 53,
+     "stamp": "0003/54",
+     "state": "firing"
+    },
+    {
+     "slot": 54,
+     "stamp": "0003/55",
+     "state": "firing"
+    },
+    {
+     "slot": 55,
+     "stamp": "0003/56",
+     "state": "firing"
+    },
+    {
+     "slot": 56,
+     "stamp": "0003/57",
+     "state": "firing"
+    },
+    {
+     "slot": 57,
+     "stamp": "0003/58",
+     "state": "firing"
+    },
+    {
+     "slot": 58,
+     "stamp": "0003/59",
+     "state": "firing"
+    },
+    {
+     "slot": 59,
+     "stamp": "0003/60",
+     "state": "firing"
+    },
+    {
+     "slot": 60,
+     "stamp": "0003/61",
+     "state": "firing"
+    },
+    {
+     "slot": 61,
+     "stamp": "0003/62",
+     "state": "firing"
+    },
+    {
+     "slot": 62,
+     "stamp": "0003/63",
+     "state": "firing"
+    },
+    {
+     "slot": 63,
+     "stamp": "0003/64",
+     "state": "firing"
+    },
+    {
+     "slot": 64,
+     "stamp": "0003/65",
+     "state": "firing"
+    },
+    {
+     "slot": 65,
+     "stamp": "0003/66",
+     "state": "firing"
+    },
+    {
+     "slot": 66,
+     "stamp": "0003/67",
+     "state": "firing"
+    },
+    {
+     "slot": 67,
+     "stamp": "0003/68",
+     "state": "firing"
+    },
+    {
+     "slot": 68,
+     "stamp": "0003/69",
+     "state": "firing"
+    },
+    {
+     "slot": 69,
+     "stamp": "0003/70",
+     "state": "firing"
+    },
+    {
+     "slot": 70,
+     "stamp": "0003/71",
+     "state": "firing"
+    },
+    {
+     "slot": 71,
+     "stamp": "0003/72",
+     "state": "firing"
+    },
+    {
+     "slot": 72,
+     "stamp": "0003/73",
+     "state": "firing"
+    },
+    {
+     "slot": 73,
+     "stamp": "0003/74",
+     "state": "firing"
+    },
+    {
+     "slot": 74,
+     "stamp": "0003/75",
+     "state": "firing"
+    },
+    {
+     "slot": 75,
+     "stamp": "0003/76",
+     "state": "firing"
+    },
+    {
+     "slot": 76,
+     "stamp": "0003/77",
+     "state": "firing"
+    },
+    {
+     "slot": 77,
+     "stamp": "0003/78",
+     "state": "firing"
+    },
+    {
+     "slot": 78,
+     "stamp": "0003/79",
+     "state": "firing"
+    },
+    {
+     "slot": 79,
+     "stamp": "0003/80",
+     "state": "firing"
+    },
+    {
+     "slot": 80,
+     "stamp": "0003/81",
+     "state": "firing"
+    },
+    {
+     "slot": 81,
+     "stamp": "0003/82",
+     "state": "firing"
+    },
+    {
+     "slot": 82,
+     "stamp": "0003/83",
+     "state": "firing"
+    },
+    {
+     "slot": 83,
+     "stamp": "0003/84",
+     "state": "firing"
+    },
+    {
+     "slot": 84,
+     "stamp": "0003/85",
+     "state": "firing"
+    },
+    {
+     "slot": 85,
+     "stamp": "0003/86",
+     "state": "firing"
+    },
+    {
+     "slot": 86,
+     "stamp": "0003/87",
+     "state": "firing"
+    },
+    {
+     "slot": 87,
+     "stamp": "0003/88",
+     "state": "firing"
+    },
+    {
+     "slot": 88,
+     "stamp": "0003/89",
+     "state": "firing"
+    },
+    {
+     "slot": 89,
+     "stamp": "0003/90",
+     "state": "firing"
+    },
+    {
+     "slot": 90,
+     "stamp": "0003/91",
+     "state": "firing"
+    },
+    {
+     "slot": 91,
+     "stamp": "0003/92",
+     "state": "firing"
+    },
+    {
+     "slot": 92,
+     "stamp": "0003/93",
+     "state": "firing"
+    },
+    {
+     "slot": 93,
+     "stamp": "0003/94",
+     "state": "firing"
+    },
+    {
+     "slot": 94,
+     "stamp": "0003/95",
+     "state": "firing"
+    },
+    {
+     "slot": 95,
+     "stamp": "0003/96",
+     "state": "firing"
+    },
+    {
+     "slot": 96,
+     "stamp": "0003/97",
+     "state": "firing"
+    },
+    {
+     "slot": 97,
+     "stamp": "0003/98",
+     "state": "firing"
+    },
+    {
+     "slot": 98,
+     "stamp": "0003/99",
+     "state": "firing"
+    },
+    {
+     "slot": 99,
+     "stamp": "0003/100",
+     "state": "firing"
+    },
+    {
+     "slot": 100,
+     "stamp": "0003/101",
+     "state": "firing"
+    },
+    {
+     "slot": 101,
+     "stamp": "0003/102",
+     "state": "firing"
+    },
+    {
+     "slot": 102,
+     "stamp": "0003/103",
+     "state": "firing"
+    },
+    {
+     "slot": 103,
+     "stamp": "0003/104",
+     "state": "firing"
+    },
+    {
+     "slot": 104,
+     "stamp": "0003/105",
+     "state": "firing"
+    },
+    {
+     "slot": 105,
+     "stamp": "0003/106",
+     "state": "firing"
+    },
+    {
+     "slot": 106,
+     "stamp": "0003/107",
+     "state": "firing"
+    },
+    {
+     "slot": 107,
+     "stamp": "0003/108",
+     "state": "firing"
+    },
+    {
+     "slot": 108,
+     "stamp": "0003/109",
+     "state": "firing"
+    },
+    {
+     "slot": 109,
+     "stamp": "0003/110",
+     "state": "firing"
+    },
+    {
+     "slot": 110,
+     "stamp": "0003/111",
+     "state": "firing"
+    },
+    {
+     "slot": 111,
+     "stamp": "0003/112",
+     "state": "firing"
+    },
+    {
+     "slot": 112,
+     "stamp": "0003/113",
+     "state": "firing"
+    },
+    {
+     "slot": 113,
+     "stamp": "0003/114",
+     "state": "firing"
+    },
+    {
+     "slot": 114,
+     "stamp": "0003/115",
+     "state": "firing"
+    },
+    {
+     "slot": 115,
+     "stamp": "0003/116",
+     "state": "firing"
+    },
+    {
+     "slot": 116,
+     "stamp": "0003/117",
+     "state": "firing"
+    },
+    {
+     "slot": 117,
+     "stamp": "0003/118",
+     "state": "firing"
+    },
+    {
+     "slot": 118,
+     "stamp": "0003/119",
+     "state": "firing"
+    },
+    {
+     "slot": 119,
+     "stamp": "0003/120",
+     "state": "firing"
+    },
+    {
+     "slot": 120,
+     "stamp": "0003/121",
+     "state": "firing"
+    },
+    {
+     "slot": 121,
+     "stamp": "0003/122",
+     "state": "firing"
+    },
+    {
+     "slot": 122,
+     "stamp": "0003/123",
+     "state": "firing"
+    },
+    {
+     "slot": 123,
+     "stamp": "0003/124",
+     "state": "firing"
+    },
+    {
+     "slot": 124,
+     "stamp": "0003/125",
+     "state": "firing"
+    },
+    {
+     "slot": 125,
+     "stamp": "0003/126",
+     "state": "firing"
+    },
+    {
+     "slot": 126,
+     "stamp": "0003/127",
+     "state": "firing"
+    },
+    {
+     "slot": 127,
+     "stamp": "0003/128",
+     "state": "firing"
+    },
+    {
+     "slot": 128,
+     "stamp": "0003/129",
+     "state": "firing"
+    },
+    {
+     "slot": 129,
+     "stamp": "0003/130",
+     "state": "firing"
+    },
+    {
+     "slot": 130,
+     "stamp": "0003/131",
+     "state": "firing"
+    },
+    {
+     "slot": 131,
+     "stamp": "0003/132",
+     "state": "firing"
+    },
+    {
+     "slot": 132,
+     "stamp": "0003/133",
+     "state": "firing"
+    },
+    {
+     "slot": 133,
+     "stamp": "0003/134",
+     "state": "firing"
+    },
+    {
+     "slot": 134,
+     "stamp": "0003/135",
+     "state": "firing"
+    },
+    {
+     "slot": 135,
+     "stamp": "0003/136",
+     "state": "firing"
+    },
+    {
+     "slot": 136,
+     "stamp": "0003/137",
+     "state": "firing"
+    },
+    {
+     "slot": 137,
+     "stamp": "0003/138",
+     "state": "firing"
+    },
+    {
+     "slot": 138,
+     "stamp": "0003/139",
+     "state": "firing"
+    },
+    {
+     "slot": 139,
+     "stamp": "0003/140",
+     "state": "firing"
+    },
+    {
+     "slot": 140,
+     "stamp": "0003/141",
+     "state": "firing"
+    },
+    {
+     "slot": 141,
+     "stamp": "0003/142",
+     "state": "firing"
+    },
+    {
+     "slot": 142,
+     "stamp": "0003/143",
+     "state": "firing"
+    },
+    {
+     "slot": 143,
+     "stamp": "0003/144",
+     "state": "firing"
+    },
+    {
+     "slot": 144,
+     "stamp": "0003/145",
+     "state": "firing"
+    },
+    {
+     "slot": 145,
+     "stamp": "0003/146",
+     "state": "firing"
+    },
+    {
+     "slot": 146,
+     "stamp": "0003/147",
+     "state": "firing"
+    },
+    {
+     "slot": 147,
+     "stamp": "0003/148",
+     "state": "firing"
+    },
+    {
+     "slot": 148,
+     "stamp": "0003/149",
+     "state": "firing"
+    },
+    {
+     "slot": 149,
+     "stamp": "0003/150",
+     "state": "firing"
+    },
+    {
+     "slot": 150,
+     "stamp": "0003/151",
+     "state": "firing"
+    },
+    {
+     "slot": 151,
+     "stamp": "0003/152",
+     "state": "firing"
+    },
+    {
+     "slot": 152,
+     "stamp": "0003/153",
+     "state": "firing"
+    },
+    {
+     "slot": 153,
+     "stamp": "0003/154",
+     "state": "firing"
+    },
+    {
+     "slot": 154,
+     "stamp": "0003/155",
+     "state": "firing"
+    },
+    {
+     "slot": 155,
+     "stamp": "0003/156",
+     "state": "firing"
+    },
+    {
+     "slot": 156,
+     "stamp": "0003/157",
+     "state": "firing"
+    },
+    {
+     "slot": 157,
+     "stamp": "0003/158",
+     "state": "firing"
+    },
+    {
+     "slot": 158,
+     "stamp": "0003/159",
+     "state": "firing"
+    },
+    {
+     "slot": 159,
+     "stamp": "0003/160",
+     "state": "firing"
+    },
+    {
+     "slot": 160,
+     "stamp": "0003/161",
+     "state": "firing"
+    },
+    {
+     "slot": 161,
+     "stamp": "0003/162",
+     "state": "firing"
+    },
+    {
+     "slot": 162,
+     "stamp": "0003/163",
+     "state": "firing"
+    },
+    {
+     "slot": 163,
+     "stamp": "0003/164",
+     "state": "firing"
+    },
+    {
+     "slot": 164,
+     "stamp": "0003/165",
+     "state": "firing"
+    },
+    {
+     "slot": 165,
+     "stamp": "0003/166",
+     "state": "firing"
+    },
+    {
+     "slot": 166,
+     "stamp": "0003/167",
+     "state": "firing"
+    },
+    {
+     "slot": 167,
+     "stamp": "0003/168",
+     "state": "firing"
+    },
+    {
+     "slot": 168,
+     "stamp": "0003/169",
+     "state": "firing"
+    },
+    {
+     "slot": 169,
+     "stamp": "0003/170",
+     "state": "firing"
+    },
+    {
+     "slot": 170,
+     "stamp": "0003/171",
+     "state": "firing"
+    },
+    {
+     "slot": 171,
+     "stamp": "0003/172",
+     "state": "firing"
+    },
+    {
+     "slot": 172,
+     "stamp": "0003/173",
+     "state": "firing"
+    },
+    {
+     "slot": 173,
+     "stamp": "0003/174",
+     "state": "firing"
+    },
+    {
+     "slot": 174,
+     "stamp": "0003/175",
+     "state": "firing"
+    },
+    {
+     "slot": 175,
+     "stamp": "0003/176",
+     "state": "firing"
+    },
+    {
+     "slot": 176,
+     "stamp": "0003/177",
+     "state": "firing"
+    },
+    {
+     "slot": 177,
+     "stamp": "0003/178",
+     "state": "firing"
+    },
+    {
+     "slot": 178,
+     "stamp": "0003/179",
+     "state": "firing"
+    },
+    {
+     "slot": 179,
+     "stamp": "0003/180",
+     "state": "firing"
+    },
+    {
+     "slot": 180,
+     "stamp": "0003/181",
+     "state": "firing"
+    },
+    {
+     "slot": 181,
+     "stamp": "0003/182",
+     "state": "firing"
+    },
+    {
+     "slot": 182,
+     "stamp": "0003/183",
+     "state": "firing"
+    },
+    {
+     "slot": 183,
+     "stamp": "0003/184",
+     "state": "firing"
+    },
+    {
+     "slot": 184,
+     "stamp": "0003/185",
+     "state": "firing"
+    },
+    {
+     "slot": 185,
+     "stamp": "0003/186",
+     "state": "firing"
+    },
+    {
+     "slot": 186,
+     "stamp": "0003/187",
+     "state": "firing"
+    },
+    {
+     "slot": 187,
+     "stamp": "0003/188",
+     "state": "firing"
+    },
+    {
+     "slot": 188,
+     "stamp": "0003/189",
+     "state": "firing"
+    },
+    {
+     "slot": 189,
+     "stamp": "0003/190",
+     "state": "firing"
+    },
+    {
+     "slot": 190,
+     "stamp": "0003/191",
+     "state": "firing"
+    },
+    {
+     "slot": 191,
+     "stamp": "0003/192",
+     "state": "firing"
+    },
+    {
+     "slot": 192,
+     "stamp": "0003/193",
+     "state": "firing"
+    },
+    {
+     "slot": 193,
+     "stamp": "0003/194",
+     "state": "firing"
+    },
+    {
+     "slot": 194,
+     "stamp": "0003/195",
+     "state": "firing"
+    },
+    {
+     "slot": 195,
+     "stamp": "0003/196",
+     "state": "firing"
+    },
+    {
+     "slot": 196,
+     "stamp": "0003/197",
+     "state": "firing"
+    },
+    {
+     "slot": 197,
+     "stamp": "0003/198",
+     "state": "firing"
+    },
+    {
+     "slot": 198,
+     "stamp": "0003/199",
+     "state": "firing"
+    },
+    {
+     "slot": 199,
+     "stamp": "0003/200",
+     "state": "firing"
+    },
+    {
+     "slot": 200,
+     "stamp": "0003/201",
+     "state": "firing"
+    },
+    {
+     "slot": 201,
+     "stamp": "0003/202",
+     "state": "firing"
+    },
+    {
+     "slot": 202,
+     "stamp": "0003/203",
+     "state": "firing"
+    },
+    {
+     "slot": 203,
+     "stamp": "0003/204",
+     "state": "firing"
+    },
+    {
+     "slot": 204,
+     "stamp": "0003/205",
+     "state": "firing"
+    },
+    {
+     "slot": 205,
+     "stamp": "0003/206",
+     "state": "firing"
+    },
+    {
+     "slot": 206,
+     "stamp": "0003/207",
+     "state": "firing"
+    },
+    {
+     "slot": 207,
+     "stamp": "0003/208",
+     "state": "firing"
+    },
+    {
+     "slot": 208,
+     "stamp": "0003/209",
+     "state": "firing"
+    },
+    {
+     "slot": 209,
+     "stamp": "0003/210",
+     "state": "firing"
+    },
+    {
+     "slot": 210,
+     "stamp": "0003/211",
+     "state": "firing"
+    },
+    {
+     "slot": 211,
+     "stamp": "0003/212",
+     "state": "firing"
+    },
+    {
+     "slot": 212,
+     "stamp": "0003/213",
+     "state": "firing"
+    },
+    {
+     "slot": 213,
+     "stamp": "0003/214",
+     "state": "firing"
+    },
+    {
+     "slot": 214,
+     "stamp": "0003/215",
+     "state": "firing"
+    },
+    {
+     "slot": 215,
+     "stamp": "0003/216",
+     "state": "firing"
+    },
+    {
+     "slot": 216,
+     "stamp": "0003/217",
+     "state": "firing"
+    },
+    {
+     "slot": 217,
+     "stamp": "0003/218",
+     "state": "firing"
+    },
+    {
+     "slot": 218,
+     "stamp": "0003/219",
+     "state": "firing"
+    },
+    {
+     "slot": 219,
+     "stamp": "0003/220",
+     "state": "firing"
+    },
+    {
+     "slot": 220,
+     "stamp": "0003/221",
+     "state": "firing"
+    },
+    {
+     "slot": 221,
+     "stamp": "0003/222",
+     "state": "firing"
+    },
+    {
+     "slot": 222,
+     "stamp": "0003/223",
+     "state": "firing"
+    },
+    {
+     "slot": 223,
+     "stamp": "0003/224",
+     "state": "firing"
+    },
+    {
+     "slot": 224,
+     "stamp": "0003/225",
+     "state": "firing"
+    },
+    {
+     "slot": 225,
+     "stamp": "0003/226",
+     "state": "firing"
+    },
+    {
+     "slot": 226,
+     "stamp": "0003/227",
+     "state": "firing"
+    },
+    {
+     "slot": 227,
+     "stamp": "0003/228",
+     "state": "firing"
+    },
+    {
+     "slot": 228,
+     "stamp": "0003/229",
+     "state": "firing"
+    },
+    {
+     "slot": 229,
+     "stamp": "0003/230",
+     "state": "firing"
+    },
+    {
+     "slot": 230,
+     "stamp": "0003/231",
+     "state": "firing"
+    },
+    {
+     "slot": 231,
+     "stamp": "0003/232",
+     "state": "firing"
+    },
+    {
+     "slot": 232,
+     "stamp": "0003/233",
+     "state": "firing"
+    },
+    {
+     "slot": 233,
+     "stamp": "0003/234",
+     "state": "firing"
+    },
+    {
+     "slot": 234,
+     "stamp": "0003/235",
+     "state": "firing"
+    },
+    {
+     "slot": 235,
+     "stamp": "0003/236",
+     "state": "firing"
+    },
+    {
+     "slot": 236,
+     "stamp": "0003/237",
+     "state": "firing"
+    },
+    {
+     "slot": 237,
+     "stamp": "0003/238",
+     "state": "firing"
+    },
+    {
+     "slot": 238,
+     "stamp": "0003/239",
+     "state": "firing"
+    },
+    {
+     "slot": 239,
+     "stamp": "0003/240",
+     "state": "firing"
+    },
+    {
+     "slot": 240,
+     "stamp": "0003/241",
+     "state": "firing"
+    },
+    {
+     "slot": 241,
+     "stamp": "0003/242",
+     "state": "firing"
+    },
+    {
+     "slot": 242,
+     "stamp": "0003/243",
+     "state": "firing"
+    },
+    {
+     "slot": 243,
+     "stamp": "0003/244",
+     "state": "firing"
+    },
+    {
+     "slot": 244,
+     "stamp": "0003/245",
+     "state": "firing"
+    },
+    {
+     "slot": 245,
+     "stamp": "0003/246",
+     "state": "firing"
+    },
+    {
+     "slot": 246,
+     "stamp": "0003/247",
+     "state": "firing"
+    },
+    {
+     "slot": 247,
+     "stamp": "0003/248",
+     "state": "firing"
+    },
+    {
+     "slot": 248,
+     "stamp": "0003/249",
+     "state": "firing"
+    },
+    {
+     "slot": 249,
+     "stamp": "0003/250",
+     "state": "firing"
+    },
+    {
+     "slot": 250,
+     "stamp": "0003/251",
+     "state": "firing"
+    },
+    {
+     "slot": 251,
+     "stamp": "0003/252",
+     "state": "firing"
+    },
+    {
+     "slot": 252,
+     "stamp": "0003/253",
+     "state": "firing"
+    },
+    {
+     "slot": 253,
+     "stamp": "0003/254",
+     "state": "firing"
+    },
+    {
+     "slot": 254,
+     "stamp": "0003/255",
+     "state": "firing"
+    },
+    {
+     "slot": 255,
+     "stamp": "0003/256",
+     "state": "firing"
+    }
+   ],
+   "payload": "c9000300000e01998430002e9b3f615008040c",
+   "built_from": {
+    "stamp": "0003/14",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     10,
+     100,
+     101,
+     102,
+     103,
+     104,
+     105,
+     106,
+     107,
+     108,
+     109,
+     11,
+     110,
+     111,
+     112,
+     113,
+     114,
+     115,
+     116,
+     117,
+     118,
+     119,
+     12,
+     120,
+     121,
+     122,
+     123,
+     124,
+     125,
+     126,
+     127,
+     128,
+     129,
+     13,
+     130,
+     131,
+     132,
+     133,
+     134,
+     135,
+     136,
+     137,
+     138,
+     139,
+     14,
+     140,
+     141,
+     142,
+     143,
+     144,
+     145,
+     146,
+     147,
+     148,
+     149,
+     15,
+     150,
+     151,
+     152,
+     153,
+     154,
+     155,
+     156,
+     157,
+     158,
+     159,
+     16,
+     160,
+     161,
+     162,
+     163,
+     164,
+     165,
+     166,
+     167,
+     168,
+     169,
+     17,
+     170,
+     171,
+     172,
+     173,
+     174,
+     175,
+     176,
+     177,
+     178,
+     179,
+     18,
+     180,
+     181,
+     182,
+     183,
+     184,
+     185,
+     186,
+     187,
+     188,
+     189,
+     19,
+     190,
+     191,
+     192,
+     193,
+     194,
+     195,
+     196,
+     197,
+     198,
+     199,
+     2,
+     20,
+     200,
+     201,
+     202,
+     203,
+     204,
+     205,
+     206,
+     207,
+     208,
+     209,
+     21,
+     210,
+     211,
+     212,
+     213,
+     214,
+     215,
+     216,
+     217,
+     218,
+     219,
+     22,
+     220,
+     221,
+     222,
+     223,
+     224,
+     225,
+     226,
+     227,
+     228,
+     229,
+     23,
+     230,
+     231,
+     232,
+     233,
+     234,
+     235,
+     236,
+     237,
+     238,
+     239,
+     24,
+     240,
+     241,
+     242,
+     243,
+     244,
+     245,
+     246,
+     247,
+     248,
+     249,
+     25,
+     250,
+     251,
+     252,
+     253,
+     254,
+     255,
+     26,
+     27,
+     28,
+     29,
+     3,
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     4,
+     40,
+     41,
+     42,
+     43,
+     44,
+     45,
+     46,
+     47,
+     48,
+     49,
+     5,
+     50,
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58,
+     59,
+     6,
+     60,
+     61,
+     62,
+     63,
+     64,
+     65,
+     66,
+     67,
+     68,
+     69,
+     7,
+     70,
+     71,
+     72,
+     73,
+     74,
+     75,
+     76,
+     77,
+     78,
+     79,
+     8,
+     80,
+     81,
+     82,
+     83,
+     84,
+     85,
+     86,
+     87,
+     88,
+     89,
+     9,
+     90,
+     91,
+     92,
+     93,
+     94,
+     95,
+     96,
+     97,
+     98,
+     99
+    ],
+    "vouched_ranks": [
+     3
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 256,
+     "section": "confirmed",
+     "confirmed": [
+      100
+     ]
+    },
+    "firing": 256,
+    "judged": {
+     "0": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "1": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "2": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "3": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "4": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "5": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "6": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "7": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "8": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "9": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "10": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "11": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "12": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "13": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "14": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "15": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "16": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "17": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "18": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "19": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "20": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "21": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "22": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "23": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "24": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "25": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "26": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "27": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "28": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "29": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "30": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "31": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "32": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "33": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "34": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "35": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "36": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "37": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "38": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "39": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "40": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "41": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "42": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "43": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "44": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "45": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "46": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "47": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "48": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "49": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "50": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "51": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "52": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "53": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "54": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "55": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "56": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "57": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "58": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "59": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "60": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "61": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "62": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "63": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "64": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "65": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "66": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "67": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "68": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "69": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "70": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "71": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "72": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "73": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "74": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "75": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "76": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "77": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "78": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "79": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "80": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "81": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "82": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "83": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "84": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "85": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "86": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "87": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "88": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "89": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "90": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "91": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "92": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "93": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "94": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "95": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "96": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "97": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "98": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "99": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "100": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "101": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "102": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "103": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "104": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "105": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "106": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "107": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "108": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "109": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "110": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "111": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "112": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "113": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "114": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "115": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "116": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "117": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "118": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "119": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "120": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "121": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "122": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "123": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "124": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "125": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "126": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "127": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "128": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "129": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "130": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "131": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "132": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "133": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "134": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "135": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "136": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "137": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "138": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "139": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "140": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "141": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "142": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "143": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "144": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "145": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "146": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "147": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "148": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "149": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "150": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "151": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "152": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "153": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "154": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "155": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "156": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "157": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "158": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "159": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "160": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "161": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "162": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "163": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "164": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "165": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "166": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "167": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "168": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "169": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "170": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "171": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "172": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "173": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "174": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "175": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "176": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "177": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "178": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "179": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "180": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "181": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "182": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "183": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "184": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "185": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "186": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "187": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "188": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "189": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "190": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "191": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "192": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "193": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "194": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "195": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "196": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "197": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "198": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "199": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "200": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "201": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "202": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "203": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "204": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "205": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "206": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "207": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "208": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "209": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "210": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "211": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "212": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "213": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "214": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "215": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "216": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "217": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "218": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "219": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "220": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "221": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "222": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "223": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "224": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "225": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "226": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "227": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "228": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "229": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "230": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "231": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "232": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "233": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "234": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "235": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "236": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "237": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "238": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "239": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "240": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "241": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "242": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "243": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "244": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "245": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "246": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "247": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "248": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "249": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "250": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "251": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "252": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "253": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "254": {
+      "answer": "unobservable",
+      "reason": "stale"
+     },
+     "255": {
+      "answer": "unobservable",
+      "reason": "stale"
+     }
+    }
+   }
+  },
+  {
+   "note": "an owner on a 32-bit run: its records' stamps and its heartbeat's are 2 bytes wider, 19 bytes",
+   "holds_tag": 9,
+   "view": [
+    {
+     "slot": 0,
+     "stamp": "0000a1b2/5",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "stamp": "0000a1b2/6",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "stamp": "0000a1b2/7",
+     "state": "resolved"
+    }
+   ],
+   "payload": "d90000a1b20000030199843000359a4769c036",
+   "built_from": {
+    "stamp": "0000a1b2/3",
+    "tag": 9,
+    "live_in_key_order": [
+     0,
+     1,
+     2
+    ],
+    "vouched_ranks": [
+     0,
+     1
+    ],
+    "map_bit": true
+   },
+   "expect": {
+    "read": {
+     "live": 3,
+     "section": "confirmed",
+     "confirmed": [
+      0,
+      1
+     ]
+    },
+    "firing": 2,
+    "judged": {
+     "0": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "1": {
+      "answer": "yes",
+      "reason": "firing"
+     },
+     "2": {
+      "answer": "no",
+      "reason": "resolved"
+     }
+    }
+   }
+  }
+ ],
+ "snapshots": [
+  {
+   "note": "nothing held: a page of no entry, the owner's word that no alarm fires. 16 bytes",
+   "epoch": 1767225600,
+   "hex": "e0000300001e019980ac000000000000",
+   "expect": {
+    "size": 16,
+    "run": "0003",
+    "asof": 30,
+    "coll": 0,
+    "time": 1794062764000,
+    "entries": []
+   }
+  },
+  {
+   "note": "a late joiner's seed, W2's three firing alarms: 64 bytes, each entry vouched for at the snapshot's time",
+   "epoch": 1767225600,
+   "hex": "e0000300001e019980ac0000000003013020000005095019980a7037ffff80013120000006095019980a7007ffff80013220000007095019980a8037ffff8000",
+   "expect": {
+    "size": 64,
+    "run": "0003",
+    "asof": 30,
+    "coll": 0,
+    "time": 1794062764000,
+    "entries": [
+     {
+      "slot": 0,
+      "stamp": "0003/5",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 1,
+      "stamp": "0003/6",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 0,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 2,
+      "stamp": "0003/7",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062760000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "note": "three firing and two resolved records kept: a resolved entry carries its last confirmation, its put's, 22 bytes each",
+   "epoch": 1767225600,
+   "hex": "e0000300001e019980ac0000000005013020000005095019980a7037ffff80013120000006095019980a7007ffff80013220000007095019980a8037ffff80013340000009019980e301f409d019980e3037ffff8001344000000b019980e4000009d019980e3007ffff8000",
+   "expect": {
+    "size": 108,
+    "run": "0003",
+    "asof": 30,
+    "coll": 0,
+    "time": 1794062764000,
+    "entries": [
+     {
+      "slot": 0,
+      "stamp": "0003/5",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 1,
+      "stamp": "0003/6",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 0,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 2,
+      "stamp": "0003/7",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062760000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 3,
+      "stamp": "0003/9",
+      "confirmation": "conf",
+      "confirmed_at": 1794062819500,
+      "record": {
+       "state": "resolved",
+       "severity": "critical",
+       "at": 1794062819000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 4,
+      "stamp": "0003/11",
+      "confirmation": "conf",
+      "confirmed_at": 1794062820000,
+      "record": {
+       "state": "resolved",
+       "severity": "critical",
+       "at": 1794062819000,
+       "rule": 0,
+       "argument": "not_available"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "note": "a firing alarm its owner no longer vouches for: confirmation 2, its last confirmation",
+   "epoch": 1767225600,
+   "hex": "e0000300001e019980ac0000000001013040000005019980a90000095019980a7037ffff8000",
+   "expect": {
+    "size": 38,
+    "run": "0003",
+    "asof": 30,
+    "coll": 0,
+    "time": 1794062764000,
+    "entries": [
+     {
+      "slot": 0,
+      "stamp": "0003/5",
+      "confirmation": "conf",
+      "confirmed_at": 1794062761000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "note": "entries in the byte order of their ids: 10, 100, 2, 9",
+   "epoch": 1767225600,
+   "hex": "e0000300001e019980ac000000000402313020000006095019980a7007ffff800331303040000007019980e301f409d019980e3037ffff80013220000005095019980a7037ffff80013920000008095019980a7007ffff8000",
+   "expect": {
+    "size": 89,
+    "run": "0003",
+    "asof": 30,
+    "coll": 0,
+    "time": 1794062764000,
+    "entries": [
+     {
+      "slot": 10,
+      "stamp": "0003/6",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 0,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 100,
+      "stamp": "0003/7",
+      "confirmation": "conf",
+      "confirmed_at": 1794062819500,
+      "record": {
+       "state": "resolved",
+       "severity": "critical",
+       "at": 1794062819000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 2,
+      "stamp": "0003/5",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 9,
+      "stamp": "0003/8",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 0,
+       "argument": "not_available"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "note": "an adopted alarm put again under the new run, and an entry of a run the instance wrote under before: the entry states its own run",
+   "epoch": 1767225600,
+   "hex": "e00004000004019980ac0000000002013020000002095019980a7037ffff800131a00003000006095019980a7007ffff8000",
+   "expect": {
+    "size": 50,
+    "run": "0004",
+    "asof": 4,
+    "coll": 0,
+    "time": 1794062764000,
+    "entries": [
+     {
+      "slot": 0,
+      "stamp": "0004/2",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 3,
+       "argument": "not_available"
+      }
+     },
+     {
+      "slot": 1,
+      "stamp": "0003/6",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "critical",
+       "at": 1794062759000,
+       "rule": 0,
+       "argument": "not_available"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "note": "an alarm by words and one with labels",
+   "epoch": 1767225600,
+   "hex": "e0000300001e019980ac0000000002013020000005113019980a7ff7ffffe9967e04cc22b476800131200000060c3019980a7018000017ffff8000",
+   "expect": {
+    "size": 59,
+    "run": "0003",
+    "asof": 30,
+    "coll": 0,
+    "time": 1794062764000,
+    "entries": [
+     {
+      "slot": 0,
+      "stamp": "0003/5",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "warning",
+       "at": 1794062759000,
+       "rule": "not_available",
+       "argument": "not_available",
+       "key": 11986884644525756890
+      }
+     },
+     {
+      "slot": 1,
+      "stamp": "0003/6",
+      "confirmation": "time",
+      "confirmed_at": 1794062764000,
+      "record": {
+       "state": "firing",
+       "severity": "warning",
+       "at": 1794062759000,
+       "rule": 1,
+       "labels": 2,
+       "argument": "not_available"
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

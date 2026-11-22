@@ -1,0 +1,298 @@
+{
+ "description": "alarms.v2 §2.5: `at`, the acknowledgement identity. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `writes`: one identity's acts in order, under the deployment `epoch` in seconds, each with the owner's clock at the act in milliseconds since the Unix epoch (`clock_ms`) -> the `at` its record carries, in milliseconds since the Unix epoch as core §7.6's JSON reading has it, or null for none. A raise, an escalation and a resolve take a new at: the clock in whole seconds, or one second after the greatest at the owner knows it wrote for the identity where the clock's second is not later than it. A refresh keeps the at its record holds. While the clock reads no instant the epoch codes (before the epoch, or 2^32 s or more after it), and where the new at would have no code, the record carries none. `known`, where given, is an at the owner knows of from before the case: an adopted alarm's. `applies`: an acknowledgement's at (`acked_at`) and the alarm's present at (`at`), each in milliseconds or null -> whether the acknowledgement applies: while the alarm's at is at most the acknowledged one, and never with no at on either side. `moves`: an alarms.v1 document's `timestamp`, in milliseconds, adopted under the epoch -> the `at` of its record: the timestamp in whole seconds, or null where that instant has no code; and whether an acknowledgement made against that timestamp still applies.",
+ "writes": [
+  {
+   "note": "a raise, an escalation, a refresh and a resolve, minutes apart: at is the clock's second, kept at the refresh",
+   "epoch": 1767225600,
+   "acts": [
+    {
+     "act": "raise",
+     "clock_ms": 1794062759250,
+     "expect": 1794062759000
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 1794062819999,
+     "expect": 1794062819000
+    },
+    {
+     "act": "refresh",
+     "clock_ms": 1794062849000,
+     "expect": 1794062819000
+    },
+    {
+     "act": "resolve",
+     "clock_ms": 1794062879001,
+     "expect": 1794062879000
+    }
+   ]
+  },
+  {
+   "note": "a burst: four transitions within one second date the last three ahead of the clock",
+   "epoch": 1767225600,
+   "acts": [
+    {
+     "act": "raise",
+     "clock_ms": 1794062759100,
+     "expect": 1794062759000
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 1794062759200,
+     "expect": 1794062760000
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 1794062759300,
+     "expect": 1794062761000
+    },
+    {
+     "act": "resolve",
+     "clock_ms": 1794062759400,
+     "expect": 1794062762000
+    },
+    {
+     "act": "raise",
+     "clock_ms": 1794062764000,
+     "expect": 1794062764000
+    }
+   ]
+  },
+  {
+   "note": "a burst that outruns the clock: the fifth transition, 2.5 s later, is still one second after the fourth",
+   "epoch": 1767225600,
+   "acts": [
+    {
+     "act": "raise",
+     "clock_ms": 1794062759000,
+     "expect": 1794062759000
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 1794062759010,
+     "expect": 1794062760000
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 1794062759020,
+     "expect": 1794062761000
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 1794062759030,
+     "expect": 1794062762000
+    },
+    {
+     "act": "resolve",
+     "clock_ms": 1794062761500,
+     "expect": 1794062763000
+    }
+   ]
+  },
+  {
+   "note": "the clock steps back an hour: at still moves forward, a second at a time",
+   "epoch": 1767225600,
+   "acts": [
+    {
+     "act": "raise",
+     "clock_ms": 1794062759000,
+     "expect": 1794062759000
+    },
+    {
+     "act": "resolve",
+     "clock_ms": 1794059159000,
+     "expect": 1794062760000
+    },
+    {
+     "act": "raise",
+     "clock_ms": 1794059160000,
+     "expect": 1794062761000
+    }
+   ]
+  },
+  {
+   "note": "a device with no real-time clock at boot reads 1970, before the catalog's epoch: no at. Once its clock is set, the next transition carries one",
+   "epoch": 1767225600,
+   "acts": [
+    {
+     "act": "raise",
+     "clock_ms": 5000,
+     "expect": null
+    },
+    {
+     "act": "refresh",
+     "clock_ms": 9000,
+     "expect": null
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 12000,
+     "expect": null
+    },
+    {
+     "act": "resolve",
+     "clock_ms": 1794062759000,
+     "expect": 1794062759000
+    }
+   ]
+  },
+  {
+   "note": "a clock that loses its code between two transitions: the at after the gap is later than the one before it, so an acknowledgement of the first never applies to the third",
+   "epoch": 1767225600,
+   "acts": [
+    {
+     "act": "raise",
+     "clock_ms": 1794062759100,
+     "expect": 1794062759000
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 4000,
+     "expect": null
+    },
+    {
+     "act": "resolve",
+     "clock_ms": 1794062759200,
+     "expect": 1794062760000
+    }
+   ]
+  },
+  {
+   "note": "no catalog, so the epoch is 0, and 1970 has a code",
+   "epoch": 0,
+   "acts": [
+    {
+     "act": "raise",
+     "clock_ms": 5000,
+     "expect": 5000
+    },
+    {
+     "act": "resolve",
+     "clock_ms": 5999,
+     "expect": 6000
+    }
+   ]
+  },
+  {
+   "note": "an adopted alarm keeps its at, and its next transition is later than it though the clock is not",
+   "epoch": 1767225600,
+   "acts": [
+    {
+     "act": "refresh",
+     "clock_ms": 1794062754000,
+     "expect": 1794062759000
+    },
+    {
+     "act": "resolve",
+     "clock_ms": 1794062755000,
+     "expect": 1794062760000
+    }
+   ],
+   "known": 1794062759000
+  },
+  {
+   "note": "the epoch's last second: one more transition within it has no code, so no at",
+   "epoch": 1767225600,
+   "acts": [
+    {
+     "act": "raise",
+     "clock_ms": 6062192895000,
+     "expect": 6062192895000
+    },
+    {
+     "act": "escalate",
+     "clock_ms": 6062192895500,
+     "expect": null
+    }
+   ]
+  }
+ ],
+ "applies": [
+  {
+   "note": "the alarm as acknowledged",
+   "acked_at": 1794062759000,
+   "at": 1794062759000,
+   "expect": true
+  },
+  {
+   "note": "escalated since: at moved, and the acknowledgement no longer applies",
+   "acked_at": 1794062759000,
+   "at": 1794062760000,
+   "expect": false
+  },
+  {
+   "note": "refreshed since: at kept, and it applies",
+   "acked_at": 1794062759000,
+   "at": 1794062759000,
+   "expect": true
+  },
+  {
+   "note": "an acknowledgement of a later at, made against a record the reader has since seen stepped back by another run: it applies",
+   "acked_at": 1794062764000,
+   "at": 1794062759000,
+   "expect": true
+  },
+  {
+   "note": "the alarm has no at: nothing applies, and it is told again",
+   "acked_at": 1794062759000,
+   "at": null,
+   "expect": false
+  },
+  {
+   "note": "an acknowledgement with no at, made of a record that had none: it applies to nothing",
+   "acked_at": null,
+   "at": null,
+   "expect": false
+  },
+  {
+   "note": "an acknowledgement with no at and an alarm with one",
+   "acked_at": null,
+   "at": 1794062759000,
+   "expect": false
+  },
+  {
+   "note": "an acknowledgement made against alarms.v1's timestamp, in milliseconds, of an alarm since adopted: its at is that timestamp's second",
+   "acked_at": 1794062759123,
+   "at": 1794062759000,
+   "expect": true
+  }
+ ],
+ "moves": [
+  {
+   "note": "a timestamp on a whole second",
+   "epoch": 1767225600,
+   "timestamp": 1794062759000,
+   "expect": {
+    "at": 1794062759000,
+    "acknowledgement_applies": true
+   }
+  },
+  {
+   "note": "a timestamp with milliseconds: at is its second, not after it",
+   "epoch": 1767225600,
+   "timestamp": 1794062759999,
+   "expect": {
+    "at": 1794062759000,
+    "acknowledgement_applies": true
+   }
+  },
+  {
+   "note": "a timestamp before the catalog's epoch has no code: no at, and the acknowledgement lapses",
+   "epoch": 1767225600,
+   "timestamp": 1767225599999,
+   "expect": {
+    "at": null,
+    "acknowledgement_applies": false
+   }
+  },
+  {
+   "note": "no catalog: Unix seconds",
+   "epoch": 0,
+   "timestamp": 1760950000123,
+   "expect": {
+    "at": 1760950000000,
+    "acknowledgement_applies": true
+   }
+  }
+ ]
+}

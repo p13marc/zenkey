@@ -69,6 +69,11 @@
     "over": 13,
     "tags": 0
   },
+  "spec/profiles/alarms/conformance/v2/README.md": {
+    "mean": 14.5,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/alarms/scenarios.md": {
     "mean": 12.87,
     "over": 0,
@@ -80,7 +85,7 @@
     "tags": 0
   },
   "spec/profiles/alarms/v2.md": {
-    "mean": 13.63,
+    "mean": 13.74,
     "over": 0,
     "tags": 0
   },

@@ -1,0 +1,2275 @@
+{
+ "description": "alarms.v2 §2.6, §2.16: one slot's samples, in the owner's order (core §4.2), and what a reader reads of each against the record it holds on the slot. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A sample is {put: {run, alert_key, record}} or \"delete\" (a delete or a tombstone). `run` is the put's run (4 lowercase hexadecimal digits for a 16-bit run, 8 for a 32-bit run: two widths are two runs). `record` is the record's JSON reading (core §7.6): state, severity (null for the escape), at in milliseconds since the Unix epoch where present, rule, labels where present, argument, key where present; or \"undecodable\" for a put that does not read (records.json). `alert_key` is the key the reader has for the record: a record by words' own `key`, in 16 hexadecimal digits; the one it derives through the owner's table for a table's rule; or null for an unnamed alarm. Two records have one identity when each has an alert key and the two are equal, or when either has none and their `rule` and `labels` are equal, an absent labels equal only to an absent one. -> for each sample, {held, reads}. `held` is what becomes of a held record of another identity: `rebound` (it fired, under the put's run: its alarm reads resolved), `replaced` (it was resolved, under the put's run: nothing to read) or `dropped` (it was under another run: an earlier run's last word); null where nothing was held, or the same identity was. `reads` is the sample's own reading: raised, escalated, refreshed, confirmed, resolved, retired or unreadable. Against the same identity held firing, a firing put is escalated if the severity differs, else raised if `at` differs, else confirmed if the records are equal in every field, else refreshed; a resolved put is resolved. Against it held resolved, a firing put is raised; a resolved put is resolved if `at` differs, else confirmed if equal, else refreshed. An absent at is equal to an absent one and differs from any instant. Against nothing, and after `held`, a firing put is raised and a resolved one resolved. A delete is resolved over a firing record and retired over a resolved one or nothing, and the reader then holds nothing. After an unreadable put the reader holds nothing. The reader starts holding nothing. `reports`, where given, is what a notifier that reports changes (§2.16) reports after the sample, when every answer of §2.14 follows the slot's records alone (its owner present and listed, nothing lost, each firing record fresh): a list, empty for nothing to report, of {report, alert_key}: \"firing\" (that alarm's answer moved to yes, or its severity moved while yes) or \"resolved\" (it moved from yes to no: a resolved record, a delete or `rebound`). A record `replaced` or `dropped`, and an unreadable put, report nothing of the alarm held before.",
+ "cases": [
+  {
+   "note": "a raise",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "a raise, then the same record again: confirmed, as an adopted alarm put again reads",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "confirmed",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "an escalation: the severity and at move",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062764000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "escalated",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "a de-escalation is an escalation, either way",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "info",
+        "at": 1794062764000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "escalated",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "a refresh: the argument moves at one severity, at kept",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "335f24192ff5d0d4",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 0,
+        "argument": 615
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "335f24192ff5d0d4"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "335f24192ff5d0d4",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 0,
+        "argument": 640
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "refreshed",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "at moved at one severity with no resolve heard: raised, which a notifier does not report again",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062768000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "a severity that differs is escalated, whatever at says",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "escalated",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "a resolve: one put, and no delete follows",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "a re-raise on the slot its resolved record is on",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062879000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "a late reader's first put is resolved: nothing to report",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "the resolved record put again unchanged: confirmed",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": []
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "confirmed",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "a resolved record with another at: resolved again, the reader having missed the raise between",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": []
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062959000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "a resolved record with the same at and another argument: refreshed",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "335f24192ff5d0d4",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 0,
+        "argument": 615
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": []
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "335f24192ff5d0d4",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 0,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "refreshed",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "a resolved slot retaken: A resolved, then B raised on its slot. A's record is replaced, with nothing to read",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062879000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": "replaced",
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "rebound: B is put on the slot the reader holds A firing on, under the same run. The owner takes no firing slot, so A resolved and the reader lost that put: A reads resolved, then B raised",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062879000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": "rebound",
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       },
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "rebound by a resolved record of another identity: A reads resolved, and B's first put reads resolved",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "resolved",
+        "severity": "critical",
+        "at": 1794062939000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": "rebound",
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "another identity under another run: the held record is an earlier run's last word, dropped, never resolved",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0004",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062879000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": "dropped",
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "another identity under a run of another width: another run",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "00000003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062879000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": "dropped",
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "a resolved record of another identity under another run: dropped too",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0004",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062879000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": "dropped",
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "adoption: a new instance puts A again on its slot under its new run, at kept. The same identity, so the run plays no part: confirmed",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0004",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "confirmed",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "adoption, then the adopted alarm resolves under the new run",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0004",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "confirmed",
+      "reports": []
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0004",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "a restart that resolved an alarm whose rule it no longer evaluates: resolved, under the new run",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0004",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "the same alarm by words after a restart whose table no longer names it: its alert key is the table's rule's, so one identity",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0004",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": "not_available",
+        "argument": "not_available",
+        "key": 11986884644525756890
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "refreshed",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "an alarm by words, raised and resolved",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": "not_available",
+        "argument": "not_available",
+        "key": 11986884644525756890
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": "not_available",
+        "argument": "not_available",
+        "key": 11986884644525756890
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "two alarms by words in turn on one slot, the first lost its resolve: rebound",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": "not_available",
+        "argument": "not_available",
+        "key": 11986884644525756890
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "719d159937e54eb8",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": "not_available",
+        "argument": "not_available",
+        "key": 8186723445441384120
+       }
+      }
+     },
+     "expect": {
+      "held": "rebound",
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       },
+       {
+        "report": "firing",
+        "alert_key": "719d159937e54eb8"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "unnamed, the reader holding no table: the same rule and labels are one identity",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062764000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "escalated"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved"
+     }
+    }
+   ]
+  },
+  {
+   "note": "unnamed: another labels value is another identity, and rebinds",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062764000,
+        "rule": 1,
+        "labels": 5,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": "rebound",
+      "reads": "raised"
+     }
+    }
+   ]
+  },
+  {
+   "note": "unnamed: labels absent is not labels 0",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 5,
+        "labels": 0,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 5,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": "rebound",
+      "reads": "raised"
+     }
+    }
+   ]
+  },
+  {
+   "note": "unnamed held, then the same rule and labels named, the reader having got the owner's table: one identity",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062764000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "escalated"
+     }
+    }
+   ]
+  },
+  {
+   "note": "a delete over a firing record reads resolved, and over a resolved one or nothing retired: alarms.v1's column, though no rule here has an owner send one",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": "delete",
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": "delete",
+     "expect": {
+      "held": null,
+      "reads": "retired",
+      "reports": []
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": "delete",
+     "expect": {
+      "held": null,
+      "reads": "retired",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "a put that does not read: unreadable, and the reader holds nothing after it. The next put is a late reader's",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": null,
+       "record": "undecodable"
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "unreadable"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised"
+     }
+    }
+   ]
+  },
+  {
+   "note": "no at on either record: an owner with no clock. Equal records are confirmed, and a resolve is a resolve",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "confirmed",
+      "reports": []
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "confirmed",
+      "reports": []
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "note": "at absent, then present: at differs, so raised",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "a659f813308ad1da"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": []
+     }
+    }
+   ]
+  },
+  {
+   "note": "the escape on both records, an owner of a later text: equal severities, so not escalated",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": null,
+        "at": 1794062759000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": null,
+        "at": 1794062760000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised"
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "a659f813308ad1da",
+       "record": {
+        "state": "firing",
+        "severity": "critical",
+        "at": 1794062761000,
+        "rule": 1,
+        "labels": 2,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "escalated"
+     }
+    }
+   ]
+  },
+  {
+   "note": "W2's slot 3: a transient raised and resolved five times",
+   "samples": [
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794062759000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794062819000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794066359000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794066419000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794069959000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794070019000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794073559000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794073619000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "firing",
+        "severity": "warning",
+        "at": 1794077159000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "raised",
+      "reports": [
+       {
+        "report": "firing",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    },
+    {
+     "sample": {
+      "put": {
+       "run": "0003",
+       "alert_key": "abb089906038056a",
+       "record": {
+        "state": "resolved",
+        "severity": "warning",
+        "at": 1794077219000,
+        "rule": 3,
+        "argument": "not_available"
+       }
+      }
+     },
+     "expect": {
+      "held": null,
+      "reads": "resolved",
+      "reports": [
+       {
+        "report": "resolved",
+        "alert_key": "abb089906038056a"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}
