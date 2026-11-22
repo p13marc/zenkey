@@ -508,10 +508,11 @@ def one_instant(status: dict[str, Any] | None, checks: dict[str, Any] | None) ->
     in width and value, and one asof; no live entry and no tombstone of that
     run has a seq above that asof. An entry that states another run is an
     earlier run's, and breaks nothing." Each argument is a complete snapshot
-    as :func:`zk2py.snapshot.complete` gives one, or None for one that is
-    not complete, or not answered. Returns whether, and the first item that
-    fails."""
-    if status is None or checks is None:
+    as :func:`zk2py.snapshot.complete` gives one, or None for one that was
+    not answered. One whose pages were not all read is given with
+    ``complete`` False, and what its pages held (:func:`held`). Returns
+    whether, and the first item that fails."""
+    if status is None or checks is None or not (status.get("complete", True) and checks.get("complete", True)):
         return False, INCOMPLETE
     if (status["run_width"], status["run"]) != (checks["run_width"], checks["run"]):
         return False, RUN
@@ -523,6 +524,27 @@ def one_instant(status: dict[str, Any] | None, checks: dict[str, Any] | None) ->
             if _entry_run(e, snap) == run and e["seq"] > asof:
                 return False, ABOVE_ASOF
     return True, None
+
+
+def held(pages: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """One collection's snapshot as a late joiner holds it after its GET:
+    the complete snapshot, ``complete`` True, where it holds "a page of each
+    index from 0 to a page whose more bit is 0" (core §7.5); else the
+    entries of the pages it read, under the first page's header,
+    ``complete`` False; None for no page read."""
+    from . import snapshot
+
+    if not pages:
+        return None
+    whole = snapshot.complete(pages)
+    if whole is not None:
+        return dict(whole, complete=True)
+    first = pages[0]
+    out = {k: first[k] for k in snapshot.HEADER_FIELDS}
+    out["live"] = [e for p in pages for e in p["live"]]
+    out["tombs"] = [e for p in pages for e in p["tombs"]]
+    out["complete"] = False
+    return out
 
 
 def worst_of(levels: Any) -> str | None:
@@ -685,7 +707,11 @@ def judge(r: Reading) -> Answer:
     else:
         raise ValueError(f"presence {r.presence!r}")
     # 3. The status's freshness, freshness.v2's verdict, as judged.
-    verdict, reason = r.freshness if r.freshness is not None else (STALE, "no_delivery")
+    # With no observation at all the verdict is freshness's own for none,
+    # unobservable, `no_observation`. No case of judgements.json reaches
+    # this step without a status (changed after the file was opened, and
+    # for no case: the first writing guessed stale, `no_delivery`).
+    verdict, reason = r.freshness if r.freshness is not None else (UNOBSERVABLE, "no_observation")
     if verdict == STALE:
         if across and reason == "no_delivery":
             return Answer(UNOBSERVABLE, "nothing_crossed", None, major)
@@ -763,6 +789,9 @@ class ClockReader:
         self.heard: list[tuple[str, str]] = []
         #: the last read heartbeat's reading, None while none was read
         self.last: str | None = None
+        #: which step stopped the last put that was not read: ``revision``,
+        #: ``refused`` or ``older`` (clock.json's ``unread``)
+        self.why: str | None = None
 
     def _sequence(self, key: str, stamp: Any) -> bool:
         """Step "Older": "Within one run, its seq is not after the last read
@@ -784,8 +813,9 @@ class ClockReader:
         self.last = reading
         return reading
 
-    def _not_read(self, key: str) -> str:
+    def _not_read(self, key: str, why: str) -> str:
         self.heard.append((key, NOT_READ))
+        self.why = why
         return NOT_READ
 
     def heartbeat(self, payload_: bytes, enveloped: bool = True) -> str:
@@ -796,7 +826,7 @@ class ClockReader:
         try:
             env = heartbeat.put_of(payload_, "stream", enveloped)
         except heartbeat.Refused:
-            return self._not_read(key)
+            return self._not_read(key, "refused")
         return self.heartbeat_parts(env.tag, env.stamp, env.record or b"")
 
     def heartbeat_parts(self, tag: int, stamp: Any, body: bytes) -> str:
@@ -806,13 +836,13 @@ class ClockReader:
 
         key = "heartbeat"
         if tag != self.layout.tag:
-            return self._not_read(key)                 # step 1, another revision
+            return self._not_read(key, "revision")     # step 1, another revision
         try:
             value = heartbeat.read(self.layout, body)
         except heartbeat.Refused:
-            return self._not_read(key)                 # step 2, refused
+            return self._not_read(key, "refused")      # step 2, refused
         if not self._sequence(key, stamp):
-            return self._not_read(key)                 # step 3, older
+            return self._not_read(key, "older")        # step 3, older
         return self._count(key, value["time"])         # step 4, read: "whatever its sections say"
 
     def owner_heartbeat(self, payload_: bytes, cls: str = STATUS_CLASS, enveloped: bool = True) -> str:
@@ -823,14 +853,18 @@ class ClockReader:
 
         key = f"heartbeats/{cls}"
         if cls != STATUS_CLASS:
-            return self._not_read(key)
+            return self._not_read(key, "class")
         try:
             put = oh.read(payload_, "stream", enveloped)
         except oh.Refused:
-            return self._not_read(key)                 # step 1, refused whole
+            return self._not_read(key, "refused")      # step 1, refused whole
         if not self._sequence(key, put.stamp):
-            return self._not_read(key)                 # step 2, older
+            return self._not_read(key, "older")        # step 2, older
         return self._count(key, put.body.time)         # step 3, read: "whatever became of its groups"
+
+    def last_read(self, stamp: Any, key: str = "heartbeat") -> None:
+        """Start from a reader that last read ``stamp`` on ``key``."""
+        self._last[key] = stamp
 
     def answer(self, presence: str = "present", interfaces: Any = (V2,)) -> tuple[str, str]:
         return clock_question(presence, interfaces, [what for _, what in self.heard])
@@ -854,11 +888,25 @@ def clock_question(presence: str, interfaces: Any, heard: Any) -> tuple[str, str
     its time is an instant: no, ``confirmed``; its time is unknown:
     unobservable, ``time_unknown``; none read: unobservable,
     ``nothing_heard``." "Nothing else answers. A put of the status and the
-    faults' silence say nothing of the clock. Nor does the fault." """
+    faults' silence say nothing of the clock. Nor does the fault."
+
+    A service whose descriptor lists ``health.v1`` and not ``health.v2`` "is
+    read by ``health.v1``'s" text (§2.11 step 2), and "Only this major
+    answers yes from it: ``health.v1`` reads it as it read the unknown time"
+    (§2.12): its question is :func:`zk2py.health.clock_question`'s, over the
+    same hearing in v1's words. (Added after clock.json was opened, and
+    pinned by no case: its case of such a descriptor "expects nothing
+    more". The first writing answered such a service by this major's
+    rule.)"""
     if presence == "absent":
         return NOT_ASKED, "absent"
-    if presence == "present" and interfaces is not None and major_of(interfaces) is None:
-        return NOT_ASKED, "not_listed"
+    if presence == "present" and interfaces is not None:
+        major = major_of(interfaces)
+        if major is None:
+            return NOT_ASKED, "not_listed"
+        if major == V1:
+            words = {INSTANT: "heartbeat", AHEAD: "heartbeat_held", TIME_UNKNOWN: "heartbeat_held"}
+            return v1.clock_question(presence, {"lists": True}, [words.get(x, x) for x in heard])
     last = next((x for x in reversed(list(heard)) if x in (AHEAD, INSTANT, TIME_UNKNOWN)), None)
     if last == AHEAD:
         return YES, "ahead"
