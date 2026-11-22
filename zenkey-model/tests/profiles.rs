@@ -5443,6 +5443,10 @@ fn freshness_v2_apply() {
             .collect()
     };
     let (mut heartbeats, mut owner_heartbeats) = (0, 0);
+    // The heartbeats and the owner heartbeats applied whose time is the
+    // ahead time (`freshness.v2` 0.12 §2.5: the time takes no part).
+    let (mut ahead, mut owner_ahead) = (0, 0);
+    let is_ahead = |v: &View<Mono>| v.owner_time() == Some(zenkey_model::heartbeat::Time::Ahead);
     let cases = doc["cases"].as_array().expect("cases");
     for case in cases {
         let note = case["note"].as_str().expect("note");
@@ -5486,6 +5490,7 @@ fn freshness_v2_apply() {
                 let got = heartbeat(&layout, view.apply(tag, stamp, &body, ms(&step["at"])));
                 assert_eq!(step["expect"], got, "{what}");
                 heartbeats += 1;
+                ahead += usize::from(is_ahead(&view));
             } else if let Some(c) = step.get("check") {
                 let due: Vec<String> = view
                     .reread_due()
@@ -5635,6 +5640,7 @@ fn freshness_v2_apply() {
                 };
                 assert_eq!(step["expect"], got, "{what}");
                 owner_heartbeats += 1;
+                owner_ahead += usize::from(views.iter().any(is_ahead));
             } else if let Some(c) = step.get("check") {
                 // By layout, a layout with none left out.
                 let mut due = serde_json::Map::new();
@@ -5681,14 +5687,22 @@ fn freshness_v2_apply() {
             }
         }
     }
-    // A count that moves is a fixture that moved: the text's 15 cases for a
-    // heartbeat and its 22 for an owner heartbeat, the last five written by
-    // hand over bodies the file held (`freshness.v2` 0.11).
-    assert_eq!(cases.len(), 37, "apply.json's cases");
+    // A count that moves is a fixture that moved: the text's 16 cases for a
+    // heartbeat and its 23 for an owner heartbeat, five written by hand
+    // over bodies the file held (`freshness.v2` 0.11), and the last two an
+    // earlier case's first heartbeat with its time alone changed to the
+    // ahead time (0.12, #986 Q0): one heartbeat and one owner heartbeat,
+    // each read as its source is.
+    assert_eq!(cases.len(), 39, "apply.json's cases");
     assert_eq!(
         cases.iter().filter(|c| c.get("catalog").is_some()).count(),
-        22,
+        23,
         "the owner heartbeat's cases"
     );
     assert!(heartbeats > 0 && owner_heartbeats > 0);
+    assert_eq!(
+        (ahead, owner_ahead),
+        (1, 1),
+        "the heartbeats applied whose time is ahead"
+    );
 }

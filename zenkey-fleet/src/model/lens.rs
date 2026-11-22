@@ -1934,6 +1934,35 @@ mod tests {
             "{:?}",
             ok.rendering.rendered
         );
+        // Core 0.113 §7.5, `freshness.v2` §5: a tool shows the ahead time
+        // as ahead, never as unknown (`null`) and never as an instant, and
+        // dates neither of the two times that carry no instant.
+        let time_of = |time: Time| {
+            let hb = Heartbeat {
+                time,
+                sections: vec![],
+            };
+            let bytes = hb.envelope(&layout, stamp).expect("writes");
+            let c = lens.check(wire, Member::Type, Some("zenoh/bytes"), &bytes);
+            assert_eq!(c.conformance, Conformance::Valid, "{:?}", c.rendering);
+            match c.rendering.rendered {
+                Rendered::Value { value, dated, .. } => (
+                    value["time"].clone(),
+                    value.get("dated").is_some() || dated.is_some(),
+                ),
+                other => panic!("a value, not {other:?}"),
+            }
+        };
+        assert_eq!(time_of(Time::Ahead), (json!("ahead"), false));
+        assert_eq!(time_of(Time::Unknown), (json!(null), false));
+        assert_eq!(
+            time_of(Time::At {
+                secs: 3600,
+                ms: 250
+            })
+            .0,
+            json!({"s": 3600, "ms": 250})
+        );
         let mut other = bytes.clone();
         other[0] = (other[0] & 0xf0) | ((layout.tag.get() + 1) % 16);
         let bad = lens.check(wire, Member::Type, Some("zenoh/bytes"), &other);

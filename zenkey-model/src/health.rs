@@ -570,8 +570,10 @@ pub enum Heard {
     /// set or clear), whose time is known: the guard did not hold when the
     /// owner wrote it (`freshness.v2` §2.10).
     Heartbeat,
-    /// The same, whose time is unknown, all ones: the guard holds, or the
-    /// owner does not know its time. No evidence either way.
+    /// The same, whose time is no instant: the ahead time, as while the
+    /// guard holds (core §7.5, `freshness.v2` §2.10), or the unknown time,
+    /// all ones. Under this major neither answers alone: the fault does
+    /// (text 0.11; `health.v2` §2.5 reads the ahead time as a yes).
     HeartbeatHeld,
     /// A put of `state/status`: the guard does not hold it, so it says
     /// nothing of the clock.
@@ -586,6 +588,22 @@ pub enum Heard {
     Fault,
 }
 
+impl Heard {
+    /// A heartbeat read in step, by the time it carries (core §7.5):
+    /// [`Heard::Heartbeat`] for an instant, [`Heard::HeartbeatHeld`] for
+    /// the ahead time and for the unknown time. Under this major the ahead
+    /// time is read exactly as the unknown time it replaced was, so core
+    /// 0.113 moved no answer of [`clock_ahead`] (text 0.11).
+    #[must_use]
+    pub fn heartbeat(time: crate::heartbeat::Time) -> Heard {
+        if time.is_instant() {
+            Heard::Heartbeat
+        } else {
+            Heard::HeartbeatHeld
+        }
+    }
+}
+
 /// Why §5's last question has its answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ClockReason {
@@ -597,7 +615,8 @@ pub enum ClockReason {
     /// when the owner wrote it.
     Confirmed,
     /// Unobservable: no `clock_ahead` fault heard since the last heartbeat
-    /// whose time is known, and the last heartbeat's time unknown.
+    /// whose time is known, and the last heartbeat's time no instant,
+    /// ahead or unknown.
     TimeUnknown,
     /// Unobservable: no `clock_ahead` fault and no heartbeat heard within
     /// the reader's window. Never "no" from the faults' silence.
@@ -634,8 +653,8 @@ impl ClockReason {
                  none heard"
             }
             Self::TimeUnknown => {
-                "its last heartbeat's time was unknown, and no clock_ahead fault was heard since \
-                 one with its time known"
+                "its last heartbeat's time was no instant, ahead or unknown, and no clock_ahead \
+                 fault was heard since one with its time known"
             }
             Self::NothingHeard => "no clock_ahead fault and no heartbeat was heard in the window",
             Self::Absent => "it is absent: presence's word",
@@ -663,7 +682,8 @@ pub struct Clock {
 /// heartbeat whose time is known heard since; *no* when the last heartbeat
 /// heard has its time known and came after the last fault, or with none
 /// heard; unobservable otherwise, since the faults' silence is their
-/// normal state (core O5) and a time unknown proves nothing alone. A put
+/// normal state (core O5) and a time that is no instant, ahead or unknown,
+/// answers nothing alone under this major. A put
 /// or a delete of the status says nothing of the clock: the guard holds
 /// neither (§2.5). Not asked as the first question's: absent, or not
 /// listing `health.v1`. Whatever else presence says, a fault heard is the
@@ -862,6 +882,17 @@ mod tests {
             "a time unknown since: no longer no, and no fault to say yes"
         );
         assert_eq!(a(&[ClockAhead, HeartbeatHeld, Heartbeat]), Answer::No);
+        // Core 0.113's ahead time reads as the unknown time did (text
+        // 0.11): no instant, so no evidence either way under this major.
+        use crate::heartbeat::Time;
+        assert_eq!(Heard::heartbeat(Time::Ahead), HeartbeatHeld);
+        assert_eq!(Heard::heartbeat(Time::Unknown), HeartbeatHeld);
+        assert_eq!(Heard::heartbeat(Time::At { secs: 7, ms: 0 }), Heartbeat);
+        assert_eq!(
+            clock_ahead(p, &[Heartbeat, Heard::heartbeat(Time::Ahead)]).reason,
+            ClockReason::TimeUnknown,
+            "the ahead time alone answers nothing under health.v1"
+        );
         assert_eq!(a(&[Fault]), Answer::Unobservable, "never from silence");
         assert_eq!(a(&[]), Answer::Unobservable);
         assert_eq!(

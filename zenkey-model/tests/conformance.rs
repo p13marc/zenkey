@@ -1827,17 +1827,55 @@ fn heartbeat_layout_vectors() {
     }
 }
 
+/// A heartbeat's time as the heartbeat fixtures spell it (core §7.5):
+/// `{"s", "ms"}` for an instant, `null` for the unknown time, `"ahead"` for
+/// the ahead time.
+fn heartbeat_time_value(t: zenkey_model::heartbeat::Time) -> Value {
+    use zenkey_model::heartbeat::Time;
+    match t {
+        Time::Unknown => Value::Null,
+        Time::Ahead => json!("ahead"),
+        Time::At { secs, ms } => json!({"s": secs, "ms": ms}),
+    }
+}
+
+/// [`heartbeat_time_value`] read back.
+fn heartbeat_time_of(v: &Value) -> zenkey_model::heartbeat::Time {
+    use zenkey_model::heartbeat::Time;
+    match v {
+        Value::Null => Time::Unknown,
+        Value::String(s) if s == "ahead" => Time::Ahead,
+        Value::Object(_) => Time::At {
+            secs: u32::try_from(v["s"].as_u64().expect("s")).expect("32 bits of seconds"),
+            ms: u16::try_from(v["ms"].as_u64().expect("ms")).expect("ms"),
+        },
+        other => panic!("a time {other}"),
+    }
+}
+
+/// A read case's `earlier` (core 0.113): what a reader built before the
+/// ahead time answers for the same bytes. It is no expectation of the
+/// text, and no reader here is built so; what is checked is that a case
+/// states it exactly where the time read is the ahead time, and states the
+/// refusal the text names, `code`.
+fn check_earlier(case: &Value, ahead: bool, note: &Value) {
+    match case.get("earlier") {
+        Some(e) => {
+            assert!(ahead, "{note}: `earlier` on a case whose time is not ahead");
+            assert_eq!(e, &json!({"refused": "code"}), "{note}: earlier");
+        }
+        None => assert!(!ahead, "{note}: an ahead time read, and no `earlier`"),
+    }
+}
+
 /// A heartbeat value as `bodies.json` writes it: the time, and each
 /// section by its collection's resource.
 fn heartbeat_value(
     hb: &zenkey_model::heartbeat::Heartbeat,
     l: &zenkey_model::heartbeat::Layout,
 ) -> Value {
-    use zenkey_model::heartbeat::{Members, Time};
-    let time = match hb.time {
-        Time::Unknown => Value::Null,
-        Time::At { secs, ms } => json!({"s": secs, "ms": ms}),
-    };
+    use zenkey_model::heartbeat::Members;
+    let time = heartbeat_time_value(hb.time);
     let mut sections = serde_json::Map::new();
     for (c, s) in l.collections.iter().zip(&hb.sections) {
         let Some(s) = s else { continue };
@@ -1861,14 +1899,8 @@ fn heartbeat_of(
     v: &Value,
     l: &zenkey_model::heartbeat::Layout,
 ) -> zenkey_model::heartbeat::Heartbeat {
-    use zenkey_model::heartbeat::{Digest, Heartbeat, Members, Section, Time};
-    let time = match &v["time"] {
-        Value::Null => Time::Unknown,
-        t => Time::At {
-            secs: t["s"].as_u64().expect("s") as u32,
-            ms: t["ms"].as_u64().expect("ms") as u16,
-        },
-    };
+    use zenkey_model::heartbeat::{Digest, Heartbeat, Members, Section};
+    let time = heartbeat_time_of(&v["time"]);
     let sections = l
         .collections
         .iter()
@@ -1932,7 +1964,9 @@ fn heartbeat_body_vectors() {
         let note = &case["note"];
         let l = &layouts[case["layout"].as_str().expect("layout")];
         let bytes = unhex(case["hex"].as_str().expect("hex"));
-        let got = match Heartbeat::parse(&bytes, l) {
+        let read = Heartbeat::parse(&bytes, l);
+        check_earlier(case, read.as_ref().is_ok_and(|hb| hb.time.is_ahead()), note);
+        let got = match read {
             Ok(hb) => {
                 assert_eq!(
                     hb.write(l).expect("writes back"),
@@ -1948,6 +1982,7 @@ fn heartbeat_body_vectors() {
         };
         assert_eq!(case["expect"], got, "{note}");
     }
+    assert_eq!((writes.len(), reads.len()), (18, 42), "writes and reads");
     assert_eq!(
         refused.into_iter().collect::<Vec<_>>(),
         ["code", "pad", "short", "trailing"],
@@ -2023,14 +2058,8 @@ fn owner_group(v: &Value) -> zenkey_model::heartbeat::Group {
 
 /// `owner.json`'s value as an owner heartbeat: the time and the groups.
 fn owner_of(v: &Value) -> zenkey_model::heartbeat::OwnerHeartbeat {
-    use zenkey_model::heartbeat::{OwnerHeartbeat, Time};
-    let time = match &v["time"] {
-        Value::Null => Time::Unknown,
-        t => Time::At {
-            secs: u32::try_from(t["s"].as_u64().expect("s")).expect("32 bits of seconds"),
-            ms: u16::try_from(t["ms"].as_u64().expect("ms")).expect("ms"),
-        },
-    };
+    use zenkey_model::heartbeat::OwnerHeartbeat;
+    let time = heartbeat_time_of(&v["time"]);
     OwnerHeartbeat {
         time,
         groups: v["groups"]
@@ -2044,11 +2073,7 @@ fn owner_of(v: &Value) -> zenkey_model::heartbeat::OwnerHeartbeat {
 
 /// An owner heartbeat's time and groups as `owner.json` writes them.
 fn owner_value(hb: &zenkey_model::heartbeat::OwnerHeartbeat) -> Value {
-    use zenkey_model::heartbeat::Time;
-    let time = match hb.time {
-        Time::Unknown => Value::Null,
-        Time::At { secs, ms } => json!({"s": secs, "ms": ms}),
-    };
+    let time = heartbeat_time_value(hb.time);
     let groups: Vec<Value> = hb
         .groups
         .iter()
@@ -2122,7 +2147,7 @@ fn heartbeat_owner_vectors() {
     assert!(catalogs["second"].succeeds(&catalogs["other"]).is_err());
 
     let writes = doc["writes"].as_array().expect("writes");
-    assert_eq!(writes.len(), 12, "writes");
+    assert_eq!(writes.len(), 14, "writes");
     for case in writes {
         let note = &case["note"];
         let hb = owner_of(&case["value"]);
@@ -2140,7 +2165,7 @@ fn heartbeat_owner_vectors() {
     }
 
     let reads = doc["reads"].as_array().expect("reads");
-    assert_eq!(reads.len(), 45, "reads");
+    assert_eq!(reads.len(), 47, "reads");
     let mut refused = std::collections::BTreeSet::new();
     let mut accepted = 0;
     for case in reads {
@@ -2155,7 +2180,9 @@ fn heartbeat_owner_vectors() {
             OwnerHeartbeat::parse(env.tag, env.record),
             "{note}: form 6 is read by its tag and body"
         );
-        let got = match OwnerHeartbeat::of(&env) {
+        let read = OwnerHeartbeat::of(&env);
+        check_earlier(case, read.as_ref().is_ok_and(|hb| hb.time.is_ahead()), note);
+        let got = match read {
             Ok(hb) => {
                 accepted += 1;
                 assert_eq!(
@@ -2424,14 +2451,17 @@ fn utc_of(ms: i128) -> String {
 }
 
 /// `spec/conformance/heartbeat/times.json` (core §7.5, §7.6, §8.6;
-/// `freshness.v2` §2.4; #1080): a deployment epoch and an instant → the
-/// time `heartbeat::Time::from_unix_ms` gives, the unknown time where the
+/// `freshness.v2` §2.4, §2.10; #1080, and core 0.113's ahead time, #986
+/// Q0): a deployment epoch, an instant and whether the owner's clock guard
+/// holds → the time `heartbeat::Time::written` gives, the ahead time under
+/// the guard whatever the clock reads, else the unknown time where the
 /// instant has no code (before the epoch, or 2^32 s or more after it) or
-/// the clock guard holds, and `bare.v1`'s body; an epoch and bytes → the
-/// instant `Time::unix_ms` reads, or the refusal. No epoch given is E = 0,
-/// as an owner with no catalog counts from the Unix epoch. Every known
-/// write reads back to its `at`. Written by an independent reading of the
-/// text, checked by a second, never blessed.
+/// the clock reads none, and `bare.v1`'s body; an epoch and bytes → the
+/// instant `Time::unix_ms` reads, the unknown time, the ahead time, or the
+/// refusal. No epoch given is E = 0, as an owner with no catalog counts
+/// from the Unix epoch. Every known write reads back to its `at`. Written
+/// by an independent reading of the text, checked by a second, never
+/// blessed.
 #[test]
 fn heartbeat_time_vectors() {
     use zenkey_model::catalog::EPOCH_WITHOUT_CATALOG;
@@ -2443,28 +2473,41 @@ fn heartbeat_time_vectors() {
         Value::Null => EPOCH_WITHOUT_CATALOG,
         e => e.as_i64().expect("epoch"),
     };
-    let time_json = |t: Time| match t {
-        Time::Unknown => Value::Null,
-        Time::At { secs, ms } => json!({"s": secs, "ms": ms}),
-    };
     let writes = doc["writes"].as_array().expect("writes");
-    assert!(!writes.is_empty());
+    let mut held = 0;
     for case in writes {
         let note = &case["note"];
         let l = &layouts[case["layout"].as_str().expect("layout")];
         let epoch = epoch_of(case);
-        let time = match &case["at"] {
-            Value::Null => Time::Unknown,
+        // `guard`: `true` while the owner's clock guard holds, absent
+        // otherwise (`freshness.v2` §2.10).
+        let guard = match case.get("guard") {
+            None => false,
+            Some(g) => {
+                assert_eq!(g, &json!(true), "{note}: guard is true or absent");
+                held += 1;
+                true
+            }
+        };
+        let at = match &case["at"] {
+            Value::Null => None,
             at => {
                 let at = i128::from(at.as_i64().expect("at"));
                 assert_eq!(case["utc"], json!(utc_of(at)), "{note}: utc is at");
-                let t = Time::from_unix_ms(at, epoch).unwrap_or(Time::Unknown);
-                if t != Time::Unknown {
-                    assert_eq!(t.unix_ms(epoch), Some(at), "{note}: reads back");
-                }
-                t
+                Some(at)
             }
         };
+        // What an owner writes: the ahead time under the guard, whatever
+        // its clock reads; else the instant's code, or the unknown time.
+        let time = Time::written(guard, at, epoch);
+        assert_eq!(
+            time.is_ahead(),
+            guard,
+            "{note}: ahead exactly under the guard"
+        );
+        if time.is_instant() {
+            assert_eq!(time.unix_ms(epoch), at, "{note}: reads back");
+        }
         let r = Heartbeat {
             time,
             sections: vec![None; l.collections.len()],
@@ -2472,7 +2515,7 @@ fn heartbeat_time_vectors() {
         .record(l)
         .expect("writes");
         let got = json!({
-            "time": time_json(time),
+            "time": heartbeat_time_value(time),
             "bits": r.bit_string(),
             "pad": r.pad(),
             "hex": hex(&r.bytes),
@@ -2480,16 +2523,31 @@ fn heartbeat_time_vectors() {
         assert_eq!(case["expect"], got, "{note}");
     }
     let reads = doc["reads"].as_array().expect("reads");
-    assert!(!reads.is_empty());
+    assert_eq!(
+        (writes.len(), held, reads.len()),
+        (16, 3, 18),
+        "writes, those under the guard, and reads"
+    );
     for case in reads {
         let note = &case["note"];
         let l = &layouts[case["layout"].as_str().expect("layout")];
         let epoch = epoch_of(case);
         let bytes = unhex(case["hex"].as_str().expect("hex"));
-        let got = match Heartbeat::parse(&bytes, l) {
-            Ok(hb) => match hb.time.unix_ms(epoch) {
-                None => json!({"at": null}),
-                Some(at) => json!({"at": i64::try_from(at).expect("at"), "utc": utc_of(at)}),
+        let read = Heartbeat::parse(&bytes, l);
+        check_earlier(case, read.as_ref().is_ok_and(|hb| hb.time.is_ahead()), note);
+        // Three readings, each spelt its own way: the ahead time is never
+        // `{"at": null}`, the unknown time's, nor an instant.
+        let got = match read {
+            Ok(hb) => match hb.time {
+                Time::Ahead => {
+                    assert_eq!(hb.time.unix_ms(epoch), None, "{note}: no instant");
+                    json!({"ahead": true})
+                }
+                Time::Unknown => json!({"at": null}),
+                Time::At { .. } => {
+                    let at = hb.time.unix_ms(epoch).expect("an instant");
+                    json!({"at": i64::try_from(at).expect("at"), "utc": utc_of(at)})
+                }
             },
             Err(r) => json!({"refused": r.token()}),
         };

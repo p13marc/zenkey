@@ -5,7 +5,8 @@
 //! ```text
 //! heartbeat, a put's payload   CH · run · seq · body      CH: form 6 · run width · the revision's tag
 //! body       time · map · a section for each map bit set, in map order · pad
-//! time       42 bits: t32 · ms10 from the deployment epoch; all ones unknown
+//! time       42 bits: t32 · ms10 from the deployment epoch; all ones unknown,
+//!            and all ones but the last bit ahead: the owner's clock guard holds
 //! map        1 bit for each collection of the covered revision, in its order
 //! section    digest32 · members
 //! members    one member: vouched1
@@ -477,33 +478,52 @@ impl std::fmt::Display for Digest {
     }
 }
 
-/// The owner's clock when it wrote the heartbeat.
+/// The owner's word of its clock when it wrote the heartbeat (core §7.5):
+/// an instant, or one of the two codes that carry none. A reader reads a
+/// time as one of the three, and never the ahead time as either other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Time {
-    /// All 42 bits set: the owner's clock is unknown.
+    /// All 42 bits set: the owner's clock reads no instant the epoch codes
+    /// (`freshness.v2` §2.4). It says nothing of the clock guard.
     Unknown,
+    /// The seconds all ones with the millisecond code 1022, the unknown
+    /// time with its last bit clear: the owner's clock guard holds (core
+    /// §4.3, "Ahead"; `freshness.v2` §2.10). It carries no instant.
+    Ahead,
     /// Seconds from the deployment epoch, then milliseconds below 1000.
     At { secs: u32, ms: u16 },
 }
+
+/// The unknown time's code: all 42 bits set.
+const UNKNOWN_CODE: u64 = (1 << TIME_BITS) - 1;
+
+/// The ahead time's code, `0x3fffffffffe`: the seconds all ones and the
+/// millisecond code 1022.
+const AHEAD_CODE: u64 = UNKNOWN_CODE - 1;
 
 impl Time {
     /// Its 42-bit code.
     #[must_use]
     pub fn code(self) -> u64 {
         match self {
-            Time::Unknown => (1 << TIME_BITS) - 1,
+            Time::Unknown => UNKNOWN_CODE,
+            Time::Ahead => AHEAD_CODE,
             Time::At { secs, ms } => (u64::from(secs) << 10) | u64::from(ms),
         }
     }
 
-    /// A 42-bit code read: `code` for a millisecond code from 1000 up but
-    /// the unknown time's.
+    /// A 42-bit code read: `code` for an unused millisecond code, which is
+    /// every one from 1000 up but the unknown time's and the ahead time's:
+    /// 1000 to 1021 under any seconds, and 1022 or 1023 under seconds that
+    /// are not all ones.
     ///
     /// # Errors
     /// [`BodyRefusal::Code`].
     pub fn from_code(code: u64) -> Result<Time, BodyRefusal> {
-        if code == (1 << TIME_BITS) - 1 {
-            return Ok(Time::Unknown);
+        match code {
+            UNKNOWN_CODE => return Ok(Time::Unknown),
+            AHEAD_CODE => return Ok(Time::Ahead),
+            _ => {}
         }
         let ms = (code & 0x3ff) as u16;
         if ms >= 1000 {
@@ -524,14 +544,42 @@ impl Time {
         Time::from_code(code).ok()
     }
 
-    /// The instant in milliseconds since the Unix epoch, `None` when
-    /// unknown.
+    /// The time an owner writes (`freshness.v2` §2.4, §2.10): the ahead
+    /// time while its clock guard holds, `guard`, whatever its clock reads;
+    /// otherwise the instant `at`, in milliseconds since the Unix epoch,
+    /// under the deployment epoch `epoch` in seconds, or the unknown time
+    /// for a clock that reads none (`None`) or one the epoch does not code.
+    #[must_use]
+    pub fn written(guard: bool, at: Option<i128>, epoch: i64) -> Time {
+        if guard {
+            return Time::Ahead;
+        }
+        at.and_then(|at| Time::from_unix_ms(at, epoch))
+            .unwrap_or(Time::Unknown)
+    }
+
+    /// The instant in milliseconds since the Unix epoch, `None` for a time
+    /// that carries none: unknown or ahead.
     #[must_use]
     pub fn unix_ms(self, epoch: i64) -> Option<i128> {
         match self {
-            Time::Unknown => None,
+            Time::Unknown | Time::Ahead => None,
             Time::At { .. } => crate::packed::time_value(self.code(), Some(epoch), true).ok(),
         }
+    }
+
+    /// Whether the time is an instant: the owner's guard did not hold when
+    /// it wrote the heartbeat, and its clock read a time the epoch codes.
+    #[must_use]
+    pub fn is_instant(self) -> bool {
+        matches!(self, Time::At { .. })
+    }
+
+    /// Whether the time is the ahead time: the owner's guard held when it
+    /// wrote the heartbeat.
+    #[must_use]
+    pub fn is_ahead(self) -> bool {
+        self == Time::Ahead
     }
 }
 
@@ -667,10 +715,9 @@ pub enum BodyRefusal {
     /// The body ends before a bit its fields need.
     #[error("short: the body ends before a bit its fields need")]
     Short,
-    /// A code is unused: a millisecond code from 1000 up but the unknown
-    /// time's, a live count above the cardinality, a count above the live
-    /// count, or a rank not below the live count or not above the one
-    /// before it.
+    /// A code is unused: an unused millisecond code ([`Time::from_code`]),
+    /// a live count above the cardinality, a count above the live count,
+    /// or a rank not below the live count or not above the one before it.
     #[error("code: an unused code")]
     Code,
     /// A byte after the pad.
@@ -1128,7 +1175,7 @@ impl Group {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerHeartbeat {
     /// The owner's time when it wrote the put, as a heartbeat's: from the
-    /// deployment epoch, or unknown.
+    /// deployment epoch, unknown or ahead: one time for every group.
     pub time: Time,
     /// Its groups, one for each interface it covers: from 1 to
     /// [`MAX_GROUPS`], in ascending order of their indices, none twice.
@@ -1150,8 +1197,8 @@ pub enum OwnerRefusal {
     /// sections' among them.
     #[error("short: the body ends before a bit its fields need")]
     Short,
-    /// A code is unused: a millisecond code from 1000 up but the unknown
-    /// time's, or a count of 0 groups.
+    /// A code is unused: an unused millisecond code, as a heartbeat's
+    /// ([`Time::from_code`]), or a count of 0 groups.
     #[error("code: an unused code")]
     Code,
     /// A group's index is not above the index of the group before it.
@@ -1387,6 +1434,60 @@ mod tests {
         assert_eq!(bits_for(6), 3);
         assert_eq!(bits_for(1 << 32), 32);
         assert_eq!(bits_for((1 << 32) + 1), 33);
+    }
+
+    /// Core 0.113 §7.5: a time is an instant, unknown or ahead, and the
+    /// ahead time is never read as either other. Every other millisecond
+    /// code from 1000 up is unused, whatever the seconds.
+    #[test]
+    fn a_time_is_an_instant_unknown_or_ahead_and_every_other_code_unused() {
+        let all = (1u64 << TIME_BITS) - 1;
+        assert_eq!(Time::from_code(all), Ok(Time::Unknown));
+        assert_eq!(Time::from_code(all - 1), Ok(Time::Ahead));
+        assert_eq!(Time::Ahead.code(), 0x3ff_ffff_fffe);
+        assert_eq!(Time::Ahead.code() & 0x3ff, 1022, "the millisecond code");
+        assert_eq!(Time::Ahead.code() >> 10, u64::from(u32::MAX), "the seconds");
+        assert_eq!(Time::Ahead.unix_ms(0), None, "no instant");
+        assert!(Time::Ahead.is_ahead() && !Time::Ahead.is_instant());
+        assert!(!Time::Unknown.is_ahead() && !Time::Unknown.is_instant());
+        let last = Time::At {
+            secs: u32::MAX,
+            ms: 999,
+        };
+        assert_eq!(Time::from_code(last.code()), Ok(last), "a known time");
+        assert!(last.is_instant());
+        for secs in [0u64, 3600, u64::from(u32::MAX) - 1, u64::from(u32::MAX)] {
+            for ms in 1000u64..1024 {
+                let code = (secs << 10) | ms;
+                let got = Time::from_code(code);
+                match code {
+                    c if c == all => assert_eq!(got, Ok(Time::Unknown)),
+                    c if c == all - 1 => assert_eq!(got, Ok(Time::Ahead)),
+                    _ => assert_eq!(got, Err(BodyRefusal::Code), "{secs} s, {ms} ms"),
+                }
+            }
+        }
+    }
+
+    /// `freshness.v2` §2.10: while its guard holds an owner writes the
+    /// ahead time whatever its clock reads, an instant the epoch does not
+    /// code and no instant at all among them; §2.4 otherwise.
+    #[test]
+    fn an_owner_writes_ahead_while_its_guard_holds_whatever_its_clock_reads() {
+        let e = 1_767_225_600;
+        let at = 1_794_062_761_123;
+        assert_eq!(Time::written(true, Some(at), e), Time::Ahead);
+        assert_eq!(Time::written(true, Some(6_062_192_896_000), e), Time::Ahead);
+        assert_eq!(Time::written(true, None, e), Time::Ahead);
+        assert_eq!(
+            Time::written(false, Some(at), e),
+            Time::At {
+                secs: 26_837_161,
+                ms: 123
+            }
+        );
+        assert_eq!(Time::written(false, None, e), Time::Unknown);
+        assert_eq!(Time::written(false, Some(0), e), Time::Unknown);
     }
 
     #[test]
