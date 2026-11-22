@@ -1,0 +1,19 @@
+# zk2py, round 119: desired.v2 §2.18, the other way: scenarios-v2.md's
+# tasking.v2 in a revision that still uses desired.v1, so its versions are
+# Zenoh timestamps and its GETs are answered per key. A target built for
+# desired.v2 is bound to its author.
+[interface]
+name  = "tasking"
+major = 2
+minor = 0
+uses  = ["desired.v1", "freshness.v2"]
+
+[schemas]
+jsonschema = ["tasking.json"]
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

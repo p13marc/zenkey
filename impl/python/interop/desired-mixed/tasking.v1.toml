@@ -1,0 +1,19 @@
+# zk2py, round 119: desired.v2 §2.18, "An author moves by a revision of its
+# contract: `uses` goes from `desired.v1` to `desired.v2`." This is
+# scenarios.md's tasking.v1, one minor on, with that one change. A target
+# built on its minor 0, under desired.v1, is bound to its author.
+[interface]
+name  = "tasking"
+major = 1
+minor = 1
+uses  = ["desired.v2", "freshness.v1"]
+
+[schemas]
+jsonschema = ["tasking.json"]
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }

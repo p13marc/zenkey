@@ -8,7 +8,7 @@ zk2py processes against each other (#609, round 118)::
         [--desired-target <system>/<service>] [--desired-unbound]
         [--desired-presence-watch] [--desired-reread-ms <ms>] [--desired-hold]
         [--desired-across] [--desired-reply-timeout-ms <ms>] [--desired-watch] [--desired-no-move]
-        [--desired-catalog <file>] [--desired-owner-heartbeat]
+        [--desired-catalog <file>] [--desired-owner-heartbeat] [--desired-contract <file>]
         <system>/<service>
 
 Standard output: ``connected <endpoint>``, then ``ready
@@ -31,7 +31,7 @@ import sys
 from typing import Any
 
 from . import desired
-from .desired_v2_live import Author, Target, canonical
+from .desired_v2_live import Author, Target, canonical, contract_file
 
 
 def _dump(x: Any) -> str:
@@ -122,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--desired-reply-timeout-ms", type=int)
     ap.add_argument("--desired-watch", action="store_true", help="watch the author's heartbeat (§2.5)")
     ap.add_argument("--desired-no-move", action="store_true", help="do not move the digest it expects at its own change")
+    ap.add_argument("--desired-contract", help="the author's interface in a revision of the caller's own, by its "
+                                               "file: the author's contract, and what a target is told its author uses")
     ap.add_argument("--desired-catalog", help="core §8.6's catalog: the author states its id; the target reads groups by it")
     ap.add_argument("--desired-owner-heartbeat", action="store_true",
                     help="the author confirms its interface by owner heartbeats (freshness.v2 §2.4); needs a catalog")
@@ -133,12 +135,14 @@ def main(argv: list[str] | None = None) -> int:
     author: Author | None = None
     target: Target | None = None
     instance = None
+    tasking = contract_file(args.desired_contract) if args.desired_contract else None
     try:
         if args.desired_author:
             author = Author(args.address, args.connect, record=args.desired_record,
                             run_record=args.desired_run_record, window_s=args.desired_window,
                             watched=args.desired_watched, tokenless=tuple(args.tokenless),
-                            catalog=args.desired_catalog, owner_heartbeat=args.desired_owner_heartbeat)
+                            catalog=args.desired_catalog, owner_heartbeat=args.desired_owner_heartbeat,
+                            tasking=tasking)
             instance = author.start()
         if args.desired_target or args.desired_unbound:
             target = Target(args.address, args.connect, author=args.desired_target or "lab/author",
@@ -146,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
                             reread_ms=args.desired_reread_ms, hold=args.desired_hold, across=args.desired_across,
                             reply_timeout_ms=args.desired_reply_timeout_ms, watch=args.desired_watch,
                             moves=not args.desired_no_move, watched=args.desired_watched,
-                            run_record=args.desired_run_record, catalog=args.desired_catalog)
+                            run_record=args.desired_run_record, catalog=args.desired_catalog, tasking=tasking)
             instance = target.start()
     except OwnerRefused as e:
         print(f"not started: {e}", file=sys.stderr, flush=True)
