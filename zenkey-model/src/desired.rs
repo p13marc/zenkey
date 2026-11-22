@@ -31,6 +31,13 @@
 //! [`Target::finish`] how it ended, and puts [`Target::report`] whenever it
 //! changes (§2.10). An author's writes, its diff and its record (§2.11) are
 //! the runtime's.
+//!
+//! [`v2`] is `desired.v2`'s half (`spec/profiles/desired/v2.md`, #986),
+//! which restates this major by reference. What the two share is here, one
+//! copy of each rule: the state machine (`machine`, a version ordered by
+//! a tick within an epoch, v1's time within an id and v2's seq within a
+//! run), and §5's judges, which read a report of either major through
+//! [`Reported`].
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -44,6 +51,8 @@ use crate::freshness;
 use crate::grammar::{self, Addr, IfaceId, Key, KindToken, ZkKey};
 use crate::seed::Stamp;
 use crate::template::{Bindings, Template};
+
+pub mod v2;
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "desired.v1";
@@ -164,6 +173,10 @@ pub enum Invalid {
     /// A target parameter, not a rest one, whose type is not `string`
     /// (text 0.2, F-170).
     NotString,
+    /// `desired.v2` §2.2 alone, checked last: a horizon above 0 in a
+    /// contract that does not use `freshness.v2` ([`v2::declaration`]).
+    /// [`declaration`], `desired.v1`'s reading, never gives it.
+    HorizonV1,
 }
 
 impl Invalid {
@@ -178,6 +191,7 @@ impl Invalid {
             Self::RestParam => "rest_param",
             Self::ParamNotTarget => "param_not_target",
             Self::NotString => "not_string",
+            Self::HorizonV1 => "horizon_v1",
         }
     }
 
@@ -194,6 +208,9 @@ impl Invalid {
                 "every template parameter must be a target parameter: one document per target"
             }
             Self::NotString => "a target parameter holds a system or a service name, a string",
+            Self::HorizonV1 => {
+                "a horizon above 0 is confirmed by a heartbeat: the contract must use freshness.v2"
+            }
         }
     }
 }
@@ -681,10 +698,18 @@ impl fmt::Display for Unreadable {
     }
 }
 
-/// A report that reads, but breaks §2.10's consistency.
+/// A report that reads, but breaks §2.10's consistency, of either major:
+/// [`Report::check`] gives `desired.v1`'s eight, [`v2::Fields::check`]
+/// `desired.v2`'s eight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Finding {
+    /// `desired.v2` alone: `source` or `outcome` is a later text's value.
+    Escape,
+    /// `desired.v2` alone: a version's fields do not hold together.
+    RunFields,
+    /// `desired.v1` alone: no key, and more than the baseline.
     Keyless,
+    /// `desired.v1` alone: a key that is no state key.
     KeyForm,
     ObservedOutcome,
     Refusal,
@@ -699,6 +724,8 @@ impl Finding {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Escape => "escape",
+            Self::RunFields => "run_fields",
             Self::Keyless => "keyless",
             Self::KeyForm => "key_form",
             Self::ObservedOutcome => "observed_outcome",
@@ -1535,13 +1562,7 @@ impl Act {
     /// puts whose documents compare equal, or two deletes.
     #[must_use]
     pub fn same_document(&self, next: &Act) -> bool {
-        match (self.kind, next.kind) {
-            (ActKind::Revert, ActKind::Revert) => true,
-            (ActKind::Apply, ActKind::Apply) => {
-                self.content.is_some() && self.content == next.content
-            }
-            _ => false,
-        }
+        machine::same_document((self.kind, self.content), (next.kind, next.content))
     }
 
     /// The act's version, as the report writes it.
@@ -1554,16 +1575,17 @@ impl Act {
     }
 }
 
-/// How an act ended (§2.7, §2.10).
+/// How an act ended (§2.7, §2.10), with the refusal its major's report
+/// carries: [`Refusal`] for `desired.v1`, [`v2::Refusal`] for `desired.v2`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Ended {
+pub enum Ended<R = Refusal> {
     /// Applied whole: a put converged, a delete reverted.
     Done,
     /// Refused whole, nothing applied. A revert is never refused: a
     /// refusal of one is read as [`Ended::Failed`].
-    Refused(Refusal),
+    Refused(R),
     /// Applied in part.
-    Failed(Refusal),
+    Failed(R),
 }
 
 /// What a step of a target does (§2.6–§2.9).
@@ -1613,37 +1635,449 @@ impl Step {
     }
 }
 
-/// Whether `incoming` is admitted over `held` (§2.6, core §4.3): by time
-/// within one id, the first value under another id accepted. `Err` says why
-/// not.
-fn admits(held: &Stamp, incoming: &Stamp) -> Result<(), Step> {
-    if held.id != incoming.id {
-        return Ok(());
+/// How many ids a target remembers (§2.6, text 0.2, F-163): at least the
+/// 16 most recent ids an instance acted on or adopted a version of. An id
+/// forgotten beyond them is read as new. `desired.v2` remembers as many
+/// runs ([`v2::REMEMBERED_RUNS`]).
+pub const REMEMBERED_IDS: usize = 16;
+
+/// The state machine both majors share (v1 §2.6 to §2.10, which
+/// `desired.v2` §2.6 to §2.10 restates over runs and seqs): one copy of
+/// each rule that did not change. A major gives its [`machine::Mark`], the
+/// place of a version in its author's order, and renders its own report
+/// from the [`machine::Ledger`].
+pub(crate) mod machine {
+    use std::cmp::Ordering;
+    use std::fmt;
+
+    use super::{ActKind, Content, Ended, Outcome, REMEMBERED_IDS, Source, Via};
+
+    /// A version's place in its author's order: an epoch nothing orders
+    /// against another (v1: the stamp's id; v2: the run, with its width)
+    /// and a tick within it (v1: the time; v2: the seq).
+    pub(crate) trait Mark: Copy + Eq + fmt::Debug {
+        type Epoch: Copy + Eq + fmt::Debug;
+        type Tick: Copy + Ord + fmt::Debug;
+        fn epoch(&self) -> Self::Epoch;
+        fn tick(&self) -> Self::Tick;
+        /// A floor names no version (`desired.v2` §2.8's snapshot with no
+        /// entry: its run and its asof): every version of its epoch at or
+        /// below its tick is older, and it leaves no observed version.
+        /// `desired.v1` has none.
+        fn floor(&self) -> bool {
+            false
+        }
     }
-    match incoming.time.cmp(&held.time) {
-        std::cmp::Ordering::Greater => Ok(()),
-        std::cmp::Ordering::Equal => Err(Step::SameVersion),
-        std::cmp::Ordering::Less => Err(Step::Older),
+
+    /// An act, as the machine holds one: what a major's `Act` says, its
+    /// stamp a [`Mark`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) struct Doing<M> {
+        pub kind: ActKind,
+        pub mark: M,
+        pub revision: Option<u64>,
+        pub via: Via,
+        pub content: Option<Content>,
+    }
+
+    /// Whether two acts carry the same document (§2.7): two puts whose
+    /// documents compare equal, or two that carry none.
+    pub(crate) fn same_document(
+        a: (ActKind, Option<Content>),
+        b: (ActKind, Option<Content>),
+    ) -> bool {
+        match (a.0, b.0) {
+            (ActKind::Revert, ActKind::Revert) => true,
+            (ActKind::Apply, ActKind::Apply) => a.1.is_some() && a.1 == b.1,
+            _ => false,
+        }
+    }
+
+    /// What a version received does (§2.6).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Judged<M> {
+        Act(Doing<M>),
+        Adopted,
+        Held,
+        SameVersion,
+        Older,
+        Confirmed,
+    }
+
+    /// What a floor received does (`desired.v2` §2.8).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Floored<M> {
+        NoVerdict,
+        Older,
+        Held,
+        Act(Doing<M>),
+    }
+
+    /// What follows an act's end (§2.7).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Finished<M> {
+        Done,
+        Adopted,
+        Act(Doing<M>),
+    }
+
+    /// What a report says, whatever its major's record (§2.10): a version
+    /// is its mark and its document's own revision.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub(crate) struct Ledger<M, R> {
+        pub source: Source,
+        pub in_force: Option<(M, Option<u64>)>,
+        pub observed: Option<(M, Option<u64>)>,
+        /// `None` until an act ends in this process.
+        pub outcome: Option<Outcome>,
+        pub refusal: Option<R>,
+        pub last_known: bool,
+    }
+
+    /// Why a version is not admitted over the one held.
+    enum Not {
+        Same,
+        Older,
+    }
+
+    /// Whether `incoming` is admitted over `held` (§2.6, core §4.3): by
+    /// tick within one epoch, the first value under another epoch
+    /// accepted. At or below a floor of its epoch, it is older.
+    fn admits<M: Mark>(held: &M, incoming: &M) -> Result<(), Not> {
+        if held.epoch() != incoming.epoch() {
+            return Ok(());
+        }
+        match incoming.tick().cmp(&held.tick()) {
+            Ordering::Greater => Ok(()),
+            Ordering::Equal if !held.floor() => Err(Not::Same),
+            Ordering::Equal | Ordering::Less => Err(Not::Older),
+        }
+    }
+
+    /// The author's own delivery of a version held from an archive
+    /// confirms it (§2.9).
+    fn confirm<M>(slot: &mut Doing<M>, via: Via) -> bool {
+        let confirmed = via == Via::Owner && slot.via == Via::Archive;
+        if confirmed {
+            slot.via = Via::Owner;
+        }
+        confirmed
+    }
+
+    /// One process of a target's role: the version it last acted on or
+    /// adopted, the one it holds while an act runs, per epoch the highest
+    /// tick it acted on or adopted, and what its report says.
+    #[derive(Debug, Clone)]
+    pub(crate) struct Core<M: Mark, R> {
+        acted: Option<Doing<M>>,
+        running: bool,
+        waiting: Option<Doing<M>>,
+        /// `(epoch, tick, floor)`, the epoch acted on or adopted most
+        /// recently first, at most [`REMEMBERED_IDS`].
+        remembered: Vec<(M::Epoch, M::Tick, bool)>,
+        ledger: Ledger<M, R>,
+    }
+
+    impl<M: Mark, R> Core<M, R> {
+        /// At its start: nothing held, the baseline in force.
+        pub fn new() -> Self {
+            Self {
+                acted: None,
+                running: false,
+                waiting: None,
+                remembered: Vec::new(),
+                ledger: Ledger {
+                    source: Source::Baseline,
+                    in_force: None,
+                    observed: None,
+                    outcome: None,
+                    refusal: None,
+                    last_known: false,
+                },
+            }
+        }
+
+        pub fn ledger(&self) -> &Ledger<M, R> {
+            &self.ledger
+        }
+
+        /// The act that runs, if one does.
+        pub fn running(&self) -> Option<&Doing<M>> {
+            self.acted.as_ref().filter(|_| self.running)
+        }
+
+        /// The latest it admitted (§2.5's held stamp): the one held
+        /// waiting, else the running act's, else the last acted on or
+        /// adopted.
+        pub fn latest(&self) -> Option<&Doing<M>> {
+            self.waiting.as_ref().or(self.acted.as_ref())
+        }
+
+        /// The highest tick this process acted on or adopted under
+        /// `epoch`, if it remembers the epoch (§2.6 step 4).
+        pub fn remembered(&self, epoch: M::Epoch) -> Option<M::Tick> {
+            self.remembered_as(epoch).map(|(t, _)| t)
+        }
+
+        fn remembered_as(&self, epoch: M::Epoch) -> Option<(M::Tick, bool)> {
+            self.remembered
+                .iter()
+                .find(|(e, _, _)| *e == epoch)
+                .map(|(_, t, f)| (*t, *f))
+        }
+
+        /// Records a version acted on or adopted (§2.6 step 4). Called
+        /// from `start`, as an act starts and as a version is adopted, so
+        /// an adoption counts as an act does; a version held waiting
+        /// counts only once its act starts or it is adopted, and one
+        /// passed over never.
+        fn remember(&mut self, mark: M) {
+            let (tick, floor) = match self
+                .remembered
+                .iter()
+                .position(|(e, _, _)| *e == mark.epoch())
+            {
+                Some(at) => {
+                    let (_, tick, floor) = self.remembered.remove(at);
+                    match mark.tick().cmp(&tick) {
+                        Ordering::Greater => (mark.tick(), mark.floor()),
+                        Ordering::Equal => (tick, floor || mark.floor()),
+                        Ordering::Less => (tick, floor),
+                    }
+                }
+                None => (mark.tick(), mark.floor()),
+            };
+            self.remembered.insert(0, (mark.epoch(), tick, floor));
+            self.remembered.truncate(REMEMBERED_IDS);
+        }
+
+        /// Judges a version (§2.6): against the version last acted on or
+        /// adopted (the running act's while one runs) and every epoch
+        /// remembered, then, while an act runs, against the one held
+        /// waiting (§2.7): an act to start, adopted, held while one runs,
+        /// or ignored with why.
+        pub fn observe(&mut self, doing: Doing<M>) -> Judged<M> {
+            let mark = doing.mark;
+            let remembered = self.remembered_as(mark.epoch());
+            if let Some(r) = self.acted.as_mut() {
+                if r.mark.epoch() == mark.epoch() {
+                    match admits(&r.mark, &mark) {
+                        Ok(()) => {}
+                        Err(Not::Same) if confirm(r, doing.via) => {
+                            if !self.running {
+                                self.ledger.last_known = false;
+                            }
+                            return Judged::Confirmed;
+                        }
+                        Err(Not::Same) => return Judged::SameVersion,
+                        Err(Not::Older) => return Judged::Older,
+                    }
+                } else if let Some((tick, floor)) = remembered {
+                    // Another epoch than the held one, acted on or adopted
+                    // before in this process: never an older version of
+                    // it, nor one acted on again. A version is its stamp
+                    // (§2.4), so an equal one is the same version
+                    // whatever document it carries.
+                    match mark.tick().cmp(&tick) {
+                        Ordering::Greater => {}
+                        Ordering::Equal if !floor => return Judged::SameVersion,
+                        Ordering::Equal | Ordering::Less => return Judged::Older,
+                    }
+                }
+            }
+            if let Some(w) = self.waiting.as_mut() {
+                match admits(&w.mark, &mark) {
+                    Ok(()) => {}
+                    Err(Not::Same) if confirm(w, doing.via) => return Judged::Confirmed,
+                    Err(Not::Same) => return Judged::SameVersion,
+                    Err(Not::Older) => return Judged::Older,
+                }
+            }
+            if self.running {
+                self.waiting = Some(doing);
+                return Judged::Held;
+            }
+            match self.start(doing) {
+                Finished::Act(a) => Judged::Act(a),
+                Finished::Adopted | Finished::Done => Judged::Adopted,
+            }
+        }
+
+        /// Judges a floor (`desired.v2` §2.8): it reverts only a put's
+        /// version of its own epoch at or below its tick, judged of the
+        /// version last acted on or adopted, then of the one held waiting.
+        pub fn observe_floor(&mut self, floor: M) -> Floored<M> {
+            let reverts = |held: &Doing<M>| {
+                if held.kind != ActKind::Apply || held.mark.epoch() != floor.epoch() {
+                    Err(Floored::NoVerdict)
+                } else if held.mark.tick() > floor.tick() {
+                    Err(Floored::Older)
+                } else {
+                    Ok(())
+                }
+            };
+            let Some(acted) = self.acted.as_ref() else {
+                return Floored::NoVerdict;
+            };
+            if let Err(why) = reverts(acted) {
+                return why;
+            }
+            if let Some(Err(why)) = self.waiting.as_ref().map(reverts) {
+                return why;
+            }
+            let doing = Doing {
+                kind: ActKind::Revert,
+                mark: floor,
+                revision: None,
+                via: Via::Owner,
+                content: None,
+            };
+            if self.running {
+                self.waiting = Some(doing);
+                return Floored::Held;
+            }
+            match self.start(doing) {
+                Finished::Act(a) => Floored::Act(a),
+                // A floor follows a put, never the same document.
+                Finished::Adopted | Finished::Done => Floored::NoVerdict,
+            }
+        }
+
+        /// The author's own word of `mark`, by an unchanged answer to a
+        /// conditional read (`desired.v2` §2.5, §2.9): it confirms that
+        /// version where the target holds it from an archive, acted on,
+        /// running or waiting, and is no version received: nothing is
+        /// judged, admitted or remembered. `true` when it confirmed one.
+        pub fn unchanged(&mut self, mark: M) -> bool {
+            if let Some(w) = self.waiting.as_mut().filter(|w| w.mark == mark) {
+                return confirm(w, Via::Owner);
+            }
+            let Some(a) = self.acted.as_mut().filter(|a| a.mark == mark) else {
+                return false;
+            };
+            let confirmed = confirm(a, Via::Owner);
+            if confirmed && !self.running {
+                self.ledger.last_known = false;
+            }
+            confirmed
+        }
+
+        fn start(&mut self, doing: Doing<M>) -> Finished<M> {
+            self.remember(doing.mark);
+            let version = (!doing.mark.floor()).then_some((doing.mark, doing.revision));
+            if let Some(prev) = self.acted
+                && same_document((prev.kind, prev.content), (doing.kind, doing.content))
+            {
+                let l = &mut self.ledger;
+                if !prev.mark.floor() && l.in_force.is_some_and(|(m, _)| m == prev.mark) {
+                    l.in_force = version;
+                }
+                l.observed = version;
+                l.last_known = doing.via == Via::Archive;
+                self.acted = Some(doing);
+                return Finished::Adopted;
+            }
+            self.acted = Some(doing);
+            self.running = true;
+            Finished::Act(doing)
+        }
+
+        /// Ends the running act (§2.7, §2.10): the ledger updated, then
+        /// the held version, if one is held, adopted or its act started.
+        /// With no act running, nothing changes.
+        pub fn finish(&mut self, ended: Ended<R>) -> Finished<M> {
+            let Some(act) = self.acted.filter(|_| self.running) else {
+                return Finished::Done;
+            };
+            self.running = false;
+            let l = &mut self.ledger;
+            let version = (act.mark, act.revision);
+            if !act.mark.floor() {
+                l.observed = Some(version);
+                l.last_known = act.via == Via::Archive;
+            } else if matches!(ended, Ended::Done) {
+                // A revert on a floor has no observed version
+                // (`desired.v2` §2.8). One that could not finish keeps
+                // the version it was reverting: a failed act with none
+                // stated would be malformed (§2.10).
+                l.observed = None;
+                l.last_known = false;
+            }
+            l.refusal = None;
+            match (act.kind, ended) {
+                (ActKind::Apply, Ended::Done) => {
+                    l.source = Source::Desired;
+                    l.in_force = Some(version);
+                    l.outcome = Some(Outcome::Converged);
+                }
+                (ActKind::Revert, Ended::Done) => {
+                    l.source = Source::Baseline;
+                    l.in_force = None;
+                    l.outcome = Some(Outcome::Reverted);
+                }
+                (ActKind::Apply, Ended::Refused(why)) => {
+                    l.outcome = Some(Outcome::Refused);
+                    l.refusal = Some(why);
+                }
+                (kind, Ended::Refused(why) | Ended::Failed(why)) => {
+                    l.source = match kind {
+                        ActKind::Apply => Source::Desired,
+                        ActKind::Revert => Source::Baseline,
+                    };
+                    l.in_force = None;
+                    l.outcome = Some(Outcome::Failed);
+                    l.refusal = Some(why);
+                }
+            }
+            match self.waiting.take() {
+                Some(next) => self.start(next),
+                None => Finished::Done,
+            }
+        }
+
+        /// The target's own operation changed what is in force (§2.7):
+        /// `source` is `call`, and no version is wholly in force. The
+        /// last act's report stands, and no version is acted on again.
+        pub fn call(&mut self) {
+            self.ledger.source = Source::Call;
+            self.ledger.in_force = None;
+        }
     }
 }
 
-/// How many ids a target remembers (§2.6, text 0.2, F-163): at least the
-/// 16 most recent ids an instance acted on or adopted a version of. An id
-/// forgotten beyond them is read as new.
-pub const REMEMBERED_IDS: usize = 16;
+impl machine::Mark for Stamp {
+    type Epoch = u128;
+    type Tick = u64;
+    fn epoch(&self) -> u128 {
+        self.id
+    }
+    fn tick(&self) -> u64 {
+        self.time
+    }
+}
+
+impl From<machine::Doing<Stamp>> for Act {
+    fn from(d: machine::Doing<Stamp>) -> Self {
+        Self {
+            kind: d.kind,
+            stamp: d.mark,
+            revision: d.revision,
+            via: d.via,
+            content: d.content,
+        }
+    }
+}
 
 /// One instance of a target's role (§2.6–§2.10): the version it last acted
 /// on or adopted, the one it holds while an act runs, per id the latest
 /// time it acted on or adopted (F-163), and its report. A restart is a new
-/// `Target`, holding nothing (§2.7).
+/// `Target`, holding nothing (§2.7). Its rules are `machine::Core`'s,
+/// which `desired.v2`'s target shares ([`v2::Target`]).
 #[derive(Debug, Clone)]
 pub struct Target {
-    acted: Option<Act>,
-    running: bool,
-    waiting: Option<Act>,
-    /// `(id, time)`, the id acted on or adopted most recently first, at most
-    /// [`REMEMBERED_IDS`].
-    ids: Vec<(u128, u64)>,
+    core: machine::Core<Stamp, Refusal>,
+    key: Option<String>,
+    running: Option<Act>,
     report: Report,
 }
 
@@ -1653,11 +2087,10 @@ impl Target {
     #[must_use]
     pub fn new(key: Option<String>) -> Self {
         Self {
-            acted: None,
-            running: false,
-            waiting: None,
-            ids: Vec::new(),
-            report: Report::baseline(key),
+            core: machine::Core::new(),
+            running: None,
+            report: Report::baseline(key.clone()),
+            key,
         }
     }
 
@@ -1670,27 +2103,31 @@ impl Target {
     /// The act that runs, if one does.
     #[must_use]
     pub fn running(&self) -> Option<&Act> {
-        self.acted.as_ref().filter(|_| self.running)
+        self.running.as_ref()
     }
 
     /// The latest time this instance acted on or adopted a version of `id`
     /// at, if it remembers the id (§2.6 step 4).
     #[must_use]
     pub fn remembered(&self, id: u128) -> Option<u64> {
-        self.ids.iter().find(|(i, _)| *i == id).map(|(_, t)| *t)
+        self.core.remembered(id)
     }
 
-    /// Records a version acted on or adopted (§2.6 step 4). Called from
-    /// `start`, as an act starts and as a version is adopted, so an
-    /// adoption counts as an act does; a version held waiting counts only
-    /// once its act starts or it is adopted, and one passed over never.
-    fn remember(&mut self, stamp: Stamp) {
-        let time = match self.ids.iter().position(|(i, _)| *i == stamp.id) {
-            Some(at) => self.ids.remove(at).1.max(stamp.time),
-            None => stamp.time,
+    /// The machine's ledger written as `desired.v1.Report`, and the
+    /// running act as the runtime reads it.
+    fn sync(&mut self) {
+        let version = |(stamp, revision): (Stamp, Option<u64>)| Version { stamp, revision };
+        let l = self.core.ledger();
+        self.report = Report {
+            key: self.key.clone(),
+            source: l.source,
+            in_force: l.in_force.map(version),
+            observed: l.observed.map(version),
+            outcome: l.outcome,
+            refusal: l.refusal.clone(),
+            last_known: l.last_known,
         };
-        self.ids.insert(0, (stamp.id, time));
-        self.ids.truncate(REMEMBERED_IDS);
+        self.running = self.core.running().map(|d| Act::from(*d));
     }
 
     /// Judges a sample (§2.6): against the version last acted on or adopted
@@ -1702,68 +2139,23 @@ impl Target {
         let Some(stamp) = s.stamp else {
             return Step::Unstamped;
         };
-        let remembered = self.remembered(stamp.id);
-        if let Some(r) = self.acted.as_mut() {
-            if r.stamp.id == stamp.id {
-                match admits(&r.stamp, &stamp) {
-                    Ok(()) => {}
-                    Err(Step::SameVersion) if s.via == Via::Owner && r.via == Via::Archive => {
-                        r.via = Via::Owner;
-                        if !self.running {
-                            self.report.last_known = false;
-                        }
-                        return Step::Confirmed;
-                    }
-                    Err(why) => return why,
-                }
-            } else if let Some(time) = remembered {
-                // Another id than the held one, acted on or adopted before
-                // in this instance: never an older version of it (F-163),
-                // nor one acted on again. A version is its stamp (§2.4), so
-                // an equal (time, id) is the same version whatever document
-                // it carries.
-                match stamp.time.cmp(&time) {
-                    std::cmp::Ordering::Greater => {}
-                    std::cmp::Ordering::Equal => return Step::SameVersion,
-                    std::cmp::Ordering::Less => return Step::Older,
-                }
-            }
-        }
-        if let Some(w) = self.waiting.as_mut() {
-            match admits(&w.stamp, &stamp) {
-                Ok(()) => {}
-                Err(Step::SameVersion) if s.via == Via::Owner && w.via == Via::Archive => {
-                    w.via = Via::Owner;
-                    return Step::Confirmed;
-                }
-                Err(why) => return why,
-            }
-        }
         let act = Act::of(&s, stamp);
-        if self.running {
-            self.waiting = Some(act);
-            return Step::Held;
-        }
-        self.start(act)
-    }
-
-    fn start(&mut self, act: Act) -> Step {
-        self.remember(act.stamp);
-        if let Some(prev) = self.acted
-            && prev.same_document(&act)
-        {
-            let r = &mut self.report;
-            if r.in_force == Some(prev.version()) {
-                r.in_force = Some(act.version());
-            }
-            r.observed = Some(act.version());
-            r.last_known = act.via == Via::Archive;
-            self.acted = Some(act);
-            return Step::Adopted;
-        }
-        self.acted = Some(act);
-        self.running = true;
-        Step::Act(act)
+        let step = match self.core.observe(machine::Doing {
+            kind: act.kind,
+            mark: stamp,
+            revision: act.revision,
+            via: act.via,
+            content: act.content,
+        }) {
+            machine::Judged::Act(d) => Step::Act(d.into()),
+            machine::Judged::Adopted => Step::Adopted,
+            machine::Judged::Held => Step::Held,
+            machine::Judged::SameVersion => Step::SameVersion,
+            machine::Judged::Older => Step::Older,
+            machine::Judged::Confirmed => Step::Confirmed,
+        };
+        self.sync();
+        step
     }
 
     /// Ends the running act (§2.7, §2.10): the report updated, then the
@@ -1771,51 +2163,21 @@ impl Target {
     /// [`Step::Done`]. With no act running, nothing changes, and it is
     /// [`Step::Done`].
     pub fn finish(&mut self, ended: Ended) -> Step {
-        let Some(act) = self.acted.filter(|_| self.running) else {
-            return Step::Done;
+        let step = match self.core.finish(ended) {
+            machine::Finished::Done => Step::Done,
+            machine::Finished::Adopted => Step::Adopted,
+            machine::Finished::Act(d) => Step::Act(d.into()),
         };
-        self.running = false;
-        let r = &mut self.report;
-        r.observed = Some(act.version());
-        r.refusal = None;
-        r.last_known = act.via == Via::Archive;
-        match (act.kind, ended) {
-            (ActKind::Apply, Ended::Done) => {
-                r.source = Source::Desired;
-                r.in_force = Some(act.version());
-                r.outcome = Some(Outcome::Converged);
-            }
-            (ActKind::Revert, Ended::Done) => {
-                r.source = Source::Baseline;
-                r.in_force = None;
-                r.outcome = Some(Outcome::Reverted);
-            }
-            (ActKind::Apply, Ended::Refused(why)) => {
-                r.outcome = Some(Outcome::Refused);
-                r.refusal = Some(why);
-            }
-            (kind, Ended::Refused(why) | Ended::Failed(why)) => {
-                r.source = match kind {
-                    ActKind::Apply => Source::Desired,
-                    ActKind::Revert => Source::Baseline,
-                };
-                r.in_force = None;
-                r.outcome = Some(Outcome::Failed);
-                r.refusal = Some(why);
-            }
-        }
-        match self.waiting.take() {
-            Some(next) => self.start(next),
-            None => Step::Done,
-        }
+        self.sync();
+        step
     }
 
     /// The target's own operation changed what is in force (§2.7): the
     /// report's `source` is `call`, and no version is wholly in force. The
     /// last act's report stands, and no version is acted on again.
     pub fn call(&mut self) {
-        self.report.source = Source::Call;
-        self.report.in_force = None;
+        self.core.call();
+        self.sync();
     }
 }
 
@@ -1847,20 +2209,63 @@ pub enum Listing {
     Listed { bound: bool },
 }
 
-/// The target's report of the role's slice, as the tool read it (§2.10).
-#[derive(Debug, Clone, Copy)]
-pub enum ReportRead<'a> {
-    /// None read.
-    NotRead,
-    /// Bytes that do not read ([`decode`] refused them).
-    Unreadable,
-    /// A report that reads; malformed when [`Report::check`] finds anything.
-    Read(&'a Report),
+/// What §2.17's step 5 reads of a report, of either major.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Facts {
+    pub source: Source,
+    /// The last act's outcome, `None` with no act yet in this process: a
+    /// `desired.v1` report with no `outcome`, a `desired.v2` one that says
+    /// `not_acted`.
+    pub outcome: Option<Outcome>,
+    pub last_known: bool,
+    /// Whether a version is wholly in force: v1's `in_force`, v2's
+    /// `in_force` `observed` or `other`.
+    pub in_force: bool,
 }
 
+/// A report of either major, as §5's judges read one: [`Report`]
+/// (`desired.v1`) or [`v2::Read`] (`desired.v2`).
+pub trait Reported {
+    /// What step 5 reads, or `None` for a malformed report (§2.10's
+    /// consistency), which answers nothing.
+    fn facts(&self) -> Option<Facts>;
+}
+
+impl Reported for Report {
+    fn facts(&self) -> Option<Facts> {
+        self.check().is_empty().then(|| Facts {
+            source: self.source,
+            outcome: self.outcome,
+            last_known: self.last_known,
+            in_force: self.in_force.is_some(),
+        })
+    }
+}
+
+/// The target's report of the role's slice, as the tool read it (§2.10):
+/// `R` is the major's report as read, [`Report`] or [`v2::Read`].
+#[derive(Debug)]
+pub enum ReportRead<'a, R = Report> {
+    /// None read.
+    NotRead,
+    /// Bytes that do not read ([`decode`] or [`v2::read`] refused them).
+    Unreadable,
+    /// A report that reads; malformed when it has a finding
+    /// ([`Reported::facts`]).
+    Read(&'a R),
+}
+
+impl<R> Clone for ReportRead<'_, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<R> Copy for ReportRead<'_, R> {}
+
 /// What the tool read of the target (§2.17 steps 1 to 4).
-#[derive(Debug, Clone, Copy)]
-pub struct TargetReading<'a> {
+#[derive(Debug)]
+pub struct TargetReading<'a, R = Report> {
     pub presence: Seen,
     /// Its descriptor, `None` when not read. Ignored across a face.
     pub descriptor: Option<Listing>,
@@ -1868,11 +2273,20 @@ pub struct TargetReading<'a> {
     /// say, `None` when the tool has none (§2.17 step 2, text 0.2, F-168).
     /// Ignored elsewhere.
     pub deployment: Option<Listing>,
-    pub report: ReportRead<'a>,
-    /// The report's freshness by `freshness.v1`, [`freshness::Verdict::NotAsked`]
-    /// when its resource declares no horizon.
+    pub report: ReportRead<'a, R>,
+    /// The report's freshness by the `freshness` major its contract uses,
+    /// [`freshness::Verdict::NotAsked`] when its resource declares no
+    /// horizon.
     pub freshness: freshness::Verdict,
 }
+
+impl<R> Clone for TargetReading<'_, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<R> Copy for TargetReading<'_, R> {}
 
 /// The author's latest version of the slice, by S4's GET (§2.17 step 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2021,11 +2435,15 @@ impl Judged {
     }
 }
 
-/// §2.17 steps 1 to 4, shared by every question: the report to answer
-/// from, or the answer. `unbound` is the answer for an unbound role.
-/// Across a face, the deployment's word answers step 2 in the descriptor's
-/// place (text 0.2, F-168).
-fn premises<'a>(t: &TargetReading<'a>, unbound: Judged) -> Result<&'a Report, Judged> {
+/// §2.17 steps 1 to 4, shared by every question and by both majors: the
+/// report to answer from with what step 5 reads of it, or the answer.
+/// `unbound` is the answer for an unbound role. Across a face, the
+/// deployment's word answers step 2 in the descriptor's place (text 0.2,
+/// F-168).
+fn premises<'a, R: Reported>(
+    t: &TargetReading<'a, R>,
+    unbound: Judged,
+) -> Result<(&'a R, Facts), Judged> {
     use Answer::{NotAsked, Unobservable};
     let listing = match t.presence {
         Seen::Absent => return Err(Judged::new(NotAsked, Reason::TargetAbsent)),
@@ -2051,10 +2469,10 @@ fn premises<'a>(t: &TargetReading<'a>, unbound: Judged) -> Result<&'a Report, Ju
             ));
         }
         ReportRead::Unreadable => return Err(Judged::new(Unobservable, Reason::ReportInvalid)),
-        ReportRead::Read(r) if !r.check().is_empty() => {
-            return Err(Judged::new(Unobservable, Reason::ReportInvalid));
-        }
-        ReportRead::Read(r) => r,
+        ReportRead::Read(r) => match r.facts() {
+            Some(f) => (r, f),
+            None => return Err(Judged::new(Unobservable, Reason::ReportInvalid)),
+        },
     };
     match t.freshness {
         freshness::Verdict::Stale => Err(Judged::new(Unobservable, Reason::ReportStale)),
@@ -2067,6 +2485,46 @@ fn premises<'a>(t: &TargetReading<'a>, unbound: Judged) -> Result<&'a Report, Ju
 
 const UNBOUND: Judged = Judged::new(Answer::NotAsked, Reason::Unbound);
 
+/// §5's first question up to step 6's read, for either major: the
+/// premises, then the author's presence.
+fn converging<'a, R: Reported>(
+    t: &TargetReading<'a, R>,
+    author: Seen,
+) -> Result<(&'a R, Facts), Judged> {
+    let r = premises(t, UNBOUND)?;
+    match author {
+        Seen::Absent => Err(Judged::new(Answer::NotAsked, Reason::AuthorAbsent)),
+        Seen::Incomplete => Err(Judged::new(
+            Answer::Unobservable,
+            Reason::AuthorPresenceIncomplete,
+        )),
+        Seen::Present | Seen::AcrossFace => Ok(r),
+    }
+}
+
+/// Step 7, of either major: the report's observed version against the
+/// author's. The same version answers by the last act's outcome; within
+/// one epoch (v1: an id; v2: a run) a lower tick is behind and a higher
+/// one ahead; another epoch is `other_epoch`.
+fn compared<M: machine::Mark>(observed: &M, current: &M, outcome: Outcome) -> Judged {
+    if observed == current {
+        return match outcome {
+            Outcome::Converged | Outcome::Reverted => {
+                Judged::new(Answer::Yes, outcome_reason(outcome))
+            }
+            Outcome::Refused | Outcome::Failed => Judged::new(Answer::No, outcome_reason(outcome)),
+        };
+    }
+    if observed.epoch() != current.epoch() {
+        return Judged::new(Answer::NotYet, Reason::OtherEpoch);
+    }
+    if observed.tick() < current.tick() {
+        Judged::new(Answer::NotYet, Reason::Behind)
+    } else {
+        Judged::new(Answer::Unobservable, Reason::Ahead)
+    }
+}
+
 fn outcome_reason(o: Outcome) -> Reason {
     match o {
         Outcome::Converged => Reason::Converged,
@@ -2077,11 +2535,11 @@ fn outcome_reason(o: Outcome) -> Reason {
 }
 
 /// §5's second question, "is the target's last act refused or failed?"
-/// (§2.17). Yes is the finding.
+/// (§2.17), of a report of either major. Yes is the finding.
 #[must_use]
-pub fn refused(t: &TargetReading<'_>) -> Judged {
+pub fn refused<R: Reported>(t: &TargetReading<'_, R>) -> Judged {
     let r = match premises(t, UNBOUND) {
-        Ok(r) => r,
+        Ok((_, f)) => f,
         Err(j) => return j,
     };
     match r.outcome {
@@ -2094,14 +2552,17 @@ pub fn refused(t: &TargetReading<'_>) -> Judged {
 }
 
 /// §5's third question, "is what the target acted on last-known?" (§2.9,
-/// §2.17). Informative.
+/// §2.17), of a report of either major. Informative. Not asked with no act
+/// yet: a consistent `desired.v1` report has an `observed` exactly when it
+/// has an `outcome`, and a `desired.v2` one that reverted on a snapshot
+/// with no entry has an outcome and no observed version.
 #[must_use]
-pub fn last_known(t: &TargetReading<'_>) -> Judged {
+pub fn last_known<R: Reported>(t: &TargetReading<'_, R>) -> Judged {
     let r = match premises(t, UNBOUND) {
-        Ok(r) => r,
+        Ok((_, f)) => f,
         Err(j) => return j,
     };
-    match (&r.observed, r.last_known) {
+    match (r.outcome, r.last_known) {
         (None, _) => Judged::new(Answer::NotAsked, Reason::NotActed),
         (Some(_), true) => Judged::new(Answer::Yes, Reason::LastKnown),
         (Some(_), false) => Judged::new(Answer::No, Reason::Current),
@@ -2109,15 +2570,16 @@ pub fn last_known(t: &TargetReading<'_>) -> Judged {
 }
 
 /// §5's fourth question, "is a desired document in force?" (§2.10,
-/// §2.12, §2.17). An unbound role answers no: the kill switch. Informative.
+/// §2.12, §2.17), of a report of either major. An unbound role answers no:
+/// the kill switch. Informative.
 #[must_use]
-pub fn in_force(t: &TargetReading<'_>) -> Judged {
+pub fn in_force<R: Reported>(t: &TargetReading<'_, R>) -> Judged {
     let r = match premises(t, Judged::new(Answer::No, Reason::Unbound)) {
-        Ok(r) => r,
+        Ok((_, f)) => f,
         Err(j) => return j,
     };
     match r.source {
-        Source::Desired if r.in_force.is_some() => Judged::new(Answer::Yes, Reason::Desired),
+        Source::Desired if r.in_force => Judged::new(Answer::Yes, Reason::Desired),
         Source::Desired => Judged::new(Answer::Yes, Reason::Partial),
         Source::Baseline => Judged::new(Answer::No, Reason::Baseline),
         Source::Call => Judged::new(Answer::No, Reason::Call),
@@ -2130,16 +2592,11 @@ pub fn in_force(t: &TargetReading<'_>) -> Judged {
 /// finding.
 #[must_use]
 pub fn converged(t: &TargetReading<'_>, a: &AuthorReading) -> Judged {
-    use Answer::{No, NotAsked, NotYet, Unobservable, Yes};
-    let r = match premises(t, UNBOUND) {
-        Ok(r) => r,
+    use Answer::{NotYet, Unobservable};
+    let r = match converging(t, a.presence) {
+        Ok((r, _)) => r,
         Err(j) => return j,
     };
-    match a.presence {
-        Seen::Absent => return Judged::new(NotAsked, Reason::AuthorAbsent),
-        Seen::Incomplete => return Judged::new(Unobservable, Reason::AuthorPresenceIncomplete),
-        Seen::Present | Seen::AcrossFace => {}
-    }
     let current = match a.current {
         Current::NotRead => return Judged::new(Unobservable, Reason::AuthorNotRead),
         Current::Incomplete => return Judged::new(Unobservable, Reason::AuthorReadIncomplete),
@@ -2149,21 +2606,7 @@ pub fn converged(t: &TargetReading<'_>, a: &AuthorReading) -> Judged {
     let (Some(observed), Some(outcome)) = (&r.observed, r.outcome) else {
         return Judged::new(NotYet, Reason::NotActed);
     };
-    let o = observed.stamp;
-    if o == current {
-        return match outcome {
-            Outcome::Converged | Outcome::Reverted => Judged::new(Yes, outcome_reason(outcome)),
-            Outcome::Refused | Outcome::Failed => Judged::new(No, outcome_reason(outcome)),
-        };
-    }
-    if o.id != current.id {
-        return Judged::new(NotYet, Reason::OtherEpoch);
-    }
-    if o.time < current.time {
-        Judged::new(NotYet, Reason::Behind)
-    } else {
-        Judged::new(Unobservable, Reason::Ahead)
-    }
+    compared(&observed.stamp, &current, outcome)
 }
 
 #[cfg(test)]
