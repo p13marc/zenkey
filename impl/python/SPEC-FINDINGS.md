@@ -30578,3 +30578,71 @@ review-bot's four notes on round 118 (#1153).
 - **Open:** F-437 to F-441; F-569 to F-592.
 
   F-365 stays open as #965's.
+
+## At core 0.113, freshness.v2 0.12 and health.v2 0.1
+
+Round 120 read this tree at 08f3600a (#986): core 0.113's ahead time,
+`freshness.v2` 0.12, `health.v1` 0.11, and a new major, `health.v2`,
+text 0.1.
+
+### The answers, given from the text first
+
+Each was written here before its cases were opened. The two of the ahead
+time stood before `times.json`, `bodies.json`, `owner.json` and
+`apply.json` were opened (db4a8f1d). The three of `health.v2` were
+committed before any `health.v2` code, and before any file of
+`conformance/v2/` was opened.
+
+1. **Which bit pattern says ahead.** "The seconds all ones, with the
+   millisecond code 1022": `0x3fffffffffe` in 42 bits, "the unknown time
+   with its last bit clear". A body's first six bytes are `ffffffffff80`
+   under a map of zeros.
+   - **The reserved patterns near it** (core §7.5, "Unused"): "1000 to
+     1021 under any seconds, and 1022 or 1023 under seconds that are not
+     all ones". Each is refused, `code`.
+   - **All 42 bits set** is the unknown time, 1023 under seconds all
+     ones.
+   - **Seconds all ones under 0 to 999** is an instant, the last second
+     the field holds.
+2. **What zk2py's round-119 reader does with an ahead heartbeat.** It
+   refuses the body, `code`: its `read_time` took any code from 1000 up
+   for unused unless all 42 bits were set. An owner heartbeat it refused
+   whole, `code`, with every group. That is what core §7.5 says of "A
+   reader that knows no ahead time".
+3. **The clock question counts any read heartbeat.** "**Which
+   heartbeats count.** A heartbeat covering `health.v2` counts, and an
+   owner heartbeat of the status's class, `host` (`freshness.v2` §2.4),
+   each where it is a read heartbeat. Its sections play no part: the
+   time is the owner's word of its clock." (§2.5.) §0 says the same: "A
+   heartbeat or an owner heartbeat that a reader's steps read, whatever
+   its sections say."
+   - So a heartbeat whose status section diverges from the view counts,
+     and one read by a reader that holds no view.
+   - A read owner heartbeat is "one read at step 3, whatever became of
+     its groups" (`freshness.v2` §2.5). So zk2py counts one whose
+     `health.v2` group is refused, and one that holds no group for
+     `health.v2` at all.
+   - "A heartbeat of another revision, a refused one and an older one
+     are not read, and count for nothing."
+4. **A contract that lists `health.v1` and carries `health.v2`'s
+   tables loads, with no finding, and that is `not_used`.**
+   - It loads: core E020 asks that "the profile is a `uses` name
+     without its major", and `health` is one. It draws no W105: "A
+     contract that lists `health.v1` draws no W105, as before" (core
+     Appendix D).
+   - It is `not_used` by §2.10's first item: "a resource carries the
+     key, and the contract's `uses` does not list `health.v2`".
+   - So the next sentence is wrong: "A contract that loads cannot hold
+     it (core E020)". This one loads and holds it.
+5. **A status better than its worst check, read in one GET, is a
+   finding about the owner only where that reading is one instant.**
+   "A tool MAY report the break itself, as a finding about the owner,
+   from one reading that is one instant." "From any other reading it
+   SHOULD see the break in two readings a grace apart, as v1 §2.2
+   says." (§2.2.)
+   - One GET is not one instant by itself. Both snapshots must be
+     complete, "under one run, in width and value, and one asof", and
+     "no live entry and no tombstone of that run has a seq above that
+     asof".
+   - Either way the reader answers the first question unhealthy,
+     `inconsistent`, at the check's level (§2.11).
