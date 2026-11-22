@@ -5302,6 +5302,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round114_readings(root)
     out += _round115_readings(root)
     out += _round116_readings(root)
+    out += _round117_readings(root)
     return out
 
 
@@ -6301,6 +6302,398 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # Round 111's findings, F-535 to F-539, are answered by core 0.109 and
     # desired.v1 0.14: `_round114_readings` holds each answer as its text
     # states it, and the sentences the findings quoted gone.
+    return out
+
+
+def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """``freshness.v2`` 0.11, ``link.v2`` 0.22, observer 0.35 and core 0.111,
+    the answers to F-548 and F-550 to F-568, read cold (#609, round 117):
+    each version and its entry; what each new fixture case pins, by a
+    changed reader or by the figures a wrong reading would give; §2.5's two
+    ways before a subscriber knows the catalog its owner names, side by
+    side; zk2py's :class:`~zk2py.freshness_v2.Naming`; a class as one
+    revision's; and the texts round 117's findings quote, so that an answer
+    moves each. The answers themselves are read where round 113's to 115's
+    readings quoted their findings, re-keyed."""
+    import re
+    import tempfile
+
+    from . import across, catalog as cat, freshness_v2 as f2, heartbeat, link, link_v2, owner_heartbeat as oh, zk2c
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    def entry(rel: str, version: str, words: str) -> list[str]:
+        log_ = (spec / rel).read_text(encoding="utf-8").splitlines()
+        ok = any(line.startswith(f"## {version} ") and words in line for line in log_)
+        return [] if ok else [f"{rel} has no {version} entry saying {words!r}"]
+
+    def header(rel: str) -> tuple[str | None, str | None]:
+        t = flat(rel)
+        v = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+)", t)
+        w = re.search(r"\| \*\*Written against\*\* \| core (\d+\.\d+)", t)
+        return (v.group(1) if v else None, w.group(1) if w else None)
+
+    core, fv, l2, obs = flat("core.md"), flat("profiles/freshness/v2.md"), flat("profiles/link/v2.md"), \
+        flat("observer.md")
+    flog, llog = flat("profiles/freshness/CHANGELOG.md"), flat("profiles/link/CHANGELOG.md")
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    out: list[tuple[str, Any, Any]] = [
+        ("freshness.v2 0.11 or later, link.v2 0.22 or later and observer 0.35 or later, each still written against "
+         "core 0.108, and core 0.111 or later, each with its entry, each editorial; RULES.md lists 295 rules, as "
+         "core 0.110 left it",
+         [_at_least(header("profiles/freshness/v2.md")[0], "0.11"), header("profiles/freshness/v2.md")[1],
+          _at_least(header("profiles/link/v2.md")[0], "0.22"), header("profiles/link/v2.md")[1],
+          _at_least(header("observer.md")[0], "0.35"), header("observer.md")[1],
+          m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.111"), int(once.group(1)) if once else None]
+         + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.11", "no keyword changed")
+         + entry("profiles/link/CHANGELOG.md", "link.v2 0.22", "no keyword changed")
+         + entry("observer-CHANGELOG.md", "0.35", "no keyword rule changed")
+         + entry("CHANGELOG.md", "0.111", "no rule changed"),
+         [True, "0.108", True, "0.108", True, "0.108", True, 295]),
+    ]
+
+    # -- apply.json's five cases, each under a reader changed where the entry says it pins --
+    apply_cases = _load_json(spec / "profiles" / "freshness" / "conformance" / "apply.json")["cases"]
+    lay = _load_json(root / "heartbeat" / "layouts.json")
+    contracts: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, text in lay["contracts"].items():
+            contracts[name] = load_contract(Path(tmp) / f"{name}.toml", text=text)
+    layouts = {n: heartbeat.layout_of(c.canonical, c.fingerprint) for n, c in contracts.items()}
+
+    class EveryFollowed(f2.Reader):
+        """Loses every followed collection of the key's class, named or not."""
+
+        def lost(self, cls: str) -> list[tuple[str, str]]:
+            if not self.keys[cls].gap:
+                return []
+            return [(i, c.resource) for i in sorted(self.views) for c in self.views[i].layout.collections
+                    if c.resource in self.views[i].follows and self.classes[i][c.resource] == cls]
+
+    class NamesKept(f2.Reader):
+        """Another run does not start the names again."""
+
+        def _read(self, cls: str, stamp: Any, value: Any, at: int) -> dict[str, Any]:
+            before = set(self.keys[cls].named)
+            got = super()._read(cls, stamp, value, at)
+            self.keys[cls].named |= before
+            if "read" in got:
+                got["read"]["lost"] = self.lost(cls)
+            return got
+
+    class RevisionNamesNone(f2.Reader):
+        """A group stopped at "Another revision" names no interface."""
+
+        def _group(self, cls: str, g: Any, at: int) -> dict[str, Any]:
+            before = set(self.keys[cls].named)
+            got = super()._group(cls, g, at)
+            if got.get("answer") == "revision" and got["iface"] not in before:
+                self.keys[cls].named.discard(got["iface"])
+            return got
+
+    class CountPerRun(f2.Reader):
+        """Another run starts a collection's count again."""
+
+        def _read(self, cls: str, stamp: Any, value: Any, at: int) -> dict[str, Any]:
+            last = self.keys[cls].last
+            if last is not None and not last.same_run(stamp):
+                for v in self.views.values():
+                    for r in v.streak:
+                        v.streak[r] = 0
+            return super()._read(cls, stamp, value, at)
+
+    class ClassBeforeFollowed(f2.Reader):
+        """Reads a collection's class before whether it is followed."""
+
+        def _group(self, cls: str, g: Any, at: int) -> dict[str, Any]:
+            got = super()._group(cls, g, at)
+            for r, v in (got.get("sections") or {}).items():
+                if v == "not_followed" and self.classes[got["iface"]][r] != cls:
+                    got["sections"][r] = "other_class"
+            return got
+
+    class OtherClassEnds(f2.Reader):
+        """``other_class`` ends a row of divergences."""
+
+        def _group(self, cls: str, g: Any, at: int) -> dict[str, Any]:
+            got = super()._group(cls, g, at)
+            for r, v in (got.get("sections") or {}).items():
+                if v == "other_class":
+                    self.views[got["iface"]].streak[r] = 0
+            return got
+
+    owned = [i for i, c in enumerate(apply_cases) if "catalog" in c]
+
+    def fails(reader: Any) -> list[int]:
+        bad = []
+        for i in owned:
+            try:
+                if any(got != want for _, got, want in f2.apply_owner_case(contracts, apply_cases[i], reader)):
+                    bad.append(i)
+            except Exception:  # noqa: BLE001 - a changed reader that cannot run a case fails it
+                bad.append(i)
+        return bad
+
+    out.append(("freshness.v2 0.11's five cases of apply.json, 32 to 36 (F-548's answer), each under a reader changed "
+                "where the entry says it pins, over the 22 owner heartbeat cases: zk2py's reader fails none; one "
+                "that loses every followed collection fails case 32 alone, and so does one that keeps the names "
+                "across runs; one whose group stopped at another revision names nothing fails case 33; one that "
+                "starts a collection's count again with a run fails case 34; one that reads a collection's class "
+                "before whether it is followed fails case 35; one for which other_class ends a row fails case 36: "
+                "each of the six sentences round 113 found unpinned has its case, and none of the 17 earlier ones "
+                "pinned any",
+                [fails(f2.Reader), fails(EveryFollowed), fails(NamesKept), fails(RevisionNamesNone), fails(CountPerRun),
+                 fails(ClassBeforeFollowed), fails(OtherClassEnds)],
+                [[], [32], [32], [33], [34], [35], [36]]))
+
+    # -- §2.5 "Before it knows": the two ways, side by side ---------------------------------
+    order = ["alert.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1", "bare.v1"]
+    held = cat.Catalog(epoch=0, entries=[(contracts[n].interface, contracts[n].fingerprint) for n in order],
+                       id="0badcafe")
+    index = {n: i for i, n in enumerate(order)}
+    KNOB, VITAL = "zk2/lab/n1/knob.v1/state/config", "zk2/lab/n1/vital.v1/state/status"
+
+    def digest(*members: tuple[str, int]) -> str:
+        return f"{heartbeat.digest((k, 16, 1, s_) for k, s_ in members):08x}"
+
+    g_knob = oh.group_of(index["knob.v1"], layouts["knob.v1"], {"state/config": {"digest": digest((KNOB, 1)),
+                                                                                 "vouched": True}})
+    g_vital = oh.group_of(index["vital.v1"], layouts["vital.v1"], {"state/status": {"digest": digest((VITAL, 1)),
+                                                                                    "vouched": True}})
+    g_knob_off = oh.group_of(index["knob.v1"], layouts["knob.v1"], {"state/config": {"digest": "0badf00d",
+                                                                                     "vouched": True}})
+
+    def way(holds: bool, puts: list[tuple[int, list[Any]]]) -> list[Any]:
+        """One subscriber over ``puts`` (seq, groups) on the host key, each
+        arriving 100 later than the last, that learns the catalog its owner
+        names after the first. ``holds`` False: "It refuses", the first put
+        read with no catalog named. True: "Or it holds the put", read
+        through the catalog once named, "confirmed at the put's arrival"."""
+        r = f2.Reader([held], held.id if holds else None)
+        for n in ("knob.v1", "vital.v1"):
+            r.follow(contracts[n].canonical, contracts[n].fingerprint, None)
+        r.views["knob.v1"].mutate(KNOB, zk2c.InBand(16, 1, 1), 0, True)
+        r.views["vital.v1"].mutate(VITAL, zk2c.InBand(16, 1, 1), 0, True)
+        trace: list[Any] = []
+        for n, (seq, groups) in enumerate(puts):
+            got = r.owner_heartbeat("host", 0, zk2c.InBand(16, 9, seq), oh.write_body(None, groups), 100 * (n + 1))
+            r.named = held.id
+            trace.append(([g.get("refused") or g.get("answer") or "read" for g in got["read"]["groups"]],
+                          got["read"]["gap"], sorted(i for i, _ in r.lost("host")),
+                          r.views["knob.v1"].confirmed(KNOB), r.views["vital.v1"].confirmed(VITAL),
+                          [x for _, x in r.reread_due()]))
+        return trace
+
+    plain = [(0, [g_knob, g_vital]), (1, [g_knob, g_vital])]
+    gapped = [(0, [g_knob, g_vital]), (2, [g_knob])]
+    off = [(0, [g_knob_off]), (1, [g_knob_off]), (2, [g_knob_off])]
+    out.append(("freshness.v2 0.11 §2.5 \"Before it knows\", the two ways over the same puts (F-557's answer): zk2py's "
+                "subscriber refuses, each group of the first put unknown_catalog, the put still a read one that "
+                "moves the sequence and names no interface; one that holds reads it through the catalog once named, "
+                "its members confirmed at the put's arrival. They differ in three things, each for the puts heard "
+                "before the id alone: the members' confirmation, one put later where it refuses; a gap after the "
+                "first put, which loses vital.v1's collection only where the first put named it, held; and two "
+                "divergences in a row, due after the second put where it holds and after the third where it "
+                "refuses. The last is the one difference a peer can see: the re-read's GET one owner heartbeat "
+                "earlier. A lost delivery sends nothing (freshness.v1 §2.5 rule 3 is a verdict), and both read the "
+                "same descriptor",
+                [way(False, plain), way(True, plain), way(False, gapped)[1][1:3], way(True, gapped)[1][1:3],
+                 [t[5] for t in way(False, off)], [t[5] for t in way(True, off)]]
+                + missing(fv, "- Either is sound. Neither reads an index through a catalog the owner was not said to "
+                              "name: core §8.6 allows no guess.",
+                          "- **What it holds is bounded.** Past its bound, a subscriber reads a put the first way."),
+                [[(["unknown_catalog", "unknown_catalog"], False, [], None, None, []),
+                  (["read", "read"], False, [], 200, 200, [])],
+                 [(["read", "read"], False, [], 100, 100, []), (["read", "read"], False, [], 200, 200, [])],
+                 (True, ["knob.v1"]), (True, ["knob.v1", "vital.v1"]),
+                 [[], [], ["state/config"]], [[], ["state/config"], ["state/config"]]]))
+
+    # -- Naming: the catalog an owner names, by run -----------------------------------------
+    n = f2.Naming(ask_again_ns=10)
+    t: list[Any] = [n.of("0007"), n.due("0007", 0), n.due("0007", 1)]      # unknown; ask; one read at a time
+    n.answer("0007", [], 2)                                                # a read that fails
+    t += [n.of("0007"), n.due("0007", 5), n.due("0007", 12)]               # not at every put; again later
+    n.answer("0007", [{"run": "0008", "catalog": "aabbccdd"}], 13)          # "all state another run"
+    t += [n.of("0007"), n.of("0008"), n.due("0007", 14), n.due("0007", 23)]
+    n.answer("0007", [{"run": "0007", "catalog": "11223344"}, {"run": "00000007"}], 24)
+    t += [n.of("0007"), n.of("00000007"), n.due("0007", 99), n.due("00000007", 99), n.reads]
+    w = f2.Naming("deadbeef")
+    t += [w.of("0001"), w.due("0001", 0), w.reads]
+    out.append(("freshness.v2 0.11 §2.5 \"The catalog its owner names\", zk2py's Naming: the id is its run's, read "
+                "from \"the one that states the put's run\"; unknown, a put asks once, and a second put asks nothing "
+                "while that read is under way; \"A read that fails names no catalog. Neither does one whose "
+                "descriptors all state another run. The subscriber asks again later, and not at every put\": after "
+                "a failure no put asks within the bound, and the first one past it does; a descriptor of another "
+                "run names that run's catalog and not this one's; a 16-bit run and a 32-bit one of one value are "
+                "two runs (core §3.3); a descriptor of the run that states no catalog is an answer, its owner "
+                "naming none, and is not asked again; given the deployment's word, no descriptor is read; the "
+                "bound, 10 s, is zk2py's, where the text gives none and the reference's is 30 s",
+                t + [f2.ASK_AGAIN_S]
+                + missing(fv, "- **A read that fails** names no catalog. Neither does one whose descriptors all state "
+                              "another run. The subscriber asks again later, and not at every put. Until an answer "
+                              "comes, each group is `unknown_catalog`.",
+                          "A read that fails stands for its run for 30 s."),
+                [None, True, False, None, False, True, None, "aabbccdd", False, True,
+                 "11223344", None, False, False, 3, "deadbeef", False, 0, 10.0]))
+
+    # -- §2.4 "The class ... is one revision's" (F-551's answer, the reader's half) --------
+    text_link = lay["contracts"]["vital.v1"].replace('annotations = { "freshness.ttl_s" = 60 }',
+                                                     'annotations = { "freshness.ttl_s" = 60, "link.exposure" = "link" }')
+    text_link = text_link.replace('uses  = ["freshness.v2"]', 'uses  = ["freshness.v2", "link.v1"]')
+    with tempfile.TemporaryDirectory() as tmp:
+        vital_link = load_contract(Path(tmp) / "vital.v1.toml", text=text_link)
+    lo_link = heartbeat.layout_of(vital_link.canonical, vital_link.fingerprint)
+    theirs = cat.Catalog(epoch=0, entries=[(vital_link.interface, vital_link.fingerprint)], id="0badcafe")
+    g_theirs = oh.group_of(0, lo_link, {"state/status": {"digest": digest((VITAL, 1)), "vouched": True}})
+    body = oh.write_body(None, [g_theirs])
+    other = f2.Reader([theirs], theirs.id)       # holds the revision that reads status host
+    other.follow(contracts["vital.v1"].canonical, contracts["vital.v1"].fingerprint, None)
+    other.views["vital.v1"].mutate(VITAL, zk2c.InBand(16, 1, 1), 0, True)
+    same = f2.Reader([theirs], theirs.id)        # holds the owner's revision
+    same.follow(vital_link.canonical, vital_link.fingerprint, None)
+    same.views["vital.v1"].mutate(VITAL, zk2c.InBand(16, 1, 1), 0, True)
+
+    def answers(r: f2.Reader, cls: str) -> list[Any]:
+        got = r.owner_heartbeat(cls, 0, zk2c.InBand(16, 9, 0), body, 50)
+        return [g.get("answer") or g.get("refused") or g.get("sections") for g in got["read"]["groups"]]
+
+    out.append(("freshness.v2 0.11 §2.4 \"The class\", \"It is one revision's\" (F-551's answer, the reader's half): "
+                "two revisions of vital.v1, one reading status link and one host, have two fingerprints; the owner "
+                "on the first marks status on the link key; a subscriber that holds the other revision subscribes "
+                "to the host key for it, and reads that owner's group `revision` on either key, nothing confirmed, "
+                "by §2.5's \"Another revision\" as it stood; a subscriber on the owner's revision subscribes to "
+                "the link key and confirms",
+                [vital_link.fingerprint != contracts["vital.v1"].fingerprint,
+                 f2.classes_of(vital_link.canonical)["state/status"],
+                 f2.classes_of(contracts["vital.v1"].canonical)["state/status"],
+                 other.followed_classes(), answers(other, "link"), other.views["vital.v1"].confirmed(VITAL),
+                 same.followed_classes(), answers(same, "link"), same.views["vital.v1"].confirmed(VITAL)],
+                [True, "link", "host", ["host"], ["revision"], None, ["link"],
+                 [{"state/status": {"confirmed": [VITAL]}}], 50]))
+
+    # -- v2/plan.json's case 48, and what no case holds --------------------------------------
+    plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    plan1 = _load_json(spec / "profiles" / "link" / "conformance" / "plan.json")["cases"]
+
+    def codes(o: Any) -> set[str]:
+        if isinstance(o, dict):
+            return ({o["code"]} if isinstance(o.get("code"), str) else set()) | {x for v in o.values() for x in codes(v)}
+        if isinstance(o, list):
+            return {x for v in o for x in codes(v)}
+        return set()
+
+    c48 = plan[48]
+    res48 = {i: link.merge_revisions(i, link.revisions_of(v)) for i, v in c48["interfaces"].items()}
+    listed = c48["implements"]["node-a"]
+    beating = [i for i in listed if link.heartbeat_of(c48["interfaces"][i], res48[i])]
+    num = lambda k: int(re.search(rf"{k}\s*=\s*(\d+)", c48["policy"]).group(1))  # noqa: E731
+    every_bits = link_v2.owner_heartbeat_longest_bits([res48[i] for i in listed])
+    with_bits = link_v2.owner_heartbeat_longest_bits([res48[i] for i in beating])
+    out.append(("link.v2 0.22's case 48 of v2/plan.json (F-550's answer), its figures: node-a lists four interfaces, "
+                "old.v1 the one with no heartbeat; counting those with a heartbeat, the longest put is 160 bytes, "
+                "not above the 160-byte batch, and the horizon 60 s, not below horizon_s 60, so neither finding, as "
+                "the case expects; counting every listed interface old.v1's group adds 1,074 bits, the note's 14 + "
+                "16 + 1 + 1,043, the put is 294 bytes and the horizon 30 s, and both findings are drawn: the case "
+                "pins the reading; zk2py's plan read it so before the case (round 113)",
+                [listed, beating, link_v2.owner_heartbeat_longest([res48[i] for i in beating]),
+                 link_v2.owner_heartbeat_horizon([res48[i] for i in beating]), num("batch_bytes"), num("horizon_s"),
+                 (every_bits or 0) - (with_bits or 0), 14 + 16 + 1 + 1043,
+                 link_v2.owner_heartbeat_longest([res48[i] for i in listed]),
+                 link_v2.owner_heartbeat_horizon([res48[i] for i in listed]),
+                 sorted(codes(c48["expect"]) & {"block_over_batch", "horizon_under_face"})],
+                [["census.v1", "old.v1", "quiet.v1", "vital.v1"], ["census.v1", "quiet.v1", "vital.v1"], 160, 60, 160,
+                 60, 1074, 1074, 294, 30, []]))
+    out.append(("link.v2 0.22 §2.9, \"A collection the revisions disagree on is read `host`\" (F-551's answer, the "
+                "plan's half), and its evidence (F-573): §2.16's warning it bears on cites `[F: v2/plan.json]`, and "
+                "no case of v2/plan.json's 49 draws exposure_disagrees, so none holds such a collection: a plan "
+                "that counted it `link`, for the horizon or for the longest put, passes the file whole; link.v1's "
+                "plan.json draws the code, in cases that weigh no owner heartbeat",
+                [len(plan), [i for i, c in enumerate(plan) if "exposure_disagrees" in codes(c["expect"])],
+                 bool([i for i, c in enumerate(plan1) if "exposure_disagrees" in codes(c["expect"])])]
+                + missing(l2, "- **A collection the revisions disagree on** is read `host`, as `link.v1` §2.3 reads "
+                              "it. The plan gives it no section and weighs no horizon of it (below, §2.16).")
+                + missing(l2, "The plan warns of a face the `link` key crosses when a listed service's longest owner "
+                              "heartbeat is above `batch_bytes` (`block_over_batch`). `[F: v2/plan.json]`")
+                + missing(llog, "- **Now:** the plan reads it `host`, for the horizon and for the longest put. Both "
+                                "implementations do."),
+                [49, [], True]))
+
+    # -- scope/faces.json's four cases, v2/transport.json's five, carries.json's three ------
+    faces = _load_json(root / "scope" / "faces.json")["cases"]
+    HBS = "/freshness.v2/stream/heartbeats/"
+
+    def class_keys(c: dict[str, Any]) -> list[str]:
+        return sorted(x.split(HBS)[1] for x in c["expect"].get("selectors", []) if HBS in x)
+
+    out.append(("observer 0.35's four cases of scope/faces.json, 29 to 32 (F-558's answer), what each states: a GET "
+                "given a catalog has probe.v1's two state resources and no owner heartbeat key; the link key given "
+                "to that GET is refused, never dropped; probe.v1 and health.v1 across the RF face, a host collection "
+                "in hand, have the link key and never the host key, seven selectors; with no face policy both "
+                "class keys; a tool that added the link key to a GET's scope fails the first two, and one that "
+                "declared the host key for a host collection in hand the third; none has a link.v1 policy, which "
+                "the text now lets a tool refuse or take",
+                [[faces[i]["reads"] for i in (29, 30, 31, 32)], class_keys(faces[29]), faces[30]["expect"],
+                 class_keys(faces[31]), len(faces[31]["expect"]["selectors"]), class_keys(faces[32]),
+                 [faces[i]["policy"] is None for i in (29, 30, 31, 32)]]
+                + missing(obs, "A tool MAY refuse one as its face policy, naming why."),
+                [["state", "state", "samples", "samples"], [],
+                 {"refused": ["zk2/lab/radio-a/freshness.v2/stream/heartbeats/link"]}, ["link"], 7, ["host", "link"],
+                 [False, False, False, True]]))
+    tr = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "transport.json")["cases"]
+    new_tr = tr[27:32]
+    out.append(("link.v2 0.22's five cases of v2/transport.json, 27 to 31 (F-562's answer): a string for "
+                "timestamping/enabled, a string at the router's mode, a mode of 5 beside the peer's value alone and "
+                "beside both stated off, and a mode of \"bogus\" beside the peer's value alone; none draws "
+                "transport_differs; zk2py's stamps as 0.22 words it reads the five as the cases do, and as it "
+                "stood through round 116, reading a refused mode as a router that stamps whatever the file "
+                "states, it read four of them so and failed the fourth, case 30",
+                [[(c["router"].get("mode"), c["router"].get("timestamping/enabled")) for c in new_tr],
+                 [[f["code"] for f in c["expect"]["findings"]] for c in new_tr],
+                 [link_v2.stamps(c["router"]) for c in new_tr],
+                 [True if c["router"].get("mode") not in (None, "router", "peer", "client")
+                  else link_v2.stamps(c["router"]) for c in new_tr]],
+                [[(None, "yes"), ("router", {"peer": False, "router": "yes"}), (5, {"peer": False}),
+                  (5, {"peer": False, "router": False}), ("bogus", {"peer": False})],
+                 [["face_timestamping"], ["face_timestamping"], ["face_timestamping"], [], ["face_timestamping"]],
+                 [True, True, True, False, True], [True, True, True, True, True]]))
+    carry = _load_json(root / "envelope" / "carries.json")
+    hb_cases = [c for c in carry["cases"] if "/freshness.v2/stream/heartbeat" in c["key"]]
+    out.append(("core 0.111's three cases of envelope/carries.json (F-563's answer): an owner heartbeat's key and a "
+                "heartbeat's under application/octet-stream carry no envelope, and an owner heartbeat's key under "
+                "zenoh/bytes carries one; the file holds 29 cases; zk2c.carries, as round 114 left it, reads the "
+                "three so",
+                [len(carry["cases"]), [(c["key"].split("/stream/")[1], c["encoding"], c["expect"]) for c in hb_cases],
+                 [zk2c.carries(c["key"], c["encoding"]) for c in hb_cases]],
+                [29, [("heartbeats/host", "application/octet-stream", False),
+                      ("heartbeat/beacon.v2", "application/octet-stream", False),
+                      ("heartbeats/host", "zenoh/bytes", True)], [False, False, True]]))
+
+    # -- the texts round 117's findings quote, so that an answer moves each -----------------
+    s25 = fv.split("### 2.5 A subscriber's age")[1].split("### 2.6")[0]
+    out.append(("round 117's findings, the texts they quote: F-574, §2.5 gives a near-side read that draws no reply "
+                "two outcomes, \"Where no descriptor answers … the subscriber takes the deployment's word\" and \"A "
+                "read that fails names no catalog … Until an answer comes, each group is `unknown_catalog`\", "
+                "where only the entry says which (\"The deployment's word after silence\"), and \"the catalog it was "
+                "provisioned\", of a subscriber that holds several, is the last given in the reference's "
+                "parenthesis alone; F-575, §2.19 says what a refused `timestamping/enabled` reads as, and a refused "
+                "value of it \"for the mode\", and nothing of a value per mode zenoh refuses at another mode",
+                missing(s25, "- **Where no descriptor answers,** as across a constrained face, the subscriber takes "
+                             "the deployment's word: the catalog it was provisioned (core §8.6, R7).",
+                        "Until an answer comes, each group is `unknown_catalog`.",
+                        "Of several catalogs given, the deployment's word is the last.")
+                + missing(flog, "- **The deployment's word after silence.** A reader on the near side whose read drew "
+                                "no reply cannot tell that from a face. It reads through the catalog it was "
+                                "provisioned, as across one.")
+                + missing(l2, "A refused `timestamping/enabled` reads as its mode's default. So does a refused value "
+                              "of it for the mode.")
+                + ["after silence" in s25], [False]))
     return out
 
 
