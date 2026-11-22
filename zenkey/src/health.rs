@@ -1,9 +1,13 @@
-//! `health.v1` in the runtime: a service says how well it serves
-//! (`spec/profiles/health/v1.md`, #721).
+//! `health.v1` and `health.v2` in the runtime: a service says how well it
+//! serves (`spec/profiles/health/v1.md`, #721; `v2.md`, #986's Q2).
 //!
 //! The owner's half of the profile. The levels, the codes and the reader's
 //! judgement are `zenkey-model`'s ([`zenkey_model::health`]); this module
 //! puts what the text asks of an owner, on the standard contract, embedded.
+//! One handle, [`Health`], serves either major: [`ServiceBuilder::health`]
+//! implements `health.v1`, the default, and [`ServiceBuilder::health_v2`]
+//! `health.v2`, never both in one instance (`health.v2` §2.3). The table
+//! below is `health.v1`'s; what `health.v2` changes follows it.
 //!
 //! ```text
 //! ServiceBuilder::health() ─▶ Health: implements health.v1, declares the status writer,
@@ -29,6 +33,21 @@
 //! | §2.5 the status not held | the guard holds no call: the status and the checks carry no Zenoh timestamp (core §4.3, "Ahead"; #978's F6), and the heartbeat goes on vouching for the status, its time the ahead time while the guard holds (`freshness.v2` §2.10, core §7.5) |
 //! | §2.6 `UNSPECIFIED` | the status only at start; a check only through [`Health::set_check_unknown`] |
 //! | §2.10 fault codes | an application's code in the form, or refused; the profile's codes are the runtime's |
+//!
+//! **`health.v2`** ([`ServiceBuilder::health_v2`], [`v2`]) keeps every row
+//! above but these:
+//!
+//! | Rule (`v2.md`) | Here |
+//! |---|---|
+//! | §3 packed records | a status and a check are 6 bytes and a fault 8 ([`v2::Status`], [`v2::Check`], [`v2::Fault`]), each sealed under its layout's tag by its writer; `since` and `at` are whole seconds on the owner's clock from the deployment epoch, absent where the epoch does not code them (§2.3) |
+//! | §2.10 words | a reason, a detail and a code are given as text and written as a number by the profile's tables and the instance's own ([`Health::tables`]): no text is 0, a name no table holds is `out_of_range`, and its words go to the owner's log (`tracing`, `info`) |
+//! | §2.10 an instance's table | the one table among the contracts the service implements, read again at each [`ServiceBuilder::implement`]; `start()` puts again a status or a check whose word a later contract moved |
+//! | §2.2 the order of the puts, by seq | the same order as `health.v1`'s; the status and the checks share the owner's one state seq, and a GET's two snapshots are built at one asof, with no entry above it (`Store::answer`) |
+//! | §2.2 a status raised to a check | its reason is the profile's `check` |
+//! | §2.3 nothing put again unchanged | a status is put when its level or its word changes, a check likewise |
+//! | §2.5 `clock_ahead`, once | one fault when the guard begins to hold, its `argument` the offset measured in whole seconds, rounded up; none again until the guard has released and holds anew. The heartbeat's ahead time answers the clock question |
+//! | §2.5 no Zenoh timestamp | a fault is put through its writer as any stream sample: its `at` is in the record |
+//! | §2.3 a fault's `argument` | [`Health::fault_argument`]; [`Health::fault`]'s `detail` stays in the owner's log |
 //!
 //! **An unknown status bounds nothing.** Before a level is declared, the
 //! status stays `UNSPECIFIED` whatever the checks say: the owner has not
@@ -78,13 +97,58 @@ use zenkey_model::health::{self as model, Code};
 use zenkey_model::template::Bindings;
 use zenoh::time::Timestamp;
 
-pub use zenkey_model::health::{CLOCK_AHEAD, Level, Read};
+pub use zenkey_model::health::{CLOCK_AHEAD, Level, Major, Read};
 
 use crate::error::{Error, Result};
 use crate::implementation::Implementation;
 use crate::service::ServiceBuilder;
 use crate::state::{HLC_DELTA, Minter, StateWriter, Store};
-use crate::writer::Writer;
+use crate::writer::{PackedType, Writer};
+
+/// `health.v2`'s standard contract and its records
+/// (`spec/profiles/health/v2.md` §3): what [`ServiceBuilder::health_v2`]
+/// implements, and what a reader of `health.v2` is compiled against. The
+/// records, the words and the tables are `zenkey-model`'s
+/// ([`zenkey_model::health::v2`]), re-exported here.
+pub mod v2 {
+    use std::sync::LazyLock;
+
+    use zenkey_model::grammar::IfaceId;
+    pub use zenkey_model::health::v2::{
+        Argument, CANNOT_RUN, CHECK, Check, Fault, Instance, InstanceTables, Kind, Named, Packed,
+        STARTING, Status, Tables, Word, read_word, write_word,
+    };
+
+    use crate::implementation::Implementation;
+
+    /// The standard contract's bundle, revision 2.0 as published in
+    /// `spec/profiles/.history/health.v2/` (§3), byte for byte, read
+    /// through `bundles/` so that the crate's package carries the bytes.
+    pub const BUNDLE: &[u8] = include_bytes!(
+        "../bundles/health.v2/b447f613bea7bdc24703500280a20bf0cf20fb27cbb38ecd25f5164b0ae005b1.bundle.json"
+    );
+
+    /// Its fingerprint (§3).
+    pub const FINGERPRINT: &str = zenkey_model::health::v2::FINGERPRINT;
+
+    static IMPLEMENTATION: LazyLock<Implementation> = LazyLock::new(|| {
+        Implementation::from_bundle(BUNDLE).expect("the published health.v2 bundle verifies")
+    });
+
+    /// The standard contract's interface id, `health.v2`.
+    #[must_use]
+    pub fn iface() -> IfaceId {
+        zenkey_model::health::v2::IFACE
+            .parse()
+            .expect("health.v2 is an interface id")
+    }
+
+    /// The standard contract, implemented from the embedded bundle.
+    #[must_use]
+    pub fn implementation() -> Implementation {
+        IMPLEMENTATION.clone()
+    }
+}
 
 /// `health.v1`'s payload types (`spec/profiles/health/proto/health/v1/health.proto`),
 /// as prost would generate them for the package `health.v1`.
@@ -255,8 +319,14 @@ pub struct Effective {
     /// The level published; `None` for `UNSPECIFIED`, which is put at start
     /// until the caller declares a level (§2.3, §2.6).
     pub level: Option<Level>,
-    /// The reason published.
+    /// The reason published. Under `health.v2` it is the text the caller
+    /// gave, or the raising check's `check`, and [`Effective::word`] is
+    /// the number it was written as.
     pub reason: String,
+    /// Under `health.v2`, the reason's word as the record carries it
+    /// (`health.v2` §2.10): `out_of_range` for a text no table names.
+    /// `None` under `health.v1`.
+    pub word: Option<v2::Word>,
     /// When the published level last changed, on the owner's clock (§2.3).
     pub since_ns: u64,
     /// The level the caller last declared through [`Health::set_status`].
@@ -276,9 +346,10 @@ impl Effective {
     }
 }
 
-/// A service's `health.v1`: the status, its checks and its faults (§2.2,
-/// §2.3, §2.5), from [`ServiceBuilder::health`], and again from
-/// [`crate::Service::health`] once it runs.
+/// A service's `health.v1` or `health.v2`: the status, its checks and its
+/// faults (§2.2, §2.3, §2.5), from [`ServiceBuilder::health`] or
+/// [`ServiceBuilder::health_v2`], and again from [`crate::Service::health`]
+/// once it runs. [`Health::major`] says which.
 ///
 /// A clone is the same handle. Calls are serialized: each one finishes its
 /// puts, in §2.2's order, before the next begins. The clock guard holds
@@ -294,6 +365,16 @@ pub struct Health {
 }
 
 struct Inner {
+    major: Major,
+    /// `health.v2` §2.10: the instance's own tables, as the contracts the
+    /// service implements hold them ([`Health::retable`]).
+    tables: Mutex<v2::InstanceTables>,
+    /// The checks' packed type under `health.v2` (core §7.6), which each
+    /// check's writer seals and admits by.
+    packed: Option<PackedType>,
+    /// The deployment epoch a `health.v2` record's times count from, in
+    /// seconds (core §7.6, §8.6).
+    epoch: i64,
     iface: IfaceId,
     state: tokio::sync::Mutex<State>,
     /// What [`Health::status`] answers.
@@ -332,6 +413,8 @@ struct State {
 struct Published {
     level: Option<Level>,
     reason: String,
+    /// The reason's word under `health.v2`, `None` under `health.v1`.
+    word: Option<v2::Word>,
     since_ns: u64,
     raised_by: Option<String>,
 }
@@ -339,6 +422,8 @@ struct Published {
 struct CheckState {
     level: Option<Level>,
     detail: String,
+    /// The detail's word under `health.v2`, `None` under `health.v1`.
+    word: Option<v2::Word>,
     writer: StateWriter,
 }
 
@@ -356,7 +441,12 @@ struct Aggregate {
 /// level is declared the status is `UNSPECIFIED`, and no check bounds it:
 /// the owner has not established its level (§2.3), and a reader reads a
 /// bad check under an unknown status as §2.11 step 5 says.
+///
+/// Under `health.v1` a raised status's reason says which check and what
+/// was declared, in words. Under `health.v2` it is the profile's `check`:
+/// the checks say which (`health.v2` §2.10).
 fn aggregate(
+    major: Major,
     declared: Option<&(Level, String)>,
     checks: &BTreeMap<&str, Option<Level>>,
 ) -> Aggregate {
@@ -377,10 +467,10 @@ fn aggregate(
     match worst {
         Some((w, name)) if w > *d => Aggregate {
             level: Some(w),
-            reason: if reason.is_empty() {
-                format!("check {name} is {w} (declared {d})")
-            } else {
-                format!("check {name} is {w} (declared {d}: {reason})")
+            reason: match major {
+                Major::V2 => v2::CHECK.to_owned(),
+                Major::V1 if reason.is_empty() => format!("check {name} is {w} (declared {d})"),
+                Major::V1 => format!("check {name} is {w} (declared {d}: {reason})"),
             },
             raised_by: Some(name.to_owned()),
         },
@@ -474,14 +564,68 @@ async fn clock_ahead(
     }
 }
 
+/// A stamp's time as a `health.v2` record's `since` or `at` (§2.3): whole
+/// seconds since the Unix epoch, absent where `epoch` does not code it.
+fn seconds(ns: u64, epoch: i64) -> Option<i64> {
+    model::v2::time_at(i128::from(ns / 1_000_000), epoch)
+}
+
+/// A `health.v2` record's bytes, as its writer seals them.
+fn record<R: v2::Packed>(r: &R, epoch: i64) -> Result<Vec<u8>> {
+    r.write(epoch)
+        .map(|rec| rec.bytes)
+        .map_err(|e| Error::Payload(format!("health.v2 {}: {e}", R::TYPE.name())))
+}
+
+/// One `health.v2` fault (§2.3, §2.5): a stream sample as any other, with
+/// no Zenoh timestamp of the owner's, its `at` in the record.
+async fn publish_fault_v2(w: &Writer, fault: &v2::Fault, epoch: i64) -> Result<()> {
+    w.put(record(fault, epoch)?).await
+}
+
+/// `health.v2` §2.5: one `clock_ahead` fault when the guard begins to
+/// hold, none again while it holds, and one more at each later hold, until
+/// the service closes. The heartbeat's ahead time repeats the word each
+/// period (`freshness.v2` §2.10).
+async fn clock_ahead_once(
+    faults: Arc<Writer>,
+    minter: Arc<Minter>,
+    epoch: i64,
+    mut closed: tokio::sync::watch::Receiver<bool>,
+) {
+    let mut held = minter.held();
+    loop {
+        let offset = tokio::select! {
+            r = held.wait_for(Option::is_some) => match r {
+                Ok(offset) => *offset,
+                Err(_) => return,
+            },
+            _ = closed.wait_for(|c| *c) => return,
+        };
+        let fault = v2::Fault::clock_ahead(offset, seconds(ns(&minter.now()), epoch));
+        if let Err(e) = publish_fault_v2(&faults, &fault, epoch).await {
+            tracing::warn!("health.v2: the clock_ahead fault was not published: {e}");
+        }
+        tokio::select! {
+            r = held.wait_for(Option::is_none) => if r.is_err() { return },
+            _ = closed.wait_for(|c| *c) => return,
+        }
+    }
+}
+
 impl Health {
-    /// Implements `health.v1` on `b`: the status's writer, the checks'
-    /// template exposed, the faults' writer (§2.3).
-    pub(crate) async fn declare(b: &mut ServiceBuilder) -> Result<Self> {
+    /// Implements `major`'s standard contract on `b`: the status's writer,
+    /// the checks' template exposed, the faults' writer (§2.3).
+    pub(crate) async fn declare(b: &mut ServiceBuilder, major: Major) -> Result<Self> {
         let addr = b.address()?.clone();
-        let imp = implementation();
+        let imp = match major {
+            Major::V1 => implementation(),
+            Major::V2 => v2::implementation(),
+        };
         let iface = imp.iface().clone();
         let checks = imp.resource(CHECKS)?.clone();
+        let epoch = b.deployment_epoch();
+        let packed = PackedType::of(imp.contract(), &checks, epoch)?;
         b.implement(imp)?;
         let none = Bindings::new();
         let status = b.declare_state_writer(&iface, STATUS, &none).await?;
@@ -490,6 +634,10 @@ impl Health {
         let (session, store, minter, closed) = b.state_parts();
         let h = Self {
             inner: Arc::new(Inner {
+                major,
+                tables: Mutex::new(b.health_tables()),
+                packed,
+                epoch,
                 max_checks: AtomicU64::new(checks.cardinality.unwrap_or(model::MAX_CHECKS)),
                 iface,
                 state: tokio::sync::Mutex::new(State::default()),
@@ -510,15 +658,110 @@ impl Health {
     }
 
     /// At start, before step 3: the status, `UNSPECIFIED` and `"starting"`,
-    /// when nothing put one yet (§2.3).
+    /// when nothing put one yet (§2.3). Under `health.v2`, a status or a
+    /// check whose word the instance's tables now write otherwise is put
+    /// again: a contract implemented after the call may have brought the
+    /// table that names it, or one that differs, which leaves none
+    /// (`health.v2` §2.10).
     pub(crate) async fn bring_up(&self) -> Result<()> {
         let mut st = self.inner.state.lock().await;
-        if st.published.is_none() {
-            let next = aggregate(st.declared.as_ref(), &levels(&st.checks));
+        if self.inner.major == Major::V2 {
+            let moved: Vec<String> = st
+                .checks
+                .iter()
+                .filter(|(_, c)| c.word != Some(self.word(v2::Kind::Detail, &c.detail, false)))
+                .map(|(n, _)| n.clone())
+                .collect();
+            for name in moved {
+                let c = &st.checks[&name];
+                let (payload, word) = self.check_payload(c.level, &c.detail)?;
+                c.writer.put(payload).await?;
+                st.checks.get_mut(&name).expect("a current check").word = word;
+            }
+        }
+        if self.inner.major == Major::V2 || st.published.is_none() {
+            let next = self.aggregate(&st);
             self.put_status(&mut st, next).await?;
             self.remember(&st);
         }
         Ok(())
+    }
+
+    /// `health.v2` §2.10: the instance's own tables are `tables`, read
+    /// from the contracts the service implements so far.
+    pub(crate) fn retable(&self, tables: v2::InstanceTables) {
+        *self.inner.tables.lock().expect("not poisoned") = tables;
+    }
+
+    /// The major this handle serves: `health.v1` from
+    /// [`ServiceBuilder::health`], `health.v2` from
+    /// [`ServiceBuilder::health_v2`].
+    #[must_use]
+    pub fn major(&self) -> Major {
+        self.inner.major
+    }
+
+    /// The instance's own tables of words (`health.v2` §2.10): for each
+    /// kind, the one table among the contracts the service implements, none
+    /// where none declares one, and none where two differ. Under
+    /// `health.v1` they play no part.
+    #[must_use]
+    pub fn tables(&self) -> v2::InstanceTables {
+        self.inner.tables.lock().expect("not poisoned").clone()
+    }
+
+    /// The number a word of `kind` is written as (`health.v2` §2.10): 0
+    /// for no text, the profile's number or the instance's own, and
+    /// `out_of_range` for any other text, which then goes to the owner's
+    /// log when `log`.
+    fn word(&self, kind: v2::Kind, text: &str, log: bool) -> v2::Word {
+        let tables = self.inner.tables.lock().expect("not poisoned");
+        let word = v2::write_word(kind, (!text.is_empty()).then_some(text), tables.own(kind));
+        if log && word.is_out_of_range() {
+            tracing::info!(
+                service = %self.inner.addr,
+                table = kind.table(),
+                words = text,
+                "health.v2: no table names these words, so the record carries out_of_range \
+                 (§2.10)"
+            );
+        }
+        word
+    }
+
+    /// The status §2.2 calls for now, over what is declared and the
+    /// current checks.
+    fn aggregate(&self, st: &State) -> Aggregate {
+        aggregate(self.inner.major, st.declared.as_ref(), &levels(&st.checks))
+    }
+
+    /// A check's payload, and under `health.v2` its detail's word.
+    fn check_payload(
+        &self,
+        level: Option<Level>,
+        detail: &str,
+    ) -> Result<(Vec<u8>, Option<v2::Word>)> {
+        let now = ns(&self.inner.minter.now());
+        match self.inner.major {
+            Major::V1 => Ok((
+                v1::Check {
+                    level: wire(level),
+                    detail: detail.to_owned(),
+                    checked_at_ns: now,
+                }
+                .encode_to_vec(),
+                None,
+            )),
+            Major::V2 => {
+                let word = self.word(v2::Kind::Detail, detail, true);
+                let check = v2::Check {
+                    level,
+                    detail: word,
+                    at: seconds(now, self.inner.epoch),
+                };
+                Ok((record(&check, self.inner.epoch)?, Some(word)))
+            }
+        }
     }
 
     /// Starts §2.5's watcher on the service's clock guard.
@@ -536,14 +779,18 @@ impl Health {
             tracing::warn!("health.v1: no tokio runtime here, so a clock ahead is not reported");
             return;
         };
-        let layout = zenkey_model::heartbeat::Layout::of(implementation().contract());
-        let period = crate::heartbeat::period(&layout).unwrap_or(model::STATUS_REFRESH);
-        let task = rt.spawn(clock_ahead(
-            Arc::clone(&self.inner.faults),
-            Arc::clone(&self.inner.minter),
-            period,
-            closed,
-        ));
+        let faults = Arc::clone(&self.inner.faults);
+        let minter = Arc::clone(&self.inner.minter);
+        let task = match self.inner.major {
+            Major::V1 => {
+                let layout = zenkey_model::heartbeat::Layout::of(implementation().contract());
+                let period = crate::heartbeat::period(&layout).unwrap_or(model::STATUS_REFRESH);
+                rt.spawn(clock_ahead(faults, minter, period, closed))
+            }
+            // health.v2 §2.5: once per hold. The heartbeat says it each
+            // period.
+            Major::V2 => rt.spawn(clock_ahead_once(faults, minter, self.inner.epoch, closed)),
+        };
         if let Some(old) = self.inner.clock.lock().expect("not poisoned").replace(task) {
             old.abort();
         }
@@ -554,7 +801,7 @@ impl Health {
         self.inner.max_checks.store(n, Ordering::Relaxed);
     }
 
-    /// `health.v1`.
+    /// The interface it implements: `health.v1`, or `health.v2`.
     #[must_use]
     pub fn iface(&self) -> &IfaceId {
         &self.inner.iface
@@ -579,10 +826,16 @@ impl Health {
     /// (§2.2); it is put only when its level or reason changes, and
     /// `since_ns` moves only with its level (§2.3). A level is never
     /// `UNSPECIFIED` here: that is the start's alone (§2.6).
+    ///
+    /// Under `health.v2`, `reason` is a word (§2.10): a name of the
+    /// profile's reasons (`serving`, `fallback`, …) or of the instance's
+    /// own `health.reasons`, written as its number; no text is no word, and
+    /// any other text is written `out_of_range` and logged. The status is
+    /// put when its level or its word changes.
     pub async fn set_status(&self, level: Level, reason: impl Into<String>) -> Result<Effective> {
         let mut st = self.inner.state.lock().await;
         let declared = Some((level, reason.into()));
-        let next = aggregate(declared.as_ref(), &levels(&st.checks));
+        let next = aggregate(self.inner.major, declared.as_ref(), &levels(&st.checks));
         self.put_status(&mut st, next).await?;
         st.declared = declared;
         Ok(self.remember(&st))
@@ -593,6 +846,10 @@ impl Health {
     /// status puts the status first, any other change puts the check
     /// first, then the status if it improves. Refused past the bound on
     /// checks ([`Health::max_checks`]).
+    ///
+    /// Under `health.v2`, `detail` is a word (§2.10), as
+    /// [`Health::set_status`]'s reason is: of the profile's details (`ok`,
+    /// `timeout`, …) or of the instance's own `health.details`.
     pub async fn set_check(
         &self,
         name: &str,
@@ -604,7 +861,8 @@ impl Health {
 
     /// Puts the check `name` as `UNSPECIFIED`, with `detail` saying why: a
     /// check the owner can no longer run, which it does not leave at its
-    /// last level (§2.3, §2.6). It bounds the status no more (§2.2).
+    /// last level (§2.3, §2.6). It bounds the status no more (§2.2). Under
+    /// `health.v2` the profile's word for it is [`v2::CANNOT_RUN`].
     pub async fn set_check_unknown(
         &self,
         name: &str,
@@ -622,7 +880,7 @@ impl Health {
             c.writer.delete().await?;
             st.checks.remove(name);
         }
-        let next = aggregate(st.declared.as_ref(), &levels(&st.checks));
+        let next = self.aggregate(&st);
         let put = self.put_status(&mut st, next).await;
         let now = self.remember(&st);
         put.map(|()| now)
@@ -636,7 +894,25 @@ impl Health {
     /// recommendation. A code of the profile's table is the runtime's to
     /// publish (`clock_ahead`, §2.5) and is refused, as is a malformed one.
     /// The guard does not hold a fault, which is no state.
+    ///
+    /// Under `health.v2` a fault carries no text: `code` is a word of the
+    /// instance's own `health.codes`, `out_of_range` and logged where no
+    /// table names it, the record's `argument` is `not_available`, and
+    /// `detail` stays in the owner's log. [`Health::fault_argument`] gives
+    /// the code its number.
     pub async fn fault(&self, code: &str, level: Level, detail: impl Into<String>) -> Result<()> {
+        if self.inner.major == Major::V2 {
+            let detail = detail.into();
+            if !detail.is_empty() {
+                tracing::info!(
+                    service = %self.inner.addr,
+                    code,
+                    detail,
+                    "health.v2: a fault carries no text, so its detail stays here (§2.3)"
+                );
+            }
+            return self.fault_v2(code, level, v2::Argument::NotAvailable).await;
+        }
         match model::code(code) {
             Code::Application(_) => {}
             Code::Profile(c) => {
@@ -659,6 +935,57 @@ impl Health {
             detail.into(),
         )
         .await
+    }
+
+    /// Publishes a `health.v2` fault with its `argument` (§2.3): the
+    /// code's own number, from 0 to 65,534, where the code's table says
+    /// what it counts, or `None` where it takes none (`not_available`).
+    /// `code` is written as [`Health::fault`] writes it. Refused under
+    /// `health.v1`, whose fault carries a `detail` in words, and for
+    /// 65,535, which is `not_available`'s code.
+    pub async fn fault_argument(
+        &self,
+        code: &str,
+        level: Level,
+        argument: Option<u16>,
+    ) -> Result<()> {
+        if self.inner.major != Major::V2 {
+            return Err(Error::Contract(
+                "a health.v1 fault carries a detail in words, not an argument: publish it \
+                 through Health::fault (health.v1 §2.3)"
+                    .to_owned(),
+            ));
+        }
+        let argument = match argument {
+            None => v2::Argument::NotAvailable,
+            Some(n) => v2::Argument::new(n).ok_or_else(|| {
+                Error::Contract(format!(
+                    "a fault's argument is 0 to {}: {n} is not_available's code (health.v2 §3)",
+                    v2::Argument::MAX
+                ))
+            })?,
+        };
+        self.fault_v2(code, level, argument).await
+    }
+
+    /// One `health.v2` fault of the application's: a code of the profile's
+    /// table is the runtime's to publish (`clock_ahead`, §2.5) and is
+    /// refused; any other is written by the instance's own table.
+    async fn fault_v2(&self, code: &str, level: Level, argument: v2::Argument) -> Result<()> {
+        if v2::Kind::Code.profile().contains(&code) {
+            return Err(Error::Contract(format!(
+                "{code} is a code of health.v2's table, which the runtime publishes itself \
+                 (health.v2 §2.5, §2.10)"
+            )));
+        }
+        let i = &self.inner;
+        let fault = v2::Fault {
+            code: self.word(v2::Kind::Code, code, true),
+            level: Some(level),
+            argument,
+            at: seconds(ns(&i.minter.now()), i.epoch),
+        };
+        publish_fault_v2(&i.faults, &fault, i.epoch).await
     }
 
     /// Turns the confirmation of the status off, or back on
@@ -703,14 +1030,24 @@ impl Health {
 
     async fn check(&self, name: &str, level: Option<Level>, detail: String) -> Result<Effective> {
         let mut st = self.inner.state.lock().await;
-        let unchanged = st
-            .checks
-            .get(name)
-            .is_some_and(|c| c.level == level && c.detail == detail);
+        // health.v2 §2.3: a check is put when its level or its word
+        // changes; its words are no part of its record.
+        let word =
+            (self.inner.major == Major::V2).then(|| self.word(v2::Kind::Detail, &detail, false));
+        let unchanged = st.checks.get(name).is_some_and(|c| {
+            c.level == level
+                && match word {
+                    Some(w) => c.word == Some(w),
+                    None => c.detail == detail,
+                }
+        });
         if unchanged {
             // §2.3: a check is put on change only. The status may still owe
             // a put a failed call left behind.
-            let next = aggregate(st.declared.as_ref(), &levels(&st.checks));
+            if let Some(c) = st.checks.get_mut(name) {
+                c.detail = detail;
+            }
+            let next = self.aggregate(&st);
             let put = self.put_status(&mut st, next).await;
             let now = self.remember(&st);
             return put.map(|()| now);
@@ -721,20 +1058,16 @@ impl Health {
             let max = self.max_checks();
             if st.checks.len() as u64 >= max {
                 return Err(Error::Contract(format!(
-                    "health.v1 holds at most {max} checks (§2.3), so check {name:?} is refused"
+                    "{} holds at most {max} checks (§2.3), so check {name:?} is refused",
+                    self.inner.iface
                 )));
             }
             Some(self.check_writer(name).await?)
         };
         let mut view = levels(&st.checks);
         view.insert(name, level);
-        let next = aggregate(st.declared.as_ref(), &view);
-        let payload = v1::Check {
-            level: wire(level),
-            detail: detail.clone(),
-            checked_at_ns: ns(&self.inner.minter.now()),
-        }
-        .encode_to_vec();
+        let next = aggregate(self.inner.major, st.declared.as_ref(), &view);
+        let (payload, word) = self.check_payload(level, &detail)?;
         // §2.2: a check worse than the published status goes after the
         // status that bounds it; any other change goes first.
         let status_first = matches!(
@@ -759,6 +1092,7 @@ impl Health {
                     CheckState {
                         level,
                         detail,
+                        word,
                         writer,
                     },
                 );
@@ -767,6 +1101,7 @@ impl Health {
                 let c = st.checks.get_mut(name).expect("a current check");
                 c.level = level;
                 c.detail = detail;
+                c.word = word;
             }
         }
         let put = if status_first {
@@ -780,24 +1115,52 @@ impl Health {
 
     /// Puts the status `next` when its level or reason differ from what is
     /// published; `since_ns` moves with the level only (§2.3).
+    ///
+    /// Under `health.v2` the record is what is compared: the status is put
+    /// when its level or its reason's word changes, and a reason in other
+    /// words under the same number is no change (`health.v2` §2.3).
     async fn put_status(&self, st: &mut State, next: Aggregate) -> Result<()> {
+        let i = &self.inner;
+        let word = (i.major == Major::V2).then(|| {
+            // The words are logged when they are put, below.
+            self.word(v2::Kind::Reason, &next.reason, false)
+        });
         let since_ns = match &mut st.published {
-            Some(p) if p.level == next.level && p.reason == next.reason => {
+            Some(p)
+                if p.level == next.level
+                    && match word {
+                        Some(w) => p.word == Some(w),
+                        None => p.reason == next.reason,
+                    } =>
+            {
+                p.reason = next.reason;
                 p.raised_by = next.raised_by;
                 return Ok(());
             }
             Some(p) if p.level == next.level => p.since_ns,
-            _ => ns(&self.inner.minter.now()),
+            _ => ns(&i.minter.now()),
         };
-        let msg = v1::Status {
-            level: wire(next.level),
-            reason: next.reason.clone(),
-            since_ns,
+        let payload = match i.major {
+            Major::V1 => v1::Status {
+                level: wire(next.level),
+                reason: next.reason.clone(),
+                since_ns,
+            }
+            .encode_to_vec(),
+            Major::V2 => {
+                let status = v2::Status {
+                    level: next.level,
+                    reason: self.word(v2::Kind::Reason, &next.reason, true),
+                    since: seconds(since_ns, i.epoch),
+                };
+                record(&status, i.epoch)?
+            }
         };
-        self.inner.status.put(msg.encode_to_vec()).await?;
+        i.status.put(payload).await?;
         st.published = Some(Published {
             level: next.level,
             reason: next.reason,
+            word,
             since_ns,
             raised_by: next.raised_by,
         });
@@ -813,7 +1176,7 @@ impl Health {
             .checks
             .template
             .build(&values)
-            .map_err(|e| Error::Contract(format!("health.v1 {CHECKS:?}: {e}")))?;
+            .map_err(|e| Error::Contract(format!("{} {CHECKS:?}: {e}", i.iface)))?;
         let refs: Vec<&str> = chunks.iter().map(String::as_str).collect();
         let key = data_key(&i.addr, &i.iface, i.checks.token, &refs)?;
         let w = Writer::declare(
@@ -823,7 +1186,8 @@ impl Health {
             &i.checks,
             &values,
         )
-        .await?;
+        .await?
+        .packed(i.packed.clone());
         Ok(StateWriter::new(
             w,
             Arc::clone(&i.store),
@@ -838,6 +1202,7 @@ impl Health {
         let now = st.published.as_ref().map(|p| Effective {
             level: p.level,
             reason: p.reason.clone(),
+            word: p.word,
             since_ns: p.since_ns,
             declared: st.declared.as_ref().map(|(l, _)| *l),
             raised_by: p.raised_by.clone(),
@@ -852,6 +1217,7 @@ impl Health {
         now.unwrap_or_else(|| Effective {
             level: None,
             reason: String::new(),
+            word: None,
             since_ns: 0,
             declared: st.declared.as_ref().map(|(l, _)| *l),
             raised_by: None,
@@ -870,7 +1236,7 @@ mod tests {
     use zenkey_model::bundle::Bundle;
     use zenkey_model::schema::{ArtifactData, SchemaKind};
 
-    use super::{BUNDLE, FINGERPRINT, Level, aggregate, implementation, v1};
+    use super::{BUNDLE, FINGERPRINT, Level, Major, aggregate, implementation, v1, v2};
 
     /// The hand-written types are the bundle's: the descriptor set it
     /// carries has exactly these fields, numbers and types, and these enum
@@ -1028,7 +1394,7 @@ mod tests {
     fn aggregation() {
         let declared = (Level::Ok, "serving".to_owned());
         let mut checks = BTreeMap::new();
-        let a = aggregate(Some(&declared), &checks);
+        let a = aggregate(Major::V1, Some(&declared), &checks);
         assert_eq!(
             (a.level, a.reason.as_str(), a.raised_by),
             (Some(Level::Ok), "serving", None)
@@ -1036,22 +1402,97 @@ mod tests {
         checks.insert("net", Some(Level::Failed));
         checks.insert("disk", Some(Level::Failed));
         checks.insert("cpu", None);
-        let a = aggregate(Some(&declared), &checks);
+        let a = aggregate(Major::V1, Some(&declared), &checks);
         assert_eq!(a.level, Some(Level::Failed));
         assert_eq!(a.raised_by.as_deref(), Some("disk"));
         assert_eq!(a.reason, "check disk is FAILED (declared OK: serving)");
         let worse = (Level::Failed, "down".to_owned());
-        let a = aggregate(Some(&worse), &checks);
+        let a = aggregate(Major::V1, Some(&worse), &checks);
         assert_eq!(
             (a.level, a.reason.as_str(), a.raised_by),
             (Some(Level::Failed), "down", None),
             "a status may be worse than its checks"
         );
-        let a = aggregate(None, &checks);
+        let a = aggregate(Major::V1, None, &checks);
         assert_eq!((a.level, a.reason.as_str()), (None, "starting"));
         checks.clear();
         checks.insert("cpu", None);
-        assert_eq!(aggregate(Some(&declared), &checks).level, Some(Level::Ok));
+        assert_eq!(
+            aggregate(Major::V1, Some(&declared), &checks).level,
+            Some(Level::Ok)
+        );
+    }
+
+    /// `health.v2`'s standard contract is the published bundle, served
+    /// byte for byte: revision 2.0, its status confirmed by the heartbeat
+    /// within its horizon, its checks bounded, and each resource's packed
+    /// type the model's record under the tag v2.md §3 gives it.
+    #[test]
+    fn the_v2_contract_is_the_published_bundle() {
+        use zenkey_model::health::v2::{Packed as _, RecordType};
+        let imp = v2::implementation();
+        assert_eq!(imp.fingerprint().hex().to_string(), v2::FINGERPRINT);
+        assert_eq!(&**imp.bundle_bytes(), v2::BUNDLE, "served byte for byte");
+        assert_eq!(imp.iface(), &v2::iface());
+        assert!(zenkey_model::freshness::uses_v2(imp.contract()));
+        let status = imp.resource(super::STATUS).unwrap();
+        assert_eq!(
+            zenkey_model::freshness::horizon_of(status).refresh_bound(),
+            Some(std::time::Duration::from_secs(30))
+        );
+        assert_eq!(imp.resource(super::CHECKS).unwrap().cardinality, Some(64));
+        for (resource, ty) in [
+            (super::STATUS, RecordType::Status),
+            (super::CHECKS, RecordType::Check),
+            (super::FAULTS, RecordType::Fault),
+        ] {
+            let r = imp.resource(resource).unwrap();
+            let packed = super::PackedType::of(imp.contract(), r, 0)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{resource}: a packed type"));
+            assert_eq!(packed.tag().get(), ty.tag(), "{resource}");
+        }
+        // What the owner writes, the contract's own layout admits.
+        let checks = imp.resource(super::CHECKS).unwrap();
+        let packed = super::PackedType::of(imp.contract(), checks, 0)
+            .unwrap()
+            .unwrap();
+        let check = v2::Check {
+            level: Some(Level::Failed),
+            detail: v2::write_word(v2::Kind::Detail, Some("timeout"), None),
+            at: Some(1_794_062_759),
+        };
+        packed.admit(&super::record(&check, 0).unwrap()).unwrap();
+        assert_eq!(v2::Check::tag(), packed.tag().get());
+    }
+
+    /// `health.v2` §2.2, §2.10: a status raised to its worst check carries
+    /// the profile's reason `check`, and one not yet established
+    /// `starting`; the levels are `health.v1`'s.
+    #[test]
+    fn a_v2_status_raised_to_a_check_says_check() {
+        let declared = (Level::Ok, "serving".to_owned());
+        let mut checks = BTreeMap::new();
+        checks.insert("disk", Some(Level::Degraded));
+        let a = aggregate(Major::V2, Some(&declared), &checks);
+        assert_eq!(
+            (a.level, a.reason.as_str(), a.raised_by.as_deref()),
+            (Some(Level::Degraded), v2::CHECK, Some("disk"))
+        );
+        let a = aggregate(Major::V2, None, &checks);
+        assert_eq!((a.level, a.reason.as_str()), (None, v2::STARTING));
+        checks.clear();
+        let a = aggregate(Major::V2, Some(&declared), &checks);
+        assert_eq!((a.level, a.reason.as_str()), (Some(Level::Ok), "serving"));
+        assert_eq!(
+            super::seconds(1_794_062_759_900_000_000, 0),
+            Some(1_794_062_759)
+        );
+        assert_eq!(
+            super::seconds(5_000_000_000, 1_767_225_600),
+            None,
+            "a clock the epoch does not code: the field is left absent (§2.3)"
+        );
     }
 
     /// An application shares the handle across tasks, and spawns its calls.
@@ -1066,6 +1507,7 @@ mod tests {
                 let _ = h.set_check("disk", Level::Ok, "").await;
                 let _ = h.retire_check("disk").await;
                 let _ = h.fault("app_x", Level::Ok, "").await;
+                let _ = h.fault_argument("app_x", Level::Ok, Some(1)).await;
             });
         };
     }
