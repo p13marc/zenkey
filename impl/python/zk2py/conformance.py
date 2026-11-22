@@ -1753,10 +1753,100 @@ def _desired_v2_reports(path: Path) -> list[Result]:
     return out
 
 
+def _desired_v2_order(path: Path) -> list[Result]:
+    """desired.v2 §2.4, §2.6 to §2.10: one target's steps -> each step's
+    word, and the report after the last. Each report the machine builds is
+    also written, read back and checked (§2.10: "A target's report MUST be
+    consistent")."""
+    from . import desired_v2 as d2
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        name = f"v2 order #{i}: {c['note']}"
+        words, fields = d2.run_steps(c["steps"])
+        out.append(_check(name, {"steps": words, "report": d2.reading_of_fields(fields)}, c["expect"]))
+        back = d2.read_report(d2.REPORT_TAG, d2.write_report(fields))
+        out.append(_check(f"{name} (its report reads back, with no finding)",
+                          {"fields": back.report, "findings": list(back.findings)}, {"fields": fields, "findings": []}))
+    return out
+
+
+def _desired_v2_watch(path: Path) -> list[Result]:
+    """desired.v2 §2.5, the watch: one target's heartbeats, live versions
+    and answers -> what each does, the section it expects after each, and
+    whether the version it holds is still last-known. The file's holder of
+    one version is this function's: the watch itself holds none."""
+    from . import desired_v2 as d2, heartbeat
+
+    def section(x: Any) -> Any:
+        return None if x is None else d2.Section(int(x["digest"], 16), x["live"])
+
+    def shown(x: Any) -> Any:
+        return None if x is None else {"digest": format(x.digest, "08x"), "live": x.live}
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        name = f"v2 watch #{i}: {c['note']}"
+        w = d2.Watch()
+        held = None if c["held"] is None else [d2.Version.parse(c["held"]["version"]), c["held"]["kind"] == "delete",
+                                               bool(c["held"].get("last_known"))]
+        sent: Any = None
+        words: list[str] = []
+        expects: list[Any] = []
+        digests_ok = True
+        for st in c["steps"]:
+            if "heartbeat" in st:
+                h = st["heartbeat"]
+                run = d2.Run.parse(h["run"])
+                assert run is not None
+                if "read" in h:
+                    word = w.heartbeat(run, h["seq"], None, read=False)
+                    word = h["read"] if word == d2.NOT_READ else word
+                else:
+                    if "members" in h:
+                        ms = [(m["key"], d2.Version.parse(m["version"])) for m in h["members"]]
+                        dg = heartbeat.digest((k, v.run.width, v.run.value, v.seq) for k, v in ms)
+                        digests_ok &= section(h["section"]) == d2.Section(dg, len(ms))
+                    word = w.heartbeat(run, h["seq"], section(h["section"]))
+                    if word == d2.READ:
+                        sent = None if held is None else held[0]
+                words.append(word)
+            elif "heard" in st:
+                new = (d2.Version.parse(st["heard"]["version"]), st["heard"]["kind"] == "delete")
+                moved = bool(c["moves"]) and w.own_change(c["key"], None if held is None else (held[0], held[1]), new)
+                held = [new[0], new[1], False]
+                words.append("moved" if moved else "kept")
+            else:
+                a = st["answer"]
+                if a == "unchanged":
+                    still = held is not None and held[0] == sent
+                    w.unchanged(still)
+                    if still:
+                        held[2] = False  # "that version is no longer last-known"
+                    words.append("unchanged")
+                elif isinstance(a, dict):
+                    e = a["whole"]
+                    held = None if e["kind"] == "no_entry" else [d2.Version.parse(e["version"]), e["kind"] == "delete",
+                                                                 False]
+                    w.whole()
+                    words.append("whole")
+                else:
+                    w.no_answer()
+                    words.append("no_answer")
+            expects.append(shown(w.expects))
+        got = {"steps": words, "expects": expects, "last_known": bool(held is not None and held[2])}
+        out.append(_check(name, got, c["expect"]))
+        if not digests_ok:
+            out.append((f"{name} (each section given with its members is core §7.5's digest of them)", False,
+                        "a section is not its members' digest and count"))
+    return out
+
+
 #: desired.v2's fixtures (``conformance/v2/``), by file name; an unknown file
 #: fails, as in :data:`PROFILE_FIXTURES`.
 DESIRED_V2_FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
-    "schema.json": _desired_v2_schema, "reports.json": _desired_v2_reports,
+    "schema.json": _desired_v2_schema, "reports.json": _desired_v2_reports, "order.json": _desired_v2_order,
+    "watch.json": _desired_v2_watch,
 }
 
 
