@@ -14484,15 +14484,22 @@ def _heartbeat_owner(data: dict[str, Any], layouts: dict[str, Any]) -> list[Resu
     for i, c in enumerate(data.get("forms", [])):
         raw = bytes.fromhex(c["hex"])
         name = f"heartbeat: owner form {i}: {c['note']}"
+        # core 0.111, Appendix E: "A put of another form → `form` (`forms`).
+        # So is a case's put under the `encoding` it states"; its entry: "one
+        # that states none is under `zenoh/bytes`". §7.5: "No envelope is a
+        # put under another Encoding than zenoh/bytes … Its bytes are not
+        # parsed". The reader is round 114's, which took `enveloped` already;
+        # the runner gave it no Encoding until the member existed.
+        enveloped = zk2c.envelope_encoding(c.get("encoding", zk2c.ENCODING))
         try:
-            got = _owner_value(oh.read(raw, "stream"))
+            got = _owner_value(oh.read(raw, "stream", enveloped))
         except oh.Refused as e:
             got = {"refused": e.token}
         out.append(_check(f"{name}: on an owner heartbeat's key", got, c["expect"]))
         # "on an owner heartbeat's key or a heartbeat's": the same put on a
         # heartbeat's key, through the gate a heartbeat's reader goes through
         try:
-            env = heartbeat.put_of(raw, "stream")
+            env = heartbeat.put_of(raw, "stream", enveloped)
             got = {"form": env.form, "tag": env.tag}
         except heartbeat.Refused as e:
             got = {"refused": e.token}
