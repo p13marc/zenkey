@@ -1,0 +1,356 @@
+{
+ "description": "alarms.v2 §2.2, §2.12, §4: the alert key under this major, and the key of a slot. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. Each case has an `op`. `derive`: a rule's name and its labels as text (host-scoped ones included) -> `key`, the alert key alarms.v1's recipe derives through its sanitizing step (v1 §2.2, §2.3; v1's keys.json holds the recipe's own cases), in 16 hexadecimal digits, `integer`, the same 64 bits as the number a record by words carries in `key`, and `input`, the string hashed. `table`: a record's `rule` and `labels` under the table T1 of tables.json -> the alert key of the alarm they name, or null where they name none. `slot`: a key -> the system, the service and the slot it names, or null where it is no key of `alarms/{slot}` with a slot from 0 to 255 written in decimal with no leading zero. `words`: the same for `words/{slot}`. `collection`: a reference's system and service -> the selector of the collection read that finds the alarm (§2.12), and the snapshot key its answer comes on (core §4.2), or null where the system or the service is no name.",
+ "cases": [
+  {
+   "note": "alarms.v1's test vector: host drops out, peer sorts before port",
+   "op": "derive",
+   "rule": "link_down",
+   "labels": {
+    "peer": "r2",
+    "port": "eth0",
+    "host": "h-3fa9c2d41b7e"
+   },
+   "expect": {
+    "key": "a659f813308ad1da",
+    "integer": 11986884644525756890,
+    "input": "link_down\npeer=r2\nport=eth0"
+   }
+  },
+  {
+   "note": "no label",
+   "op": "derive",
+   "rule": "door_open",
+   "labels": {},
+   "expect": {
+    "key": "abb089906038056a",
+    "integer": 12371539429569332586,
+    "input": "door_open"
+   }
+  },
+  {
+   "note": "a table's integer label, as its decimal text",
+   "op": "derive",
+   "rule": "sensor_lost",
+   "labels": {
+    "sensor": "63"
+   },
+   "expect": {
+    "key": "088ddf792dc0aeaa",
+    "integer": 616394435571265194,
+    "input": "sensor_lost\nsensor=63"
+   }
+  },
+  {
+   "note": "a negative integer's text",
+   "op": "derive",
+   "rule": "rack_temp",
+   "labels": {
+    "rack": "-2"
+   },
+   "expect": {
+    "key": "4d9943e3998197aa",
+    "integer": 5591575057169225642,
+    "input": "rack_temp\nrack=-2"
+   }
+  },
+  {
+   "note": "a rule by words with a value no table lists",
+   "op": "derive",
+   "rule": "disk_full",
+   "labels": {
+    "mount": "/var"
+   },
+   "expect": {
+    "key": "719d159937e54eb8",
+    "integer": 8186723445441384120,
+    "input": "disk_full\nmount=/var"
+   }
+  },
+  {
+   "note": "words that break the framing are sanitized, as in v1: the newline becomes _",
+   "op": "derive",
+   "rule": "link\ndown",
+   "labels": {
+    "port": "22"
+   },
+   "expect": {
+    "key": "16991d91fb818ca6",
+    "integer": 1628365253098179750,
+    "input": "link_down\nport=22"
+   }
+  },
+  {
+   "note": "an empty rule by words is unnamed, v1's word for it: not this text's unnamed",
+   "op": "derive",
+   "rule": "",
+   "labels": {},
+   "expect": {
+    "key": "8cdb6af9c367e25f",
+    "integer": 10149823806167310943,
+    "input": "unnamed"
+   }
+  },
+  {
+   "note": "words outside printable ASCII, which no table holds",
+   "op": "derive",
+   "rule": "température",
+   "labels": {
+    "salle": "é"
+   },
+   "expect": {
+    "key": "8652246030cef418",
+    "integer": 9678838544726946840,
+    "input": "température\nsalle=é"
+   }
+  },
+  {
+   "note": "a key whose first hexadecimal digit is 0 keeps its 16 digits",
+   "op": "derive",
+   "rule": "rule_1700",
+   "labels": {},
+   "expect": {
+    "key": "0e7eb59c393ab8e8",
+    "integer": 1044471846176209128,
+    "input": "rule_1700"
+   }
+  },
+  {
+   "note": "link_down, labels 2: alarms.v1's test vector",
+   "op": "table",
+   "record": {
+    "rule": 1,
+    "labels": 2
+   },
+   "expect": "a659f813308ad1da"
+  },
+  {
+   "note": "door_open",
+   "op": "table",
+   "record": {
+    "rule": 3
+   },
+   "expect": "abb089906038056a"
+  },
+  {
+   "note": "sensor_lost, labels 63",
+   "op": "table",
+   "record": {
+    "rule": 2,
+    "labels": 63
+   },
+   "expect": "088ddf792dc0aeaa"
+  },
+  {
+   "note": "rack_temp, labels 0: rack -2",
+   "op": "table",
+   "record": {
+    "rule": 4,
+    "labels": 0
+   },
+   "expect": "4d9943e3998197aa"
+  },
+  {
+   "note": "fan, labels 0",
+   "op": "table",
+   "record": {
+    "rule": 5,
+    "labels": 0
+   },
+   "expect": "ba7b65032e4dca6b"
+  },
+  {
+   "note": "hot: the argument is no part of the identity",
+   "op": "table",
+   "record": {
+    "rule": 0
+   },
+   "expect": "335f24192ff5d0d4"
+  },
+  {
+   "note": "link_down, labels 6: a code the label does not have, so no alarm is named",
+   "op": "table",
+   "record": {
+    "rule": 1,
+    "labels": 6
+   },
+   "expect": null
+  },
+  {
+   "note": "rule 9: no rule",
+   "op": "table",
+   "record": {
+    "rule": 9
+   },
+   "expect": null
+  },
+  {
+   "note": "slot 0",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/0",
+   "expect": {
+    "system": "h-3fa9c2d41b7e",
+    "service": "netlink",
+    "slot": 0
+   }
+  },
+  {
+   "note": "slot 255, the last",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/255",
+   "expect": {
+    "system": "h-3fa9c2d41b7e",
+    "service": "netlink",
+    "slot": 255
+   }
+  },
+  {
+   "note": "slot 10",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/10",
+   "expect": {
+    "system": "h-3fa9c2d41b7e",
+    "service": "netlink",
+    "slot": 10
+   }
+  },
+  {
+   "note": "256 is no slot",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/256",
+   "expect": null
+  },
+  {
+   "note": "a leading zero: a uint is written without one (core §2.2)",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/03",
+   "expect": null
+  },
+  {
+   "note": "00 is no slot",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/00",
+   "expect": null
+  },
+  {
+   "note": "an alert key where a slot belongs: alarms.v1's chunk",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/a659f813308ad1da",
+   "expect": null
+  },
+  {
+   "note": "a negative number",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/-1",
+   "expect": null
+  },
+  {
+   "note": "a slugged chunk",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/x-MQ",
+   "expect": null
+  },
+  {
+   "note": "the snapshot key itself names no slot",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms",
+   "expect": null
+  },
+  {
+   "note": "a chunk more",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/0/1",
+   "expect": null
+  },
+  {
+   "note": "alarms.v1's key is not this major's",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms/0",
+   "expect": null
+  },
+  {
+   "note": "the words' key is no record's",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/words/0",
+   "expect": null
+  },
+  {
+   "note": "a dotted service",
+   "op": "slot",
+   "key": "zk2/h-3fa9c2d41b7e/snmp.router01/alarms.v2/state/alarms/7",
+   "expect": {
+    "system": "h-3fa9c2d41b7e",
+    "service": "snmp.router01",
+    "slot": 7
+   }
+  },
+  {
+   "note": "the words of slot 7",
+   "op": "words",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/words/7",
+   "expect": {
+    "system": "h-3fa9c2d41b7e",
+    "service": "netlink",
+    "slot": 7
+   }
+  },
+  {
+   "note": "a record's key is no words'",
+   "op": "words",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/7",
+   "expect": null
+  },
+  {
+   "note": "the words of slot 256: none",
+   "op": "words",
+   "key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/words/256",
+   "expect": null
+  },
+  {
+   "note": "a reference names an owner, and the alarm is found among its records",
+   "op": "collection",
+   "system": "h-3fa9c2d41b7e",
+   "service": "netlink",
+   "expect": {
+    "selector": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/**",
+    "snapshot_key": "zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms"
+   }
+  },
+  {
+   "note": "a dotted service stays whole",
+   "op": "collection",
+   "system": "h-3fa9c2d41b7e",
+   "service": "snmp.router01",
+   "expect": {
+    "selector": "zk2/h-3fa9c2d41b7e/snmp.router01/alarms.v2/state/alarms/**",
+    "snapshot_key": "zk2/h-3fa9c2d41b7e/snmp.router01/alarms.v2/state/alarms"
+   }
+  },
+  {
+   "note": "a service with a slash is no name",
+   "op": "collection",
+   "system": "h-3fa9c2d41b7e",
+   "service": "snmp/router01",
+   "expect": null
+  },
+  {
+   "note": "an empty system is no name",
+   "op": "collection",
+   "system": "",
+   "service": "netlink",
+   "expect": null
+  },
+  {
+   "note": "an upper-case system is no name (core §1.2)",
+   "op": "collection",
+   "system": "Lab",
+   "service": "netlink",
+   "expect": null
+  },
+  {
+   "note": "a system that is no name",
+   "op": "slot",
+   "key": "zk2/Lab/netlink/alarms.v2/state/alarms/0",
+   "expect": null
+  }
+ ]
+}

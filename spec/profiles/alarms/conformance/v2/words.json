@@ -1,0 +1,703 @@
+{
+ "description": "alarms.v2 §2.4, §5: the words of an alarm no table names, on words/{slot}. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `takes`: what a reader holds on one slot: its `record` (null for none; \"undecodable\" for one that does not read; else the fields that matter here, `rule` and, for one by words, `key`, the alert key as an integer) and its `words` (null for none read; a document, decoded; or {text}, a payload's text) -> whether the reader takes the words as that alarm's: {taken: true, how: \"strict\"} where alarms.v1's recipe gives the record's key from the words as they are, {taken: true, how: \"sanitized\"} where only its sanitizing step does, or {taken: false, why}, the first of: `no_record`; `undecodable` (the record does not read); `table` (the record names a table's rule, so the slot's words are an earlier alarm's); `no_words`; `unreadable` (the words are not strict JSON as alarms.v1 §2.4 reads a payload, or are outside the Words schema: `rule` and `summary` strings, `category` a string, `labels` an object of strings, any other member ignored); `mismatch` (the recipe does not give the record's key). `shows`: one slot's deliveries in arrival order, each {words: document} on words/<slot> or {record: {rule, key}} on alarms/<slot>, and what a tool shows of the slot's alarm after each: null while it holds no record; else {alert_key, words}: the alert key of an alarm by words in 16 hexadecimal digits (null for a table's rule, which its table names), and the words it takes, or null.",
+ "takes": [
+  {
+   "note": "the words derive the record's key",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    },
+    "summary": "Link to r2 is down"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "a host-scoped label and a category are no part of the key",
+   "record": {
+    "rule": "not_available",
+    "key": 8186723445441384120
+   },
+   "words": {
+    "rule": "disk_full",
+    "labels": {
+     "mount": "/var",
+     "host.boot_id": "7"
+    },
+    "summary": "/var is 97 % full",
+    "category": "expectation"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "the same words with another summary: a refresh, and still the alarm's",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    },
+    "summary": "Link to r2 is down again"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "the slot's words are another alarm's: the record came, and its words did not yet",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "rule": "disk_full",
+    "labels": {
+     "mount": "/var",
+     "host.boot_id": "7"
+    },
+    "summary": "/var is 97 % full",
+    "category": "expectation"
+   },
+   "expect": {
+    "taken": false,
+    "why": "mismatch"
+   }
+  },
+  {
+   "note": "the record names a table's rule: the slot's words are an earlier alarm's, even where they would derive the same alert key",
+   "record": {
+    "rule": 1
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    },
+    "summary": "Link to r2 is down"
+   },
+   "expect": {
+    "taken": false,
+    "why": "table"
+   }
+  },
+  {
+   "note": "no words read",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": null,
+   "expect": {
+    "taken": false,
+    "why": "no_words"
+   }
+  },
+  {
+   "note": "no record held",
+   "record": null,
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    },
+    "summary": "Link to r2 is down"
+   },
+   "expect": {
+    "taken": false,
+    "why": "no_record"
+   }
+  },
+  {
+   "note": "the record does not read",
+   "record": "undecodable",
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    },
+    "summary": "Link to r2 is down"
+   },
+   "expect": {
+    "taken": false,
+    "why": "undecodable"
+   }
+  },
+  {
+   "note": "the record does not read and no words were read: the record's reason comes first",
+   "record": "undecodable",
+   "words": null,
+   "expect": {
+    "taken": false,
+    "why": "undecodable"
+   }
+  },
+  {
+   "note": "words with no summary are outside the schema",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    }
+   },
+   "expect": {
+    "taken": false,
+    "why": "unreadable"
+   }
+  },
+  {
+   "note": "a label that is a number is outside the schema",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": 0
+    },
+    "summary": "s"
+   },
+   "expect": {
+    "taken": false,
+    "why": "unreadable"
+   }
+  },
+  {
+   "note": "a member the schema does not name is ignored",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    },
+    "summary": "Link to r2 is down",
+    "runbook": "https://wiki.example/link"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "an empty summary is a summary",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    },
+    "summary": ""
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "words that derive the key only through the sanitizing step",
+   "record": {
+    "rule": "not_available",
+    "key": 1628365253098179750
+   },
+   "words": {
+    "rule": "link\ndown",
+    "labels": {
+     "port": "22"
+    },
+    "summary": "s"
+   },
+   "expect": {
+    "taken": true,
+    "how": "sanitized"
+   }
+  },
+  {
+   "note": "the sanitized twin derives the same key, strictly",
+   "record": {
+    "rule": "not_available",
+    "key": 1628365253098179750
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "port": "22"
+    },
+    "summary": "s"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "no labels member, and a rule with none",
+   "record": {
+    "rule": "not_available",
+    "key": 12371539429569332586
+   },
+   "words": {
+    "rule": "door_open",
+    "summary": "Door open"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "an empty labels object is the same alarm",
+   "record": {
+    "rule": "not_available",
+    "key": 12371539429569332586
+   },
+   "words": {
+    "rule": "door_open",
+    "labels": {},
+    "summary": "Door open"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "words outside printable ASCII, which a table cannot hold",
+   "record": {
+    "rule": "not_available",
+    "key": 9678838544726946840
+   },
+   "words": {
+    "rule": "température",
+    "labels": {
+     "salle": "é"
+    },
+    "summary": "Trop chaud : 31 °C"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "a payload's text, strict JSON with a trailing newline",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "text": "{\"rule\": \"link_down\", \"labels\": {\"peer\": \"r2\", \"port\": \"eth0\"}, \"summary\": \"Link to r2 is down\"}\n"
+   },
+   "expect": {
+    "taken": true,
+    "how": "strict"
+   }
+  },
+  {
+   "note": "a duplicate member: not strict JSON",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "text": "{\"rule\":\"link_down\",\"rule\":\"link_down\",\"labels\":{\"peer\":\"r2\",\"port\":\"eth0\"},\"summary\":\"s\"}"
+   },
+   "expect": {
+    "taken": false,
+    "why": "unreadable"
+   }
+  },
+  {
+   "note": "text after the value",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "text": "{\"rule\": \"link_down\", \"labels\": {\"peer\": \"r2\", \"port\": \"eth0\"}, \"summary\": \"Link to r2 is down\"} x"
+   },
+   "expect": {
+    "taken": false,
+    "why": "unreadable"
+   }
+  },
+  {
+   "note": "a lone surrogate escape has no UTF-8 form",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "text": "{\"rule\":\"link_down\",\"labels\":{\"peer\":\"r2\",\"port\":\"eth0\"},\"summary\":\"\\ud800\"}"
+   },
+   "expect": {
+    "taken": false,
+    "why": "unreadable"
+   }
+  },
+  {
+   "note": "not an object",
+   "record": {
+    "rule": "not_available",
+    "key": 11986884644525756890
+   },
+   "words": {
+    "text": "\"link_down\""
+   },
+   "expect": {
+    "taken": false,
+    "why": "unreadable"
+   }
+  },
+  {
+   "note": "a key of 0 and words that do not derive it",
+   "record": {
+    "rule": "not_available",
+    "key": 0
+   },
+   "words": {
+    "rule": "link_down",
+    "labels": {
+     "peer": "r2",
+     "port": "eth0"
+    },
+    "summary": "Link to r2 is down"
+   },
+   "expect": {
+    "taken": false,
+    "why": "mismatch"
+   }
+  }
+ ],
+ "shows": [
+  {
+   "note": "a raise by words: the words, then the record. The alarm is shown with its words from its first record",
+   "steps": [
+    {
+     "words": {
+      "rule": "link_down",
+      "labels": {
+       "peer": "r2",
+       "port": "eth0"
+      },
+      "summary": "Link to r2 is down"
+     },
+     "expect": null
+    },
+    {
+     "record": {
+      "rule": "not_available",
+      "key": 11986884644525756890
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": {
+       "rule": "link_down",
+       "labels": {
+        "peer": "r2",
+        "port": "eth0"
+       },
+       "summary": "Link to r2 is down"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a refresh by words: new words for the record held, and no record",
+   "steps": [
+    {
+     "words": {
+      "rule": "link_down",
+      "labels": {
+       "peer": "r2",
+       "port": "eth0"
+      },
+      "summary": "Link to r2 is down"
+     },
+     "expect": null
+    },
+    {
+     "record": {
+      "rule": "not_available",
+      "key": 11986884644525756890
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": {
+       "rule": "link_down",
+       "labels": {
+        "peer": "r2",
+        "port": "eth0"
+       },
+       "summary": "Link to r2 is down"
+      }
+     }
+    },
+    {
+     "words": {
+      "rule": "link_down",
+      "labels": {
+       "peer": "r2",
+       "port": "eth0"
+      },
+      "summary": "Link to r2 flaps"
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": {
+       "rule": "link_down",
+       "labels": {
+        "peer": "r2",
+        "port": "eth0"
+       },
+       "summary": "Link to r2 flaps"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a slot retaken by another alarm by words: its words come first, so the old alarm is shown without words until its slot's record moves, and the new one with its own",
+   "steps": [
+    {
+     "words": {
+      "rule": "link_down",
+      "labels": {
+       "peer": "r2",
+       "port": "eth0"
+      },
+      "summary": "Link to r2 is down"
+     },
+     "expect": null
+    },
+    {
+     "record": {
+      "rule": "not_available",
+      "key": 11986884644525756890
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": {
+       "rule": "link_down",
+       "labels": {
+        "peer": "r2",
+        "port": "eth0"
+       },
+       "summary": "Link to r2 is down"
+      }
+     }
+    },
+    {
+     "words": {
+      "rule": "disk_full",
+      "labels": {
+       "mount": "/var",
+       "host.boot_id": "7"
+      },
+      "summary": "/var is 97 % full",
+      "category": "expectation"
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": null
+     }
+    },
+    {
+     "record": {
+      "rule": "not_available",
+      "key": 8186723445441384120
+     },
+     "expect": {
+      "alert_key": "719d159937e54eb8",
+      "words": {
+       "rule": "disk_full",
+       "labels": {
+        "mount": "/var",
+        "host.boot_id": "7"
+       },
+       "summary": "/var is 97 % full",
+       "category": "expectation"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a reader that lost the words' put shows the alarm by its alert key, and takes the words when they come",
+   "steps": [
+    {
+     "record": {
+      "rule": "not_available",
+      "key": 11986884644525756890
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": null
+     }
+    },
+    {
+     "words": {
+      "rule": "link_down",
+      "labels": {
+       "peer": "r2",
+       "port": "eth0"
+      },
+      "summary": "Link to r2 is down"
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": {
+       "rule": "link_down",
+       "labels": {
+        "peer": "r2",
+        "port": "eth0"
+       },
+       "summary": "Link to r2 is down"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a slot retaken by a table's rule: the old words stay on words/<slot>, and are not its words",
+   "steps": [
+    {
+     "words": {
+      "rule": "link_down",
+      "labels": {
+       "peer": "r2",
+       "port": "eth0"
+      },
+      "summary": "Link to r2 is down"
+     },
+     "expect": null
+    },
+    {
+     "record": {
+      "rule": "not_available",
+      "key": 11986884644525756890
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": {
+       "rule": "link_down",
+       "labels": {
+        "peer": "r2",
+        "port": "eth0"
+       },
+       "summary": "Link to r2 is down"
+      }
+     }
+    },
+    {
+     "record": {
+      "rule": 3
+     },
+     "expect": {
+      "alert_key": null,
+      "words": null
+     }
+    }
+   ]
+  },
+  {
+   "note": "an owner that puts the record before its words breaks §2.4: between the two, the reader holds the previous alarm's words and takes none",
+   "steps": [
+    {
+     "words": {
+      "rule": "disk_full",
+      "labels": {
+       "mount": "/var",
+       "host.boot_id": "7"
+      },
+      "summary": "/var is 97 % full",
+      "category": "expectation"
+     },
+     "expect": null
+    },
+    {
+     "record": {
+      "rule": "not_available",
+      "key": 8186723445441384120
+     },
+     "expect": {
+      "alert_key": "719d159937e54eb8",
+      "words": {
+       "rule": "disk_full",
+       "labels": {
+        "mount": "/var",
+        "host.boot_id": "7"
+       },
+       "summary": "/var is 97 % full",
+       "category": "expectation"
+      }
+     }
+    },
+    {
+     "record": {
+      "rule": "not_available",
+      "key": 11986884644525756890
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": null
+     }
+    },
+    {
+     "words": {
+      "rule": "link_down",
+      "labels": {
+       "peer": "r2",
+       "port": "eth0"
+      },
+      "summary": "Link to r2 is down"
+     },
+     "expect": {
+      "alert_key": "a659f813308ad1da",
+      "words": {
+       "rule": "link_down",
+       "labels": {
+        "peer": "r2",
+        "port": "eth0"
+       },
+       "summary": "Link to r2 is down"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

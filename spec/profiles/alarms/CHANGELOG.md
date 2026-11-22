@@ -170,6 +170,25 @@ the design, which the maintainer saw and did not overrule.
   Appendix D, and names `alarms.v2` in §8.1's tokenless list.
 - **Observer** is unchanged.
 
+**Evidence.** [`conformance/v2/`](conformance/v2/) holds ten files,
+473 cases, and its `README.md` says what each pins.
+- **Computed twice.** One script read the text into code and wrote the
+  files. A second, written from the finished text, computed each
+  expectation again from the files' inputs: it parses each heartbeat
+  and each snapshot, where the first writes them. The two agree on
+  every case. Both are the drafter's, kept out of the repository, and
+  no file was blessed.
+- **What that is worth.** Both scripts are one drafter's. They catch a
+  slip of computation, not a reading of the text that both share.
+- **Checked against the core's fixtures.** The first script's records,
+  pages, heartbeat bodies and digests agree with the core's own
+  vectors, and its alert keys with `alarms.v1`'s `keys.json`.
+- **What the first computation found in the text.** A JSON document's
+  bytes read as a record under tag 0, so §3 no longer says the length
+  refuses one. A writer's refusal of `labels` under `not_available`,
+  the order of a reader's reasons for taking no words, and a reader
+  with no slot under the present run were each stated after it.
+
 **Not verified.**
 - **No `alarms.v2` byte has crossed a wire.** Every figure is computed.
 - **The 5-byte frame and the 2-byte key suffix** are inferred from
