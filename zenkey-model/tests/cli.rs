@@ -330,3 +330,47 @@ fn config_derive_writes_the_derived_types() {
         2
     );
 }
+
+/// `zk2 contract lint` runs desired.v2's lint (desired.v2 §2.2, §2.10): the
+/// scenarios' two contracts have no finding, and a horizon above 0 under
+/// `freshness.v1` is a finding, exit 1, named by its token.
+#[test]
+fn contract_lint_reads_desired_v2s_declarations() {
+    let contracts = Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts");
+    for file in ["tasking.v2.toml", "worker.v2.toml"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_zk2"))
+            .args([
+                "contract",
+                "lint",
+                &contracts.join(file).display().to_string(),
+            ])
+            .output()
+            .expect("runs");
+        assert_eq!(out.status.code(), Some(0), "{file}");
+        assert!(out.stderr.is_empty(), "{file}: no finding at all");
+    }
+    let text = std::fs::read_to_string(contracts.join("tasking.v2.toml"))
+        .expect("tasking.v2")
+        .replace("\"freshness.v2\"", "\"freshness.v1\"")
+        .replace("\"freshness.ttl_s\" = 0", "\"freshness.ttl_s\" = 600")
+        .replace("jsonschema = [\"tasking.json\"]", "");
+    let text = text.replace(
+        "type        = \"json:Task\"",
+        "type        = { raw = \"text/plain\" }",
+    );
+    let dir = std::env::temp_dir().join(format!("zk2-cli-desired-v2-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a directory");
+    let file = dir.join("tasking.v2.toml");
+    std::fs::write(&file, text).expect("the contract");
+    let out = Command::new(env!("CARGO_BIN_EXE_zk2"))
+        .args(["contract", "lint", &file.display().to_string()])
+        .output()
+        .expect("runs");
+    let _ = std::fs::remove_dir_all(&dir);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("error[desired.v2 horizon_v1] state/tasks/{system}/{service}"),
+        "{stderr}"
+    );
+}
