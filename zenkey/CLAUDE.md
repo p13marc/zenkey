@@ -421,6 +421,65 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `desired put` puts the line byte for byte once it reads as strict JSON,
   `desired seeds` says what the last seed found, and `desired gets` counts
   the GETs that reached a slice (`Author::gets`, text 0.4).
+  `desired.v2` (#986's J3, text 0.1) is the same three calls, the major
+  read from the author's revision (`desired::Major`, `Author::major`,
+  `Target::major`; §2.18): a service holds authors and roles of either
+  major side by side, and `desired.v1`'s paths are untouched. **Author:**
+  `implement` of a contract that lists `desired.v2` tells the `Minter`
+  (`version_in_band`), so `Writer::is_stamped` leaves its desired
+  resources out of §4.3's table (no Zenoh timestamp unless the session
+  stamps) and `service::answered` answers them by snapshot, where
+  `Store::held_answer` answers a conditional read; `Author::put`/`delete`
+  return `Written::PutV2`/`DeletedV2` (`Written::version`), nothing is
+  caught up at a restart, a new instance's new run orders its re-puts
+  (`new_epoch` refuses for the clock only for a `desired.v1` author), and
+  `Kept::major` makes `FileRecord` write `"profile": "desired.v2"` with
+  no `stamp`. `Author::reads(target)` lists each GET of the one key the
+  store answered (`state::Asked { held, unchanged }`, the latest 1,024),
+  and `Author::delete_unheld` puts a delete where no document is held
+  (§2.8's residual, scenarios §15 step 2). **Target** (`desired/v2.rs`,
+  over `model::desired::v2::Target`): every read of the slice is one seed
+  at a time through `seed_soon`, its GET carrying `Target::held()`'s stamp
+  read at the GET, the next read waiting until the last was judged on the
+  target's one task; a GET that ran to its timeout is never made again
+  before the next trigger; a period below `TargetStartup::timeout` refuses
+  the role and the start (`not started: … below its read's timeout`), and
+  `set_reread` keeps the period it had; `TargetStartup::across` is the
+  face's reply timeout. A reply is a held stamp (`unchanged`, confirming a
+  last-known version; one not sent is no answer), a snapshot's entry, or
+  a snapshot with no entry, given to `observe_no_entry` with the page's
+  run and asof. **The watch:** where the author's desired resource is a
+  collection of its heartbeat, the target subscribes to
+  `…/freshness.v2/stream/heartbeat/<iface>`, and to the owner heartbeat
+  key of the collection's class when the service holds a catalog (the
+  owner's catalog read once a run by `answer::owner_catalog`, the
+  service's own where no descriptor reaches it), reads each into a
+  `v2::Beat` and asks `v2::Watch`; a `read` decision while any read is
+  outstanding is told to the watch as no answer (the text's
+  `outstanding`); the reference moves the digest it expects at a version
+  heard live; the period re-reads only while no heartbeat was read within
+  the horizon, logged once (`Target::watching()` → `Watching { watches,
+  expects, read, unread, last, asked, silent }`, `Target::reads()`). **The
+  report** is the packed `Report` on the report resource the caller names,
+  which must declare `desired.report` for the role (`tables_of`), put
+  before the tokens and after each change (`Target::report_v2`;
+  `Target::report` stays the baseline for such a role). The `Handler` is
+  the one trait: it refuses in words, and the runtime writes the place and
+  the line as indices by the tables, `out_of_range` logged with its words;
+  `Document::inband` is the version (`version.stamp` zero), and
+  `Handler::revert_v2(Option<&Version>)` defaults to `revert`. §2.4's
+  bound is refused before the handler at `desired::REVISION_POINTER` with
+  `desired::REVISION_LINE`. `desired_config` feeds `config.v1`'s or
+  `config.v2`'s owner from a `desired.v2` author with no code of its own
+  (§2.16; `config.v2` §2.18 names `desired.v1` alone). The three places
+  the text is silent keep the model's choices. `tests/profile_desired_v2.rs`
+  is `scenarios-v2.md` §1–§8 and §10–§15 over `tests/contracts/{tasking,
+  worker}.v2.toml` (§13 a played author, §14 an author on a runtime of its
+  own that the test stops, behind a router denying the target's session
+  `@zk`), with `config_v2_as_a_target`; the owner example's `--desired-v2`,
+  `--desired-ttl <s>` and `--desired-timeout-ms <ms>` drive it (`desired
+  gets` listing `<held>=<unchanged|whole>`, `desired delete-unheld`,
+  `desired watch`).
   `redundancy` (#841, RB) is `redundancy.v1`'s candidate:
   `ServiceBuilder::redundancy(RedundancyStartup)` → `Redundancy` (also
   `Service::redundancy()`) elects every governed interface the service
