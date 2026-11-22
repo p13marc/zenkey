@@ -1665,6 +1665,114 @@ def _desired_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _desired_v2_schema(path: Path) -> list[Result]:
+    """desired.v2 §3: the standard packed schema's id, its type's tag, and
+    each case's document -> its id and whether the profile publishes it."""
+    from . import desired_v2 as d2, jcs
+
+    data = _load_json(path)
+    repo = path.parents[5]
+    out = [
+        _check("v2 schema: the profile's file is the current revision",
+               d2.artifact_id(jcs.loads((path.parents[2] / data["file"]).read_bytes())), data["current"]),
+        _check("v2 schema: zk2py's current id is the file's, §3's", d2.CURRENT, data["current"]),
+        _check("v2 schema: zk2py's published ids are §3's", list(d2.PUBLISHED_IDS), [x["id"] for x in data["published"]]),
+        _check("v2 schema: the Report's tag is §3's 12, by core §7.6's layout form",
+               [[d2.REPORT_TYPE, d2.report_record().tag, d2.REPORT_TAG]], [[t["name"], t["tag"], 12] for t in data["types"]]),
+    ]
+    for i, c in enumerate(data["cases"]):
+        doc = jcs.loads((repo / c["path"]).read_bytes()) if "path" in c else c["document"]
+        got = d2.artifact_id(doc)
+        out.append(_check(f"v2 schema #{i}: {c['note']}", {"id": got, "published": d2.is_published(got)}, c["expect"]))
+    return out
+
+
+def _desired_v2_reports(path: Path) -> list[Result]:
+    """desired.v2 §2.10, §3: a report written as a record and as its put;
+    records read back, refused, or read with their findings; a refusal's
+    place and line written as indices, and read back as words."""
+    from . import desired_v2 as d2, packed
+
+    data = _load_json(path)
+    rec = d2.report_record()
+    lo, hi = rec.bit_bounds()
+    out = [_check("v2 reports: the Report's layout form, its sha256, its tag and its shortest and longest record",
+                  {"form": rec.layout_form(), "sha256": rec.layout_sha256(), "tag": rec.tag, "min_bits": lo,
+                   "max_bits": hi}, data["layout"])]
+    for i, c in enumerate(data["writes"]):
+        got: dict[str, Any]
+        try:
+            fields = d2.fields_of(c["report"])
+            bits = d2.write_bits(fields)
+            record = d2.write_report(fields)
+            got = {"fields": fields, "bits": bits, "pad": -len(bits) % 8, "hex": record.hex()}
+            if "stamp" in c:
+                at = d2.Version.parse(c["stamp"])
+                assert at is not None
+                got["payload"] = d2.put_payload(fields, at.run.value, at.seq, at.run.width).hex()
+        except packed.Refused as e:
+            got = {"refused": e.token}
+        out.append(_check(f"v2 reports, write #{i}: {c['note']}", got, c["expect"]))
+    not_back: list[int] = []
+    for i, c in enumerate(data["reads"]):
+        r = d2.read_report(c["tag"], bytes.fromhex(c["hex"]))
+        if not r.readable:
+            got = {"refused": r.refusal}
+        else:
+            assert r.report is not None
+            got = {"fields": r.report, "findings": list(r.findings)}
+            if not r.findings:
+                got["report"] = d2.reading_of_fields(r.report)
+        out.append(_check(f"v2 reports, read #{i}: {c['note']}", got, c["expect"]))
+        if r.valid and d2.write_report(r.report).hex() != c["hex"]:
+            not_back.append(i)
+    # zk2py's own, beside the file (F-576): §2.10 says "Every report reads
+    # back to the same bytes. The checks leave one record for one report."
+    # Four of the file's records read with no finding and write back to
+    # other bytes: three hold a later text's bits behind the marker, and one
+    # a `code` past its five values, which reads as the escape.
+    out.append(_check("v2 reports: the records that read with no finding and do not write back to their bytes "
+                      "(§2.10 \"Every report reads back to the same bytes\"; F-576)", not_back, [27, 28, 29, 32]))
+    for i, c in enumerate(data["places"]):
+        got = {}
+        p = d2.place_index(c["pointers"], c["refusal"]["place"])
+        ln = d2.line_index(c["details"], c["refusal"]["line"])
+        if p is not None:
+            got["pointer"] = p
+        if ln is not None:
+            got["detail"] = ln
+        out.append(_check(f"v2 reports, place #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(data["words"]):
+        got = {}
+        for k, table in (("pointer", c["pointers"]), ("detail", c["details"])):
+            if k in c["refusal"]:
+                shown = d2.show_index(table, c["refusal"][k])
+                # the file's null: "an index past the table (shown as its number)"
+                got[k] = None if isinstance(shown, int) else shown
+        out.append(_check(f"v2 reports, word #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+#: desired.v2's fixtures (``conformance/v2/``), by file name; an unknown file
+#: fails, as in :data:`PROFILE_FIXTURES`.
+DESIRED_V2_FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
+    "schema.json": _desired_v2_schema, "reports.json": _desired_v2_reports,
+}
+
+
+def _desired_v2(directory: Path) -> list[Result]:
+    out: list[Result] = []
+    for path in sorted(directory.iterdir()):
+        if path.name == "README.md":
+            continue
+        run = DESIRED_V2_FIXTURES.get(path.name)
+        if run is None:
+            out.append((f"v2/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        out += run(path)
+    return out
+
+
 def _redundancy_declarations(path: Path) -> list[Result]:
     """redundancy.v1 §2.2: a contract's uses, each resource's resolved
     annotations, and the tokenless set -> its declaration."""
@@ -1918,7 +2026,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
                   "v2": _telemetry_v2, "contracts": _telemetry_contracts},
     "desired": {"schema.json": _desired_schema, "declarations.json": _desired_declarations,
                 "bindings.json": _desired_bindings, "order.json": _desired_order, "reports.json": _desired_reports,
-                "conclusions.json": _desired_conclusions, "slices.json": _desired_slices},
+                "conclusions.json": _desired_conclusions, "slices.json": _desired_slices, "v2": _desired_v2},
     "redundancy": {"declarations.json": _redundancy_declarations, "descriptors.json": _redundancy_descriptors,
                    "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
                    "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions,

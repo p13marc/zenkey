@@ -423,3 +423,74 @@ def reads_back(record: bytes, tag: int = REPORT_TAG) -> bool:
     and writes back byte for byte."""
     got = read_report(tag, record)
     return got.valid and got.report is not None and write_report(got.report) == record
+
+
+# -- reports.json's format: "the profile's reading" -----------------------------------------------
+#
+# Written after reports.json was opened (round 118): the file's description
+# names a nested form of a report, ``{source, outcome, last_known, observed?,
+# in_force?, refusal?}``, which the text does not hold. These two functions
+# are that format and nothing of §2.10's rules.
+
+def fields_of(reading: dict[str, Any]) -> dict[str, Any]:
+    """reports.json's nested reading as the record's fields: "observed and
+    in_force are {version, revision?} ...; in_force absent is the field
+    ``none``, equal to observed in its version is ``observed``, and any other
+    is ``other`` with the four in_force fields; refusal is {code, pointer?,
+    detail?}, code null for a code of the type's own". Raises
+    :class:`zk2py.packed.Refused` (``value``) for a version that does not
+    read."""
+    out: dict[str, Any] = {"source": reading["source"], "outcome": reading["outcome"],
+                           "last_known": reading["last_known"]}
+
+    def version(x: dict[str, Any]) -> Version:
+        v = Version.parse(x["version"])
+        if v is None:
+            raise packed.Refused("value", f"{x['version']!r} is no version (§2.4)")
+        return v
+
+    observed = reading.get("observed")
+    in_force = reading.get("in_force")
+    if in_force is None:
+        out["in_force"] = IN_NONE
+    elif observed is not None and version(in_force) == version(observed):
+        out["in_force"] = IN_OBSERVED
+    else:
+        out["in_force"] = IN_OTHER
+    if observed is not None:
+        out.update(version_fields(version(observed), observed.get("revision")))
+    if out["in_force"] == IN_OTHER:
+        assert in_force is not None
+        out.update(version_fields(version(in_force), in_force.get("revision"), IN_FORCE_FIELDS))
+    refusal = reading.get("refusal")
+    if refusal is not None:
+        out["code"] = refusal["code"]
+        for k in ("pointer", "detail"):
+            if refusal.get(k) is not None:
+                out[k] = refusal[k]
+    return out
+
+
+def reading_of_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """A consistent record's fields as reports.json's nested reading."""
+    out: dict[str, Any] = {"source": fields["source"], "outcome": fields["outcome"],
+                           "last_known": fields["last_known"]}
+    observed = stated(fields)
+    if observed is not None:
+        out["observed"] = {"version": observed.text}
+        if fields.get("revision") is not None:
+            out["observed"]["revision"] = fields["revision"]
+    if fields["in_force"] == IN_OBSERVED and observed is not None:
+        out["in_force"] = dict(out["observed"])
+    elif fields["in_force"] == IN_OTHER:
+        other = stated(fields, IN_FORCE_FIELDS)
+        if other is not None:
+            out["in_force"] = {"version": other.text}
+            if fields.get("in_force_revision") is not None:
+                out["in_force"]["revision"] = fields["in_force_revision"]
+    if "code" in fields:
+        out["refusal"] = {"code": fields["code"]}
+        for k in ("pointer", "detail"):
+            if k in fields:
+                out["refusal"][k] = fields[k]
+    return out
