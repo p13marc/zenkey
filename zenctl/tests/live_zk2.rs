@@ -10680,8 +10680,10 @@ async fn gen_brings_up_an_owner_of_history_resources_and_telemetry_reads_it() {
         "zs.snmp.v1",
         "--contracts",
         &zensight,
+        // Long enough for T's 3 s window, asked again until it reads the
+        // mock: the mock's 30 s was the whole of this test's time (#1151).
         "--duration",
-        "30",
+        "12",
         "--format",
         "json",
     ]);

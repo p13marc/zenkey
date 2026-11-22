@@ -2133,10 +2133,19 @@ async fn a_round_trip_under_load_misses_no_withdrawal() {
     let ep = Arc::new(ep);
     let (owner, tool) = (Arc::new(owner), Arc::new(tool));
     for settle in [true, false] {
+        // The control asserts nothing: it shows the race is there to close.
+        // Each withdrawal it misses is waited for 2 s, which made it three
+        // quarters of this test's time (12 of 160 missed in 22 s, against
+        // 6.8 s for the 160 that are asserted). A quarter of the runs shows
+        // it as well (#1151).
+        let wanted = if settle { UNSTALLED } else { UNSTALLED / 4 };
+        // Whole batches, and never none: the count printed is the count run.
+        let batches = (wanted / AT_ONCE).max(1);
+        let count = batches * AT_ONCE;
         let started = std::time::Instant::now();
         let mut missed = 0;
-        for batch in 0..UNSTALLED / AT_ONCE {
-            let runs: Vec<_> = (0..AT_ONCE)
+        for batch in 0..batches {
+            let tasks: Vec<_> = (0..AT_ONCE)
                 .map(|i| {
                     let (ep, owner, tool) =
                         (Arc::clone(&ep), Arc::clone(&owner), Arc::clone(&tool));
@@ -2147,13 +2156,13 @@ async fn a_round_trip_under_load_misses_no_withdrawal() {
                     })
                 })
                 .collect();
-            for r in runs {
+            for r in tasks {
                 missed += usize::from(!r.await.unwrap());
             }
         }
         eprintln!(
             "{AT_ONCE} at once beside {CROWD} tokens, round trip {settle}: missed {missed} of \
-             {UNSTALLED} in {:?}",
+             {count} in {:?}",
             started.elapsed()
         );
         if settle {
