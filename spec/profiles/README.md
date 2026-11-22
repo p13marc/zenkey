@@ -41,13 +41,14 @@ and fails when a row's is stale.
 
 No adopter's mapping and no shipped service uses these, yet or any
 longer. Their texts, fixtures, runtimes and tools are as complete as the
-others'. Only the walkthrough exercises them, or for `freshness.v1` its
-scenarios' own contracts. A profile leaves this table when one does
+others'. Only the walkthrough exercises them, or for `freshness.v1` and
+`desired.v2` their scenarios' own contracts. A profile leaves this table when one does
 (the process, below).
 
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|---|
 | [`freshness.v1`](freshness/v1.md) | 0.6 | experimental | none | 0.22 | 2: `freshness.ttl_s`; 4 through `uses` | A resource's staleness horizon: the owner's re-puts, how a reader ages a value, and fresh, stale or unobservable (core R7, S6) |
+| [`desired.v2`](desired/v2.md) | 0.1 | experimental | none | 0.112 | 1: a standard schema, [`desired.v2.json`](desired/desired.v2.json); 2: `target_param`, `report`, `pointers`, `details`; 4 through `uses` | `desired.v1` by reference, on a wire a far target can afford: a document's version is its put's in-band stamp, a run and a seq, so the desired resource carries no Zenoh timestamp and is answered by snapshot; a target orders by seq within a run, admits another run, and never acts on an older version of one of the 16 runs it remembers; its re-read is conditional, answered unchanged by the held stamp alone, and where its author's heartbeat reaches it, it reads only when that heartbeat's digest moves, after a gap or after another run, never taking an unmoved digest for a confirmation; across a face it waits the face's reply timeout, one read at a time; a snapshot with no entry reverts under the held version's run and is no verdict under another; the report is a packed record of 3 to 27 bytes, its role named by `desired.report`, a refusal's place and line indices into two tables of the target's contract (core §4.2, §4.3, §7.5, §7.6, S7) |
 | [`timing.v1`](timing/v1.md) | 0.10 | experimental | none | 0.83 | 2: `period_ms`, `deadline_ms`, `lifespan_ms`; 4 through `uses` | A stream's cadence, its deadline and its lifespan: the owner publishes each member at its period and no runtime repeats a sample; a reader reports a member missed when more than its deadline passes between two arrivals on its own monotonic clock, seen within max(deadline/50, 1 ms), and met at its next, a member never heard judged only when known and its owner present, and a miss never "down"; a sample arrives expired by its owner's stamp only against a clock bound ε the deployment states, never the HLC's delta, and with none nothing is discarded (core §2.7, §4.1, §8.1, R6) |
 | [`arbitration.v1`](arbitration/v1.md) | 0.6 | experimental | none | 0.83 | 2: `policy`, on a requirement; 4 through `uses` | One commander at a time: an arbitrated role follows the first provider, in its binding's order, whose stream arrives within its `timing.v1` deadline and whose interface token it has not heard withdrawn, and holds the dead-man when none is left, the safe value the application's; a withdrawal makes a provider ineligible at once, never absent, and only its token or a read re-admits it, never a sample; no hysteresis; a move of the consumer's own watch hands no authority over; the source from the key, never the payload (core R1, R3, R6, §8.1, §8.2) |
 
@@ -63,7 +64,7 @@ profiles/
     scenarios.md          the rules a fixture cannot check; scenarios-v<major>.md for a later major
     conformance/          fixtures; each file states its format in its description; v<major>/ for a later major
     <name>.v<major>.toml  the standard contract, for a profile that defines one
-    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, config.v2)
+    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, desired.v2, config.v2)
 ```
 
 ## The template
@@ -204,6 +205,11 @@ thing in the same place.
     instance, as `alarms.v1`'s owner does, and its targets adopt them
     without an act. A stamp's id that is never 0 needed none either. That
     rule is `desired.v1`'s own, in its §2.4;
+  - `desired.v2`: that §7.5 defines a held stamp and §4.2 a conditional
+    read, which its target's re-read is. Also that §4.3's table and
+    §4.2's list of per-key resources name a desired resource only where
+    its contract does not use it. Its packed report needed no change:
+    it uses §7.6's kinds as they stand;
   - `redundancy.v1`: that a descriptor marks a standby (`"standby":
     true`, D012 when tokenless), and that the core defines what a standby
     holds and exposes. Also that a standby taking over and an incumbent
