@@ -24,7 +24,7 @@
 //! | [`shm`]: the memlock limit SHM falls back under | §7.4 |
 //! | [`state`]: stamped mutations, tombstones, clocks, the owner-only GET | §4.1–§4.3, S1–S4, S6–S7 |
 //! | [`heartbeat`]: `freshness.v2`'s owner, its standard contract embedded: a heartbeat per covered interface, after the tokens, each member's bit; no re-puts | `freshness.v2` §2.4, §2.10; §4.3, §7.5, §8.2 |
-//! | [`health`]: `health.v1`'s owner, its standard contract embedded: the status, checks and faults; `clock_ahead` | `health.v1` §2.2–§2.6, §2.10; §4.3, §8.2 |
+//! | [`health`]: `health.v1`'s owner, its standard contract embedded: the status, checks and faults; `clock_ahead`. `health.v2`'s too, opt-in: packed records, words by table, one `clock_ahead` per hold | `health.v1` §2.2–§2.6, §2.10; `health.v2` §2.2–§2.6, §2.10; §4.3, §8.2 |
 //! | [`alarms`]: `alarms.v1`'s owner, its standard contract embedded: the acts keyed by the recipe, confirmations every 450 s, the bound, adoption at a restart from the owner's record or an archive | `alarms.v1` §2.1–§2.9; §2.7, §4.3, §4.4 |
 //! | [`config_v1`]: `config.v1`'s owner, its standard contract embedded: the five operations over a device, the view and the status, the change events, the deadline timer, the persisted layer, desired state | `config.v1` §2.1–§2.19; §2.6–§2.7, §5, §8.2 |
 //! | [`config_v2`]: `config.v2`'s owner over the service's config contract: the record put as the model stamps it, the operations in the value and error forms, tokens from the minter's runs | `config.v2` §2.1–§2.18; §4.3, §5.1, §5.2, §8.2 |
@@ -58,7 +58,9 @@
 //! `health.v1` is [`health`], through [`ServiceBuilder::health`] (#721): the
 //! status never better than its worst check, put before the tokens and
 //! confirmed every 30 s, checks on change, faults, and `clock_ahead` while
-//! the clock guard holds; `config.v1` is [`config_v1`], through
+//! the clock guard holds, and `health.v2` through
+//! [`ServiceBuilder::health_v2`] (#986), one major per instance;
+//! `config.v1` is [`config_v1`], through
 //! [`ServiceBuilder::config_v1`] (#768): `zenkey_model::config`'s owner
 //! wrapped over the application's device, its acts, timer, persisted layer
 //! and puts. The module is `config_v1`, the profile's id as a path, because

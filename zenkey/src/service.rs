@@ -195,7 +195,8 @@ pub struct ServiceBuilder {
     /// Set when the service closes, and dropped with it: its state
     /// writers' refreshers stop on either (`freshness.v1` §2.4).
     closed: tokio::sync::watch::Sender<bool>,
-    /// `health.v1`, once [`ServiceBuilder::health`] implemented it.
+    /// `health.v1`, once [`ServiceBuilder::health`] implemented it, or
+    /// `health.v2`, once [`ServiceBuilder::health_v2`] did.
     pub(crate) health: Option<crate::health::Health>,
     /// `config.v1`, once [`ServiceBuilder::config_v1`] implemented it.
     pub(crate) config_v1: Option<crate::config_v1::Configuration>,
@@ -262,6 +263,28 @@ fn log_minted(addr: &Addr, m: &Minted) {
             inputs = %trail,
             "hostid.v1: the system is minted from this host's id"
         );
+    }
+}
+
+/// `health.v2` §2.3: an instance has one status, so an owner MUST NOT
+/// implement `health.v1` and `health.v2` in one instance. Refuses `iface`
+/// where it is one major and `impls` holds the other.
+fn other_health_major(impls: &[ImplState], iface: &IfaceId) -> Result<()> {
+    use zenkey_model::health::Major;
+    let Some(major) = Major::named(&iface.to_string()) else {
+        return Ok(());
+    };
+    let held = impls
+        .iter()
+        .filter_map(|s| Major::named(&s.imp.iface().to_string()))
+        .find(|m| *m != major);
+    match held {
+        Some(other) => Err(Error::Contract(format!(
+            "{iface}: this service implements {} already, and an instance implements one major \
+             of health, never both (health.v2 §2.3)",
+            other.iface()
+        ))),
+        None => Ok(()),
     }
 }
 
@@ -606,13 +629,50 @@ impl ServiceBuilder {
     /// `"starting"` unless [`crate::health::Health::set_status`] put one
     /// first (§2.3), and with a clock reference configured, reports a clock
     /// ahead as `clock_ahead` faults (§2.5). Refused when the service
-    /// implements `health.v1` already.
+    /// implements `health.v1` already, and when it implements `health.v2`:
+    /// an instance has one status (`health.v2` §2.3).
     pub async fn health(&mut self) -> Result<crate::health::Health> {
-        let iface = crate::health::iface();
+        self.health_of(crate::health::Major::V1).await
+    }
+
+    /// Implements `health.v2`, its standard contract embedded
+    /// ([`crate::health::v2`], #986's Q2), in place of `health.v1`: the
+    /// same handle, its status, checks and faults put as packed records, on
+    /// change only, and their words written by the profile's tables and by
+    /// the tables the service's own contracts declare (`health.reasons`,
+    /// `health.details`, `health.codes`; §2.10), whichever side of this
+    /// call they are implemented on. [`ServiceBuilder::start`] puts the
+    /// status before step 3, `unknown` with the reason `starting` unless
+    /// one was set, and with a clock reference configured publishes one
+    /// `clock_ahead` fault per hold of the clock guard (§2.5); the
+    /// heartbeat covering `health.v2` carries the ahead time meanwhile
+    /// (`freshness.v2` §2.10). Give the deployment catalog first
+    /// ([`ServiceBuilder::catalog`]): the records' times count from its
+    /// epoch. Refused when the service implements `health.v2` already, and
+    /// when it implements `health.v1`: an owner MUST NOT implement both
+    /// majors in one instance (§2.3).
+    pub async fn health_v2(&mut self) -> Result<crate::health::Health> {
+        self.health_of(crate::health::Major::V2).await
+    }
+
+    async fn health_of(&mut self, major: crate::health::Major) -> Result<crate::health::Health> {
+        let iface: IfaceId = major.iface().parse().expect("an interface id");
+        other_health_major(&self.impls, &iface)?;
         if self.health.is_some() || self.implements(&iface) {
             return Err(Error::Duplicate(iface));
         }
-        crate::health::Health::declare(self).await
+        crate::health::Health::declare(self, major).await
+    }
+
+    /// `health.v2` §2.10: the instance's own tables of words, the one
+    /// table of each kind among the contracts implemented so far.
+    pub(crate) fn health_tables(&self) -> crate::health::v2::InstanceTables {
+        let held: Vec<crate::health::v2::Tables> = self
+            .impls
+            .iter()
+            .map(|s| crate::health::v2::Tables::of(s.imp.contract()))
+            .collect();
+        crate::health::v2::Tables::of_instance(&held)
     }
 
     /// Implements `config.v1`, its standard contract embedded
@@ -954,6 +1014,7 @@ impl ServiceBuilder {
         if self.impls.iter().any(|s| s.imp.iface() == imp.iface()) {
             return Err(Error::Duplicate(imp.iface().clone()));
         }
+        other_health_major(&self.impls, imp.iface())?;
         for (role, req) in &imp.contract().requires {
             self.roles.push(Role {
                 role: role.clone(),
@@ -1017,6 +1078,11 @@ impl ServiceBuilder {
             // Revision 1.1's owner heartbeat key is optional (v2 §3):
             // `start` exposes it or lists it unavailable, once every
             // interface is implemented (`settle_owner_heartbeats`).
+        }
+        // health.v2 §2.10: a contract may bring one of the instance's own
+        // tables of words, or one that differs from another's.
+        if let Some(h) = &self.health {
+            h.retable(self.health_tables());
         }
         Ok(self)
     }
@@ -1818,7 +1884,8 @@ pub struct Service {
     ops: crate::operation::Ops,
     state_qs: BTreeMap<IfaceId, Vec<Arc<QSlot>>>,
     clock: Option<ClockGuard>,
-    /// `health.v1`, when the builder implemented it (`health.v1` §2.3).
+    /// `health.v1` or `health.v2`, when the builder implemented one
+    /// (`health.v1` §2.3, `health.v2` §2.3).
     health: Option<crate::health::Health>,
     /// `config.v1`, when the builder implemented it.
     config_v1: Option<crate::config_v1::Configuration>,
