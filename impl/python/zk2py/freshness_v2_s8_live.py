@@ -526,7 +526,7 @@ def steps12(report: Report, pairing: str, dump: str | None) -> None:
             h = Recorder(hs)
             tw = TokenWatch(hs)
             closers += [h, tw]
-            s = p = None
+            s = p = sn = zn = None
             zw: dict[str, ZWatch] = {}
             ze = None
             total_s = 5.0 + 2.5 + 6.0 + 8.0
@@ -544,6 +544,18 @@ def steps12(report: Report, pairing: str, dump: str | None) -> None:
                 p = fv2.Provider(ps, ADDRESS, [(cs[2].canonical, cs[2].fingerprint, None)], held=[held],
                                  named=held.id, wait_s=0.0)
                 closers += [s, p]
+                # Round 117 (text 0.11 §2.5, "The catalog its owner names"): a third reader
+                # that holds the catalog and is given no word. It starts before its owner,
+                # so it knows no id at its first owner heartbeat, and learns it from the
+                # descriptor that states the put's run.
+                ns_ = live.open_client(r2_ep)
+                closers.append(ns_)
+                sn = fv2.Provider(ns_, ADDRESS, [(c.canonical, c.fingerprint, None) for c in cs], held=[held],
+                                  wait_s=0.0, reread=False)
+                closers.append(sn)
+                # and, beside the reference's owner, zenctl watch given no catalog
+                if owner_impl == "rust" and (BLACKBOX / "zenctl").is_file():
+                    zn = ZWatch(r2_ep, DIAL, "config", None, 6.0)
             else:
                 # S: one watch a collection, each a client of R2; P: pulse.v1's
                 # status, holding pulse.v1's file alone, a client of R1.
@@ -581,6 +593,37 @@ def steps12(report: Report, pairing: str, dump: str | None) -> None:
                                        "lists nothing unavailable",
                          fentry.get("contract") == fv2.standard_contract().fingerprint
                          and not fentry.get("unavailable"), json.dumps(fentry))
+            if sn is not None:
+                # text 0.11 §2.5, "Where the id is" and "Before it knows" (round 117)
+                read = [x for x in sn.answers() if "read" in x.answer]
+                known = [x for x in read if any("refused" not in g for g in x.answer["read"]["groups"])]
+                before = [x for x in read if known and x.arrival_ns < known[0].arrival_ns]
+                runs = sorted({x.stamp.run_hex() for x in read if x.stamp is not None})
+                report.check(pairing, sec, "freshness.v2 0.11 §2.5, \"Where the id is\": a reader that holds the "
+                                           "catalog and is given no word, started before its owner, reads each "
+                                           "group of the puts heard before it knows unknown_catalog, reads its "
+                                           "owner's descriptors once, finds the one that states the puts' run, and "
+                                           "from then on reads every group through the catalog it names",
+                             bool(known) and 1 <= len(before) <= 6
+                             and all(g.get("refused") == "unknown_catalog" for x in before
+                                     for g in x.answer["read"]["groups"])
+                             and all("refused" not in g for x in known for g in x.answer["read"]["groups"])
+                             and sn.naming.reads == 1 and len(runs) == 1 and (d or {}).get("run") == runs[0]
+                             and sn.naming.known.get(runs[0]) == held.id,
+                             f"{len(read)} read, {len(before)} before it knew; {sn.naming.reads} descriptor read; the "
+                             f"descriptor's run {(d or {}).get('run')}, the puts' {runs}, naming {sn.naming.known}")
+            if zn is not None:
+                zn.wait()
+                line = zn.err[0].strip() if zn.err else ""
+                report.check(pairing, sec, "freshness.v2 0.11 §2.5 and §5, zenctl watch given no catalog beside the "
+                                           "reference's owner, on dial.v1's config: no confirmation row, no "
+                                           "heartbeat counted, and one line on stderr that names the host class's "
+                                           "key as not subscribed and says it is no finding about the owner",
+                             not zn.confirmations() and zn.summary().get("heartbeats") == 0 and len(zn.err) == 1
+                             and "no catalog given" in line and "`host` class" in line
+                             and "no finding about the owner" in line,
+                             f"{len(zn.confirmations())} confirmation rows; summary heartbeats "
+                             f"{zn.summary().get('heartbeats')}; stderr {zn.err[:2]}")
 
             # -- H ------------------------------------------------------------------------------
             beats = h.heartbeats()

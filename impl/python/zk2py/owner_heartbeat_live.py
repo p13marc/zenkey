@@ -115,6 +115,10 @@ def run_owner(endpoint: str, catalog_path: str) -> int:
                         o.set_state(words[1], words[2].encode())
                     finally:
                         o._publishers[words[1]] = real
+            elif words[0] == "mute":
+                # a test rig's: the instance's descriptor queryable undeclared, so
+                # that no descriptor answers a GET while the owner keeps putting
+                o._instance_entities[0].undeclare()
             elif words[0] == "report":
                 print("report " + json.dumps({
                     "owner_heartbeats": [[cls, ib.seq, sorted(v)] for cls, ib, v in o.owner_heartbeats_sent],
@@ -360,7 +364,10 @@ def run() -> int:
             # S holds the catalog; N holds none. S seeds a and c, never b.
             s = fv2.Provider(sessions[0], ADDRESS, revs, held=[held], seed=[A, C], wait_s=0.0)
             n = fv2.Provider(sessions[1], ADDRESS, revs, held=[], reread=False, wait_s=0.0)
-            providers += [s, n]
+            # E knows no catalog at its first owner heartbeat (text 0.11 §2.5, "Before it knows"): it reads no
+            # descriptor until one arrives.
+            e = fv2.Provider(sessions[1], ADDRESS, revs, held=[held], reread=False, wait_s=0.0, read_at_start=False)
+            providers += [s, n, e]
             check("step 2: S subscribes to one owner heartbeat key per class its collections have (§2.5 \"Both "
                   "forms\")", sorted(s.keys) == ["host", "link"],
                   json.dumps(s.keys))
@@ -375,6 +382,27 @@ def run() -> int:
             check("step 2: one host owner heartbeat holds a's group alone, b and c having no host collection",
                   len(host) >= 2 and all([g.get("iface") for g in h.answer.get("read", {}).get("groups", [])] == [A]
                                          for h in host), f"{len(host)} heard")
+            # freshness.v2 0.11 §2.5, "Before it knows" and "Where the id is" (F-557's answer, round 117)
+            e_link = [h for h in e.answers("link") if "read" in h.answer]
+            first_known = next((i for i, h in enumerate(e_link) if any("refused" not in g for g in _groups(h))), None)
+            runs = sorted({h.stamp.run_hex() for h in e_link if h.stamp is not None})
+            check("before it knows (text 0.11 §2.5): E, which read no descriptor before its first owner heartbeat, "
+                  "refuses: each group of the puts heard before the id is unknown_catalog, each put still a read "
+                  "one in sequence; it reads its owner's descriptors once for the run, the one that states the "
+                  "put's run, learns the catalog's id there, and from then on reads every group, with no gap "
+                  "between the last put refused and the first read",
+                  first_known is not None and 1 <= first_known <= 3
+                  and all(g.get("refused") == "unknown_catalog" for h in e_link[:first_known] for g in _groups(h))
+                  and all("refused" not in g for h in e_link[first_known:] for g in _groups(h))
+                  and not any(_gap(h) for h in e_link) and e.naming.reads == 1
+                  and len(runs) == 1 and e.naming.known.get(runs[0]) == held.id,
+                  f"{len(e_link)} read, the first {first_known} unknown_catalog; {e.naming.reads} descriptor read; "
+                  f"run {runs} names {e.naming.known}")
+            check("N, which holds no catalog, read its owner's descriptors at its start, knows the id its run "
+                  "names, and asks at no put (\"asks again later, and not at every put\"), where through round "
+                  "116 zk2py's reader that knew no id read again after each owner heartbeat",
+                  n.naming.reads == 0 and n.naming.known.get(runs[0] if runs else "") == held.id,
+                  f"{n.naming.reads} read at a put, over {len(n.answers('link'))} puts")
             # "In a group, an owner MUST set the map bit of no collection of another class."
             on_link = [_sections(h.payload, held, layouts) for h in link]
             on_host = [_sections(h.payload, held, layouts) for h in host]
@@ -513,12 +541,13 @@ class Watch:
     """``zenctl watch``, a black box: the reference's consumer on one
     resource, its ndjson rows and its stderr."""
 
-    def __init__(self, ep: str, iface: str, resource: str, catalog: str | None, for_s: float):
+    def __init__(self, ep: str, iface: str, resource: str, catalog: str | None, for_s: float,
+                 address: str = ADDRESS, extra: tuple[str, ...] = ()):
         from .blackbox import BLACKBOX
 
-        argv = [str(BLACKBOX / "zenctl"), "watch", ADDRESS, iface, resource, "--for", f"{for_s:g}", "--format",
+        argv = [str(BLACKBOX / "zenctl"), "watch", address, iface, resource, "--for", f"{for_s:g}", "--format",
                 "ndjson", "-c", ep, *[a for f in FILES for a in ("--contracts", str(f))],
-                *(["--catalog", catalog] if catalog else [])]
+                *(["--catalog", catalog] if catalog else []), *extra]
         self.p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.rows: list[dict[str, Any]] = []
         self.err: list[str] = []
@@ -639,7 +668,8 @@ def run_reference() -> int:
             watches = {"a": Watch(endpoint, A, "status", path, for_s), "b": Watch(endpoint, B, "config", path, for_s),
                        "c": Watch(endpoint, C, "alarms/{alarm}", path, for_s),
                        "peer": Watch(endpoint, A, "peer/{peer}", path, for_s),
-                       "none": Watch(endpoint, A, "status", None, for_s)}
+                       "none": Watch(endpoint, A, "status", None, for_s),
+                       "none_host": Watch(endpoint, A, "peer/{peer}", None, for_s)}
             s = fv2.Provider(session, ADDRESS, [(c.canonical, c.fingerprint, None) for c in contracts], held=[held],
                              wait_s=0.0)
             sel = f"zk2/{ADDRESS}/freshness.v2/stream/heartbeats/*"
@@ -787,17 +817,53 @@ def run_reference() -> int:
                       f"seq {q}: zk2py {heard.get(payload)}, then gap {mine_q.get('gap')}; zenctl rows "
                       + json.dumps({n: [(r['confirmed'], r['lost'], r.get('diverged')) for r in rows_at[n]]
                                     for n in 'abc'}))
-            # -- a reader given no catalog ---------------------------------------------------
-            wn = watches["none"]
+            # -- a reader given no catalog (freshness.v2 0.11 §2.5 and §5, observer 0.35; round 117) --
+            wn, wh = watches["none"], watches["none_host"]
             kinds = sorted({r.get("row", "?") for r in wn.rows})
-            check("a reader given no catalog: zenctl watch prints no confirmation row, counts no heartbeat in its "
-                  "summary and says nothing on stderr; zk2py's reader given none reads each group unknown_catalog "
+            line = wn.err[0].strip() if wn.err else ""
+            check("a reader given no catalog (freshness.v2 0.11 §2.5 \"A subscriber that holds no catalog … need "
+                  "not subscribe to one\"): zenctl watch on a's status prints no confirmation row and counts no "
+                  "heartbeat in its summary; zk2py's reader given none reads each group unknown_catalog "
                   "(owner_heartbeat_live's N). Neither confirms a member",
-                  "confirmation" not in kinds and wn.summary().get("heartbeats") == 0 and not wn.err,
+                  "confirmation" not in kinds and wn.summary().get("heartbeats") == 0,
                   f"rows {kinds}; summary heartbeats {wn.summary().get('heartbeats')}, lost "
-                  f"{wn.summary().get('heartbeats_lost')}; stderr {wn.err[:2]}")
-            note("zenctl watch with no catalog shows a covered interface exactly as it shows an owner that sends "
-                 "no heartbeat: nothing says its members are unconfirmed, or that a catalog is missing (F-556)")
+                  f"{wn.summary().get('heartbeats_lost')}; exit {wn.p.returncode}")
+            check("and it says so, where through round 116 it said nothing (F-556): one line on stderr, that no "
+                  "heartbeat was read and no catalog given, that the `link` class's owner heartbeat key was not "
+                  "subscribed, that such an owner is heard as one that confirms nothing, and that it is no finding "
+                  "about the owner: §5's \"A tool that subscribed to no owner heartbeat key hears none. It cannot "
+                  "tell an owner that sends them from one that confirms nothing\", and \"no finding about the "
+                  "owner\". It names no catalog's id, which §5 lets a tool name and does not ask",
+                  len(wn.err) == 1 and "no catalog given" in line and "`link` class" in line
+                  and "not subscribed" in line and "confirms nothing" in line and "no finding about the owner" in line
+                  and held.id not in line, f"stderr {wn.err[:3]}")
+            line_h = wh.err[0].strip() if wh.err else ""
+            check("the same reader on a's peer/{peer}, a host collection: the line names the `host` class's key, "
+                  "the one that collection's class has (§2.5 \"one for each class that the collections it follows "
+                  "have\")",
+                  len(wh.err) == 1 and "`host` class" in line_h and "`link` class" not in line_h
+                  and not wh.confirmations("host") and not wh.confirmations("link"), f"stderr {wh.err[:3]}")
+            # the same verb, no catalog, beside an owner that sends heartbeats alone: a heartbeat is read, no line
+            from .owner import Owner
+
+            lone = Owner("lab", "alone", [contracts[1]], connect=endpoint)
+            lone.start()
+            try:
+                lone.set_state(f"zk2/lab/alone/{B}/state/config", b"v1")
+                wl = Watch(endpoint, B, "config", None, 4.0, address="lab/alone")
+                wl.wait()
+            finally:
+                lone.close()
+            beats = [r for r in wl.rows if r.get("row") == "confirmation"]
+            check("beside an owner that sends heartbeats alone, the same verb with no catalog reads the interface's "
+                  "heartbeat, prints its confirmation rows and no such line: the line is drawn only where no "
+                  "heartbeat of the collection was read",
+                  len(beats) >= 2 and not wl.err and wl.summary().get("heartbeats", 0) >= 2,
+                  f"{len(beats)} confirmation rows, summary heartbeats {wl.summary().get('heartbeats')}, stderr "
+                  f"{wl.err[:2]}")
+            note("zenctl watch with no catalog now tells its operator that an owner's confirmations may be out of "
+                 "its reach (F-556, resolved); it reads no descriptor's `catalog`, and by hand it says the same on an "
+                 "address no owner serves: silence, and no verdict (§5)")
             on_key.wait()
             shown = sorted({(r.get("payload", {}).get("as"), r.get("payload", {}).get("declared"),
                             "groups" in json.dumps(r)) for r in on_key.rows if r.get("row") == "sample"})
@@ -859,6 +925,102 @@ def run_reference() -> int:
         router.close()
     failed = [r for r in rows if not r[1]]
     print(f"owner_heartbeat_live --reference: {len(rows) - len(failed)}/{len(rows)}", flush=True)
+    return 1 if failed else 0
+
+
+def run_silent() -> int:
+    """freshness.v2 0.11 §2.5, "The catalog its owner names", beside an owner
+    whose descriptor does not answer (round 117): zk2py's owner under a
+    catalog, sending owner heartbeats, its descriptor queryable undeclared
+    (a test rig's). On the near side, with no face:
+
+    - zk2py's subscriber that holds the catalog and was given no word reads
+      the descriptors, gets no reply, and reads each group
+      ``unknown_catalog``: "A read that fails names no catalog … The
+      subscriber asks again later, and not at every put. Until an answer
+      comes, each group is ``unknown_catalog``";
+    - zk2py's subscriber given the deployment's word reads every group;
+    - the reference's consumer, ``zenctl watch --catalog`` (a black box):
+      what it prints. Its entry says "The deployment's word after silence
+      … It reads through the catalog it was provisioned" (F-574)."""
+    from . import live
+    from .blackbox import BLACKBOX, workdir
+    from .live_interop import _r1
+
+    rows: list[tuple[str, bool, str]] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> bool:
+        rows.append((name, bool(ok), detail))
+        print(f"{'PASS' if ok else 'FAIL'} {name}" + (f": {detail}" if detail else ""), flush=True)
+        return bool(ok)
+
+    contracts = _contracts()
+    held = cat.read(json.dumps(catalog_doc()))
+    router, endpoint, _ = _r1()
+    sessions = [live.open_client(endpoint) for _ in range(2)]
+    child = None
+    providers: list[Any] = []
+    try:
+        with workdir("zk2py-ohb-silent-") as tmp:
+            path = str(Path(tmp) / "catalog.json")
+            Path(path).write_text(json.dumps(catalog_doc()))
+            child = Child(endpoint, path)
+            if not check("the owner process starts", child.wait_for("ready ", 60) is not None,
+                         "\n".join(child.err[-5:])):
+                return 1
+            for k in [STATUS, CONFIG, *PEERS, *ALARMS]:
+                child.command(f"put {k} v1")
+            child.command("mute")
+            time.sleep(0.3)
+            answered = fv2.descriptors_of(sessions[0], ADDRESS, 1.0)
+            check("the rig: the owner's descriptor answers no GET, and its owner heartbeats go on",
+                  answered == [], f"{len(answered)} descriptors")
+            revs = [(c.canonical, c.fingerprint, None) for c in contracts]
+            window, again = 9.0, 2.0
+            p0 = fv2.Provider(sessions[0], ADDRESS, revs, held=[held], seed=[A, B, C], wait_s=0.0, reread=False,
+                              get_timeout=0.5, ask_again_s=again)
+            pw = fv2.Provider(sessions[1], ADDRESS, revs, held=[held], named=held.id, seed=[A, B, C], wait_s=0.0,
+                              reread=False)
+            providers += [p0, pw]
+            w = Watch(endpoint, A, "status", path, window, extra=("--timeout", "1")) \
+                if (BLACKBOX / "zenctl").is_file() else None
+            time.sleep(window)
+            h0 = [h for h in p0.answers("link") if "read" in h.answer]
+            check("zk2py's subscriber, holding the catalog and given no word (§2.5 \"A read that fails names no "
+                  "catalog … Until an answer comes, each group is `unknown_catalog`\"): every owner heartbeat a "
+                  "read one, every group unknown_catalog, nothing confirmed by one",
+                  len(h0) >= 6 and all(g.get("refused") == "unknown_catalog" for h in h0 for g in _groups(h))
+                  and not any(sub.last_conf for sub in p0.subs.values()), f"{len(h0)} read")
+            check("and it asks again later, not at every put: a descriptor read at the first put of the run and "
+                  f"one each {again:g} s after a failure, zk2py's bound for this run",
+                  2 <= p0.naming.reads <= int(window / again) + 2 and p0.naming.reads < len(h0),
+                  f"{p0.naming.reads} reads over {len(h0)} puts in {window:g} s")
+            hw = [h for h in pw.answers("link") if "read" in h.answer]
+            check("zk2py's subscriber given the deployment's word (§2.5 \"Where no descriptor answers … the "
+                  "subscriber takes the deployment's word\") reads every group through it, and reads no descriptor",
+                  len(hw) >= 6 and all("refused" not in g for h in hw for g in _groups(h))
+                  and any(sub.last_conf for sub in pw.subs.values()) and pw.naming.reads == 0, f"{len(hw)} read")
+            if w is not None:
+                w.wait()
+                conf = w.confirmations("link")
+                confirmed = [q for q, r in sorted(conf.items()) if r.get("confirmed") == [STATUS]]
+                print("NOTE the reference's consumer (zenctl watch --catalog, on the near side, its descriptor read "
+                      f"unanswered): {len(conf)} confirmation rows on the link key, {len(confirmed)} confirming "
+                      f"status; summary heartbeats {w.summary().get('heartbeats')}; stderr {w.err[:2]}", flush=True)
+                check("the reference's consumer beside the same owner reads its groups through the catalog it was "
+                      "given, as its entry says of silence (\"The deployment's word after silence\"): confirmation "
+                      "rows, where zk2py's reads each group unknown_catalog. The text gives the case both outcomes "
+                      "(F-574)", len(confirmed) >= 3, f"{len(confirmed)} rows confirm status")
+    finally:
+        for p in providers:
+            p.close()
+        if child is not None:
+            child.close()
+        for x in sessions:
+            x.close()
+        router.close()
+    failed = [r for r in rows if not r[1]]
+    print(f"owner_heartbeat_live --silent: {len(rows) - len(failed)}/{len(rows)}", flush=True)
     return 1 if failed else 0
 
 
@@ -972,6 +1134,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.owner_heartbeat_live", description=__doc__.split("\n")[0])
     ap.add_argument("--forms", action="store_true",
                     help="another form on a heartbeat's own key, beside each owner's heartbeats (core §7.5)")
+    ap.add_argument("--silent", action="store_true",
+                    help="an owner whose descriptor does not answer: zk2py's subscribers and zenctl watch (a black box)")
     ap.add_argument("--owner", nargs=2, metavar=("ENDPOINT", "CATALOG"), help="run the owner process")
     ap.add_argument("--reference", action="store_true",
                     help="zk2py's owner with the reference's readers, zenctl watch and zenctl echo (black boxes)")
@@ -982,6 +1146,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_reference()
     if args.forms:
         return run_forms()
+    if args.silent:
+        return run_silent()
     return run()
 
 
