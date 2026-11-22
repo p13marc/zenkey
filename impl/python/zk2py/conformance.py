@@ -6623,7 +6623,8 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  60, 1074, 1074, 294, 30, []]))
     out.append(("link.v2 0.22 §2.9, \"A collection the revisions disagree on is read `host`\" (F-551's answer, the "
                 "plan's half), and its evidence (F-573): §2.16's warning it bears on cites `[F: v2/plan.json]`, and "
-                "no case of v2/plan.json's 49 draws exposure_disagrees, so none holds such a collection: a plan "
+                "no case of v2/plan.json's 49, 50 since link.v2 0.23's case 49 (round 118), draws exposure_disagrees, "
+                "so none holds such a collection: a plan "
                 "that counted it `link`, for the horizon or for the longest put, passes the file whole; link.v1's "
                 "plan.json draws the code, in cases that weigh no owner heartbeat",
                 [len(plan), [i for i, c in enumerate(plan) if "exposure_disagrees" in codes(c["expect"])],
@@ -6634,7 +6635,7 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "heartbeat is above `batch_bytes` (`block_over_batch`). `[F: v2/plan.json]`")
                 + missing(llog, "- **Now:** the plan reads it `host`, for the horizon and for the longest put. Both "
                                 "implementations do."),
-                [49, [], True]))
+                [50, [], True]))
 
     # -- scope/faces.json's four cases, v2/transport.json's five, carries.json's three ------
     faces = _load_json(root / "scope" / "faces.json")["cases"]
@@ -8052,7 +8053,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     crossing = [(i, f) for i, c in enumerate(plan2) for f in faces(c) if any(e.startswith(HB) for e in evidence(f))]
     v1_cases = sorted({i for i, _ in crossing if plan2[i]["expect"]["transport"] is None})
     out.append(("link.v2 0.19's entry, its evidence: v2/plan.json held 48 cases then, 49 since link.v2 0.22's case "
-                "48 (round 117); fourteen faces let a heartbeat cross, in the twelve cases the entry names and in "
+                "48 (round 117) and 50 since 0.23's case 49 (round 118); fourteen faces let a heartbeat cross, in the twelve cases the entry names and in "
                 "cases 46 and 47, and case 48's one more; each under a link.v2 policy "
                 "denies the host key by name, nothing under heartbeats/link, and lists the link key as evidence; "
                 "case 10, a link.v1 policy, denies both classes' and lists none; case 6 draws horizon_under_face at "
@@ -8064,7 +8065,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                 for x in f["findings"])]]
                 + missing(llog, "**Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8, 9, 10, 12, 19, "
                                 "20, 22, 23, 44 and 45."),
-                [49, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48], 14, [10],
+                [50, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48], 14, [10],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/host/**",), True)],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/**",), False)], [6]]))
     c46 = plan2[46]
@@ -8714,7 +8715,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
         return next((n for n, word in enumerate(("RF", "SF7", "SF9", "SF12", "SBD")) if word in mm.group(1)), None)
 
     out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases then, 48 since "
-                "0.19 (round 113) and 49 since 0.22 (round 117), v2/transport.json 27 then and 32 since 0.22; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
+                "0.19 (round 113), 49 since 0.22 (round 117) and 50 since 0.23 (round 118), v2/transport.json 27 then and 32 since 0.22; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
                 "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
                 "where case 5 at 240,000 ms does: §2.16's inequality pinned on both sides; transport.json's cases "
                 "24 to 26 state a null among the eight keys, the lease and twice routing/interests/timeout, drawing "
@@ -8724,7 +8725,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  lease_of(case(5)), draws(case(5)), with_null,
                  [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
                 + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
-                [49, 32, True, False, False, True, 240_001, False, 240_000, True,
+                [50, 32, True, False, False, True, 240_001, False, 240_000, True,
                  {24: ["transport/link/tx/lease"], 25: ["routing/interests/timeout"],
                   26: ["routing/interests/timeout"]},
                  [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
@@ -8732,10 +8733,10 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     modem = [i for i, c in enumerate(plan) if "zm-1.10.2-r1" in c["policy"] and "modem.v3" in c["policy"]]
     out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
                 "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
-                "then SBD, in that order, of 46 then, 48 since 0.19 and 49 since 0.22",
+                "then SBD, in that order, of 46 then, 48 since 0.19, 49 since 0.22 and 50 since 0.23",
                 ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
                  [medium(plan[i]["note"]) for i in modem], len(plan)],
-                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 49]))
+                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 50]))
     zm = repo / "examples" / "zk2" / "zenoh-modem"
     zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
     # link.md's notes are block quotes: their lines' "> " is no word of theirs.
@@ -9001,11 +9002,11 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out.append(("link.v2 0.17's evidence as zk2py counts it: keep_alive_not_suppressed is drawn by 6, 15 and 19, "
                 "above their intervals as before, and by the eleven the entry names, each at its interval; "
-                "v2/plan.json held 45 cases then, 46 since 0.18, 48 since 0.19 (round 113) and 49 since 0.22 (round "
-                "117)",
+                "v2/plan.json held 45 cases then, 46 since 0.18, 48 since 0.19 (round 113), 49 since 0.22 (round "
+                "117) and 50 since 0.23 (round 118)",
                 [len(plan), [i for i, c in enumerate(plan) if draws(c)]]
                 + missing(log, "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
-                [49, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
+                [50, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
     # review-bot's note 5 on #1121: stamps() reads a shape the text does not
     # name as stamping. No spec case hits it; zk2py's own cases pin it.
     shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731
