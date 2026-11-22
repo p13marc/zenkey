@@ -1,0 +1,875 @@
+{
+  "description": "health.v2 §2.5, §5: \"is this service's clock ahead?\". Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `heartbeats`: a put on the heartbeat key covering health.v2, its `payload` in hex (core §7.5's form 6: CH, the run, the seq, the body, read with the standard contract's one collection, state/status, of one member), the tag of the revision the reader holds (`holds_tag`; revision 2.0's is 1) and the stamp of the last heartbeat it read on that key (`last_read`, <run>/<seq>, or null for none) -> {read: \"instant\" | \"ahead\" | \"unknown\"}, the time of a read heartbeat (freshness.v2 §2.5), or {unread: \"revision\" | \"refused\" | \"older\"}, a heartbeat its steps 1 to 3 stop, which counts for nothing. The sections play no part: a cleared bit, a digest that is not the view's and a map bit of 0 change nothing. `cases`: what one reader heard of one service, in arrival order -> the answer. presence, descriptor and face are judgements.json's. heard: \"heartbeat\" (a read heartbeat covering health.v2, or a read owner heartbeat of the host class, whose time is an instant), \"heartbeat_ahead\" (the same, its time the ahead time), \"heartbeat_unknown\" (the same, its time unknown), \"heartbeat_unread\" (a heartbeat or an owner heartbeat not read), \"status_put\", \"status_deleted\", \"clock_ahead\" (a stream/faults sample whose code is 1, whatever its level and its argument) or \"fault\" (one with any other code). The last read heartbeat answers: heartbeat_ahead yes, `ahead`; heartbeat no, `confirmed`; heartbeat_unknown unobservable, `time_unknown`; none read unobservable, `nothing_heard`. Nothing else answers: a clock_ahead fault is an occurrence, published once, and says nothing of whether the hold lasts. expect.answer is yes, no, unobservable or not_asked (absent, `absent`; a descriptor that lists neither major, `not_listed`). expect.major is judgements.json's: under 1 the case expects nothing more, the question being health.v1's. `heartbeat` gives what the `heartbeats` payloads were built from: the key, the collection, its one member's key and stamp, and that member's digest (core §7.5).",
+  "heartbeat": {
+    "key": "zk2/lab/svc/freshness.v2/stream/heartbeat/health.v2",
+    "collection": "state/status",
+    "member": "zk2/lab/svc/health.v2/state/status",
+    "stamp": "0003/5",
+    "digest": "bdec5ddb"
+  },
+  "heartbeats": [
+    {
+      "note": "the heartbeat covering health.v2 on a healthy day: an instant, the status vouched for. 16 bytes: CH 0xc1, the run 0003, the seq 41, and a body of 76 bits",
+      "holds_tag": 1,
+      "last_read": null,
+      "payload": "c10003000029019980a71ef7bd8bbb70",
+      "expect": {
+        "read": "instant"
+      }
+    },
+    {
+      "note": "the same while the owner's clock guard holds: the ahead time, the status still vouched for (§2.5)",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002affffffffffb7bd8bbb70",
+      "expect": {
+        "read": "ahead"
+      }
+    },
+    {
+      "note": "an owner whose clock reads no instant the epoch codes: the unknown time, all 42 bits set",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002afffffffffff7bd8bbb70",
+      "expect": {
+        "read": "unknown"
+      }
+    },
+    {
+      "note": "the ahead time with the status's bit clear: the sections play no part in the clock question",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002affffffffffb7bd8bbb60",
+      "expect": {
+        "read": "ahead"
+      }
+    },
+    {
+      "note": "the ahead time over a digest that is not the reader's view's: still a read heartbeat, and its time counts",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002affffffffffbcf6c0f030",
+      "expect": {
+        "read": "ahead"
+      }
+    },
+    {
+      "note": "the ahead time with the status's map bit 0: 43 bits, 6 bytes of body",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002affffffffff80",
+      "expect": {
+        "read": "ahead"
+      }
+    },
+    {
+      "note": "the first heartbeat a late joiner hears, the ahead time: nothing read before it",
+      "holds_tag": 1,
+      "last_read": null,
+      "payload": "c1000300004dffffffffffb7bd8bbb70",
+      "expect": {
+        "read": "ahead"
+      }
+    },
+    {
+      "note": "a heartbeat of another revision, CH's tag 2: not read, whatever its time",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c2000300002affffffffffb7bd8bbb70",
+      "expect": {
+        "unread": "revision"
+      }
+    },
+    {
+      "note": "1022 ms under a known second: an unused code, the body refused, not read",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002a00000e10ffb7bd8bbb70",
+      "expect": {
+        "unread": "refused"
+      }
+    },
+    {
+      "note": "an older heartbeat, its seq not after the last read one's: not read",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c10003000029ffffffffffb7bd8bbb70",
+      "expect": {
+        "unread": "older"
+      }
+    },
+    {
+      "note": "an older one that arrives late, seq 40 after 41",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c10003000028019980a71ef7bd8bbb70",
+      "expect": {
+        "unread": "older"
+      }
+    },
+    {
+      "note": "a heartbeat after a gap, seq 44 after 41: read. A gap is a lost delivery to the members' ages, and nothing to the clock question",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002cffffffffffb7bd8bbb70",
+      "expect": {
+        "read": "ahead"
+      }
+    },
+    {
+      "note": "a heartbeat of another run: read, and the sequence starts again",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c10004000000019980a71ef7bd8bbb70",
+      "expect": {
+        "read": "instant"
+      }
+    },
+    {
+      "note": "a body cut after its time: refused",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002affffffffff",
+      "expect": {
+        "unread": "refused"
+      }
+    },
+    {
+      "note": "a pad bit set after the ahead time's sections: refused",
+      "holds_tag": 1,
+      "last_read": "0003/41",
+      "payload": "c1000300002affffffffffb7bd8bbb71",
+      "expect": {
+        "unread": "refused"
+      }
+    },
+    {
+      "note": "under a 32-bit run: CH 0xd1",
+      "holds_tag": 1,
+      "last_read": "0000002a/41",
+      "payload": "d10000002a00002affffffffffb7bd8bbb70",
+      "expect": {
+        "read": "ahead"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "note": "nothing heard: the faults' silence is their normal state, and no heartbeat was read",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    },
+    {
+      "note": "a heartbeat whose time is an instant: its guard did not hold when it wrote it",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "a heartbeat whose time is ahead, and nothing else: one heartbeat answers alone (§2.5)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "a late joiner during the hold, the fault published before it joined: its first heartbeat answers",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_ahead",
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "the hold begins: an instant, the fault once, then each heartbeat ahead",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat",
+        "clock_ahead",
+        "heartbeat_ahead",
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "the fault alone, before any heartbeat: an occurrence, which answers nothing of the question",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    },
+    {
+      "note": "an instant, then the fault, before the next heartbeat: the last heartbeat read still answers. The next one, within a period, carries the ahead time",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat",
+        "clock_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "the fault lost, the heartbeats ahead: yes all the same",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat",
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "the guard released: the next heartbeat carries an instant again",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "heartbeat_ahead",
+        "heartbeat"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "a second hold, with a fault of its own",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "heartbeat_ahead",
+        "heartbeat",
+        "clock_ahead",
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "the fault, then an instant: the hold ended before the heartbeat was written",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "heartbeat"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "an old fault never keeps the answer at yes: the heartbeats since carry instants",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "heartbeat_ahead",
+        "heartbeat",
+        "heartbeat",
+        "heartbeat"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "a heartbeat whose time is unknown: the owner's clock reads no instant, which says nothing of ahead",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_unknown"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "time_unknown"
+      }
+    },
+    {
+      "note": "an instant, then the unknown time",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat",
+        "heartbeat_unknown"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "time_unknown"
+      }
+    },
+    {
+      "note": "the unknown time, then an instant",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_unknown",
+        "heartbeat"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "ahead, then unknown: the guard released on a clock the epoch does not code",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_ahead",
+        "heartbeat_unknown"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "time_unknown"
+      }
+    },
+    {
+      "note": "the fault, then the unknown time",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "clock_ahead",
+        "heartbeat_unknown"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "time_unknown"
+      }
+    },
+    {
+      "note": "a put of the status while the guard holds: the guard does not hold it, and it says nothing of the clock",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_ahead",
+        "status_put"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "a put of the status alone",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "status_put"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    },
+    {
+      "note": "a delete of the status alone says nothing of the clock",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "status_deleted"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    },
+    {
+      "note": "a fault of another code says nothing of the clock",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "fault"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    },
+    {
+      "note": "another code after an instant",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat",
+        "fault"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "another code after the ahead time",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_ahead",
+        "fault"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "a heartbeat that was not read, another revision's or a refused one: it counts for nothing, whatever its time",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_unread"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    },
+    {
+      "note": "an instant, then a heartbeat not read",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat",
+        "heartbeat_unread"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "ahead, then a heartbeat not read",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_ahead",
+        "heartbeat_unread"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "health.v2 in the tokenless set: the token plays no part",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": false
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "absent: not asked, as the first question's, whatever was heard before",
+      "presence": "absent",
+      "descriptor": null,
+      "face": null,
+      "heard": [
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": null,
+        "answer": "not_asked",
+        "reason": "absent"
+      }
+    },
+    {
+      "note": "the descriptor lists neither major: not asked",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "tc.v1"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat"
+      ],
+      "expect": {
+        "major": null,
+        "answer": "not_asked",
+        "reason": "not_listed"
+      }
+    },
+    {
+      "note": "the descriptor lists health.v1 and not health.v2: health.v1's question, where the ahead time answers nothing alone",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v1"
+        ],
+        "token": true
+      },
+      "face": null,
+      "heard": [
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": 1
+      }
+    },
+    {
+      "note": "the descriptor not read: a heartbeat read on its key is still its owner's word",
+      "presence": "present",
+      "descriptor": null,
+      "face": null,
+      "heard": [
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": null,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "the descriptor not read, and nothing heard",
+      "presence": "present",
+      "descriptor": null,
+      "face": null,
+      "heard": [],
+      "expect": {
+        "major": null,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    },
+    {
+      "note": "its token not seen in a read possibly incomplete, and a heartbeat read",
+      "presence": "incomplete",
+      "descriptor": null,
+      "face": null,
+      "heard": [
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": null,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "across a face that lets the status cross: its heartbeat crossed, and the answer with it (§2.8)",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": true
+      },
+      "heard": [
+        "heartbeat_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "yes",
+        "reason": "ahead"
+      }
+    },
+    {
+      "note": "across that face on a healthy day",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": true
+      },
+      "heard": [
+        "heartbeat"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "no",
+        "reason": "confirmed"
+      }
+    },
+    {
+      "note": "across a face closed to the status, its faults crossing: the occurrence is seen, and the question is unobservable, never yes for good",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": false
+      },
+      "heard": [
+        "clock_ahead"
+      ],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    },
+    {
+      "note": "across a face closed to the status, nothing heard: never a no",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": false
+      },
+      "heard": [],
+      "expect": {
+        "major": 2,
+        "answer": "unobservable",
+        "reason": "nothing_heard"
+      }
+    }
+  ]
+}

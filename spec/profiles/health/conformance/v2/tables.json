@@ -1,0 +1,1612 @@
+{
+  "description": "health.v2 §2.10, §4: words and their tables. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `profile`: the profile's three tables as this text has them, by kind (`reasons`, a status's reason; `details`, a check's detail; `codes`, a fault's code): the name at index i is the word i + 1. `declarations`: a contract's `uses` and each resource's resolved annotations, by kind token and template -> for each kind, the table the contract holds: a list, null where no resource carries the key (`health.reasons`, `health.details`, `health.codes`), or {invalid: reason}, the first of `not_used` (a resource carries the key, and uses does not list health.v2), `value` (a resource's value is not a list of at most 31 names, each [a-z][a-z0-9_]*, none twice) and `disagrees` (two resources carry two different lists). An invalid declaration holds no table. `instances`: the revisions an instance's descriptor `names`, and the tables of each revision the reader `holds` (as declarations reads them, an invalid one null) -> for each kind, the instance's table: the one list among the named revisions the reader holds, null where none holds one, or \"differ\" where two hold two different lists, which is no table. A revision that is held and not named adds nothing. `writes`: a kind, the word an owner has (a name, or null for none) and its instance's `own` table of that kind (null for none) -> the number it writes: 0 for no word, the profile's number, 32 plus the index in its own table, or \"out_of_range\". `reads`: a kind, a number (or \"out_of_range\") and the instance's `own` table as the reader holds it (null for none) -> {none: true} for 0; {name, of: \"profile\"} or {name, of: \"service\"}; {number} where no table in hand names it; {out_of_range: true}. `growth`: a table in one revision and in the next -> `same`, `appended` (the old list is a prefix of the new, so every number keeps its word) or `moved` (some number names another word, or none).",
+  "profile": {
+    "reasons": [
+      "starting",
+      "serving",
+      "stopping",
+      "check",
+      "upstream_lost",
+      "fallback",
+      "backlog",
+      "misconfigured"
+    ],
+    "details": [
+      "ok",
+      "unreachable",
+      "timeout",
+      "refused",
+      "cannot_run"
+    ],
+    "codes": [
+      "clock_ahead"
+    ]
+  },
+  "declarations": [
+    {
+      "note": "a contract that writes the three keys once, on [defaults]: every resource carries them",
+      "uses": [
+        "health.v2",
+        "freshness.v2"
+      ],
+      "resources": {
+        "state/links/{link}": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "health.details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "health.codes": [
+            "tc_netns_restarted"
+          ]
+        },
+        "stream/rates": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "health.details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "health.codes": [
+            "tc_netns_restarted"
+          ]
+        },
+        "operation/reset": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "health.details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "health.codes": [
+            "tc_netns_restarted"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": [
+          "tc_netns_gone",
+          "tc_qdisc_missing",
+          "tc_probe_stale"
+        ],
+        "details": [
+          "tc_no_route",
+          "tc_loss_high"
+        ],
+        "codes": [
+          "tc_netns_restarted"
+        ]
+      }
+    },
+    {
+      "note": "one key alone: the other two kinds have no table",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/links/{link}": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ]
+        },
+        "stream/rates": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": [
+          "tc_netns_gone",
+          "tc_qdisc_missing",
+          "tc_probe_stale"
+        ],
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "a contract that writes none",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/links/{link}": {
+          "freshness.ttl_s": 60
+        },
+        "stream/rates": {}
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "the key on one resource only: a resource that does not carry it takes no part",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/links/{link}": {
+          "health.codes": [
+            "tc_netns_restarted"
+          ]
+        },
+        "stream/rates": {}
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": [
+          "tc_netns_restarted"
+        ]
+      }
+    },
+    {
+      "note": "an empty list is a table that names nothing",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.details": []
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": [],
+        "codes": null
+      }
+    },
+    {
+      "note": "31 names, the most a table holds",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "w0",
+            "w1",
+            "w2",
+            "w3",
+            "w4",
+            "w5",
+            "w6",
+            "w7",
+            "w8",
+            "w9",
+            "w10",
+            "w11",
+            "w12",
+            "w13",
+            "w14",
+            "w15",
+            "w16",
+            "w17",
+            "w18",
+            "w19",
+            "w20",
+            "w21",
+            "w22",
+            "w23",
+            "w24",
+            "w25",
+            "w26",
+            "w27",
+            "w28",
+            "w29",
+            "w30"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": [
+          "w0",
+          "w1",
+          "w2",
+          "w3",
+          "w4",
+          "w5",
+          "w6",
+          "w7",
+          "w8",
+          "w9",
+          "w10",
+          "w11",
+          "w12",
+          "w13",
+          "w14",
+          "w15",
+          "w16",
+          "w17",
+          "w18",
+          "w19",
+          "w20",
+          "w21",
+          "w22",
+          "w23",
+          "w24",
+          "w25",
+          "w26",
+          "w27",
+          "w28",
+          "w29",
+          "w30"
+        ],
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "32 names: one more than the numbers 32 to 62 hold",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "w0",
+            "w1",
+            "w2",
+            "w3",
+            "w4",
+            "w5",
+            "w6",
+            "w7",
+            "w8",
+            "w9",
+            "w10",
+            "w11",
+            "w12",
+            "w13",
+            "w14",
+            "w15",
+            "w16",
+            "w17",
+            "w18",
+            "w19",
+            "w20",
+            "w21",
+            "w22",
+            "w23",
+            "w24",
+            "w25",
+            "w26",
+            "w27",
+            "w28",
+            "w29",
+            "w30",
+            "w31"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "value"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "a name twice",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "tc_a",
+            "tc_b",
+            "tc_a"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "value"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "a name in capitals",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "tc_a",
+            "TC_B"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "value"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "a name with a space: v1's free text is no name",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.details": [
+            "no route"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": {
+          "invalid": "value"
+        },
+        "codes": null
+      }
+    },
+    {
+      "note": "a name that starts with a digit",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.codes": [
+            "1st"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": {
+          "invalid": "value"
+        }
+      }
+    },
+    {
+      "note": "the empty name",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.codes": [
+            ""
+          ]
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": {
+          "invalid": "value"
+        }
+      }
+    },
+    {
+      "note": "a name that ends with a newline: the form is the whole name's",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.codes": [
+            "tc_netns_restarted\n"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": {
+          "invalid": "value"
+        }
+      }
+    },
+    {
+      "note": "a string, not a list",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": "tc_netns_gone"
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "value"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "a list holding a number",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "tc_a",
+            7
+          ]
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "value"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "two resources carry two lists, one a prefix of the other",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ]
+        },
+        "state/b": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "disagrees"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "two resources carry the same names in another order",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ]
+        },
+        "stream/b": {
+          "health.details": [
+            "tc_loss_high",
+            "tc_no_route"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": {
+          "invalid": "disagrees"
+        },
+        "codes": null
+      }
+    },
+    {
+      "note": "value before disagrees: one resource's list is no table, and the two differ",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ]
+        },
+        "state/b": {
+          "health.reasons": [
+            "Bad Name"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "value"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "the key in a contract that does not list health.v2: not_used, whatever its value",
+      "uses": [
+        "freshness.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "not_used"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "the key in a contract that lists health.v1: that major defines no key",
+      "uses": [
+        "health.v1"
+      ],
+      "resources": {
+        "state/a": {
+          "health.codes": [
+            "tc_netns_restarted"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": {
+          "invalid": "not_used"
+        }
+      }
+    },
+    {
+      "note": "not_used before value",
+      "uses": [],
+      "resources": {
+        "state/a": {
+          "health.reasons": "x y"
+        }
+      },
+      "expect": {
+        "reasons": {
+          "invalid": "not_used"
+        },
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "each key is read alone: one valid, one invalid, one absent",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "health.details": [
+            "Bad"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": [
+          "tc_netns_gone",
+          "tc_qdisc_missing",
+          "tc_probe_stale"
+        ],
+        "details": {
+          "invalid": "value"
+        },
+        "codes": null
+      }
+    },
+    {
+      "note": "a name of the profile's own table is a valid name: a writer still writes the profile's number for it",
+      "uses": [
+        "health.v2"
+      ],
+      "resources": {
+        "state/a": {
+          "health.reasons": [
+            "starting",
+            "tc_netns_gone"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": [
+          "starting",
+          "tc_netns_gone"
+        ],
+        "details": null,
+        "codes": null
+      }
+    }
+  ],
+  "instances": [
+    {
+      "note": "one of the instance's contracts holds the tables: health.v2's own revision holds none",
+      "names": [
+        "health.v2@b447",
+        "tc.v1@1111"
+      ],
+      "holds": {
+        "health.v2@b447": {
+          "reasons": null,
+          "details": null,
+          "codes": null
+        },
+        "tc.v1@1111": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": [
+            "tc_netns_restarted"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": [
+          "tc_netns_gone",
+          "tc_qdisc_missing",
+          "tc_probe_stale"
+        ],
+        "details": [
+          "tc_no_route",
+          "tc_loss_high"
+        ],
+        "codes": [
+          "tc_netns_restarted"
+        ]
+      }
+    },
+    {
+      "note": "no contract holds one",
+      "names": [
+        "health.v2@b447",
+        "tc.v1@2222"
+      ],
+      "holds": {
+        "health.v2@b447": {
+          "reasons": null,
+          "details": null,
+          "codes": null
+        },
+        "tc.v1@2222": {
+          "reasons": null,
+          "details": null,
+          "codes": null
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "two contracts hold the same lists",
+      "names": [
+        "tc.v1@1111",
+        "tcaux.v1@3333"
+      ],
+      "holds": {
+        "tc.v1@1111": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": [
+            "tc_netns_restarted"
+          ]
+        },
+        "tcaux.v1@3333": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": [
+            "tc_netns_restarted"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": [
+          "tc_netns_gone",
+          "tc_qdisc_missing",
+          "tc_probe_stale"
+        ],
+        "details": [
+          "tc_no_route",
+          "tc_loss_high"
+        ],
+        "codes": [
+          "tc_netns_restarted"
+        ]
+      }
+    },
+    {
+      "note": "two contracts hold two lists of reasons: none, and the owner writes out_of_range. The other kinds stand",
+      "names": [
+        "tc.v1@1111",
+        "tcaux.v1@4444"
+      ],
+      "holds": {
+        "tc.v1@1111": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": [
+            "tc_netns_restarted"
+          ]
+        },
+        "tcaux.v1@4444": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": null
+        }
+      },
+      "expect": {
+        "reasons": "differ",
+        "details": [
+          "tc_no_route",
+          "tc_loss_high"
+        ],
+        "codes": [
+          "tc_netns_restarted"
+        ]
+      }
+    },
+    {
+      "note": "a revision the descriptor names and the reader does not hold adds no table",
+      "names": [
+        "health.v2@b447",
+        "tc.v1@1111"
+      ],
+      "holds": {
+        "health.v2@b447": {
+          "reasons": null,
+          "details": null,
+          "codes": null
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "a revision the reader holds and the descriptor does not name adds none: never another revision's table",
+      "names": [
+        "health.v2@b447",
+        "tc.v1@5555"
+      ],
+      "holds": {
+        "health.v2@b447": {
+          "reasons": null,
+          "details": null,
+          "codes": null
+        },
+        "tc.v1@1111": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": [
+            "tc_netns_restarted"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "the reader holds the named revision and an earlier one of the same interface, whose list differs: only the named one is read",
+      "names": [
+        "tc.v1@1111"
+      ],
+      "holds": {
+        "tc.v1@1111": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": [
+            "tc_netns_restarted"
+          ]
+        },
+        "tc.v1@0000": {
+          "reasons": [
+            "tc_probe_stale",
+            "tc_qdisc_missing",
+            "tc_netns_gone"
+          ],
+          "details": null,
+          "codes": null
+        }
+      },
+      "expect": {
+        "reasons": [
+          "tc_netns_gone",
+          "tc_qdisc_missing",
+          "tc_probe_stale"
+        ],
+        "details": [
+          "tc_no_route",
+          "tc_loss_high"
+        ],
+        "codes": [
+          "tc_netns_restarted"
+        ]
+      }
+    },
+    {
+      "note": "a contract whose declaration was invalid holds none, and takes no part",
+      "names": [
+        "tc.v1@6666",
+        "tcaux.v1@3333"
+      ],
+      "holds": {
+        "tc.v1@6666": {
+          "reasons": null,
+          "details": null,
+          "codes": null
+        },
+        "tcaux.v1@3333": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": [
+            "tc_netns_restarted"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": [
+          "tc_netns_gone",
+          "tc_qdisc_missing",
+          "tc_probe_stale"
+        ],
+        "details": [
+          "tc_no_route",
+          "tc_loss_high"
+        ],
+        "codes": [
+          "tc_netns_restarted"
+        ]
+      }
+    },
+    {
+      "note": "no descriptor and no deployment's word: no revision named, so no table",
+      "names": [],
+      "holds": {
+        "tc.v1@1111": {
+          "reasons": [
+            "tc_netns_gone",
+            "tc_qdisc_missing",
+            "tc_probe_stale"
+          ],
+          "details": [
+            "tc_no_route",
+            "tc_loss_high"
+          ],
+          "codes": [
+            "tc_netns_restarted"
+          ]
+        }
+      },
+      "expect": {
+        "reasons": null,
+        "details": null,
+        "codes": null
+      }
+    }
+  ],
+  "writes": [
+    {
+      "note": "no word given",
+      "kind": "reasons",
+      "word": null,
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": 0
+    },
+    {
+      "note": "the profile's first reason",
+      "kind": "reasons",
+      "word": "starting",
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": 1
+    },
+    {
+      "note": "the profile's last reason",
+      "kind": "reasons",
+      "word": "misconfigured",
+      "own": null,
+      "expect": 8
+    },
+    {
+      "note": "raised to its worst check's level",
+      "kind": "reasons",
+      "word": "check",
+      "own": null,
+      "expect": 4
+    },
+    {
+      "note": "the service's own first reason",
+      "kind": "reasons",
+      "word": "tc_netns_gone",
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": 32
+    },
+    {
+      "note": "the service's own third reason",
+      "kind": "reasons",
+      "word": "tc_probe_stale",
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": 34
+    },
+    {
+      "note": "the same word with no table of its own: out_of_range, and the word stays in the owner's log",
+      "kind": "reasons",
+      "word": "tc_netns_gone",
+      "own": null,
+      "expect": "out_of_range"
+    },
+    {
+      "note": "free text, as health.v1 carried: no table names it",
+      "kind": "reasons",
+      "word": "upstream lost",
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": "out_of_range"
+    },
+    {
+      "note": "a detail's name given as a reason: each kind has its own tables",
+      "kind": "reasons",
+      "word": "timeout",
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": "out_of_range"
+    },
+    {
+      "note": "a name in both tables: the profile's number",
+      "kind": "reasons",
+      "word": "starting",
+      "own": [
+        "starting",
+        "tc_netns_gone"
+      ],
+      "expect": 1
+    },
+    {
+      "note": "the second name of that table",
+      "kind": "reasons",
+      "word": "tc_netns_gone",
+      "own": [
+        "starting",
+        "tc_netns_gone"
+      ],
+      "expect": 33
+    },
+    {
+      "note": "the last of 31 own names: 62",
+      "kind": "reasons",
+      "word": "w30",
+      "own": [
+        "w0",
+        "w1",
+        "w2",
+        "w3",
+        "w4",
+        "w5",
+        "w6",
+        "w7",
+        "w8",
+        "w9",
+        "w10",
+        "w11",
+        "w12",
+        "w13",
+        "w14",
+        "w15",
+        "w16",
+        "w17",
+        "w18",
+        "w19",
+        "w20",
+        "w21",
+        "w22",
+        "w23",
+        "w24",
+        "w25",
+        "w26",
+        "w27",
+        "w28",
+        "w29",
+        "w30"
+      ],
+      "expect": 62
+    },
+    {
+      "note": "the profile's detail ok",
+      "kind": "details",
+      "word": "ok",
+      "own": [
+        "tc_no_route",
+        "tc_loss_high"
+      ],
+      "expect": 1
+    },
+    {
+      "note": "cannot_run",
+      "kind": "details",
+      "word": "cannot_run",
+      "own": null,
+      "expect": 5
+    },
+    {
+      "note": "the service's own second detail",
+      "kind": "details",
+      "word": "tc_loss_high",
+      "own": [
+        "tc_no_route",
+        "tc_loss_high"
+      ],
+      "expect": 33
+    },
+    {
+      "note": "a detail no table names",
+      "kind": "details",
+      "word": "23 % loss on eth0",
+      "own": [
+        "tc_no_route",
+        "tc_loss_high"
+      ],
+      "expect": "out_of_range"
+    },
+    {
+      "note": "clock_ahead",
+      "kind": "codes",
+      "word": "clock_ahead",
+      "own": null,
+      "expect": 1
+    },
+    {
+      "note": "the service's own code",
+      "kind": "codes",
+      "word": "tc_netns_restarted",
+      "own": [
+        "tc_netns_restarted"
+      ],
+      "expect": 32
+    },
+    {
+      "note": "health.v1's application code, with no table: out_of_range",
+      "kind": "codes",
+      "word": "modem_link_down",
+      "own": null,
+      "expect": "out_of_range"
+    },
+    {
+      "note": "no code given",
+      "kind": "codes",
+      "word": null,
+      "own": null,
+      "expect": 0
+    }
+  ],
+  "reads": [
+    {
+      "note": "0: no word",
+      "kind": "reasons",
+      "number": 0,
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": {
+        "none": true
+      }
+    },
+    {
+      "note": "1",
+      "kind": "reasons",
+      "number": 1,
+      "own": null,
+      "expect": {
+        "name": "starting",
+        "of": "profile"
+      }
+    },
+    {
+      "note": "4",
+      "kind": "reasons",
+      "number": 4,
+      "own": null,
+      "expect": {
+        "name": "check",
+        "of": "profile"
+      }
+    },
+    {
+      "note": "8, the last this text names",
+      "kind": "reasons",
+      "number": 8,
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": {
+        "name": "misconfigured",
+        "of": "profile"
+      }
+    },
+    {
+      "note": "9: a later text's, shown as its number",
+      "kind": "reasons",
+      "number": 9,
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": {
+        "number": 9
+      }
+    },
+    {
+      "note": "31",
+      "kind": "reasons",
+      "number": 31,
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": {
+        "number": 31
+      }
+    },
+    {
+      "note": "32 with the service's table in hand",
+      "kind": "reasons",
+      "number": 32,
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": {
+        "name": "tc_netns_gone",
+        "of": "service"
+      }
+    },
+    {
+      "note": "34",
+      "kind": "reasons",
+      "number": 34,
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": {
+        "name": "tc_probe_stale",
+        "of": "service"
+      }
+    },
+    {
+      "note": "35: the table ends before it, a later revision's word",
+      "kind": "reasons",
+      "number": 35,
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": {
+        "number": 35
+      }
+    },
+    {
+      "note": "32 with no table in hand: the number",
+      "kind": "reasons",
+      "number": 32,
+      "own": null,
+      "expect": {
+        "number": 32
+      }
+    },
+    {
+      "note": "62 with no table",
+      "kind": "reasons",
+      "number": 62,
+      "own": null,
+      "expect": {
+        "number": 62
+      }
+    },
+    {
+      "note": "62 of 31 names",
+      "kind": "reasons",
+      "number": 62,
+      "own": [
+        "w0",
+        "w1",
+        "w2",
+        "w3",
+        "w4",
+        "w5",
+        "w6",
+        "w7",
+        "w8",
+        "w9",
+        "w10",
+        "w11",
+        "w12",
+        "w13",
+        "w14",
+        "w15",
+        "w16",
+        "w17",
+        "w18",
+        "w19",
+        "w20",
+        "w21",
+        "w22",
+        "w23",
+        "w24",
+        "w25",
+        "w26",
+        "w27",
+        "w28",
+        "w29",
+        "w30"
+      ],
+      "expect": {
+        "name": "w30",
+        "of": "service"
+      }
+    },
+    {
+      "note": "out_of_range: a word no table names, never a name",
+      "kind": "reasons",
+      "number": "out_of_range",
+      "own": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": {
+        "out_of_range": true
+      }
+    },
+    {
+      "note": "a detail's 1",
+      "kind": "details",
+      "number": 1,
+      "own": null,
+      "expect": {
+        "name": "ok",
+        "of": "profile"
+      }
+    },
+    {
+      "note": "a detail's 5",
+      "kind": "details",
+      "number": 5,
+      "own": [
+        "tc_no_route",
+        "tc_loss_high"
+      ],
+      "expect": {
+        "name": "cannot_run",
+        "of": "profile"
+      }
+    },
+    {
+      "note": "a detail's 6: this text names five",
+      "kind": "details",
+      "number": 6,
+      "own": [
+        "tc_no_route",
+        "tc_loss_high"
+      ],
+      "expect": {
+        "number": 6
+      }
+    },
+    {
+      "note": "a detail's 33",
+      "kind": "details",
+      "number": 33,
+      "own": [
+        "tc_no_route",
+        "tc_loss_high"
+      ],
+      "expect": {
+        "name": "tc_loss_high",
+        "of": "service"
+      }
+    },
+    {
+      "note": "a code's 1",
+      "kind": "codes",
+      "number": 1,
+      "own": null,
+      "expect": {
+        "name": "clock_ahead",
+        "of": "profile"
+      }
+    },
+    {
+      "note": "a code's 2: this text names one",
+      "kind": "codes",
+      "number": 2,
+      "own": [
+        "tc_netns_restarted"
+      ],
+      "expect": {
+        "number": 2
+      }
+    },
+    {
+      "note": "a code's 32",
+      "kind": "codes",
+      "number": 32,
+      "own": [
+        "tc_netns_restarted"
+      ],
+      "expect": {
+        "name": "tc_netns_restarted",
+        "of": "service"
+      }
+    },
+    {
+      "note": "a code's 0: an occurrence with no code",
+      "kind": "codes",
+      "number": 0,
+      "own": [
+        "tc_netns_restarted"
+      ],
+      "expect": {
+        "none": true
+      }
+    },
+    {
+      "note": "a code's out_of_range",
+      "kind": "codes",
+      "number": "out_of_range",
+      "own": null,
+      "expect": {
+        "out_of_range": true
+      }
+    },
+    {
+      "note": "the instance's lists differ, so it has no table: 32 is a number, though a conforming owner writes none",
+      "kind": "reasons",
+      "number": 32,
+      "own": null,
+      "expect": {
+        "number": 32
+      }
+    }
+  ],
+  "growth": [
+    {
+      "note": "the same list",
+      "old": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "new": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": "same"
+    },
+    {
+      "note": "a name appended: every number keeps its word",
+      "old": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "new": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale",
+        "tc_cgroup_gone"
+      ],
+      "expect": "appended"
+    },
+    {
+      "note": "a first table where there was none",
+      "old": [],
+      "new": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": "appended"
+    },
+    {
+      "note": "a name removed from the end: its number names nothing now",
+      "old": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "new": [
+        "tc_netns_gone",
+        "tc_qdisc_missing"
+      ],
+      "expect": "moved"
+    },
+    {
+      "note": "a name removed from the middle: the later numbers move",
+      "old": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "new": [
+        "tc_netns_gone",
+        "tc_probe_stale"
+      ],
+      "expect": "moved"
+    },
+    {
+      "note": "two names swapped",
+      "old": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "new": [
+        "tc_qdisc_missing",
+        "tc_netns_gone",
+        "tc_probe_stale"
+      ],
+      "expect": "moved"
+    },
+    {
+      "note": "a name renamed in place: the number keeps its place and changes its word",
+      "old": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "new": [
+        "tc_netns_gone",
+        "tc_qdisc_gone",
+        "tc_probe_stale"
+      ],
+      "expect": "moved"
+    },
+    {
+      "note": "a name inserted first",
+      "old": [
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "new": [
+        "tc_new",
+        "tc_netns_gone",
+        "tc_qdisc_missing",
+        "tc_probe_stale"
+      ],
+      "expect": "moved"
+    }
+  ]
+}

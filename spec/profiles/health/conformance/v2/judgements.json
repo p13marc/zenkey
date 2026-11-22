@@ -1,0 +1,1740 @@
+{
+  "description": "health.v2 §2.11, §2.12: one reading of one service -> the answer to \"is this service healthy?\". Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A case gives presence: \"present\", \"absent\" (a complete read without its instance token), \"incomplete\" (its token not seen, and the read possibly incomplete or refused) or \"across_face\" (across a constrained face, where presence and descriptors do not cross). descriptor, read only when present: null when it could not be read, or {\"interfaces\": the interface ids it lists, \"token\": false where health.v2 is in the tokenless set}; the interface token plays no part. deployment, given only across a face: the major the deployment's word names. face, read only across a face: {\"status_crosses\": whether the face lets state/status cross}. status: null where the case reads none, else {\"freshness\": the verdict and the reason freshness.v2 gives the observations of state/status at the standard contract's horizon, 60 s, as freshness's own judgements.json computes them (fresh; stale: beyond_horizon or no_delivery; unobservable: listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon or no_observation; not_asked: last_known, only an archive read, or deleted), \"record\": the latest status read, {\"tag\": CH's tag, \"hex\": the record's bytes}, or null where no value was read}. checks: null when not read, or the checks the owner answered with a record, [{\"check\", \"tag\", \"hex\"}]. A record is read by core §7.6 as records.json reads it, under epoch 1767225600: one it refuses is unknown, `undecodable`, and one at the level `unknown` is unknown, `unknown_level`; a check that is either bounds nothing. expect.major is the major the reading is judged under: 2; 1, where the descriptor lists health.v1 and not health.v2, or the deployment's word names it, and then the case expects nothing more, health.v1's own judgements.json being the evidence; or null where no descriptor decides. expect.verdict is healthy, unhealthy, stale, unobservable or not_asked; expect.reason its class: ok, degraded, failed, inconsistent, check, unknown_level, undecodable, deleted, presence_incomplete, no_descriptor, face_closed, nothing_crossed, absent, not_listed, last_known, or freshness's own reason for a stale or unobservable status; expect.level is the level the verdict rests on, ok, degraded or failed, for healthy and unhealthy, and null otherwise.",
+  "cases": [
+    {
+      "note": "absent: presence's word, not a level (§2.1). No record takes part",
+      "presence": "absent",
+      "descriptor": null,
+      "face": null,
+      "status": null,
+      "checks": null,
+      "expect": {
+        "major": null,
+        "verdict": "not_asked",
+        "reason": "absent",
+        "level": null
+      }
+    },
+    {
+      "note": "absent, with an archive's status failed: last-known, never current, never failed",
+      "presence": "absent",
+      "descriptor": null,
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "not_asked",
+          "reason": "last_known"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "c480ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": null,
+        "verdict": "not_asked",
+        "reason": "absent",
+        "level": null
+      }
+    },
+    {
+      "note": "absent, though a subscriber still holds a fresh status: presence first",
+      "presence": "absent",
+      "descriptor": null,
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": null,
+        "verdict": "not_asked",
+        "reason": "absent",
+        "level": null
+      }
+    },
+    {
+      "note": "its token not seen in a read possibly incomplete: unobservable, never absent",
+      "presence": "incomplete",
+      "descriptor": null,
+      "face": null,
+      "status": null,
+      "checks": null,
+      "expect": {
+        "major": null,
+        "verdict": "unobservable",
+        "reason": "presence_incomplete",
+        "level": null
+      }
+    },
+    {
+      "note": "not seen in an incomplete read, whatever a subscription heard",
+      "presence": "incomplete",
+      "descriptor": null,
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": null,
+        "verdict": "unobservable",
+        "reason": "presence_incomplete",
+        "level": null
+      }
+    },
+    {
+      "note": "present, and its descriptor lists neither major: not asked (§2.11)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "tc.v1"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": null,
+      "checks": null,
+      "expect": {
+        "major": null,
+        "verdict": "not_asked",
+        "reason": "not_listed",
+        "level": null
+      }
+    },
+    {
+      "note": "not listed, whatever a status on its keys says",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "tc.v1"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "c480ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": null,
+        "verdict": "not_asked",
+        "reason": "not_listed",
+        "level": null
+      }
+    },
+    {
+      "note": "present, and its descriptor could not be read",
+      "presence": "present",
+      "descriptor": null,
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": null,
+        "verdict": "unobservable",
+        "reason": "no_descriptor",
+        "level": null
+      }
+    },
+    {
+      "note": "its descriptor lists health.v1 and not health.v2: read by health.v1's text over its keys, not by this file (§2.12)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v1"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 1
+      }
+    },
+    {
+      "note": "its descriptor lists both majors, which §2.3 forbids: read as health.v2",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v1",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "listed with its interface token: ok",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "listed in the tokenless set, with no alive/health.v2 token: implemented all the same (§2.7)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": false
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "tokenless and stale: stale, never not implemented",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": false
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "stale",
+          "reason": "beyond_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "stale",
+        "reason": "beyond_horizon",
+        "level": null
+      }
+    },
+    {
+      "note": "degraded: the finding",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "8580ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "degraded",
+        "level": "degraded"
+      }
+    },
+    {
+      "note": "failed: the finding",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "c480ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "failed",
+        "level": "failed"
+      }
+    },
+    {
+      "note": "unknown is no level: unobservable, never ok (§2.6)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "0180ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "unknown_level",
+        "level": null
+      }
+    },
+    {
+      "note": "unknown at start, with no since: a 2-byte record",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "0100"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "unknown_level",
+        "level": null
+      }
+    },
+    {
+      "note": "a status whose record has a pad bit set: refused, so unknown, never the ok its bits would read (§2.6)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05381"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "undecodable",
+        "level": null
+      }
+    },
+    {
+      "note": "a status under a fault's tag: refused",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 11,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "undecodable",
+        "level": null
+      }
+    },
+    {
+      "note": "a status cut to five bytes: refused",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc053"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "undecodable",
+        "level": null
+      }
+    },
+    {
+      "note": "a status with a byte after its pad: refused",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc0538000"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "undecodable",
+        "level": null
+      }
+    },
+    {
+      "note": "an empty payload: refused",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": ""
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "undecodable",
+        "level": null
+      }
+    },
+    {
+      "note": "a status ok whose marker is 1, a later text's field after it: read, and ok",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc053e0"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "a status ok with a word no table names: the word plays no part in the verdict",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "7f80ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "a stale status at failed: stale, never failed (§2.4)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "stale",
+          "reason": "beyond_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "c480ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "stale",
+        "reason": "beyond_horizon",
+        "level": null
+      }
+    },
+    {
+      "note": "a stale status at ok: never ok as though current",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "stale",
+          "reason": "beyond_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "stale",
+        "reason": "beyond_horizon",
+        "level": null
+      }
+    },
+    {
+      "note": "nothing delivered in 61 s of listening to a status that exists: stale",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "stale",
+          "reason": "no_delivery"
+        },
+        "record": null
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "stale",
+        "reason": "no_delivery",
+        "level": null
+      }
+    },
+    {
+      "note": "nothing delivered in 30 s: not long enough to tell",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "listened_too_short"
+        },
+        "record": null
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "listened_too_short",
+        "level": null
+      }
+    },
+    {
+      "note": "a GET that drew no reply: silence is not a verdict (core O5)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "silent"
+        },
+        "record": null
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "silent",
+        "level": null
+      }
+    },
+    {
+      "note": "a snapshot's entry against an untrusted clock",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "clock_untrusted"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "clock_untrusted",
+        "level": null
+      }
+    },
+    {
+      "note": "an entry whose confirmation is ahead of the reader's clock beyond the delta, as from a clock ahead",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "clock_disagrees"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "clock_disagrees",
+        "level": null
+      }
+    },
+    {
+      "note": "an entry within the delta of the horizon",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "near_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "8580ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "near_horizon",
+        "level": null
+      }
+    },
+    {
+      "note": "no observation of the status at all",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "no_observation"
+        },
+        "record": null
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "no_observation",
+        "level": null
+      }
+    },
+    {
+      "note": "the status deleted, a tombstone or a complete snapshot with no entry: the owner broke §2.3",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "not_asked",
+          "reason": "deleted"
+        },
+        "record": null
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "deleted",
+        "level": null
+      }
+    },
+    {
+      "note": "present and listed, and only an archive read: last-known, never current (core S6)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "not_asked",
+          "reason": "last_known"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "8580ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "not_asked",
+        "reason": "last_known",
+        "level": null
+      }
+    },
+    {
+      "note": "every check ok",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "4180ccc05380"
+        },
+        {
+          "check": "net",
+          "tag": 3,
+          "hex": "4180ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "a check failed under a status ok: §2.2 broken, read at the worse level",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "c380ccc05380"
+        },
+        {
+          "check": "net",
+          "tag": 3,
+          "hex": "4180ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "inconsistent",
+        "level": "failed"
+      }
+    },
+    {
+      "note": "a check failed under a status degraded",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "8580ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "c380ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "inconsistent",
+        "level": "failed"
+      }
+    },
+    {
+      "note": "a check degraded under a status ok",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "a180ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "inconsistent",
+        "level": "degraded"
+      }
+    },
+    {
+      "note": "a status failed over checks ok: worse is allowed (§2.2)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "c480ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "4180ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "failed",
+        "level": "failed"
+      }
+    },
+    {
+      "note": "a status and its worst check alike",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "8580ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "8280ccc05380"
+        },
+        {
+          "check": "net",
+          "tag": 3,
+          "hex": "4180ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "degraded",
+        "level": "degraded"
+      }
+    },
+    {
+      "note": "a check at unknown bounds nothing (§2.2, §2.6)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "0500"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "a check whose record is refused bounds nothing, whatever its bits would read",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "c380ccc05381"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "a check under another tag: refused, so it bounds nothing",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 11,
+          "hex": "c380ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "no check",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [],
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "checks not read: the status alone",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "8580ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "degraded",
+        "level": "degraded"
+      }
+    },
+    {
+      "note": "a stale status: its checks are its last word, not current (§2.4)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "stale",
+          "reason": "beyond_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "c380ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "stale",
+        "reason": "beyond_horizon",
+        "level": null
+      }
+    },
+    {
+      "note": "an unobservable status vouches for no check",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "clock_untrusted"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "c380ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "clock_untrusted",
+        "level": null
+      }
+    },
+    {
+      "note": "a status at unknown, and a check failed: the no stands on the check (§2.11)",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "0180ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "c380ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "check",
+        "level": "failed"
+      }
+    },
+    {
+      "note": "a status whose record is refused, and a check degraded",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05381"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "8280ccc05380"
+        },
+        {
+          "check": "net",
+          "tag": 3,
+          "hex": "4180ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "check",
+        "level": "degraded"
+      }
+    },
+    {
+      "note": "a status at unknown over checks ok: a check never says yes",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "0180ccc05380"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "4180ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "unknown_level",
+        "level": null
+      }
+    },
+    {
+      "note": "a status whose record is refused, and no bad check",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05381"
+        }
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "0500"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "undecodable",
+        "level": null
+      }
+    },
+    {
+      "note": "across a face that lets the status cross: fresh ok",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": true
+      },
+      "deployment": "health.v2",
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "healthy",
+        "reason": "ok",
+        "level": "ok"
+      }
+    },
+    {
+      "note": "across a face, a status crossing failed",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": true
+      },
+      "deployment": "health.v2",
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "c480ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unhealthy",
+        "reason": "failed",
+        "level": "failed"
+      }
+    },
+    {
+      "note": "across a face, stale: never down (§2.8)",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": true
+      },
+      "deployment": "health.v2",
+      "status": {
+        "freshness": {
+          "verdict": "stale",
+          "reason": "beyond_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "stale",
+        "reason": "beyond_horizon",
+        "level": null
+      }
+    },
+    {
+      "note": "across a face, nothing delivered in 300 s: no status known to exist, so unobservable, never stale",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": true
+      },
+      "deployment": "health.v2",
+      "status": {
+        "freshness": {
+          "verdict": "stale",
+          "reason": "no_delivery"
+        },
+        "record": null
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "nothing_crossed",
+        "level": null
+      }
+    },
+    {
+      "note": "across a face, a GET silent too: nothing crossed",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": true
+      },
+      "deployment": "health.v2",
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "silent"
+        },
+        "record": null
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "silent",
+        "level": null
+      }
+    },
+    {
+      "note": "across a face closed to the status: unobservable, never down (§2.8)",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": false
+      },
+      "deployment": "health.v2",
+      "status": {
+        "freshness": {
+          "verdict": "stale",
+          "reason": "no_delivery"
+        },
+        "record": null
+      },
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "face_closed",
+        "level": null
+      }
+    },
+    {
+      "note": "a face closed to the status, whatever was heard otherwise",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": false
+      },
+      "deployment": "health.v2",
+      "status": {
+        "freshness": {
+          "verdict": "unobservable",
+          "reason": "no_observation"
+        },
+        "record": null
+      },
+      "checks": [
+        {
+          "check": "disk",
+          "tag": 3,
+          "hex": "c380ccc05380"
+        }
+      ],
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "face_closed",
+        "level": null
+      }
+    },
+    {
+      "note": "across a face, the deployment's word names health.v1: read by health.v1's text",
+      "presence": "across_face",
+      "descriptor": null,
+      "face": {
+        "status_crosses": true
+      },
+      "deployment": "health.v1",
+      "status": {
+        "freshness": {
+          "verdict": "fresh",
+          "reason": "within_horizon"
+        },
+        "record": {
+          "tag": 3,
+          "hex": "4280ccc05380"
+        }
+      },
+      "checks": null,
+      "expect": {
+        "major": 1
+      }
+    }
+  ]
+}

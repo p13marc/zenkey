@@ -118,6 +118,40 @@ uses it yet.
 - **One instant** needs both snapshots complete, one run, one asof, and
   no entry or tombstone of that run above the asof.
 
+**Evidence.** [`conformance/v2/`](conformance/v2/) holds six files.
+- `records.json`: 3 layouts, 42 writes, 49 reads and 8 arguments.
+- `tables.json`: the profile's 3 tables, 23 declarations, 9 instances,
+  20 writes, 23 reads and 8 growths.
+- `snapshots.json`: 25 readings. `judgements.json`: 60.
+- `clock.json`: 16 heartbeats and 37 cases. `schema.json`: 4.
+- **Computed twice.** One script read the text into code and wrote the
+  files. A second, written from the finished text, computed every
+  expectation again. They share no code, and agree on all 327 cases.
+  Both are the drafter's, kept out of the repository. No file was
+  blessed.
+- **Checked against what the repository holds.** The first script's
+  packed records agree with the core's `packed/vectors.json` for the
+  kinds these types use, its digests with `heartbeat/digests.json`, and
+  its pages with 26 writes of `snapshot/bodies.json`. The schema's
+  artifact id is the one the reference's `zk2 contract bundle` states.
+- [`scenarios-v2.md`](scenarios-v2.md) holds 9 sections: v1's eight
+  restated, and §9 for the words.
+- **`judgements.json` takes the status's freshness as judged.** Its
+  cases state `freshness.v2`'s verdict and reason, where `health.v1`'s
+  state the observations. The freshness judgement has its own fixtures.
+
+**The bytes, recomputed** from these layouts through the wire
+baseline's model. Each matches the design's figure.
+- A status and a check are 42 bits, 6 bytes, a 12-byte payload in a
+  37-byte SDU. A fault is 58 bits, 8 bytes, 14 and 39.
+- W2's four status changes a day are 148 B, where `health.v1`'s are
+  232 B.
+- A late joiner's status snapshot is 28 bytes, where it was 49.
+- The heartbeat covering `health.v2` is a 16-byte payload: 118 KB a day
+  at 28.5 s, as `health.v1`'s.
+- An hour of a clock ahead is one fault, 39 B, where `health.v1`
+  published 10.2 KB of them.
+
 **What a reader built before this major does.** It finds no `health.v1`
 in the descriptor, and answers not asked, `not_listed`. That is safe,
 and blind. Readers move first.
