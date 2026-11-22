@@ -5086,7 +5086,8 @@ fn config_desired(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
     )
 }
 
-/// The run's `desired.v1` rows (#840, DD), judged as `zenctl desired`
+/// The run's `desired.v1` and `desired.v2` rows (#840, DD; #986's J4),
+/// each read by its role's major, judged as `zenctl desired`
 /// judges a reading: the doctor's one reading, its window the bound, so a
 /// target is found behind by a trusted clock alone, never by one reading.
 fn desired_rows(
@@ -5104,6 +5105,22 @@ fn desired_rows(
     ds.clocks_synced = spec.clocks_synced;
     let mut behind = crate::model::desired::Behind::default();
     Ok(crate::judge::desired::judge(&p.obs.namespace, None, &ds, read, &mut behind, 1).rows)
+}
+
+/// The majors the rows were read by, as a check's clean line names them
+/// (`desired.v2` §2.18): `desired.v1` for none.
+fn desired_majors(rows: &[crate::report::DesiredRow]) -> &'static str {
+    let v2 = rows
+        .iter()
+        .filter(|r| r.profile == zenkey_model::desired::v2::PROFILE)
+        .count();
+    if v2 == 0 {
+        "desired.v1"
+    } else if v2 == rows.len() {
+        "desired.v2"
+    } else {
+        "desired.v1 and desired.v2"
+    }
 }
 
 /// A desired row's subject: the target and its role.
@@ -5138,7 +5155,7 @@ fn desired_refused(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
                 C,
                 DoctorSeverity::Warning,
                 desired_subject(r),
-                format!("{} (desired.v1 §2.7)", q.says),
+                format!("{} ({} §2.7)", q.says, r.profile),
             )),
             A::Unobservable => undecided.push(desired_unjudged(r, q)),
             A::No | A::NotAsked | A::NotYet => clean += 1,
@@ -5148,14 +5165,20 @@ fn desired_refused(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
         C,
         findings,
         undecided,
-        format!("{clean} desired.v1 role(s), none whose last act was refused or failed"),
+        format!(
+            "{clean} {} role(s), none whose last act was refused or failed",
+            desired_majors(&rows)
+        ),
     )
 }
 
 /// `desired-behind` (§2.17, text 0.4): a target "not yet" converged on a
 /// version its author stamped longer ago than the bound, by a clock trusted
 /// to the HLC delta. One reading alone never finds it: without
-/// `--clocks-synced`, a target not yet converged is unjudged.
+/// `--clocks-synced`, a target not yet converged is unjudged. A
+/// `desired.v2` version has no time (v2 §2.17), so no clock dates it and
+/// the doctor's one reading leaves such a target unjudged, whatever clock
+/// it trusts: `zenctl desired --for` reads it over a window.
 fn desired_behind(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
     use crate::report::DesiredAnswerToken as A;
     const C: CheckId = CheckId::DesiredBehind;
@@ -5178,6 +5201,17 @@ fn desired_behind(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
                     q.says, b.version, b.since_s
                 ),
             )),
+            (A::NotYet, None) if r.profile == zenkey_model::desired::v2::PROFILE => {
+                undecided.push(unjudged(
+                    desired_subject(r),
+                    format!(
+                        "{} — a desired.v2 version has no time, so how long it has been so \
+                         cannot be told from one reading, whatever clock is trusted: `zenctl \
+                         desired --for` reads it over a window (desired.v2 §2.17)",
+                        q.says
+                    ),
+                ))
+            }
             (A::NotYet, None) if !spec.clocks_synced => undecided.push(unjudged(
                 desired_subject(r),
                 format!(
@@ -5196,8 +5230,9 @@ fn desired_behind(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
         findings,
         undecided,
         format!(
-            "{clean} desired.v1 role(s), none behind a version its author stamped more than \
-             {bound:.0}s ago"
+            "{clean} {} role(s), none behind a version its author stamped more than \
+             {bound:.0}s ago",
+            desired_majors(&rows)
         ),
     )
 }
@@ -5220,7 +5255,7 @@ fn desired_last_known(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
                 C,
                 DoctorSeverity::Info,
                 desired_subject(r),
-                format!("{} (desired.v1 §2.9)", q.says),
+                format!("{} ({} §2.9)", q.says, r.profile),
             )),
             A::Unobservable => undecided.push(desired_unjudged(r, q)),
             A::No | A::NotAsked | A::NotYet => clean += 1,
@@ -5230,7 +5265,10 @@ fn desired_last_known(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
         C,
         findings,
         undecided,
-        format!("{clean} desired.v1 role(s), none running a document read from an archive"),
+        format!(
+            "{clean} {} role(s), none running a document read from an archive",
+            desired_majors(&rows)
+        ),
     )
 }
 
@@ -7409,6 +7447,7 @@ mod tests {
                 word: None,
                 descriptor: Ok(None),
                 roles: vec![RoleRead {
+                    major: crate::model::desired::Major::V1,
                     resolution: res,
                     author_seen: Some((author, None)),
                     current: current.map(|(t, ago)| {
@@ -7423,6 +7462,7 @@ mod tests {
                                     now - Duration::from_secs(ago),
                                 )),
                             }],
+                            member: vec![],
                             at: now,
                         })
                     }),
@@ -7439,6 +7479,7 @@ mod tests {
                         stamp: None,
                         horizon: zenkey_model::freshness::Horizon::Undeclared,
                     }],
+                    packed: vec![],
                     at: now,
                 })),
             }

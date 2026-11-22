@@ -2154,6 +2154,70 @@ fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
             let mut owed_none = Vec::new();
             for r in &roles {
                 let res = &r.resolution;
+                // A desired.v2 role (#986's J4): its report is the member
+                // of the resource whose `desired.report` names it (v2
+                // §2.10), read as the packed record, never one whose key
+                // is its slice. An unbound role's is not read here.
+                if r.major == crate::model::desired::Major::V2 {
+                    use crate::model::desired::PackedFound;
+                    let Some(w) = res.report_at.as_ref().filter(|_| res.bound()) else {
+                        owed_none.push(res.role.clone());
+                        continue;
+                    };
+                    match crate::model::desired::packed_report_of(&w.at, &g.packed) {
+                        PackedFound::One(p) => match &p.read {
+                            Ok(x) if x.findings.is_empty() => {
+                                read_ok += 1;
+                                covered_by.push(format!("{} by {}", res.role, p.key));
+                            }
+                            Ok(x) => broken.push(format!(
+                                "{}: malformed ({})",
+                                p.key,
+                                x.findings
+                                    .iter()
+                                    .map(|f| f.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )),
+                            Err(_) => {}
+                        },
+                        PackedFound::Unreadable(p) => broken.push(format!(
+                            "{}: unreadable ({})",
+                            p.key,
+                            p.read
+                                .as_ref()
+                                .err()
+                                .map(ToString::to_string)
+                                .unwrap_or_default()
+                        )),
+                        PackedFound::Two => broken.push(format!(
+                            "role {}: two or more resources name it by `desired.report` \
+                             (two_reports, desired.v2 §2.10)",
+                            res.role
+                        )),
+                        PackedFound::None(why) => broken.push(match (w.key(), why.is_empty()) {
+                            (Some(k), _) => format!(
+                                "role {}: no report on its key {k} (desired.v2 §2.10)",
+                                res.role
+                            ),
+                            (None, true) => format!(
+                                "role {}: no resource names it by `desired.report` (desired.v2 \
+                                 §2.10)",
+                                res.role
+                            ),
+                            (None, false) => format!(
+                                "role {}: its report resource is invalidly declared ({}) \
+                                 (desired.v2 §2.10)",
+                                res.role,
+                                why.iter()
+                                    .map(|r| r.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                        }),
+                    }
+                    continue;
+                }
                 let by = if res.slice.is_empty() {
                     own.iter().find(|x| {
                         !res.bound()
@@ -2338,7 +2402,7 @@ fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
 /// `desired-author` (§2.2, §2.11): each desired resource of the claimed
 /// revision.
 fn desired_author_cases(obs: &ConformObservation) -> Vec<ConformCase> {
-    use zenkey_model::desired::{Content, Declaration, declaration_of};
+    use zenkey_model::desired::{Content, Declaration, v2};
     let Some(rev) = &obs.revision else {
         return vec![ConformCase::unobservable(
             CaseId::DesiredAuthor,
@@ -2347,8 +2411,20 @@ fn desired_author_cases(obs: &ConformObservation) -> Vec<ConformCase> {
         )];
     };
     let mut out = Vec::new();
+    // The major the revision lists (desired.v2 §2.18): under desired.v2 a
+    // horizon under freshness.v1 is invalid too (`horizon_v1`, v2 §2.2).
+    let is_v2 = v2::uses_v2(rev.contract());
+    let profile = if is_v2 {
+        v2::PROFILE
+    } else {
+        zenkey_model::desired::PROFILE
+    };
     for r in &rev.contract().resources {
-        let decl = declaration_of(r);
+        let decl = if is_v2 {
+            v2::declaration_of(rev.contract(), r)
+        } else {
+            zenkey_model::desired::declaration_of(r)
+        };
         let name = zenkey::implementation::resource_name(r);
         match decl {
             Declaration::NotThisProfiles => continue,
@@ -2357,7 +2433,7 @@ fn desired_author_cases(obs: &ConformObservation) -> Vec<ConformCase> {
                 name,
                 format!(
                     "its declaration is invalid ({}): a target refuses to bind it, and no reader \
-                     reads its documents (desired.v1 §2.2)",
+                     reads its documents ({profile} §2.2)",
                     why.iter()
                         .map(|i| i.as_str())
                         .collect::<Vec<_>>()
@@ -6471,6 +6547,7 @@ mod tests {
                     word: None,
                     descriptor: Ok(None),
                     roles: vec![RoleRead {
+                        major: crate::model::desired::Major::V1,
                         resolution: res,
                         author_seen: None,
                         current: None,
@@ -6485,6 +6562,7 @@ mod tests {
                             stamp: None,
                             horizon: zenkey_model::freshness::Horizon::Undeclared,
                         }],
+                        packed: vec![],
                         at: std::time::SystemTime::now(),
                     })),
                 }],

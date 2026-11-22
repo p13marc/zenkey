@@ -753,6 +753,156 @@ alarms under zk2/lab/*/alarms.v1/state/alarms/* in namespace "acme" — anything
     assert!(said.contains("(scope_incomplete)"), "{said}");
 }
 
+/// `zenctl desired` over both majors (#986's J4, `desired.v2` §2.18, §5):
+/// a `desired.v2` author's targets beside a `desired.v1` role. A
+/// `desired.v2` row says its major, shows every version as `<run>/<seq>`,
+/// never a time, a refusal's place and line as its target's contract's
+/// words and an index no table names as its number; a report core §7.6
+/// refuses is unreadable with its token; a snapshot with no entry is shown
+/// as the author's answer, behind under the observed run and unreadable to
+/// a tool under another; a role with no revision of its author's in hand
+/// has no slice; and the `desired.v1` row is drawn as it always was.
+#[test]
+fn a_desired_reading_of_both_majors_is_drawn_by_each_roles_major() {
+    let report = fx::desired_v2_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+desired.v1 and desired.v2 in namespace "acme" — 8 role(s), 1 reading(s)
+✓  lab/worker task  converged: yes (converged) — its report's observed 0007/12 is its author lab/author's current version, converged
+    role bound, requiring tasking.v2 (desired.v2), its author lab/author
+    slice zk2/lab/author/tasking.v2/state/tasks/lab/worker (from the author contract)
+    report zk2/lab/worker/worker.v2/state/desired/task {"source":"desired","outcome":"converged","last_known":false,"observed":{"version":"0007/12","revision":2},"in_force":{"version":"0007/12","revision":2}}
+    its author's current version: put 0007/12
+    refused: no (converged) — its last act, on 0007/12, converged
+    last-known: no (current) — what it acted on, 0007/12, is its author's own
+    in force: yes (desired) — 0007/12 is wholly in force
+✗  lab/w2 task      converged: no (refused) — its author lab/author's current version, 0007/13, was refused by the target: code reach at "/endpoint": names how the worker reaches the bus
+    role bound, requiring tasking.v2 (desired.v2), its author lab/author
+    slice zk2/lab/author/tasking.v2/state/tasks/lab/w2 (from the author contract)
+    report zk2/lab/w2/worker.v2/state/desired/task {"source":"desired","outcome":"refused","last_known":false,"observed":{"version":"0007/13","revision":3},"in_force":{"version":"0007/12","revision":2},"refusal":{"code":"reach","pointer":3,"detail":1}} — at "/endpoint": "names how the worker reaches the bus"
+    its author's current version: put 0007/13
+    refused: yes (refused) — its last act, on 0007/13, was refused: code reach at "/endpoint": names how the worker reaches the bus
+    last-known: no (current) — what it acted on, 0007/13, is its author's own
+    in force: yes (desired) — 0007/12 is wholly in force
+✗  lab/w3 task      converged: no (refused) — its author lab/author's current version, 0007/13, was refused by the target: code the type's own at place 9, which no table in hand names: a line its table does not hold (out_of_range)
+    role bound, requiring tasking.v2 (desired.v2), its author lab/author
+    slice zk2/lab/author/tasking.v2/state/tasks/lab/w3 (from the author contract)
+    report zk2/lab/w3/worker.v2/state/desired/task {"source":"desired","outcome":"refused","last_known":false,"observed":{"version":"0007/13","revision":3},"in_force":{"version":"0007/12","revision":2},"refusal":{"code":null,"pointer":9,"detail":"out_of_range"}}
+    its author's current version: put 0007/13
+    refused: yes (refused) — its last act, on 0007/13, was refused: code the type's own at place 9, which no table in hand names: a line its table does not hold (out_of_range)
+    last-known: no (current) — what it acted on, 0007/13, is its author's own
+    in force: yes (desired) — 0007/12 is wholly in force
+?  lab/w4 task      converged: unobservable (report_invalid) — its report is unreadable (tag): the envelope's tag is not the type's (desired.v2 §2.10, core §7.6)
+    role bound, requiring tasking.v2 (desired.v2), its author lab/author
+    slice zk2/lab/author/tasking.v2/state/tasks/lab/w4 (from the author contract)
+    report zk2/lab/w4/worker.v2/state/desired/task unreadable: tag: the envelope's tag is not the type's
+    its author's current version: put 0007/12
+    refused: unobservable (report_invalid) — its report is unreadable (tag): the envelope's tag is not the type's (desired.v2 §2.10, core §7.6)
+    last-known: unobservable (report_invalid) — its report is unreadable (tag): the envelope's tag is not the type's (desired.v2 §2.10, core §7.6)
+    in force: unobservable (report_invalid) — its report is unreadable (tag): the envelope's tag is not the type's (desired.v2 §2.10, core §7.6)
+…  lab/w5 task      converged: not yet (behind) — its author lab/author answers a snapshot with no entry under run 0007, the run of its report's observed 0007/12: it holds no document, deleted beyond its window, and the target has not reverted: not yet (desired.v2 §2.17)
+    role bound, requiring tasking.v2 (desired.v2), its author lab/author
+    slice zk2/lab/author/tasking.v2/state/tasks/lab/w5 (from the author contract)
+    report zk2/lab/w5/worker.v2/state/desired/task {"source":"desired","outcome":"converged","last_known":false,"observed":{"version":"0007/12","revision":2},"in_force":{"version":"0007/12","revision":2}}
+    its author's answer: a snapshot with no entry, under run 0007
+    refused: no (converged) — its last act, on 0007/12, converged
+    last-known: no (current) — what it acted on, 0007/12, is its author's own
+    in force: yes (desired) — 0007/12 is wholly in force
+?  lab/w6 task      converged: unobservable (author_silent) — its author lab/author answers a snapshot with no entry under run 0008, a run its report's observed 0007/12 does not name: it restarted, is pacing, or deleted the document, and a tool cannot tell (desired.v2 §2.17)
+    role bound, requiring tasking.v2 (desired.v2), its author lab/author
+    slice zk2/lab/author/tasking.v2/state/tasks/lab/w6 (from the author contract)
+    report zk2/lab/w6/worker.v2/state/desired/task {"source":"desired","outcome":"converged","last_known":false,"observed":{"version":"0007/12","revision":2},"in_force":{"version":"0007/12","revision":2}}
+    its author's answer: a snapshot with no entry, under run 0008
+    refused: no (converged) — its last act, on 0007/12, converged
+    last-known: no (current) — what it acted on, 0007/12, is its author's own
+    in force: yes (desired) — 0007/12 is wholly in force
+—  lab/w7 task      converged: not asked (author_absent) — its author lab/author is absent by a complete presence read: whether the target converged on a current document is not asked (§2.17 step 6); with no revision of its interface in hand the role has no slice, so no archive's last-known is read (desired.v2 §2.17)
+    role bound, requiring tasking.v2 (desired.v2), its author lab/author
+    report zk2/lab/w7/worker.v2/state/desired/task {"source":"desired","outcome":"converged","last_known":false,"observed":{"version":"0007/12","revision":2},"in_force":{"version":"0007/12","revision":2}}
+    refused: no (converged) — its last act, on 0007/12, converged
+    last-known: no (current) — what it acted on, 0007/12, is its author's own
+    in force: yes (desired) — 0007/12 is wholly in force
+✓  lab/old task     converged: yes (converged) — its report's observed 100/a1 is its author lab/planner's current version, converged
+    role bound, requiring tasking.v1, its author lab/planner
+    slice zk2/lab/planner/tasking.v1/state/tasks/lab/old (from the author contract)
+    report zk2/lab/old/worker.v1/state/desired/task {"key":"zk2/lab/planner/tasking.v1/state/tasks/lab/old","source":"desired","in_force":{"stamp":"100/a1","revision":1},"observed":{"stamp":"100/a1","revision":1},"outcome":"converged"}
+    its author's current version: put 100/a1
+    refused: no (converged) — its last act, on 100/a1, converged
+    last-known: no (current) — what it acted on, 100/a1, is its author's own
+    in force: yes (desired) — 100/a1 is wholly in force
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let rows = &lines[1..];
+    assert_eq!(rows.len(), report.rows.len());
+    let row = |target: &str| {
+        rows.iter()
+            .find(|r| r["target"] == target)
+            .unwrap_or_else(|| panic!("no row of {target}"))
+    };
+    let profiles: Vec<&str> = rows
+        .iter()
+        .map(|r| r["profile"].as_str().expect("a profile"))
+        .collect();
+    assert_eq!(profiles.iter().filter(|p| **p == "desired.v2").count(), 7);
+    assert_eq!(row("lab/old")["profile"], "desired.v1");
+    // A desired.v2 report is the profile's reading, a version its run and
+    // seq; the contract's words stand beside the indices.
+    let w2 = &row("lab/w2")["report"];
+    assert_eq!(w2["document"]["observed"]["version"], "0007/13");
+    assert_eq!(w2["document"]["in_force"]["version"], "0007/12");
+    assert_eq!(w2["document"]["refusal"]["pointer"], 3);
+    assert_eq!(w2["place"], "/endpoint");
+    assert_eq!(w2["line"], "names how the worker reaches the bus");
+    assert_eq!(
+        w2["inband"], "0031/4",
+        "the target's own run, never its author's"
+    );
+    let w3 = &row("lab/w3")["report"];
+    assert_eq!(w3["document"]["refusal"]["code"], serde_json::Value::Null);
+    assert_eq!(w3["document"]["refusal"]["pointer"], 9);
+    assert_eq!(w3["document"]["refusal"]["detail"], "out_of_range");
+    assert!(
+        w3.get("place").is_none() && w3.get("line").is_none(),
+        "{w3}"
+    );
+    let w4 = &row("lab/w4")["report"];
+    assert!(w4.get("document").is_none(), "{w4}");
+    assert!(
+        w4["unreadable"].as_str().expect("why").starts_with("tag: "),
+        "{w4}"
+    );
+    // A snapshot with no entry: the author's answer, its run beside.
+    let w5 = row("lab/w5");
+    assert_eq!(w5["author"]["current"], "no_entry");
+    assert_eq!(w5["author"]["run"], "0007");
+    assert!(w5["author"].get("stamp").is_none(), "{w5}");
+    assert_eq!(w5["answers"]["converged"]["reason"], "behind");
+    assert_eq!(
+        row("lab/w6")["answers"]["converged"]["reason"],
+        "author_silent"
+    );
+    // No revision of the author's in hand: no slice from the target alone.
+    let w7 = row("lab/w7");
+    assert!(
+        w7.get("slice").is_none() && w7.get("slice_from").is_none(),
+        "{w7}"
+    );
+    assert_eq!(w7["answers"]["converged"]["reason"], "author_absent");
+    assert_eq!(w7["answers"]["in_force"]["answer"], "yes");
+    // A desired.v2 version has no time: one reading finds no target
+    // behind, whatever clock is trusted.
+    assert!(rows.iter().all(|r| r.get("behind").is_none()));
+    let said = notes(&report);
+    assert!(said.contains("found by `desired.report`"), "{said}");
+    assert!(said.contains("never a clock"), "{said}");
+}
+
 /// `zenctl desired` (#840, DD): one row per target's role, §5's four
 /// answers spelled apart in every medium — "has it converged?" as a mark
 /// and a word in the table, the other three as lines, the fixture's tokens
@@ -919,6 +1069,7 @@ fn no_family_emits_trailing_whitespace() {
         table(&fx::health_report()),
         table(&fx::alarms_report()),
         table(&fx::desired_report()),
+        table(&fx::desired_v2_report()),
         table(&fx::redundancy_report()),
     ];
     for r in &renderings {
