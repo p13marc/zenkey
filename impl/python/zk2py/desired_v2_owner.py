@@ -45,6 +45,10 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
     rest = words[2] if len(words) > 2 else ""
     a_cmds = {"put", "delete", "delete!", "documents", "adoption", "gets", "run"}
     t_cmds = {"report", "running", "fail-next", "hold", "release", "reread", "acts", "watch", "reads"}
+    if cmd not in a_cmds | t_cmds | {"new-epoch"}:
+        # refused before any role is asked for: an author-only process holds
+        # no target, and an unknown word is no target's command
+        return f"refused {line}: unknown command"
     if cmd in a_cmds and author is None or cmd in t_cmds and target is None:
         return f"refused {line}: this owner is no {'author' if cmd in a_cmds else 'target'}"
     if cmd == "put":
