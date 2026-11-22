@@ -76,6 +76,19 @@ retries = 1
 # took 14 min 15 s in all; the rest is its build. The override `priority`
 # is read by the nextest CI pins, 0.9.143, the lanes' own.
 #
+# Then the 25 longest tests, 1,605 s of the 3,867 s summed (#1151, its second
+# part). 22 stay as they are: 19 wait on a figure their scenario text states
+# (health's 60 s horizon, config's 80 s extend, the link scenarios' 5 s of
+# traffic for each block), two load a crowd of 10,000, and one puts 24
+# samples on a tool's 1 s window. Three waited on nothing a text states:
+# `zenctl::render` loaded the contract history at every fixture (52 s for
+# one test, 157 s for the binary, now 13 s), a mock ran 30 s for a 3 s
+# reading, and a control that asserts nothing ran 160 times. Three runs in
+# a row after it: 309, 322 and 312 s, 2,637 passed in each, none retried.
+# The longest test is health's §8 across a face, 201 s, and no run is
+# shorter than it. A gate from a wiped target, its builds from sccache,
+# took 12 min 49 s, 317 s of it the tests.
+#
 # Until then this was nextest's default, one test per CPU. On vm-dev (6
 # CPUs, as vm-runner-01) the suite took 5 min at 6 and 3.5 min at 12
 # (2026-10-20). The first run at 12 failed link_face's s10, 7 downsampled
@@ -108,9 +121,10 @@ test-threads = 12
 #     The two with 10,000 ran side by side in the one run at 16 where every
 #     CPU-bound test ran slow: 137 s and 61 s where they take 57 s and 28 s,
 #     and both passed.
-#   - `zenctl::render` (160 s of CPU, 53 s of it in one test), `zenctl::cli`
-#     (the trycmd corpus, 43 s), `zengui::shots` (25 s), and
-#     `profile_redundancy`'s `a_write_in_flight…` (18 s of CPU in 8 s).
+#   - `zenctl::cli` (the trycmd corpus, 43 s of CPU), `zengui::shots`
+#     (25 s), and `profile_redundancy`'s `a_write_in_flight…` (18 s of CPU
+#     in 8 s). `zenctl::render` was here with 160 s of CPU, until its
+#     fixtures loaded the contract history once a process: 13 s now.
 #
 # A test that newly needs a retry joins a group only when it measures a
 # window or loads the CPUs. Otherwise its wait is what gets fixed: a
@@ -153,7 +167,6 @@ binary_id(zenkey::presence_scale)
 | binary_id(zenkey-fleet::watch_scale)
 | binary_id(zenkey-fleet::watch_reopen)
 | (binary_id(zenkey::presence) & test(/^(s10_a_round_trip_at_a_population|a_round_trip_under_load|a_watch_session_in_a_namespace_waits)/))
-| binary_id(zenctl::render)
 | binary_id(zenctl::cli)
 | binary_id(zengui::shots)
 | (binary_id(zenkey::profile_redundancy) & test(=a_write_in_flight_during_a_step_down_lands_before_its_token_goes))
