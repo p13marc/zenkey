@@ -807,7 +807,7 @@ async fn s2_never_an_older_version() {
     // 3. A re-read on a 2-s period: it carries the held stamp s2, and the
     //    author answers with that stamp alone.
     let reads = a.author.reads(WORKER).unwrap().len();
-    w.target.set_reread(Some(Duration::from_secs(2)));
+    w.target.set_reread(Some(Duration::from_secs(2))).unwrap();
     eventually("a re-read", || async {
         a.author.reads(WORKER).unwrap().len() > reads
     })
@@ -819,7 +819,20 @@ async fn s2_never_an_older_version() {
             unchanged: true
         })
     );
-    w.target.set_reread(None);
+    // A period below the read's timeout, 1 s, set on a running target is
+    // refused as it is at the start (§2.5), and the caller is told; the
+    // 2-s period it had stands, so the re-reads go on.
+    refused_for(
+        w.target.set_reread(Some(Duration::from_millis(500))),
+        "below its read's timeout",
+        "a period set below the timeout",
+    );
+    let reads = a.author.reads(WORKER).unwrap().len();
+    eventually("a re-read on the period it had", || async {
+        a.author.reads(WORKER).unwrap().len() > reads
+    })
+    .await;
+    w.target.set_reread(None).unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(s.on(RP, mark).is_empty(), "unchanged: nothing put on Rp");
     assert_eq!(w.target.acts(), acts, "acted on nothing");

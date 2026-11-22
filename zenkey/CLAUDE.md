@@ -448,7 +448,8 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   target's one task; a GET that ran to its timeout is never made again
   before the next trigger; a period below `TargetStartup::timeout` refuses
   the role and the start (`not started: … below its read's timeout`), and
-  `set_reread` keeps the period it had; `TargetStartup::across` is the
+  `set_reread` returns the same refusal (`Result<()>`, review of #1156),
+  the period it had kept; `TargetStartup::across` is the
   face's reply timeout. A reply is a held stamp (`unchanged`, confirming a
   last-known version; one not sent is no answer), a snapshot's entry, or
   a snapshot with no entry, given to `observe_no_entry` with the page's

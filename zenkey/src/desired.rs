@@ -1759,11 +1759,7 @@ impl Target {
             && let Some(period) = startup.reread
             && period < startup.timeout
         {
-            let why = format!(
-                "role {role:?}: its period of re-reads, {period:?}, is below its read's \
-                 timeout, {:?} (desired.v2 §2.5)",
-                startup.timeout
-            );
+            let why = period_below_timeout(role, period, startup.timeout);
             b.refused.push(why.clone());
             return Err(Error::NotExposed(why));
         }
@@ -1914,18 +1910,28 @@ impl Target {
         self.inner.last_seed.lock().expect("not poisoned").clone()
     }
 
-    /// Sets the deployment's period of re-reads (§2.5); `None`: none. A
-    /// role bound to a `desired.v2` author keeps the period it had when
-    /// given one below its read's timeout (`desired.v2` §2.5), and says so.
-    pub fn set_reread(&self, period: Option<Duration>) {
+    /// Sets the deployment's period of re-reads (§2.5); `None`: none.
+    ///
+    /// # Errors
+    /// For a role bound to a `desired.v2` author, a period below its
+    /// read's timeout is refused, as the same period is at the start
+    /// (`desired.v2` §2.5: such a target would always hold a read
+    /// outstanding): [`Error::NotExposed`], in the start's words. The
+    /// period the role had stands.
+    pub fn set_reread(&self, period: Option<Duration>) -> Result<()> {
         if self.inner.major == Major::V2
+            && self.inner.key.is_some()
             && let Some(p) = period
             && p < self.inner.startup.timeout
         {
-            tracing::warn!(role = %self.inner.role, "desired.v2: a period of re-reads of {p:?} is below the read's timeout, {:?}, and is not taken (§2.5)", self.inner.startup.timeout);
-            return;
+            return Err(Error::NotExposed(period_below_timeout(
+                &self.inner.role,
+                p,
+                self.inner.startup.timeout,
+            )));
         }
         self.inner.reread.send_replace(period);
+        Ok(())
     }
 
     /// The target's own operation changed what is in force (§2.7): its
@@ -1946,6 +1952,15 @@ impl Target {
         }
         tokio::spawn(Arc::clone(&self.inner).run(rx, closed));
     }
+}
+
+/// Why a `desired.v2` role's period of re-reads is refused (§2.5): at the
+/// start, and when one is set on a running target.
+fn period_below_timeout(role: &str, period: Duration, timeout: Duration) -> String {
+    format!(
+        "role {role:?}: its period of re-reads, {period:?}, is below its read's timeout, \
+         {timeout:?} (desired.v2 §2.5)"
+    )
 }
 
 impl TargetInner {
