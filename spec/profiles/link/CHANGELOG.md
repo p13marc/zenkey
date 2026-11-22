@@ -7,6 +7,132 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.22 — 2026-11-21: editorial: which interfaces an owner heartbeat's plan counts, §2.19's refused `mode` and far end's file, and Appendix B's put of 4 bytes with LoRa's formula, no keyword changed (#609, #1110)
+
+zk2py's rounds 113 to 115 read this text's 0.19 to 0.21 cold. Eight of
+their findings name it. #1110's H4 measured W2 with an owner heartbeat
+since (`docs/zk2/measurements/wire-baseline/README.md`, "W2 with owner
+heartbeats"), and two of the findings turn on it.
+
+**Answered: F-550, an ambiguity. §2.9 and §2.16, "listed interfaces".**
+- **With a heartbeat.** An owner heartbeat's horizon and its longest put
+  count each listed interface that has a heartbeat (`link.v1` §2.9) and
+  a `link` collection. 0.19's entry said so, and the two sections said
+  "listed interface" alone.
+- **Why.** An owner covers an interface in place of its heartbeat
+  (`freshness.v2` §2.4). One with no heartbeat has none to replace.
+- **§2.16** also says that every listed service with a group is weighed
+  against the batch, whether or not a heartbeat of its own crosses.
+- **The reference and zk2py** both read it so already.
+- **One case, added with the code half.** `v2/plan.json`'s case 48 is
+  case 47's face with `horizon_s` 60 and one more listed interface.
+  - **That interface** uses `freshness.v1`. Its `link` state has a 30-s
+    horizon and a cardinality of 1,000, and no heartbeat.
+  - **Expected:** no `block_over_batch` and no `horizon_under_face` at
+    the `link` key. A reader that counts every listed interface draws
+    both.
+  - **Derived by the reference, then read by hand.** It differs from
+    case 47's plan by one deny, one evidence and a window floor
+    (§2.11). 49 cases.
+
+**Answered: F-551, an ambiguity. §2.9, a collection the revisions
+disagree on.**
+- **Before:** "What it still carries" called it a `link` collection that
+  keeps its section. `link.v1` §2.3 reads it `host`.
+- **Now:** the plan reads it `host`, for the horizon and for the longest
+  put. Both implementations do.
+- **What that misses, said.** An owner on the revision that reads it
+  `link` marks it all the same. Its put can be longer than the plan's
+  longest, and its period shorter. `exposure_disagrees` already names
+  the collection.
+- **Not taken: counting it where any revision reads `link`.** That moves
+  `block_over_batch` and `horizon_under_face` on such a face, in both
+  implementations, for a deployment the plan already warns.
+  `freshness.v2` 0.11 says whose the class is.
+
+**Answered: F-562, an ambiguity. §2.19, "As data": a `mode` or a
+`timestamping/enabled` that zenoh refuses.**
+- **No code is `at` either,** so neither draws `transport_differs`.
+- **Read at the default,** as one left out. A refused `mode` reads as
+  `router`. A refused `timestamping/enabled`, or a refused value of it
+  for the mode, reads as that mode's default.
+- **Why the default.** It is how a `null` there already reads, and a
+  router's default is on. So the warning is drawn unless the file
+  states timestamping off.
+- **What it does not say.** The data reading names no fault at the
+  `mode`. Only a tool that loads through zenoh says that no router
+  starts from the file.
+- **`v2/transport.json` gains four cases,** written by hand: a string
+  for `timestamping/enabled`, a string at the router's mode, and a
+  `mode` of 5 with the router's value left out and with it off.
+  `StatedTransport::stamps` reads the four so, by its source. 31 cases.
+- **Where the two tools stood.** For a refused `timestamping/enabled`
+  both drew `face_timestamping`. For a refused `mode` beside
+  timestamping stated off, the reference drew none and zk2py drew it.
+  The text is the reference's answer there.
+- **One corner was the reference's to mend.** It read a `mode` string
+  that is none of the three as a mode of its own, off by default. The
+  text reads it as `router`.
+  - **Mended with this text.** `StatedTransport::stamps` now reads any
+    `mode` but zenoh's three as `router`.
+  - **A fifth case holds it,** written by hand: a `mode` of `"bogus"`
+    beside the peer's value alone draws `face_timestamping`. 32 cases.
+  - **zenoh 1.10.1's loader refuses such a file:** "unknown variant
+    `bogus`", and "invalid type" for a `mode` of 5.
+
+**Answered: F-567, an ambiguity. §2.19, "Two files".**
+- **A refusal is of the file refused.** Where either file is refused,
+  the row of the two ends is not asked.
+- **A tool may ask the router's rows** of a router's file that loads,
+  beside a far end's that does not. Or it may stop at the first
+  refusal, and report no verdict. Both are sound: neither reports a
+  clean check of what it did not read.
+- **The reference stops,** exit 2. zk2py reads both as data.
+- **§5's first and third rows** list the case under "Not asked".
+
+**Answered: F-565, minor, and F-566, a gap. Appendix B, "What a horizon
+costs a medium".**
+- **An SDU is 23 bytes over its payload:** the put's 4, the frame's 3
+  and the lean stack's 16. The text named 16 and 3. H4 measured it: a
+  35-byte payload in a 58-byte SDU, 74 of 74.
+- **Why 4 here and 5 above.** A put's length takes a second byte from
+  128 bytes. A 216-byte frame's put is 5 over it.
+- **LoRa's columns are derivable now.** The appendix gives the modem
+  maker's formula, its five parameters, the symbol times, and the SF12
+  tile: a 2-byte header, 49 bytes, a 4-byte check after the SDU. It
+  gives each SDU's air to the microsecond.
+- **Recomputed for this entry:** all 40 cells of the table, from the
+  text alone.
+- **Still the model's.** The columns were never measured on LoRa, and
+  the appendix says so, with the model's source.
+- **W2 on a link with no face, measured:** 176.6 KB a day as one owner
+  heartbeat, 175.8 KB by the layout. Its three heartbeats measured
+  226.8 KB, and the model's 245 KB has each alone in its SDU: 46 of 153
+  puts went two to an SDU.
+- **Core 0.108's entry** says "a 39-byte put in a 58-byte SDU". That is
+  the same count: 35 and 4.
+
+**Answered: F-552, minor. `scenarios-v2.md` §2, Expected 1.** The plan
+also lets the `link` owner heartbeat key cross, lists it as `probe-a`'s
+evidence, and denies the `host` one by name. No step changed:
+`freshness.v2`'s scenarios §8 runs an owner heartbeat across such a
+face.
+
+**Answered: F-554, minor.** `link.v1` 0.20's entry said "`link.v2` 0.18
+lets the `link` class's key cross". It is 0.19. That entry is `v1.md`'s
+newest, and is corrected where it stands.
+
+**Deliberately not changed.**
+- **No keyword.** §2.19's "It MUST report what the fixture reports"
+  stands, and now cites five cases more.
+- **No plan of the first 48 cases** of `v2/plan.json`, and `plan.json`
+  is as it was.
+- **`frame_over_batch`** still reads the payload alone. The put's 4 or
+  5 bytes and the frame's 3 are in the appendix, and no rule counts
+  them.
+- **The table's figures.** None moved.
+- **The header** is still written against core 0.108.
+
 ## link.v2 0.21 — 2026-11-21: editorial: Appendix B, what a horizon costs a medium, no rule changed (#1110)
 
 #1110 chose one heartbeat per owner and class of exposure
@@ -205,7 +331,7 @@ crossed, the `host` collections' digests and bits with them.
   text's policy keeps their interfaces' heartbeats. `freshness.v2` §2.4
   and §2.9 say so.
 
-**Why a deny, and not `link.v2`'s rule.** `link.v2` 0.18 lets the `link`
+**Why a deny, and not `link.v2`'s rule.** `link.v2` 0.19 lets the `link`
 class's key cross where a heartbeat does. This text has no notion of a
 class crossing, and faces are moving to `link.v2`. The deny is the safe
 side: nothing new crosses a `link.v1` face.

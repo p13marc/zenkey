@@ -10572,7 +10572,363 @@
       },
       "note": "the same face under a 160-byte batch (§2.16): the owner heartbeat's longest put is 160 bytes, not above it, so the plan warns no `block_over_batch`; with case 46 it pins the count of bits on both sides. Written by reading link.v2 0.19, not derived by the reference",
       "policy": "# an owner heartbeat's longest put against the batch (link.v2 0.19)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 160\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:census.v1",
+                "key_exprs": [
+                  "zk2/*/*/census.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/heartbeat/quiet.v1/**",
+                  "zk2/*/*/freshness.v2/stream/heartbeats/host/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:old.v1",
+                "key_exprs": [
+                  "zk2/*/*/old.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:quiet.v1",
+                "key_exprs": [
+                  "zk2/*/*/quiet.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:vital.v1",
+                "key_exprs": [
+                  "zk2/*/*/vital.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state:census.v1",
+                "key_exprs": [
+                  "zk2/*/*/census.v1/state/log/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state:quiet.v1",
+                "key_exprs": [
+                  "zk2/*/*/quiet.v1/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [],
+            "liveness": [
+              {
+                "evidence": [
+                  "census.v1/state/peer/{peer}",
+                  "census.v1/state/status",
+                  "freshness.v2/stream/heartbeat/census.v1",
+                  "freshness.v2/stream/heartbeat/vital.v1",
+                  "freshness.v2/stream/heartbeats/link",
+                  "old.v1/state/peer/{peer}",
+                  "vital.v1/state/status"
+                ],
+                "service": "lab/node-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 15000,
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "lab/node-a"
+              }
+            ]
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 160,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "node-a": [
+          "census.v1",
+          "old.v1",
+          "quiet.v1",
+          "vital.v1"
+        ]
+      },
+      "interfaces": {
+        "census.v1": {
+          "resources": [
+            {
+              "annotations": {
+                "freshness.ttl_s": 600,
+                "link.exposure": "link"
+              },
+              "template": "status",
+              "token": "state",
+              "type": "packed"
+            },
+            {
+              "annotations": {
+                "freshness.ttl_s": 600,
+                "link.exposure": "link"
+              },
+              "cardinality": 1000,
+              "template": "peer/{peer}",
+              "token": "state",
+              "type": "packed"
+            },
+            {
+              "annotations": {
+                "freshness.ttl_s": 120
+              },
+              "template": "log",
+              "token": "state"
+            }
+          ],
+          "uses": [
+            "freshness.v2"
+          ]
+        },
+        "old.v1": {
+          "resources": [
+            {
+              "annotations": {
+                "freshness.ttl_s": 30,
+                "link.exposure": "link"
+              },
+              "cardinality": 1000,
+              "template": "peer/{peer}",
+              "token": "state",
+              "type": "packed"
+            }
+          ],
+          "uses": [
+            "freshness.v1"
+          ]
+        },
+        "quiet.v1": {
+          "resources": [
+            {
+              "annotations": {
+                "freshness.ttl_s": 60
+              },
+              "template": "note",
+              "token": "state"
+            }
+          ],
+          "uses": [
+            "freshness.v2"
+          ]
+        },
+        "vital.v1": {
+          "resources": [
+            {
+              "annotations": {
+                "freshness.ttl_s": 60,
+                "link.exposure": "link"
+              },
+              "template": "status",
+              "token": "state",
+              "type": "packed"
+            }
+          ],
+          "uses": [
+            "freshness.v2"
+          ]
+        }
+      },
+      "note": "an owner heartbeat's plan counts the listed interfaces with a heartbeat, never every listed interface (§2.9, §2.16): case 47's face, a 160-byte batch, with `horizon_s` 60 and one more listed interface, old.v1, whose revision uses `freshness.v1`. Its `link` state `peer/{peer}` has a 30-s horizon and a cardinality of 1,000, and no heartbeat, so the `link` owner heartbeat holds no group for it. The longest put stays 160 bytes, not above the batch (no `block_over_batch`; a group for old.v1 would add 14 + 16 + 1 + 1,043 bits), and the key's horizon stays vital.v1's 60 s, not below `horizon_s` (no `horizon_under_face`). old.v1's state crosses as `node-a`'s evidence, its stream subtree is denied by name, and, a per-key resource, it gives `node-a` a tombstone window floor of `max_outage_s` (§2.11). Derived by the reference, then read by hand against link.v2 0.22: it differs from case 47's plan by that deny, that evidence and that floor alone",
+      "policy": "# an owner heartbeat's plan counts the listed interfaces with a heartbeat (link.v2 0.22)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 160\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nhorizon_s        = 60\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     }
   ],
-  "description": "link.v2's plan (v2.md \u00a72.3, \u00a72.4, \u00a72.7, \u00a72.8, \u00a72.11, \u00a72.12, \u00a72.16, \u00a72.17, \u00a72.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). A case may give `users`, the principals the deployment binds by a user name (\u00a72.5): `near_opens_user` reads them, and a case that gives none binds no principal by one. `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 \u00a72.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (\u00a72.3). A case's own `catalog`, where it gives one, is the core \u00a78.6 catalog the far side holds (\u00a72.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (\u00a72.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 \u00a72.4 over the binding's list), null when no face excludes any. A device face (\u00a72.5) names its devices by address: `implements` maps a listed service's name, or a device's `<system>/<service>`, to its interfaces, and its plan's `attach` is `{shape: \"device\", devices}`. An inline interface may state `uses`, which a device's `presence_required` reads for `redundancy.v1`, and an inline resource `epoch`, the parameter its template declares as its epoch (`epoch_on_device`). The device cases, from case 22, were written by reading the text, not derived by the reference. A link.v2 face's `windows` is \u00a72.11's floor: each listed service that owns a state or @state resource whose deletes only a tombstone proves, a per-key resource (core \u00a74.2) or a template whose first chunk is a parameter, read from its revisions' kinds, templates, resolved annotations and `uses`. A device's address is its window's `service`, as it is a listed service's. An inline revision uses what its `uses` lists, and none where it states none. An inline resource may state `cardinality`, a templated one's (core \u00a72.2), which an owner heartbeat's longest put reads of a collection (\u00a72.16); a templated one that states none is read there as no ceiling. Since 0.19 a link.v2 face that a heartbeat crosses denies the `host` class's owner heartbeat key by name and lists the `link` class's as evidence (\u00a72.9); cases 46 and 47, an owner heartbeat's longest put on both sides of the batch, were written by reading the text, not derived by the reference."
+  "description": "link.v2's plan (v2.md \u00a72.3, \u00a72.4, \u00a72.7, \u00a72.8, \u00a72.11, \u00a72.12, \u00a72.16, \u00a72.17, \u00a72.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). A case may give `users`, the principals the deployment binds by a user name (\u00a72.5): `near_opens_user` reads them, and a case that gives none binds no principal by one. `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 \u00a72.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (\u00a72.3). A case's own `catalog`, where it gives one, is the core \u00a78.6 catalog the far side holds (\u00a72.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (\u00a72.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 \u00a72.4 over the binding's list), null when no face excludes any. A device face (\u00a72.5) names its devices by address: `implements` maps a listed service's name, or a device's `<system>/<service>`, to its interfaces, and its plan's `attach` is `{shape: \"device\", devices}`. An inline interface may state `uses`, which a device's `presence_required` reads for `redundancy.v1`, and an inline resource `epoch`, the parameter its template declares as its epoch (`epoch_on_device`). The device cases, from case 22, were written by reading the text, not derived by the reference. A link.v2 face's `windows` is \u00a72.11's floor: each listed service that owns a state or @state resource whose deletes only a tombstone proves, a per-key resource (core \u00a74.2) or a template whose first chunk is a parameter, read from its revisions' kinds, templates, resolved annotations and `uses`. A device's address is its window's `service`, as it is a listed service's. An inline revision uses what its `uses` lists, and none where it states none. An inline resource may state `cardinality`, a templated one's (core \u00a72.2), which an owner heartbeat's longest put reads of a collection (\u00a72.16); a templated one that states none is read there as no ceiling. Since 0.19 a link.v2 face that a heartbeat crosses denies the `host` class's owner heartbeat key by name and lists the `link` class's as evidence (\u00a72.9); cases 46 and 47, an owner heartbeat's longest put on both sides of the batch, were written by reading the text, not derived by the reference. Case 48, a listed interface with no heartbeat that an owner heartbeat's plan does not count, was derived by the reference and then read by hand."
 }

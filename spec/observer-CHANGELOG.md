@@ -13,6 +13,63 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.35 — 2026-11-21: editorial: §7.5's scope with a `link.v1` policy, a GET and a `host` collection pinned or said, and what a tool given no catalog hears, no keyword rule changed (#609, #1110)
+
+zk2py's round 113 read 0.34 cold, and filed F-556, F-558 and F-559
+against §7.5. `freshness.v2` 0.11 answers F-556's reader half
+([`profiles/freshness/CHANGELOG.md`](profiles/freshness/CHANGELOG.md)).
+
+**Answered: F-558, minor. Three clauses of §7.5's scope no case
+pinned.**
+- **A GET, given a catalog.** `scope/faces.json` gains two cases. A
+  GET's scope is the state resources, and the catalog adds nothing to
+  it. The `link` owner heartbeat key given to a GET is refused, never
+  dropped. §7.5 now says why: an owner heartbeat's key is a stream's.
+- **A `host` collection in hand beside a `link` key that crosses.** Two
+  cases hold `probe.v1` and `health.v1`. Across the RF face the scope
+  is `probe.v1`'s seven keys, never the `host` key. With no face policy
+  it holds both class keys.
+- **A `link.v1` policy** has no case, and the clause is reworded.
+  - It said the `link` key is declared "neither under a `link.v1`
+    policy". That is true of the plan, and `link.v1`'s `plan.json`
+    pins it.
+  - A tool across a face takes the reply timeout, `arq` and the
+    transport from its policy, and a `link.v1` policy states none. The
+    reference refuses one as a face policy. zk2py derives its plan.
+  - §7.5 now allows both: a tool MAY refuse such a policy, naming why.
+    One that takes it derives `link.v1`'s plan, which lets no owner
+    heartbeat key cross.
+  - The fixture has no spelling for a policy a tool refuses to take, so
+    no case states one.
+- **How the four cases were made.** Each was written by hand from §7.5.
+  The reference's `zenctl echo --across-face` declares the two
+  subscription scopes key for key, 7 and 13 selectors. Its GET's scope
+  was checked by its source (`FaceScope::of_given`). Never blessed. 33
+  cases.
+
+**Answered: F-559, minor. "Every group where it was given no catalog".**
+- **Before:** "The revision of a key" had a tool show by its envelope
+  every group where it was given no catalog. Across a face such a tool
+  has no scope for the key, and hears no group.
+- **Now:** that clause is its own item. Across a face the tool hears
+  none. A tool that reads by a selector of its own, on the near side,
+  shows every group so, as §7.3 says.
+
+**Answered: F-556, a gap, the tool's half.** §7.5's "Given no catalog"
+says what follows from having no scope. The tool hears no owner
+heartbeat across the face. It cannot tell an owner that sends them from
+one that confirms nothing. Members that go stale to it so are no
+finding about their owner (§2).
+
+**Deliberately not changed.**
+- **No MUST and no SHOULD.** `RULES.md` lists 295 rules, as before.
+  The one keyword added is the MAY above.
+- **The first 29 cases** of `scope/faces.json`.
+- **What a tool says of a catalog it lacks.** `freshness.v2` §5 says a
+  tool can name the catalog an owner's descriptor states. Across a face
+  no descriptor reaches it.
+- **The header** is still written against core 0.108.
+
 ## 0.34 — 2026-11-21: an owner heartbeat's scope across a face, and its groups' revisions (#1110)
 
 Core 0.108 defines the owner heartbeat, and `freshness.v2` 0.9 adopts it:

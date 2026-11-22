@@ -544,6 +544,10 @@ pub const TIMESTAMPING_OFF: [(&str, bool); 2] = [
 /// `timestamping/enabled`, a boolean or a value per mode.
 pub const POSTURE_PATHS: [&str; 2] = ["mode", "timestamping/enabled"];
 
+/// zenoh's three modes, the only `mode` strings its loader accepts
+/// (`zenoh-protocol`'s `WhatAmI`): any other is read as left out.
+const MODES: [&str; 3] = ["router", "peer", "client"];
+
 /// The transport keys a router's configuration states, by zenoh key, as
 /// the file writes them (v2 §2.19): a key it omits is absent, and read at
 /// the binding's default. Its mode and `timestamping/enabled`
@@ -589,14 +593,17 @@ impl StatedTransport {
     /// A `null` is read as zenoh 1.10.1 reads it, as left out: each value
     /// is an `Option` it fills with its default (`zenoh-config`'s
     /// `ModeValues`, `unwrap_or_default!`). So is a `mode` of `null`. Any
-    /// other value that is no boolean, or a `mode` that is no string, is
-    /// one zenoh refuses to load ("bool or mode dependent bool"): no router
-    /// runs it, and it is read at the default too.
+    /// other value that is no boolean, or a `mode` that is none of zenoh's
+    /// three, is one zenoh refuses to load ("bool or mode dependent bool";
+    /// "unknown variant", `WhatAmI`'s visitor): no router runs it, and it
+    /// is read at the default too, a refused `mode` as `router` (link.v2
+    /// 0.22 §2.19, "As data").
     #[must_use]
     pub fn stamps(&self) -> bool {
         let mode = match self.0.get("mode") {
-            Some(Value::String(mode)) => mode.as_str(),
-            // Unstated or `null`, as zenohd runs, or a value zenoh refuses.
+            Some(Value::String(mode)) if MODES.contains(&mode.as_str()) => mode.as_str(),
+            // Unstated or `null`, as zenohd runs, or a value zenoh refuses:
+            // a string that is none of its three, or no string.
             _ => "router",
         };
         let default = mode == "router";
@@ -5387,6 +5394,37 @@ mod tests {
             "timestamping": {"enabled": {"peer": false}},
         }));
         assert!(null_mode.stamps(), "a `null` mode runs as a router");
+        // A `mode` zenoh refuses, a string that is none of its three or no
+        // string, reads as `router` too (link.v2 0.22 §2.19): never a mode
+        // of its own, off by default and with no entry per mode.
+        for refused in [
+            serde_json::json!("bogus"),
+            serde_json::json!("Router"),
+            serde_json::json!(5),
+        ] {
+            let read = |enabled: Option<Value>| {
+                let mut m = BTreeMap::from([("mode".to_owned(), refused.clone())]);
+                if let Some(e) = enabled {
+                    m.insert("timestamping/enabled".to_owned(), e);
+                }
+                StatedTransport(m).stamps()
+            };
+            assert!(read(None), "{refused}: a router's default, on");
+            assert!(
+                read(Some(serde_json::json!({"peer": false}))),
+                "{refused}: the router's value left out"
+            );
+            assert!(
+                !read(Some(serde_json::json!({"router": false, "peer": false}))),
+                "{refused}: off at the mode read"
+            );
+            assert!(!read(Some(Value::from(false))), "{refused}");
+            // Its own name is no mode `timestamping/enabled` is read at.
+            assert!(
+                read(Some(serde_json::json!({"bogus": false, "5": false}))),
+                "{refused}"
+            );
+        }
     }
 
     /// The keep-alive interval in words: exact, or "about" where the lease

@@ -122,6 +122,10 @@ section, named after it. [`scenarios.md`](scenarios.md)'s sections are
 **Expected.**
 1. The plan lets `frames/link`, `status`, `level` and the heartbeat
    cross. It denies `frames/detail` and `setpoint` by name.
+   - It lets the `link` owner heartbeat key cross too, and lists it as
+     `probe-a`'s evidence (§2.9). It denies the `host` one by name.
+   - No step here puts on either key. `freshness.v2`'s scenarios run an
+     owner heartbeat across such a face (its `scenarios-v2.md` §8).
 2. Its one downsampling rule is `level`'s. It warns `timed_downsampled`
    at `setpoint` and `frame_unlisted` at `frames/detail`. It also warns
    `keep_alive_not_suppressed`: a frame a second is above the 0.5 s

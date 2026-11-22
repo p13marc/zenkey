@@ -2069,7 +2069,13 @@ fn heartbeat_owner_vectors() {
     use zenkey_model::catalog::{Catalog, CatalogId};
     use zenkey_model::grammar::KindToken;
     use zenkey_model::heartbeat::{Group, Heartbeat, OwnerHeartbeat, OwnerRefusal};
-    use zenkey_model::wire::{Envelope, Form, Run, Tag};
+    use zenkey_model::wire::{self, Envelope, Form, Run, Tag};
+    // An owner heartbeat's key and a heartbeat's, the two a `forms` case is
+    // read on (`envelope/carries.json` holds both).
+    const FORM_KEYS: [&str; 2] = [
+        "zk2/lab/n1/freshness.v2/stream/heartbeats/host",
+        "zk2/lab/beacon/freshness.v2/stream/heartbeat/beacon.v2",
+    ];
     let doc = read_json(&spec().join("conformance/heartbeat/owner.json"));
     let layouts = heartbeat_layouts();
 
@@ -2172,13 +2178,45 @@ fn heartbeat_owner_vectors() {
     // §7.5): both are `stream` keys, so the parse accepts a mutation or a
     // frame there, and the reader refuses it `form` before its tag or its
     // body.
+    //
+    // A case that states an `encoding` is a put under it (core 0.111): under
+    // any other than `zenoh/bytes` it carries no envelope on either key, so
+    // there is no `Envelope` to give the gate, and the reader names the put
+    // `form` with no byte of it parsed, a heartbeat's own bytes among them.
     let forms = doc["forms"].as_array().expect("forms");
-    assert_eq!(forms.len(), 5, "forms");
+    assert_eq!(forms.len(), 6, "forms");
     let mut carried = std::collections::BTreeSet::new();
     let mut read_past = 0;
+    let (mut no_envelope, mut own_bytes) = (0, 0);
     for case in forms {
         let note = &case["note"];
         let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let encoding = case
+            .get("encoding")
+            .map_or(wire::ENCODING, |e| e.as_str().expect("an encoding"));
+        if encoding != wire::ENCODING {
+            for key in FORM_KEYS {
+                assert!(zenkey_model::heartbeat::is_key(key), "{key}");
+                assert!(!wire::carries(key, encoding), "{note}: {key}");
+                let got = match wire::read_put(key, encoding, &bytes) {
+                    wire::Reading::Plain => {
+                        json!({"refused": zenkey_model::heartbeat::FormRefusal::TOKEN})
+                    }
+                    read => panic!("{note}: {key} under {encoding} read {read:?}"),
+                };
+                assert_eq!(case["expect"], got, "no envelope on {key}: {note}");
+                // Unparsed, not unreadable: under `zenoh/bytes` the same
+                // bytes are a put of form 6 on this key.
+                if matches!(
+                    wire::read_put(key, wire::ENCODING, &bytes),
+                    wire::Reading::Heartbeat(_)
+                ) {
+                    own_bytes += 1;
+                }
+            }
+            no_envelope += 1;
+            continue;
+        }
         let env = Envelope::parse_on(&bytes, KindToken::Stream)
             .unwrap_or_else(|e| panic!("{note}: the parse on a stream key: {e}"));
         assert_eq!(Envelope::parse(&bytes), Ok(env), "{note}: with no key");
@@ -2214,6 +2252,12 @@ fn heartbeat_owner_vectors() {
     assert!(
         read_past >= 1,
         "a case whose record would read as an owner heartbeat's body, past its form"
+    );
+    assert_eq!(no_envelope, 1, "a put with no envelope pinned");
+    assert_eq!(
+        own_bytes,
+        FORM_KEYS.len(),
+        "a heartbeat's own bytes under another Encoding, on both keys"
     );
 
     // One group: the layout its index names through the catalogs, whether

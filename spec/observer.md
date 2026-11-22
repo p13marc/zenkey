@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.34 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.35 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.108 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -1271,6 +1271,10 @@ reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
   hand that uses `freshness.v2`. `[F: scope/faces.json]`
   - **Given no catalog** a tool could read no group (core §8.6). It has
     no such scope.
+    - So it hears no owner heartbeat across the face. It cannot tell an
+      owner that sends them from one that confirms nothing.
+    - Members that go stale to it so are no finding about their owner
+      (§2; `freshness.v2` §2.5, §5).
   - **The catalog adds that scope alone.** A plan is derived as it is
     without one (below).
 - **Without a face policy** the scopes are those of every resource of the
@@ -1286,10 +1290,15 @@ reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
     that lists its frames, those are the frames it lists;
   - to subscribe, given a catalog, the `link` class's owner heartbeat
     key too, where the plan lets it cross (`link.v2` §2.9). It is never
-    the `host` class's, and neither under a `link.v1` policy
-    (`link.v1` §2.9);
+    the `host` class's, whatever collections are in hand;
   - to GET, each state resource. A request crosses by grant, never by
-    exposure (`link.v1` §2.9).
+    exposure (`link.v1` §2.9). A catalog adds nothing to a GET's scope:
+    an owner heartbeat's key is a stream's.
+  - **A `link.v1` policy** states no reply timeout, no `arq` and no
+    transport, which a tool across a face takes from its policy
+    (`link.v2` §2.20, §2.21). A tool MAY refuse one as its face policy,
+    naming why. One that takes it derives `link.v1`'s plan, which lets
+    no owner heartbeat key cross (`link.v1` §2.9).
 
   A tool given the face SHOULD NOT declare a scope for a resource the
   plan keeps off it. `[F: scope/faces.json]` Where the profile refuses
@@ -1373,10 +1382,12 @@ with the revision chosen in this order. `[F: envelope/tags.json]`
     revision's. Where they differ it says so, and shows the group by
     its envelope: the bytes disagree with the deployment's word.
   - **By its envelope** is by its index, its tag and its size. A tool
-    shows so each group it cannot read: every group where it was given
-    no catalog, one whose index core §8.6 refuses, and one whose
-    revision it does not hold. It reads the put's other groups all the
-    same.
+    shows so each group it cannot read: one whose index core §8.6
+    refuses, and one whose revision it does not hold. It reads the put's
+    other groups all the same.
+  - **Given no catalog** a tool has no scope for the key across a face
+    (above), and hears no group there. A tool that reads by a selector
+    of its own, on the near side, shows every group so (§7.3).
 - **An event's** key gives a revision a resource once its occurrence
   chunk is stripped (core §2.6). Its tag is its record's type's, as a
   mutation's is (core §7.5).
