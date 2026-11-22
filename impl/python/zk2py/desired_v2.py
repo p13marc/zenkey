@@ -1000,14 +1000,23 @@ class Watch:
 
     def __init__(self) -> None:
         self.expects: Section | None = None
-        #: The last read heartbeat's run and seq (step 3).
-        self.last: tuple[Run, int] | None = None
+        #: The last read heartbeat's run and seq (step 3), by the key it came
+        #: on: "A group of an owner heartbeat is read as a heartbeat is, its
+        #: sequence the owner heartbeat key's." One key where the caller
+        #: names none.
+        self.lasts: dict[str, tuple[Run, int]] = {}
         self.outstanding = False
         #: "the section of the heartbeat that made it read", None for a read
         #: no heartbeat made (a seed, a period).
         self.made_by: Section | None = None
 
-    def heartbeat(self, run: Run, seq: int, section: Section | None, read: bool = True) -> str:
+    @property
+    def last(self) -> tuple[Run, int] | None:
+        """The last read heartbeat's run and seq, on the one key of a
+        caller that names none."""
+        return self.lasts.get("")
+
+    def heartbeat(self, run: Run, seq: int, section: Section | None, read: bool = True, key: str = "") -> str:
         """One heartbeat of the author's, or one group of its owner
         heartbeat: "It takes the first of these that answers".
 
@@ -1026,14 +1035,15 @@ class Watch:
         # 2. "Older. In the last read one's run, its seq is not after that
         # one's, by core §4.3's serial order. Nothing changes, and it moves no
         # sequence."
-        if self.last is not None and self.last[0] == run and not serial_after(seq, self.last[1]):
+        last = self.lasts.get(key)
+        if last is not None and last[0] == run and not serial_after(seq, last[1]):
             return OLDER
         # 3. "Out of sequence. Any other heartbeat is read, and is the last
         # read one from then on. One of another run than the last read one's,
         # or whose seq is not that one's plus 1 modulo 2^24, follows a change
         # the target did not see. The target expects none, and goes on to
         # step 4."
-        last, self.last = self.last, (run, seq)
+        self.lasts[key] = (run, seq)
         if last is not None and (last[0] != run or seq != (last[1] + 1) % SEQ_MOD):
             self.expects = None
         # 4. "No section. The collection's map bit is 0. The target expects
