@@ -1,0 +1,16 @@
+# zk2py's own, for `health_v2_scenarios --only epoch`: a contract that lists
+# health.v2 and declares a table of details, so that a check's detail is a
+# word of the instance's own table (health.v2 §2.10).
+[interface]
+name    = "tcd"
+major   = 1
+minor   = 0
+summary = "zk2py's contract with a table of details"
+uses    = ["health.v2"]
+
+[defaults.annotations]
+"health.details" = ["tcd_slow"]
+
+[resources.rates]
+kind = "stream"
+type = { raw = "application/octet-stream" }

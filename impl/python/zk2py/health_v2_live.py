@@ -71,9 +71,9 @@ class HealthV2Owner:
         self.faults: list[dict[str, Any]] = []
         self.holds = 0
         self._lock = threading.RLock()
+        #: the checks held before the tokens: name -> (level, detail, at)
+        self._before: dict[str, tuple[str, str | None, int]] = {}
         self.owner = Owner(system, service, self.contracts, **owner_kw)
-        # the status put before step 4 (§2.3)
-        self.owner.initial = {f"{IFACE}/state/status": self._status_bytes()} | dict(self.owner.initial or {})
         self.owner.on_guard = self._guard
 
     def key(self, rel: str) -> str:
@@ -89,7 +89,22 @@ class HealthV2Owner:
         return self.key(f"state/checks/{slug(name)}")
 
     def start(self) -> None:
+        """The status put before step 4 (§2.3), and the checks held with
+        it. Their records are written here, never at construction: the
+        owner's catalog is set "before start", and its epoch is theirs."""
+        with self._lock:
+            self.owner.initial = self.initial() | dict(self.owner.initial or {})
         self.owner.start()
+
+    def initial(self) -> dict[str, bytes]:
+        """The records held at start, by key relative to the service: the
+        status, and each check of :meth:`hold_check`."""
+        from .slug import slug
+
+        out = {f"{IFACE}/state/status": self._status_bytes()}
+        for name, (level, detail, at) in self._before.items():
+            out[f"{IFACE}/state/checks/{slug(name)}"] = self._record(h2.CHECK, level, detail, at)[1]
+        return out
 
     def close(self) -> None:
         self.owner.close()
@@ -100,10 +115,33 @@ class HealthV2Owner:
             self.log.append(f"{kind}: {word}")
         return n
 
+    @property
+    def epoch(self) -> int:
+        """The deployment epoch every record of this owner counts its
+        ``since`` and ``at`` from: its owner's, "its catalog's, else the one
+        its deployment states, else 0" (core §7.6, §8.6), the one its
+        heartbeat's time counts from."""
+        return self.owner.writing_epoch()
+
+    def _record(self, name: str, level: str, word: str | None, at_ms: int | None,
+                argument: Any = h2.NOT_AVAILABLE) -> tuple[dict[str, Any], bytes]:
+        """One record of this owner, its value and its bytes: its word
+        through the instance's table of its kind (:meth:`_word`), its time
+        under :attr:`epoch`. Every record the owner writes is written here,
+        the status and the checks it holds before its tokens among them."""
+        value = h2.value_of(name, level, self._word(h2.KIND_OF[name], word), at_ms, argument, self.epoch)
+        return value, h2.write(name, value, self.epoch)
+
     def _status_bytes(self) -> bytes:
-        return h2.write(h2.STATUS, h2.value_of(h2.STATUS, self.level, self._word(h2.REASON, self.reason),
-                                               self.since_ms, epoch=self.owner.packed_epoch),
-                        self.owner.packed_epoch)
+        return self._record(h2.STATUS, self.level, self.reason, self.since_ms)[1]
+
+    def hold_check(self, name: str, level: str, detail: str | None = None) -> None:
+        """A check held before the tokens (a test owner's, scenarios §7):
+        written at :meth:`start` as :meth:`set_check` writes one, and put
+        with the status at step 4. Only before :meth:`start`."""
+        with self._lock:
+            self.checks[name] = (level, detail)
+            self._before[name] = (level, detail, self.clock_ms())
 
     def _worst(self) -> str | None:
         return h2.worst_of(lv for lv, _ in self.checks.values())
@@ -137,9 +175,7 @@ class HealthV2Owner:
                     and h2.LEVELS.index(level) > h2.LEVELS.index(self.level):
                 self.set_status(level, "check")
             self.checks[name] = (level, detail)
-            value = h2.value_of(h2.CHECK, level, self._word(h2.DETAIL, detail), self.clock_ms(),
-                                epoch=self.owner.packed_epoch)
-            self.owner.set_state(self.check_key(name), h2.write(h2.CHECK, value, self.owner.packed_epoch))
+            self.owner.set_state(self.check_key(name), self._record(h2.CHECK, level, detail, self.clock_ms())[1])
 
     def retire_check(self, name: str) -> None:
         with self._lock:
@@ -149,9 +185,8 @@ class HealthV2Owner:
     def publish_fault(self, code: str | None, level: str, argument: Any = h2.NOT_AVAILABLE) -> None:
         """A fault, an occurrence (§2.3). "No Zenoh timestamp": its put
         carries none of the owner's (§2.5), so none is given here."""
-        value = h2.value_of(h2.FAULT, level, self._word(h2.CODE, code), self.clock_ms(), argument,
-                            self.owner.packed_epoch)
-        self.owner.publish(self.key("stream/faults"), h2.write(h2.FAULT, value, self.owner.packed_epoch))
+        value, data = self._record(h2.FAULT, level, code, self.clock_ms(), argument)
+        self.owner.publish(self.key("stream/faults"), data)
         self.faults.append(value)
 
     def _guard(self, held: bool, offset_ns: int) -> None:
@@ -178,12 +213,16 @@ class Listener:
     its kind, its payload and its in-band stamp", the payload as it came,
     and "reads each heartbeat as freshness.v2 §2.5 says"
     (:meth:`zk2py.freshness.Subscriber.follow`). ``selectors`` names other
-    keys to hear: a late joiner hears the heartbeat key alone (``[]``)."""
+    keys to hear: a late joiner hears the heartbeat key alone (``[]``).
+    ``epoch`` is the deployment epoch this reader holds, its catalog's, else
+    0 (core §7.6): each record's ``since`` and ``at`` is read under it."""
 
-    def __init__(self, session: Any, address: str, selectors: list[str] | None = None, trust: Any = None):
+    def __init__(self, session: Any, address: str, selectors: list[str] | None = None, trust: Any = None,
+                 epoch: int = 0):
         import zenoh
 
         self.address = address
+        self.epoch = epoch
         self.raw: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         sel = [f"zk2/{address}/{IFACE}/**"] if selectors is None else selectors
@@ -217,7 +256,7 @@ class Listener:
 
         rel = x["key"].split(f"/{IFACE}/", 1)[1]
         name = h2.STATUS if rel == "state/status" else h2.CHECK if rel.startswith("state/checks/") else h2.FAULT
-        return h2.read_put(name, x["wire"], 0, zk2c.envelope_encoding(x["encoding"]))
+        return h2.read_put(name, x["wire"], self.epoch, zk2c.envelope_encoding(x["encoding"]))
 
     def stamp(self, x: dict[str, Any]) -> Any:
         from . import zk2c
@@ -253,19 +292,26 @@ def _freshness(observations: list[Any]) -> tuple[str, str]:
 
 
 def read_near(tool: Any, address: str, *, listener: Listener | None = None, trust: Any = None, get: bool = True,
-              timeout: float = 1.0, held: dict[str, Any] | None = None) -> tuple[h2.Reading, dict[str, Any]]:
+              timeout: float = 1.0, held: dict[str, Any] | None = None,
+              epoch: int | None = None) -> tuple[h2.Reading, dict[str, Any]]:
     """One reading of ``address`` on the near side, for §2.11: presence, the
     descriptor's ``interfaces`` (never the interface token), the status as
     ``listener`` saw it and as a GET over ``health.v2/state/**`` answered
     it, in two snapshots (§2.4 "How a late joiner reads"), each record read
     under its snapshot's tag. ``held`` maps a fingerprint to a revision the
-    reader holds, for the instance's tables. Returns the reading and what
+    reader holds, for the instance's tables. ``epoch`` is the deployment
+    epoch the reader holds: the listener's where one is given and none is
+    stated, else 0. The records' times and the snapshot's are read under it. Returns the reading and what
     was read: ``joined`` (:class:`zk2py.health_v2.Joined`), ``tables``,
     ``descriptor``."""
     from . import live
     from . import seed_snapshot as ss
 
     info: dict[str, Any] = {}
+    if epoch is None:
+        epoch = 0 if listener is None else listener.epoch
+    elif listener is not None and listener.epoch != epoch:
+        raise ValueError(f"the listener reads under the epoch {listener.epoch}, and this reading under {epoch}")
     pres = live.list_presence(tool, f"zk2/{address}/@zk/**")
     info["presence"] = pres
     presence = "present" if pres.instances else "absent" if pres.complete else "incomplete"
@@ -294,11 +340,11 @@ def read_near(tool: Any, address: str, *, listener: Listener | None = None, trus
         pages: dict[bool, list[dict[str, Any]]] = {True: [], False: []}
         for snap in st.snapshots:
             pages[snap.key == status_key] += [snap.pages[i] for i in sorted(snap.pages)]
-        joined = h2.late_joiner(h2.held(pages[True]), h2.held(pages[False]), 0)
+        joined = h2.late_joiner(h2.held(pages[True]), h2.held(pages[False]), epoch)
         info["joined"] = joined
         info["snapshots"] = (h2.held(pages[True]), h2.held(pages[False]))
         mine = [x for x in st.replies if x.key == status_key]
-        got = fr.reading_of(mine[-1], 0, bool(st.complete_for(status_key))) if mine else fr.GetReading(None)
+        got = fr.reading_of(mine[-1], epoch, bool(st.complete_for(status_key))) if mine else fr.GetReading(None)
         observations.append(got.observation(trust or fr.ClockTrust(word=True)))
         if joined.status is not None:
             record = joined.status

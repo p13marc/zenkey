@@ -5,7 +5,8 @@
     python -m zk2py.health_v2_owner --connect <endpoint> [--tokenless <iface>]...
         [--level <level>] [--reason <word>] [--check <name>=<level>[:<detail>]]...
         [--contract <file>]... [--reference <key>] [--offset-ms <ms>] [--liar]
-        [--auth <user>:<password>] [--run-record <file>] [--many <n> --nav <file>]
+        [--auth <user>:<password>] [--run-record <file>] [--catalog <file>]
+        [--many <n> --nav <file>]
         <system>/<service>
 
 Standard output: ``ready zk2/<system>/<service>/@zk/instance/<id> run <hex>``,
@@ -124,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--liar", action="store_true")
     p.add_argument("--auth")
     p.add_argument("--run-record")
+    p.add_argument("--catalog")
     p.add_argument("--many", type=int, default=0)
     p.add_argument("--nav")
     a = p.parse_args(argv)
@@ -161,15 +163,19 @@ def main(argv: list[str] | None = None) -> int:
                       liar=a.liar, **kw)
     if a.reference or a.offset_ms:
         o.owner.clock = off.clock(o.owner)
+    if a.catalog:
+        # core §8.6: "An owner given a catalog counts its `time` fields from
+        # the catalog's epoch, and states its id in its descriptor"
+        from pathlib import Path
+
+        from . import catalog as cat
+
+        o.owner.catalog = cat.read(Path(a.catalog).read_bytes())
     # checks held before the tokens: a test owner's (scenarios §7)
     for spec in a.check:
         name, _, rest = spec.partition("=")
         level, _, detail = rest.partition(":")
-        o.checks[name] = (level, detail or None)
-        value = h2.value_of(h2.CHECK, level, h2.write_word(h2.DETAIL, detail or None), off.ms_now())
-        from .slug import slug
-
-        o.owner.initial[f"{h2.IFACE}/state/checks/{slug(name)}"] = h2.write(h2.CHECK, value)
+        o.hold_check(name, level, detail or None)   # its table and its epoch, as every later check's
     o.start()
     inst = getattr(o.owner, "instance", None)
     print(f"ready zk2/{system}/{service}/@zk/instance/{inst} run {o.owner.run_hex()}", flush=True)

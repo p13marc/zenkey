@@ -8751,8 +8751,9 @@ Round 120 read this tree at 08f3600a (#986).
 `RULES.md` lists 297 rules, two more, both static. The walk gave each a
 verdict: 310 rows, none without one.
 
-**`just py-conformance`: 8101 of 8101** on this tree. Of them,
-`heartbeat` 361, `freshness` 303, `health` 587 and `readings` 1139.
+**`just py-conformance`: 8103 of 8103** on this tree, after the mend
+below (8101 before it). Of them, `heartbeat` 361, `freshness` 303,
+`health` 587 and `readings` 1141.
 
 ### Written from the text, then run
 
@@ -8809,13 +8810,13 @@ changed cases or of `health.v2`'s 327.
   **`health_v2_scenarios`** the runner.
 - **`ahead_live`, new:** the ahead time with the reference.
 - **W105** reads `health.v2`'s three keys.
-- **`interop/health-v2/`** holds scenario §9's `tc.v1` and the earlier
-  revision T2 holds.
+- **`interop/health-v2/`** holds scenario §9's `tc.v1`, the earlier
+  revision T2 holds, and `tcd.v1`, zk2py's own, with a table of details.
 
 ### Live
 
 ```bash
-PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.health_v2_scenarios [--only 1|2|3|4|5|6|7|8|8w|9]...
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.health_v2_scenarios [--only 1|2|3|4|5|6|7|8|8w|9|epoch]...
 PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.ahead_live [--only rust-owner|rust-owner-heartbeat|py-owner]...
 ```
 
@@ -8863,6 +8864,35 @@ fingerprint`.
 - §8 on a `link.v2` face;
 - a `health.v2` owner heartbeat on a bus;
 - zenohd: `bin/current` holds none.
+
+### The mend
+
+review-bot's notes on this round's PR, each fixed.
+1. **One helper writes every record of zk2py's `health.v2` owner,**
+   `HealthV2Owner._record`: its word through the instance's table, its
+   time under the owner's epoch. A check held before the tokens
+   (`hold_check`) goes through it at `start`, as `set_check` does later.
+   - **What the fix showed:** the owner wrote under `packed_epoch`, which
+     is 0 for an owner given a catalog. Its records counted from 1970
+     while its heartbeat counted from the catalog's epoch. It now writes
+     under `Owner.writing_epoch`. No scenario gives a catalog, so none
+     caught it.
+2. **The reader holds an epoch:** `Listener(epoch=…)`, and `read_near`
+   reads the records, the snapshot's time and the entry's conf under it.
+   `health_v2_scenarios --only epoch` runs an owner under a catalog's
+   epoch against such a reader, and against one that holds 0.
+3. **`heartbeat.read` and `owner_heartbeat.read` take their time
+   decoder,** `time_reader`. The fixtures' `earlier` reader is handed in,
+   and no module global is swapped.
+4. **`ahead_live`'s owner heartbeat covers two interfaces,** and the
+   check compares each put's groups with the catalog's indices of the
+   interfaces that have a `host` collection: `[0, 1]`, 17 puts in a hold.
+5. **`zk2 catalog new`'s exit code is a check.**
+6. Round 119's two nits: a `Sequence[str]` default, and an unread `n0`.
+
+**After the mend,** on the final code: `health_v2_scenarios` whole, 55 of
+55 in one run (the 53 above and the two under a catalog);
+`ahead_live` whole, 15 of 15.
 
 Round 120 found F-593 to F-602: one contradiction, one gap, two
 ambiguities and six minor errors. None is a blocker. F-569 to F-592 stay
@@ -9140,7 +9170,8 @@ impl/python/
     health_v2_fixtures.py health.v2 the runner of conformance/v2/
     health_v2_live.py health.v2 the owner and the reader on a bus
     health_v2_owner.py health.v2 the owner as a process
-    health_v2_scenarios.py health.v2 scenarios-v2.md §1 to §9 between two zk2py processes
+    health_v2_scenarios.py health.v2 scenarios-v2.md §1 to §9 between two zk2py processes, and an owner under a
+                      catalog's epoch (`--only epoch`)
     ahead_live.py     core §7.5's ahead time in both directions with the reference (round 120)
     config.py         config.v1 time, values, the orders of refusals, desired state, redaction, Core,
                                 ConfigOwner (fed through desired.v1 too, its re-mint a restart or refused), SimDevice,

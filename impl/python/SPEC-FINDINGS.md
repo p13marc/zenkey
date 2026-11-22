@@ -31017,6 +31017,24 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
   key alone.
 - **zenohd:** `bin/current` holds none.
 
+### The mend
+
+review-bot's six notes on this round's PR are fixed. The README lists
+them. One is worth a line here, since it bears on what the live runs
+above showed.
+- **zk2py's `health.v2` owner wrote every record under epoch 0,** given
+  a catalog or not, while its heartbeat counted from the catalog's
+  epoch. `scenarios-v2.md` gives no owner a catalog, so §1 to §9 never
+  saw it. The owner now writes under its catalog's epoch, the reader
+  holds one, and `--only epoch` runs the two under a catalog: 2 of 2.
+- **The text is not at fault.** §2.3 says "from the deployment epoch
+  (core §7.6)", and core §8.6 says whose that is. But no scenario of
+  `health.v2` runs under a catalog, and its 9 sections would pass an
+  owner that ignores one. A step under a catalog would catch it.
+- **After the mend:** `just py-conformance` 8103 of 8103;
+  `health_v2_scenarios` whole, 55 of 55 in one run; `ahead_live` whole,
+  15 of 15, the reference's owner heartbeat now over two groups.
+
 ### Counts at core 0.113, freshness.v2 0.12 and health.v2 0.1
 
 602 entries.
