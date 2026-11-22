@@ -714,3 +714,156 @@ def judge(r: Reading) -> Answer:
     if worst is not None and worst != "ok":
         return Answer(v1.UNHEALTHY, "check", worst, major)
     return Answer(UNOBSERVABLE, "unknown_level" if st is None else (st.unknown or "unknown_level"), None, major)
+
+
+# -- §2.5, §5: is this service's clock ahead? --------------------------------------------
+#
+# Written from v2.md §2.5 and §5, core §7.5 and freshness.v2 §2.5, and
+# committed before clock.json was opened.
+
+#: what one heartbeat says of its owner's clock: core §7.5's three readings
+#: where it is a read heartbeat, and ``not_read`` where it is not
+INSTANT, AHEAD, TIME_UNKNOWN, NOT_READ = "instant", "ahead", "unknown", "not_read"
+#: §2.5 "an owner heartbeat of the status's class, host"
+STATUS_CLASS = "host"
+YES, NO = "yes", "no"
+
+
+@lru_cache(maxsize=1)
+def standard_layout() -> Any:
+    """The standard contract's heartbeat layout: "The status is the
+    contract's one collection, of one member. Its section is a 32-bit digest
+    and one bit, in a body of 10 bytes" (§2.4), its tag :data:`HEARTBEAT_TAG`."""
+    from . import heartbeat
+    from .contract import load_contract
+
+    c = load_contract(CONTRACT)
+    return heartbeat.layout_of(c.canonical, c.fingerprint)
+
+
+class ClockReader:
+    """What one reader's heartbeats of one service say of its clock (§2.5
+    "Which heartbeats count"): "A heartbeat covering ``health.v2`` counts,
+    and an owner heartbeat of the status's class, ``host`` (``freshness.v2``
+    §2.4), each where it is a read heartbeat. Its sections play no part: the
+    time is the owner's word of its clock. A heartbeat of another revision,
+    a refused one and an older one are not read, and count for nothing."
+
+    It holds no view and follows nothing: a read heartbeat is "one read at
+    step 4" (``freshness.v2`` §2.5), which steps 1 to 3 decide, the tag, the
+    body and the sequence; a read owner heartbeat is "one read at step 3,
+    whatever became of its groups", so it needs no catalog. Each key has its
+    own sequence. ``layout`` is the revision of ``health.v2`` the reader
+    holds, the standard contract's by default."""
+
+    def __init__(self, layout: Any = None) -> None:
+        self.layout = standard_layout() if layout is None else layout
+        self._last: dict[str, Any] = {}        # by key: the last read put's stamp
+        #: every put heard, in arrival order: (key, what it says)
+        self.heard: list[tuple[str, str]] = []
+        #: the last read heartbeat's reading, None while none was read
+        self.last: str | None = None
+
+    def _sequence(self, key: str, stamp: Any) -> bool:
+        """Step "Older": "Within one run, its seq is not after the last read
+        heartbeat's, by core §4.3's serial order"."""
+        from . import freshness_v2 as f2
+
+        last = self._last.get(key)
+        if last is not None and last.same_run(stamp) and not f2.serial_newer(stamp.seq, last.seq):
+            return False
+        self._last[key] = stamp
+        return True
+
+    def _count(self, key: str, time: Any) -> str:
+        from . import heartbeat
+
+        reading = {heartbeat.INSTANT: INSTANT, heartbeat.AHEAD: AHEAD,
+                   heartbeat.UNKNOWN: TIME_UNKNOWN}[heartbeat.reading_of(time)]
+        self.heard.append((key, reading))
+        self.last = reading
+        return reading
+
+    def _not_read(self, key: str) -> str:
+        self.heard.append((key, NOT_READ))
+        return NOT_READ
+
+    def heartbeat(self, payload_: bytes, enveloped: bool = True) -> str:
+        """A put on the heartbeat key covering ``health.v2``."""
+        from . import heartbeat
+
+        key = "heartbeat"
+        try:
+            env = heartbeat.put_of(payload_, "stream", enveloped)
+        except heartbeat.Refused:
+            return self._not_read(key)
+        return self.heartbeat_parts(env.tag, env.stamp, env.record or b"")
+
+    def heartbeat_parts(self, tag: int, stamp: Any, body: bytes) -> str:
+        """The same, as its envelope gave it: CH's tag, the stamp and the
+        body."""
+        from . import heartbeat
+
+        key = "heartbeat"
+        if tag != self.layout.tag:
+            return self._not_read(key)                 # step 1, another revision
+        try:
+            value = heartbeat.read(self.layout, body)
+        except heartbeat.Refused:
+            return self._not_read(key)                 # step 2, refused
+        if not self._sequence(key, stamp):
+            return self._not_read(key)                 # step 3, older
+        return self._count(key, value["time"])         # step 4, read: "whatever its sections say"
+
+    def owner_heartbeat(self, payload_: bytes, cls: str = STATUS_CLASS, enveloped: bool = True) -> str:
+        """A put on an owner heartbeat key of this service. Only the
+        ``host`` class's counts: "an owner heartbeat of the status's class".
+        One of the ``link`` class says nothing here."""
+        from . import owner_heartbeat as oh
+
+        key = f"heartbeats/{cls}"
+        if cls != STATUS_CLASS:
+            return self._not_read(key)
+        try:
+            put = oh.read(payload_, "stream", enveloped)
+        except oh.Refused:
+            return self._not_read(key)                 # step 1, refused whole
+        if not self._sequence(key, put.stamp):
+            return self._not_read(key)                 # step 2, older
+        return self._count(key, put.body.time)         # step 3, read: "whatever became of its groups"
+
+    def answer(self, presence: str = "present", interfaces: Any = (V2,)) -> tuple[str, str]:
+        return clock_question(presence, interfaces, [what for _, what in self.heard])
+
+
+def clock_question(presence: str, interfaces: Any, heard: Any) -> tuple[str, str]:
+    """§5 "Is this service's clock ahead?" (§2.5 "How a reader reads it"),
+    from what one reader heard of one service, in arrival order. Each item
+    of ``heard`` is what a put says: :data:`AHEAD`, :data:`INSTANT` or
+    :data:`TIME_UNKNOWN` for a read heartbeat that counts, by its time; and
+    anything else for what answers nothing: :data:`NOT_READ`, a fault, a
+    ``clock_ahead`` fault, a put of the status.
+
+    "Whether it is asked is §2.11's first two steps: an absent service, and
+    one whose descriptor lists neither major, are not asked. In every other
+    case the heartbeats answer: a descriptor not read and a face closed to
+    the status change nothing." ``interfaces`` is the descriptor's list,
+    None for one not read.
+
+    "The last heartbeat it read answers: its time is ahead: yes, ``ahead``;
+    its time is an instant: no, ``confirmed``; its time is unknown:
+    unobservable, ``time_unknown``; none read: unobservable,
+    ``nothing_heard``." "Nothing else answers. A put of the status and the
+    faults' silence say nothing of the clock. Nor does the fault." """
+    if presence == "absent":
+        return NOT_ASKED, "absent"
+    if presence == "present" and interfaces is not None and major_of(interfaces) is None:
+        return NOT_ASKED, "not_listed"
+    last = next((x for x in reversed(list(heard)) if x in (AHEAD, INSTANT, TIME_UNKNOWN)), None)
+    if last == AHEAD:
+        return YES, "ahead"
+    if last == INSTANT:
+        return NO, "confirmed"
+    if last == TIME_UNKNOWN:
+        return UNOBSERVABLE, "time_unknown"
+    return UNOBSERVABLE, "nothing_heard"
