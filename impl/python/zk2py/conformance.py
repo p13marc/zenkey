@@ -13723,6 +13723,9 @@ def family_seed(root: Path) -> list[Result]:
         if path.name == "snapshot.json":
             out += _seed_snapshots(_load_json(path))
             continue
+        if path.name == "held.json":
+            out += _seed_held(_load_json(path))
+            continue
         if path.name != "merge.json":
             out.append((f"seed/{path.name}", False, "an unknown fixture file: the runner does not read it"))
             continue
@@ -13761,6 +13764,87 @@ def _seed_snapshots(data: dict[str, Any]) -> list[Result]:
         except (snapshot.Refused, zk2c.Refused, ValueError) as e:
             got = {"raised": f"{type(e).__name__}: {e}"}
         out.append(_check(f"seed: snapshot: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _seed_held(data: dict[str, Any]) -> list[Result]:
+    """``seed/held.json`` (core §4.2, 0.110, #986; round 116): what a reader
+    holds for one member -> the held stamp it may send (``asks``), and
+    ``snapshot.json``'s cases with the GET asked and arrivals that may be a
+    held stamp -> what it holds, each held stamp's reading and whether it
+    reads again (``cases``). :mod:`zk2py.seed_held` was written from §4.2
+    before the file was opened."""
+    from . import seed_held, snapshot, zk2c
+
+    unknown = set(data) - {"description", "asks", "cases"}
+    out: list[Result] = [("seed: held.json holds a description, asks and cases", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    for kind, run in (("asks", seed_held.run_ask), ("cases", seed_held.run_case)):
+        for c in data[kind]:
+            try:
+                got: Any = run(c)
+            except (snapshot.Refused, zk2c.Refused, ValueError) as e:
+                got = {"raised": f"{type(e).__name__}: {e}"}
+            out.append(_check(f"seed: held {kind}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _envelope_held(data: dict[str, Any]) -> list[Result]:
+    """``envelope/held.json`` (core §7.5 and §4.2, 0.110, #986; round 116):
+    a stamp -> a held stamp's bytes (``writes``); a state GET's Encoding and
+    payload -> the held stamp it carries, none, or the refusal (``gets``); a
+    GET reply's payload -> a held stamp, a page, another form or the refusal
+    (``replies``); a state GET and its owner's member -> ``held`` with the
+    reply's bytes, or ``whole`` (``answers``). "Every held stamp an
+    implementation accepts MUST write back to the same bytes": each one a
+    ``gets`` or a ``replies`` case accepts. :mod:`zk2py.held` was written
+    from the text before each list was opened."""
+    from . import held, zk2c
+
+    def stamp(x: Any) -> Any:
+        return None if x is None else zk2c.InBand(int(x["width"]), int(x["run"]), int(x["seq"]))
+
+    def js(s: Any) -> Any:
+        return None if s is None else {"width": s.width, "run": s.run, "seq": s.seq}
+
+    unknown = set(data) - {"description", "writes", "gets", "replies", "answers"}
+    out: list[Result] = [("envelope: held.json holds a description, writes, gets, replies and answers", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    for c in data["writes"]:
+        try:
+            got: Any = {"hex": held.write(stamp(c["stamp"])).hex()}
+        except ValueError as e:
+            got = {"raised": str(e)}
+        out.append(_check(f"envelope: held writes: {c['note']}", got, c["expect"]))
+    for c in data["gets"]:
+        raw = None if c["hex"] is None else bytes.fromhex(c["hex"])
+        try:
+            s = held.read_get(c["encoding"], raw)
+        except zk2c.Refused as r:
+            got = {"refused": r.token}
+        else:
+            got = {"held": js(s)}
+            if s is not None:
+                out.append(_check(f"envelope: held gets {c['hex']} writes back", held.write_back(s).hex(), c["hex"]))
+        out.append(_check(f"envelope: held gets {c['encoding']} {c['hex'] or '(none)'}: {c['note']}", got,
+                          c["expect"]))
+    for c in data["replies"]:
+        r = held.read_reply(bytes.fromhex(c["hex"]))
+        if r.refusal is not None:
+            got = {"refused": r.refusal}
+        elif r.held:
+            got = {"held": js(r.stamp)}
+            out.append(_check(f"envelope: held replies {c['hex']} writes back", held.write_back(r.stamp).hex(),
+                              c["hex"]))
+        else:
+            got = {"reads": r.reads}
+        out.append(_check(f"envelope: held replies {c['hex'][:48] or '(empty)'}: {c['note']}", got, c["expect"]))
+    for c in data["answers"]:
+        m = c["member"]
+        raw = None if c["hex"] is None else bytes.fromhex(c["hex"])
+        reply = held.answer(c["read"], c["encoding"], raw, None if m is None else stamp(m["stamp"]))
+        got = {"answer": "whole"} if reply is None else {"answer": "held", "hex": reply.hex()}
+        out.append(_check(f"envelope: held answers {c['read']}: {c['note']}", got, c["expect"]))
     return out
 
 
@@ -13819,6 +13903,8 @@ def family_envelope(root: Path) -> list[Result]:
             out += _envelope_calls(root, data)
         elif path.name == "tags.json":
             out += _envelope_tags(root, data)
+        elif path.name == "held.json":
+            out += _envelope_held(data)
         else:
             out.append((f"envelope/{path.name}", False, "an unknown fixture file: the runner does not read it"))
     return out

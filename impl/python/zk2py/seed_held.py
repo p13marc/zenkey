@@ -157,3 +157,44 @@ def stamp_of(x: dict[str, Any] | None) -> InBand | None:
 
 
 __all__ = ["ask", "entry_stamp", "reading", "HeldSeed", "stamp_of", "UNCHANGED", "REFUSED", "snapshot"]
+
+
+# -- seed/held.json, read (after the first run, round 116) ----------------------
+
+def run_ask(case: dict[str, Any]) -> dict[str, Any]:
+    """One of ``seed/held.json``'s ``asks``: what a reader holds for one
+    member, as ``holds`` or as the entry of ``member``'s id in a ``page`` it
+    read on ``key``, to the held stamp it may send."""
+    if "page" in case:
+        page = snapshot.read_page(bytes.fromhex(case["hex"]), "state")
+        if page != case["page"]:
+            raise ValueError(f"page {case['hex'][:32]}… reads {page!r}, the fixture's page is {case['page']!r}")
+        e = next((e for e in page["live"] + page["tombs"] if e["id"] == case["member"]), None)
+        holds = None if e is None else entry_stamp(page, e)
+        selector = snapshot.member_key(case["key"], case["member"])
+    else:
+        h = case["holds"]
+        holds = None if h is None else stamp_of(h["stamp"])
+        selector = "" if h is None else h["key"]
+    s = ask(selector, holds)
+    if s is None:
+        return {"held": None}
+    return {"held": {"width": s.width, "run": s.run, "seq": s.seq}, "hex": held.write(s).hex()}
+
+
+def run_case(case: dict[str, Any]) -> dict[str, Any]:
+    """One of ``seed/held.json``'s ``cases``, as its ``expect`` writes it."""
+    from .seed_snapshot import collections_of
+
+    seed = HeldSeed(collections_of(case), case["view"], case["asked"]["key"], stamp_of(case["asked"]["held"]))
+    for a in case["arrivals"]:
+        if "page" in a:
+            got = snapshot.read_page(bytes.fromhex(a["hex"]), "state")
+            if got != a["page"]:
+                raise ValueError(f"page {a['hex'][:32]}… reads {got!r}, the fixture's page is {a['page']!r}")
+        if "held" in a and stamp_of(a["held"]) != held.read_reply(bytes.fromhex(a["hex"]), "state").stamp:
+            raise ValueError(f"held stamp {a['hex']} does not read as the fixture's {a['held']!r}")
+        seed.arrive(a)
+    r = seed.result()
+    return {"view": r["view"], "snapshots": r["snapshots"], "held": [x["reads"] for x in r["held"]],
+            "read_again": r["again"]}
