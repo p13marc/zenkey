@@ -2739,6 +2739,7 @@ before it reads a tag or a body. `[F: heartbeat/owner.json]`
     `zenoh/bytes` ([`observer.md`](observer.md) §7.3). Its bytes are not
     parsed, a heartbeat's own bytes among them.
     `envelope/carries.json` holds both keys under another `Encoding`.
+    `heartbeat/owner.json`'s `forms` holds the refusal.
 - **A heartbeat on an owner heartbeat's key** is form 6, in the other
   layout. Its CH carries its covered revision's tag, so it is refused
   `tag` 15 times in 16. Under tag 0 its body is read as an owner
@@ -6214,7 +6215,8 @@ brief:
   - **`owner.json`** holds the owner heartbeat. A value → the body's
     bits, its pad and the put's payload (`writes`). A payload → the
     value, its groups' sections unread, or the refusal (`reads`). A put
-    of another form → `form` (`forms`).
+    of another form → `form` (`forms`). So is a case's put under the
+    `encoding` it states.
   - Its `groups` give the catalog an owner names, the catalogs a reader
     holds and one group → the revision its index names, whether its tag
     is that revision's, and its sections, or that group's refusal. Its
