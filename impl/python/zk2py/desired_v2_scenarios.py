@@ -45,6 +45,9 @@ D2 = "zk2/lab/author/tasking.v2/state/tasks/lab/spare"
 RP = "zk2/lab/worker/worker.v2/state/desired/task"
 RUN = "zk2/lab/worker/worker.v2/state/running"
 HB = "zk2/lab/author/freshness.v2/stream/heartbeat/tasking.v2"
+#: the owner heartbeat key of the desired collection's class: it declares no
+#: link.exposure, so its class is host (freshness.v2 §2.4)
+HBS = "zk2/lab/author/freshness.v2/stream/heartbeats/host"
 BASELINE = {"revision": 0, "mode": "idle", "rate_hz": 1}
 BASELINE_REPORT = d2.baseline_report()
 
@@ -843,13 +846,34 @@ def _hb(bus: Bus, t: float) -> list[Any]:
     return [g for g in bus.since(t, HB) if g[2] == "put"]
 
 
-def section14(rp: Report, moves: bool = True) -> None:
-    sec = "§14 the watch" + ("" if moves else ", a target that does not move what it expects")
+def watched_catalog(path: Path) -> Path:
+    """A catalog for §14 under an owner heartbeat (core §8.6): tasking.v2,
+    watched, then the standard freshness.v2 contract."""
+    from . import catalog as cat, freshness_v2 as f2
+    from .desired_v2_live import contract
+
+    entries = [(c.interface, c.fingerprint) for c in (contract("tasking.v2", watched=True), f2.standard_contract())]
+    path.write_text(json.dumps({"format": cat.FORMAT, "epoch": 1_700_000_000,
+                                "entries": [{"index": i, "iface": n, "contract": fp}
+                                            for i, (n, fp) in enumerate(entries)]}))
+    return path
+
+
+def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
+    """``ohb``: the author confirms ``tasking.v2`` by an owner heartbeat
+    under a catalog, on :data:`HBS`, and sends no heartbeat of it; the
+    target holds the catalog and reads the group (§2.5)."""
+    sec = "§14 the watch" + ("" if moves else ", a target that does not move what it expects") + (
+        ", by an owner heartbeat under a catalog" if ohb else "")
     bus = Bus(cut=True)
     try:
-        author = bus.author("--desired-watched")
+        global HB
+        hb_kept, HB = HB, HBS if ohb else HB
+        cat_flags = ["--desired-catalog", str(watched_catalog(bus.dir / "catalog.json"))] if ohb else []
+        a_flags = ["--desired-watched", *cat_flags, *(["--desired-owner-heartbeat"] if ohb else [])]
+        author = bus.author(*a_flags)
         s1 = author.put(TARGET, v(1))
-        flags = ["--desired-target", AUTHOR, "--desired-across", "--desired-watch", "--desired-watched",
+        flags = ["--desired-target", AUTHOR, "--desired-across", "--desired-watch", "--desired-watched", *cat_flags,
                  *([] if moves else ["--desired-no-move"])]
         g0, t1 = len(author.gets()), time.monotonic()
         target = bus.party(TARGET, flags, on=2)
@@ -903,7 +927,7 @@ def section14(rp: Report, moves: bool = True) -> None:
         acts0 = target.acts()
         author.kill()
         t5 = time.monotonic()
-        author = bus.author("--desired-watched")
+        author = bus.author(*a_flags)
         time.sleep(8.0)
         puts = [g for g in bus.since(t5, D) if g[2] == "put"]
         new = puts[0][4] if puts else None
@@ -932,7 +956,13 @@ def section14(rp: Report, moves: bool = True) -> None:
                  and not bus.since2(t6) and gets == [] and h1.get("unmoved", 0) > h0.get("unmoved", 0)
                  and h1.get("read") == h0.get("read"),
                  f"{quiet} heartbeats while stopped, gets {gets}, heartbeats {h0} -> {h1}")
+        if ohb:
+            own = [g for g in bus.since(t1, hb_kept) if g[2] == "put"]
+            rp.check(sec, "the author sent no heartbeat of tasking.v2 beside its owner heartbeats, and the target "
+                          "read each group on the owner heartbeat key's sequence",
+                     not own and set((w1.get("by_key") or {})) == {"host"}, f"{len(own)} heartbeats, {w1.get('by_key')}")
     finally:
+        HB = hb_kept
         bus.close()
 
 
@@ -977,7 +1007,8 @@ def section15(rp: Report) -> None:
 
 
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6, "8": section8,
-            "13": section13, "14": section14, "14-no-move": lambda rp: section14(rp, moves=False), "15": section15}
+            "13": section13, "14": section14, "14-no-move": lambda rp: section14(rp, moves=False),
+            "14-ohb": lambda rp: section14(rp, ohb=True), "15": section15}
 
 
 def main(argv: list[str] | None = None) -> int:
