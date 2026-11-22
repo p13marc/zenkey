@@ -1876,11 +1876,78 @@ def _desired_v2_declarations(path: Path) -> list[Result]:
     return out
 
 
+def _desired_v2_resource(r: dict[str, Any]) -> Any:
+    """A resource as declarations.json's ``reports`` writes one."""
+    from . import desired_v2 as d2
+
+    ty = r["type"]
+    token = "@state" if r.get("explicit") and r["kind"] == "state" else r["kind"]
+    return d2.ReportResource(token, r["template"], r["annotations"],
+                             ty["kind"] == "packed" and ty["name"] == d2.REPORT_TYPE
+                             and d2.is_published(ty["artifact"]))
+
+
+def _desired_v2_slices(path: Path) -> list[Result]:
+    """desired.v2 §2.10: a tool's finding of one role's report, among the
+    replies of S4's GET over the target's state. The file gives each reply
+    as its CH tag and its record, which the runner puts back in an envelope
+    for the reader."""
+    from . import desired_v2 as d2, zk2c
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        rd = c["reading"]
+        replies = [(x["key"], zk2c.write("mutation", 16, 0, 0, x["tag"], bytes.fromhex(x["hex"])))
+                   for x in rd["replies"]]
+        f = d2.find_report(rd["target"], rd["iface"], [_desired_v2_resource(r) for r in rd["resources"]],
+                           set(rd["requires"]), rd["role"], replies)
+        got: dict[str, Any] = {"found": f.found, "key": f.key, "reasons": list(f.reasons)}
+        if f.found == d2.FOUND_UNREADABLE:
+            got["why"] = f.why
+        if f.found == d2.FOUND_ONE and f.reading is not None:
+            got["findings"] = list(f.reading.findings)
+        out.append(_check(f"v2 slices #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _desired_v2_conclusions(path: Path) -> list[Result]:
+    """desired.v2 §2.17, §5: one reading of one target's role -> §5's four
+    questions, each an answer and a reason."""
+    from . import desired_v2 as d2
+
+    def said(x: Any) -> Any:
+        return None if x is None else (bool(x["lists"]), bool(x["bound"]))
+
+    out: list[Result] = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        t, a = c["reading"]["target"], c["reading"]["author"]
+        report = None if t["report"] is None else d2.read_report(t["report"]["tag"], bytes.fromhex(t["report"]["hex"]))
+        get = a["get"]
+        has_slice = True
+        if get == "not_made":
+            cur: Any = None
+        elif get in ("timeout", "unstamped"):
+            cur = "incomplete"
+        elif get == "silent":
+            cur = "silent"
+        elif "no_entry" in get:
+            cur = d2.NoEntry(d2.Run.parse(get["no_entry"]), 0)
+        else:
+            (_, text), = get.items()
+            cur = d2.Version.parse(text)
+        r = d2.Reading(t["presence"], said(t["descriptor"]), report, "not_asked" if t["age"] is None else t["age"],
+                       a["presence"], cur, said(t["deployment"]), has_slice)
+        got = {q: x.pair() for q, x in d2.conclude(r).items()}
+        out.append(_check(f"v2 conclusions #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: desired.v2's fixtures (``conformance/v2/``), by file name; an unknown file
 #: fails, as in :data:`PROFILE_FIXTURES`.
 DESIRED_V2_FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": _desired_v2_schema, "reports.json": _desired_v2_reports, "order.json": _desired_v2_order,
     "watch.json": _desired_v2_watch, "declarations.json": _desired_v2_declarations,
+    "slices.json": _desired_v2_slices, "conclusions.json": _desired_v2_conclusions,
 }
 
 
