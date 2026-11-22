@@ -4,6 +4,11 @@
 //! refuse an act, fail one partway, or hold one from its start. Compiled
 //! into the example (`examples/owner.rs`, `--desired-*`) and into
 //! `tests/profile_desired.rs`, whose scenarios run on the same drive.
+//!
+//! `desired.v2` (#986's J3): `scenarios-v2.md`'s `tasking.v2` and
+//! `worker.v2` beside them ([`contracts_v2`]), and the same drive refusing
+//! with the two lines `worker.v2`'s `desired.details` holds
+//! ([`Drive::new_v2`]); `tests/profile_desired_v2.rs` runs on it.
 
 use std::sync::Mutex;
 
@@ -21,6 +26,18 @@ pub const WORKER_TOML: &str = include_str!("../../tests/contracts/worker.v1.toml
 pub const TASKING_JSON: &str = include_str!("../../tests/contracts/tasking.json");
 /// The profile's standard schema, which `worker.v1` lists by its path.
 pub const DESIRED_JSON: &str = include_str!("../../../spec/profiles/desired/desired.v1.json");
+
+/// `tasking.v2`, as `zenkey/tests/contracts/` keeps it.
+pub const TASKING_V2_TOML: &str = include_str!("../../tests/contracts/tasking.v2.toml");
+/// `worker.v2`, as `zenkey/tests/contracts/` keeps it.
+pub const WORKER_V2_TOML: &str = include_str!("../../tests/contracts/worker.v2.toml");
+/// `desired.v2`'s standard schema, which `worker.v2` lists by its path.
+pub const DESIRED_V2_JSON: &str = include_str!("../../../spec/profiles/desired/desired.v2.json");
+/// `worker.v2`'s line for a rate above what the drive supports
+/// (`scenarios-v2.md`, "The contracts": index 0 of `desired.details`).
+pub const LINE_RATE: &str = "above what the drive supports";
+/// `worker.v2`'s line for a document naming the worker's endpoint (index 1).
+pub const LINE_REACH: &str = "names how the worker reaches the bus";
 
 /// The author's desired resource, as the descriptor names it.
 pub const TASKS: &str = "state/tasks/{system}/{service}";
@@ -70,6 +87,39 @@ pub fn contracts() -> Result<(Contract, Contract), String> {
     Ok((load("tasking.v1.toml")?, load("worker.v1.toml")?))
 }
 
+/// `tasking.v2` and `worker.v2` (`scenarios-v2.md`, "The contracts"), loaded
+/// as [`contracts`] loads v1's. `ttl_s` above 0 gives "tasking.v2, watched":
+/// the same file with that `freshness.ttl_s` (§14 states 4).
+///
+/// # Errors
+///
+/// A contract that does not load, or a file not written.
+pub fn contracts_v2(ttl_s: u64) -> Result<(Contract, Contract), String> {
+    let root = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let dir = root.path().join("zenkey/tests/contracts");
+    let profile = root.path().join("spec/profiles/desired");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
+    let tasking = TASKING_V2_TOML.replace(
+        "\"freshness.ttl_s\" = 0 }",
+        &format!("\"freshness.ttl_s\" = {ttl_s} }}"),
+    );
+    for (path, text) in [
+        (dir.join("tasking.v2.toml"), tasking.as_str()),
+        (dir.join("worker.v2.toml"), WORKER_V2_TOML),
+        (dir.join("tasking.json"), TASKING_JSON),
+        (profile.join("desired.v2.json"), DESIRED_V2_JSON),
+    ] {
+        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    let load = |name: &str| {
+        let l = load_path(&dir.join(name));
+        l.contract
+            .ok_or_else(|| format!("{name}, embedded:\n{}", l.report))
+    };
+    Ok((load("tasking.v2.toml")?, load("worker.v2.toml")?))
+}
+
 /// What the drive holds and did.
 #[derive(Debug, Clone)]
 pub struct DriveState {
@@ -87,6 +137,8 @@ pub struct DriveState {
     pub hold: bool,
     /// An act waits now.
     pub held: bool,
+    /// It refuses with the lines `worker.v2`'s tables hold.
+    pub v2_lines: bool,
 }
 
 /// The worker's simulated drive (`scenarios.md`, "The target"): the
@@ -111,9 +163,20 @@ impl Drive {
                 refuse_next: None,
                 hold: false,
                 held: false,
+                v2_lines: false,
             }),
             release: tokio::sync::Notify::new(),
         }
+    }
+
+    /// [`Drive::new`] for `worker.v2`: it refuses with [`LINE_RATE`] and
+    /// [`LINE_REACH`], the lines its report resource's `desired.details`
+    /// holds, so its report names them by index (`desired.v2` §2.10).
+    #[must_use]
+    pub fn new_v2(run: StateWriter) -> Self {
+        let d = Self::new(run);
+        d.with(|s| s.v2_lines = true);
+        d
     }
 
     /// Reads or changes what it holds.
@@ -177,9 +240,13 @@ impl Handler for Drive {
     fn apply<'a>(&'a self, doc: &'a Document) -> BoxFuture<'a, Ended> {
         Box::pin(async move {
             self.start().await;
-            let (refuse, fail) = self.with(|s| {
+            let (refuse, fail, v2) = self.with(|s| {
                 s.applies += 1;
-                (s.refuse_next.take(), std::mem::take(&mut s.fail_next))
+                (
+                    s.refuse_next.take(),
+                    std::mem::take(&mut s.fail_next),
+                    s.v2_lines,
+                )
             });
             if let Some(r) = refuse {
                 return Ended::Refused(r);
@@ -192,16 +259,21 @@ impl Handler for Drive {
                 return refused(
                     REACH,
                     "/endpoint",
-                    "the worker's endpoint is what it reaches the bus by",
+                    if v2 {
+                        LINE_REACH
+                    } else {
+                        "the worker's endpoint is what it reaches the bus by"
+                    },
                 );
             }
             let rate = v["rate_hz"].as_u64().unwrap_or(0);
             if rate > MAX_RATE_HZ {
-                return refused(
-                    INVALID,
-                    "/rate_hz",
-                    &format!("the worker supports up to {MAX_RATE_HZ} Hz"),
-                );
+                let line = if v2 {
+                    LINE_RATE.to_owned()
+                } else {
+                    format!("the worker supports up to {MAX_RATE_HZ} Hz")
+                };
+                return refused(INVALID, "/rate_hz", &line);
             }
             if fail {
                 // The rate set, then the mode not: applied in part (§2.7).
