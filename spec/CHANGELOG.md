@@ -3,6 +3,46 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.112 — 2026-11-22: a desired resource of a contract that uses `desired.v2` leaves §4.3's table, no keyword changed (#986)
+
+`desired.v2` text 0.1 makes a document's version its in-band stamp
+([`profiles/desired/CHANGELOG.md`](profiles/desired/CHANGELOG.md)). Its
+desired resource then needs no Zenoh timestamp. Three places of this
+text named every desired resource, and now name `desired.v1`'s alone.
+
+**What changed.**
+- **§4.3's table.** The row "A `desired.v1` desired resource" reads "A
+  desired resource of a contract that does not use `desired.v2`". A line
+  under the table says what a `desired.v2` one does: it carries no Zenoh
+  timestamp, and a GET of it is answered by snapshot.
+- **§4.2's list of per-key resources** reads the same way.
+- **§4.3, "A profile's order"** names `desired.v2` §2.6 beside
+  `desired.v1`'s: an older version of a remembered run is refused,
+  whichever run is held.
+- **Appendix D's vocabulary row** for `desired` names the three keys
+  `desired.v2` §4 adds: `report`, `pointers` and `details`. W105 reads
+  the table of the major a contract uses, as §10 already says.
+
+**Why "does not use `desired.v2`".** A contract uses one major of a
+profile (§10), so today that is a contract that uses `desired.v1`. The
+wording follows what an owner checks: the resource is per key unless its
+revision lists the major that takes it out.
+
+**What deliberately did not change.**
+- **No keyword.** S1 and S2 read the table, and the table's wording
+  moved, not its rule. 295 rules.
+- **§4.2's conditional read** is as 0.110 left it. `desired.v2` is its
+  first user, and redefines none of it.
+- **A desired resource under `redundancy.v1`** stays per key under
+  either major: every state of such a contract is.
+- **No fixture moved.** No contract in `conformance/` uses
+  `desired.v2`.
+- **Observer** stays 0.35.
+
+**Not verified.** No implementation has read this entry's wording. The
+reference still stamps every desired resource: its change is #986's
+model and runtime work.
+
 ## 0.111 — 2026-11-21: editorial: `conformance/heartbeat/` indexed, a put with no envelope on a heartbeat's key pinned, and what "written against" says, no rule changed (#609, #1110)
 
 zk2py's round 114 read 0.109 cold, and filed F-560, F-561, F-563 and
