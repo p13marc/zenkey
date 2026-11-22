@@ -47,6 +47,11 @@ mod config_v2;
 #[path = "profiles/desired_v2.rs"]
 mod desired_v2;
 
+/// `health.v2`'s runners (`health/conformance/v2/`, #986's Q1), beside
+/// them.
+#[path = "profiles/health_v2.rs"]
+mod health_v2;
+
 /// The fixtures this crate runs, as (profile directory, file name).
 const KNOWN: &[(&str, &str)] = &[
     ("hostid", "vectors.json"),
@@ -59,6 +64,12 @@ const KNOWN: &[(&str, &str)] = &[
     ("freshness", "clock-trust.json"),
     ("freshness", "apply.json"),
     ("health", "clock.json"),
+    ("health", "v2/schema.json"),
+    ("health", "v2/records.json"),
+    ("health", "v2/tables.json"),
+    ("health", "v2/snapshots.json"),
+    ("health", "v2/judgements.json"),
+    ("health", "v2/clock.json"),
     ("config", "window.json"),
     ("config", "validation.json"),
     ("config", "desired.json"),

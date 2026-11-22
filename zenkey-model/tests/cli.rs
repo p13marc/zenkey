@@ -374,3 +374,63 @@ fn contract_lint_reads_desired_v2s_declarations() {
         "{stderr}"
     );
 }
+
+/// `zk2 contract lint` reads a service's own word tables (health.v2 §2.10,
+/// §4): a contract that lists `health.v2` and writes its three keys once,
+/// on `[defaults]`, has no finding; one whose table is no list of names, or
+/// whose resources carry two lists, exits 1 and names the resource, the key
+/// and the reason.
+#[test]
+fn contract_lint_reads_health_v2s_tables() {
+    let dir = std::env::temp_dir().join(format!("zk2-cli-health-v2-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let contract = |name: &str, defaults: &str, own: &str| {
+        let path = dir.join(format!("{name}.toml"));
+        let text = format!(
+            "[interface]\nname = \"tc\"\nmajor = 1\nminor = 0\nuses = [\"health.v2\"]\n\n\
+             [defaults]\nannotations = {{ {defaults} }}\n\n\
+             [resources.rates]\nkind = \"stream\"\ntype = {{ raw = \"text/plain\" }}\n\n\
+             [resources.loss]\nkind = \"stream\"\ntype = {{ raw = \"text/plain\" }}\n{own}"
+        );
+        std::fs::write(&path, text).unwrap();
+        path.display().to_string()
+    };
+    let lint = |file: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_zk2"))
+            .args(["contract", "lint", file])
+            .output()
+            .expect("runs");
+        (
+            out.status.code().expect("exits"),
+            String::from_utf8(out.stderr).expect("UTF-8"),
+        )
+    };
+    let ok = contract(
+        "ok",
+        r#""health.reasons" = ["tc_netns_gone", "tc_probe_stale"], "health.details" = ["tc_no_route"], "health.codes" = ["tc_netns_restarted"]"#,
+        "",
+    );
+    let (code, stderr) = lint(&ok);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(!stderr.contains("health.v2"), "{stderr}");
+    let value = contract("value", r#""health.reasons" = ["Bad Name"]"#, "");
+    let (code, stderr) = lint(&value);
+    assert_eq!(code, 1, "{stderr}");
+    assert!(
+        stderr.contains("error[health.v2 value] stream/loss: health.reasons: "),
+        "{stderr}"
+    );
+    let disagrees = contract(
+        "disagrees",
+        r#""health.codes" = ["tc_a", "tc_b"]"#,
+        "annotations = { \"health.codes\" = [\"tc_a\"] }\n",
+    );
+    let (code, stderr) = lint(&disagrees);
+    assert_eq!(code, 1, "{stderr}");
+    assert!(
+        stderr.contains("error[health.v2 disagrees] stream/rates: health.codes: "),
+        "{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
