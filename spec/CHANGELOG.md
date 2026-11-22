@@ -30,10 +30,13 @@ this entry sits on it.
     heartbeat key under `application/octet-stream` carries no envelope,
     and an owner heartbeat's key under `zenoh/bytes` carries one. The
     reference's `wire::carries` reads the three so, by its source.
-  - The refusal itself, `form`, has no case yet. `owner.json`'s `forms`
-    states no `Encoding`, and the reference's runner reads none. A case
-    of an owner heartbeat's own bytes under another `Encoding` is the
-    code half's to add, with the runner.
+  - The refusal itself, `form`, has a case too, added with the code
+    half. A `forms` case of `owner.json` may state an `encoding`, and
+    one that states none is under `zenoh/bytes`. The sixth case is an
+    owner heartbeat's own bytes under `application/octet-stream`,
+    written by hand: `form`, on either key, no byte parsed.
+  - The reference's runner reads it through `wire::read_put`, which
+    finds no envelope. It passes as written.
   - Both implementations refuse such a put on a bus (round 114's
     `owner_heartbeat_live --reference`).
 - **A reader that holds one revision.** §7.5 names where it is pinned:
@@ -81,8 +84,9 @@ F-557).
 - **No rule and no keyword.** `RULES.md` lists 295 rules, as before.
 - **§8.6.** It already says where an owner states its catalog, and that
   across a face it is the deployment's word.
-- **`owner.json`'s vectors.** Its 104 cases stand. Two sentences of its
-  description and one note moved.
+- **`owner.json`'s vectors.** Its 104 cases stand, and `forms` gains
+  the one above, 105. Three sentences of its description and one note
+  moved.
 - **Every profile's header.**
 
 ## 0.110 — 2026-11-21: a conditional read: §7.5's held stamp, and §4.2's owner and reader (#986)

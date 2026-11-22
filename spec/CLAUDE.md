@@ -724,7 +724,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   key), and `face_scope.rs`'s count moves with them. Core: Appendix C
   and E index `conformance/heartbeat/` and `packed/`;
   `envelope/carries.json` holds both heartbeat keys under another
-  `Encoding` (29 cases); `profiles/README.md` says a header's "written
+  `Encoding` (29 cases), and `heartbeat/owner.json`'s `forms` the
+  refusal, a sixth case stating an `encoding`, written by hand with the
+  code half (105 cases, `heartbeat_owner_vectors` reading it through
+  `wire::read_put`); `profiles/README.md` says a header's "written
   against" is the core its rules were last read whole against. The
   code half is `/srv/dev/scratch/zenkey/p/r115-code.md`.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
