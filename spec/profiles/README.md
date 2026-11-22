@@ -60,7 +60,7 @@ implementation runs it yet. A profile leaves this table when one does
 ```text
 profiles/
   README.md               this file: the index, the template, the process
-  .history/               published revisions of the profiles' standard contracts (health.v1, config.v1, alarms.v1, freshness.v2)
+  .history/               published revisions of the profiles' standard contracts (health.v1, health.v2, config.v1, alarms.v1, freshness.v2)
   <name>/
     v<major>.md           the normative text of one wire major
     CHANGELOG.md          the versions of that text, and of a later major's beside it
