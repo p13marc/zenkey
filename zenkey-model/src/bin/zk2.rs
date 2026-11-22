@@ -105,17 +105,29 @@ fn lint(files: &[&str]) -> ExitCode {
     let mut bad = false;
     for f in files {
         match load(f) {
-            // config.v2 §2.2: its lint's findings are errors.
-            Some(c) => match zenkey_model::config::v2::lint_contract(&c).as_slice() {
-                [] => println!("{f}: {} {}", c.iface, Fingerprint::of(&c)),
-                findings => {
+            // config.v2 §2.2: its lint's findings are errors. So is an
+            // invalid declaration of a contract that lists desired.v2
+            // (desired.v2 §2.2, §2.10).
+            Some(c) => {
+                let mut findings: Vec<String> = zenkey_model::config::v2::lint_contract(&c)
+                    .iter()
+                    .map(|x| format!("error[config.v2 {}] {}", x.reason.token(), x.at))
+                    .collect();
+                findings.extend(
+                    zenkey_model::desired::v2::lint_contract(&c)
+                        .iter()
+                        .map(|x| format!("error[desired.v2 {}] {}: {}", x.token, x.at, x.says)),
+                );
+                if findings.is_empty() {
+                    println!("{f}: {} {}", c.iface, Fingerprint::of(&c));
+                } else {
                     eprintln!("{f}:");
-                    for x in findings {
-                        eprintln!("  error[config.v2 {}] {}", x.reason.token(), x.at);
+                    for x in &findings {
+                        eprintln!("  {x}");
                     }
                     bad = true;
                 }
-            },
+            }
             None => bad = true,
         }
     }
