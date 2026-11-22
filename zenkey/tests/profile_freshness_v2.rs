@@ -2213,6 +2213,21 @@ async fn the_owner_heartbeat_is_off_unless_the_deployment_sets_it() {
         "no owner heartbeat"
     );
     svc.close().await.unwrap();
+    // The first service's tokens are withdrawn on `os`, and `hs` reads them
+    // gone only once the router has heard it. Read at once, a suite running
+    // beside this one left both in the count below (#1151).
+    let tokens = || async {
+        hs.liveliness()
+            .get("zk2/lab/w2/@zk/**")
+            .await
+            .unwrap()
+            .into_iter()
+            .count()
+    };
+    eventually("the closed service's tokens gone", || async {
+        tokens().await == 0
+    })
+    .await;
 
     // On, with no catalog: refused at step 2, nothing declared.
     let mut b = ServiceBuilder::new(&os, config(W2).owner_heartbeat());
@@ -2228,14 +2243,11 @@ async fn the_owner_heartbeat_is_off_unless_the_deployment_sets_it() {
         matches!(&e, Error::NotExposed(why) if why.contains("owner_heartbeat") && why.contains("catalog")),
         "{e}"
     );
-    let tokens = hs
-        .liveliness()
-        .get("zk2/lab/w2/@zk/**")
-        .await
-        .unwrap()
-        .into_iter()
-        .count();
-    assert_eq!(tokens, 0, "no token of an instance that never started");
+    assert_eq!(
+        tokens().await,
+        0,
+        "no token of an instance that never started"
+    );
 }
 
 /// Which interfaces is the owner's choice, interface by interface (v2
