@@ -3,6 +3,89 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.113 — 2026-11-22: §7.5: a heartbeat's time says "ahead" while its owner's clock guard holds (#986)
+
+An owner whose clock guard holds wrote its heartbeat's time as unknown,
+all 42 bits set. So did an owner whose clock reads no instant the epoch
+codes, such as a device with no real-time clock at boot. A reader could
+not tell the two apart. `health.v1` therefore had its owner publish a
+`clock_ahead` fault again every period, and answered a heartbeat alone
+"unobservable". This version gives the first case a code of its own, so
+that one heartbeat answers the clock question.
+
+**What changed: §7.5, a heartbeat's time, in both layouts.**
+- **The ahead time** is the seconds all ones with the millisecond code
+  1022: `0x3fffffffffe` in 42 bits, the unknown time with its last bit
+  clear. It says the owner's clock guard holds (§4.3, "Ahead"), and
+  carries no instant.
+- **The unknown time** is still all 42 bits set. It now says one thing:
+  the owner's clock reads no instant the epoch codes.
+- **Unused** is every other millisecond code from 1000 up: 1000 to 1021
+  under any seconds, and 1022 or 1023 under seconds that are not all
+  ones. The body's `code` refusal and the owner heartbeat's read "an
+  unused millisecond code".
+- **An owner heartbeat's time** is a heartbeat's, the ahead time
+  included: one time for every group.
+- **Two keyword rules.** An implementation that reads a heartbeat's
+  time MUST read it as an instant, as unknown or as ahead, and MUST NOT
+  read the ahead time as unknown, nor as an instant.
+  `[F: heartbeat/times.json, bodies.json]` 297 rules (implementation
+  81).
+- **§4.3** follows: "Minting" and "What goes on" say the heartbeat
+  carries the ahead time while the guard holds, where they said its time
+  is unknown.
+- **Who writes it** is `freshness.v2` 0.12's §2.10: an owner MUST, while
+  its guard holds
+  ([`profiles/freshness/CHANGELOG.md`](profiles/freshness/CHANGELOG.md)).
+
+**The compatibility cost.** A reader built before this version reads
+the ahead time as an unused code. It refuses the body (`code`), and an
+owner heartbeat whole, with every group.
+- **So to that reader** the heartbeat confirms nothing while the
+  owner's guard holds. Every member the heartbeat covers goes stale to
+  it after its horizon: a `health.v1` status after 60 s, and every other
+  `freshness.v2` collection of that owner with it.
+- **Before**, the same reader read the time unknown and confirmed.
+  Stale is the safe side, and it is a visible regression during a drift.
+- **It ends with the drift.** The first heartbeat after the guard
+  releases is read again. Its seq follows a gap, so the members read as
+  after a lost delivery until the next one.
+- **Readers move first.** A deployment updates its readers before its
+  owners, as for the owner heartbeat.
+
+**Evidence.**
+- `heartbeat/times.json`: 16 writes and 18 reads. Three writes are an
+  owner whose guard holds, under an epoch, with no catalog and on a
+  clock past the epoch's range. The read of `ffffffffff80` is the ahead
+  time, where it was `code`. Five reads are new: the ahead time with no
+  catalog, and four unused codes around it.
+- `heartbeat/bodies.json`: 18 writes and 42 reads. A body of sections
+  under the ahead time is written and read back.
+- `heartbeat/owner.json`: 14 writes and 47 reads. One group and W2's
+  three are written under the ahead time, and 1022 under a known second
+  is refused.
+- **`earlier`.** Each case whose bytes a reader of 0.112 refused states
+  that refusal beside its expectation, as `earlier`. It is no
+  expectation of this text. It shows the cost above.
+- **Computed twice.** One script wrote the cases, after recomputing
+  every write the three files held with its own writer. A second,
+  written from the finished text, computed each new expectation again.
+  Both are the drafter's, kept out of the repository. No file was
+  blessed.
+
+**What deliberately did not change.**
+- **A frame's time, an event's and a snapshot's.** None has an ahead
+  code. A snapshot's times are minted from the clock ahead, as before,
+  and no router reads them.
+- **The envelope's parse**, the digest, the map and the sections.
+- **Observer** stays 0.35. It says how a tool shows a frame's and an
+  event's unknown time, and nothing of a heartbeat's.
+  `freshness.v2` §5 says a tool shows the ahead time as ahead.
+
+**Not verified.** No implementation has read these cases. The reference
+still writes all ones while its guard holds, and refuses `ffffffffff80`:
+its change is #986's code half.
+
 ## 0.112 — 2026-11-22: a desired resource of a contract that uses `desired.v2` leaves §4.3's table, no keyword changed (#986)
 
 `desired.v2` text 0.1 makes a document's version its in-band stamp

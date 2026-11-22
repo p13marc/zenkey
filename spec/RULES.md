@@ -56,8 +56,8 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 18 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 87, 27 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 79 |
-| Every rule, once | 295 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 81 |
+| Every rule, once | 297 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -812,6 +812,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST refuse an envelope or a form for the first of these that applies, in this order: (11 items) | `[F: envelope/vectors.json, carries.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | Every envelope and form an implementation accepts MUST write back to the same bytes. | `[F: envelope/vectors.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a heartbeat MUST write its covered revision's tag in CH. | `[F: heartbeat/layouts.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | An implementation that reads a heartbeat's time MUST read it as an instant, as unknown or as ahead, as these items say. | `[F: heartbeat/times.json, bodies.json]` |
+| [§7.5](core.md#75-the-zk2c-envelope) | **Three readings.** … An implementation MUST NOT read the ahead time as unknown, nor as an instant. | `[F: heartbeat/times.json, bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation that writes a templated section MUST write the list only where it is shorter than the bitmap. | `[F: heartbeat/bodies.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | An implementation MUST compute a digest so. | `[F: heartbeat/digests.json]` |
 | [§7.5](core.md#75-the-zk2c-envelope) | **Reading a body.** … An implementation MUST refuse a body for the first of these that applies, in this order, naming the refusal: (3 items) | `[F: heartbeat/bodies.json]` |

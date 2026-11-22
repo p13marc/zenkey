@@ -337,7 +337,7 @@
         "clock_ahead",
         "heartbeat_held"
       ],
-      "note": "while the guard holds: each heartbeat's time unknown, and the fault again (§2.5, freshness.v2 §2.10)",
+      "note": "while the guard holds: each heartbeat's time ahead, and the fault again (§2.5, freshness.v2 §2.10)",
       "presence": "present"
     },
     {
@@ -406,7 +406,7 @@
       "heard": [
         "heartbeat_held"
       ],
-      "note": "a reader that joined during the hold: the time unknown, and no fault heard yet (§2.5)",
+      "note": "a reader that joined during the hold: the time ahead, and no fault heard yet (§2.5)",
       "presence": "present"
     },
     {
@@ -423,7 +423,7 @@
         "heartbeat",
         "heartbeat_held"
       ],
-      "note": "a time known, then a time unknown, and no fault: the fault lost or not yet repeated",
+      "note": "a time known, then a time that is no instant, and no fault: the fault lost or not yet repeated",
       "presence": "present"
     },
     {
@@ -441,7 +441,7 @@
         "heartbeat",
         "heartbeat_held"
       ],
-      "note": "a fault, a time known, then a time unknown with no fault since",
+      "note": "a fault, a time known, then a time that is no instant with no fault since",
       "presence": "present"
     },
     {
@@ -463,5 +463,5 @@
       "presence": "present"
     }
   ],
-  "description": "health.v1 §5, \"is this service's clock ahead?\" (§2.5): what one subscriber heard of one service during its reading, in arrival order -> the answer. A case gives presence, descriptor and face as judgements.json writes them. heard: the deliveries, each \"heartbeat\" (a heartbeat covering health.v1 whose status's section the reader read in step, freshness.v2 §2.5's confirmed, its bit set or clear, and whose time is known), \"heartbeat_held\" (the same, its time unknown, all ones, as while the guard holds: freshness.v2 §2.10), \"status_put\" (a put of state/status, which the guard does not hold), \"status_deleted\" (a delete of state/status), \"clock_ahead\" (a stream/faults sample whose code is clock_ahead, whatever its level and its stamp) or \"fault\" (a stream/faults sample with any other code). expect.answer is yes, no, unobservable or not_asked: yes on a clock_ahead fault with no heartbeat whose time is known heard after it; no when the last heartbeat heard has its time known and came after the last clock_ahead fault, or with none heard; unobservable otherwise, since the faults' silence is their normal state and a time unknown proves nothing alone; not_asked when the service is absent or its descriptor does not list health.v1, as the first question's. A put or a delete of the status says nothing of the clock. A fault heard answers whatever else presence says. expect.reason: clock_ahead, confirmed, time_unknown, nothing_heard, absent or not_listed."
+  "description": "health.v1 §5, \"is this service's clock ahead?\" (§2.5): what one subscriber heard of one service during its reading, in arrival order -> the answer. A case gives presence, descriptor and face as judgements.json writes them. heard: the deliveries, each \"heartbeat\" (a heartbeat covering health.v1 whose status's section the reader read in step, freshness.v2 §2.5's confirmed, its bit set or clear, and whose time is known), \"heartbeat_held\" (the same, its time no instant: the ahead time, core §7.5's, as while the guard holds, freshness.v2 §2.10, or the unknown time, all ones), \"status_put\" (a put of state/status, which the guard does not hold), \"status_deleted\" (a delete of state/status), \"clock_ahead\" (a stream/faults sample whose code is clock_ahead, whatever its level and its stamp) or \"fault\" (a stream/faults sample with any other code). expect.answer is yes, no, unobservable or not_asked: yes on a clock_ahead fault with no heartbeat whose time is known heard after it; no when the last heartbeat heard has its time known and came after the last clock_ahead fault, or with none heard; unobservable otherwise, since the faults' silence is their normal state and a time that is no instant answers nothing alone under this major; not_asked when the service is absent or its descriptor does not list health.v1, as the first question's. A put or a delete of the status says nothing of the clock. A fault heard answers whatever else presence says. expect.reason: clock_ahead, confirmed, time_unknown, nothing_heard, absent or not_listed."
 }

@@ -4,6 +4,36 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.11 — 2026-11-22: editorial: a heartbeat's time while the guard holds is the ahead time, read as the unknown time was, no rule changed (#986)
+
+`freshness.v2` 0.12 has an owner write core 0.113's ahead time as its
+heartbeat's time while its clock guard holds, where it wrote all ones.
+This text said "its time unknown" of that heartbeat in five places.
+
+**Changed: wording.**
+- **§2.5** says the heartbeat's time is the ahead time while the guard
+  holds. Its "Nothing else does" names a heartbeat whose time is no
+  instant: the ahead time or the unknown time.
+- **§5's clock question** reads "no instant, ahead or unknown" where it
+  read "unknown". The reason keeps its token, `time_unknown`.
+- **`scenarios.md` §4**, Expected 2 and 4, names the ahead time.
+- **`clock.json`**: `heartbeat_held` is a heartbeat whose time is no
+  instant, ahead or unknown. Four notes follow. No case's `heard` and no
+  expectation moved: 29 cases.
+
+**Deliberately not changed: every answer.** Under this major a
+heartbeat's ahead time answers nothing alone, as the unknown time it
+replaced answered nothing. The fault answers, and the owner still
+publishes it again each period (§2.5).
+- **`health.v2` reads it as a yes** (its §2.5), and has its owner
+  publish the fault once. That is a new major's rule, not this one's.
+- **Not taken here:** answering yes from the ahead time under
+  `health.v1` too. It would change `clock.json`'s cases 21 and 25 and
+  what a `health.v1` reader derives.
+
+**Written against** core 0.100 still. The entry restates one sentence
+over core 0.113 and `freshness.v2` 0.12.
+
 ## 0.10 — 2026-11-07: editorial: the scenarios read a GET's answer as snapshots, no rule changed (#977, #609)
 
 Core 0.100 (#977's E3) answers a state GET by snapshot, whose entries
