@@ -286,7 +286,8 @@ fn find_mut<'s>(impls: &'s mut [ImplState], iface: &IfaceId) -> Result<&'s mut I
 /// token's, its snapshot key, its tag, and whether it is a per-key
 /// resource, a state §4.3's table lists (`freshness.v1`'s horizon, a
 /// `desired.v1` desired resource, a metric resource, every state of a
-/// governed interface), or one with a horizon under `freshness.v2`.
+/// governed interface), or one with a horizon under `freshness.v2`. A
+/// `desired.v2` desired resource is no per-key resource (core 0.112).
 fn answered(
     s: &ImplState,
     token: KindToken,
@@ -309,10 +310,13 @@ fn answered(
             zenkey_model::freshness::horizon_of(r),
             zenkey_model::freshness::Horizon::Within(_)
         );
-        let desired = matches!(
-            zenkey_model::desired::declaration_of(r),
-            zenkey_model::desired::Declaration::Declared(_)
-        );
+        // Core 0.112: a desired resource of a revision that uses
+        // `desired.v2` is answered by snapshot (`desired.v2` §2.4).
+        let desired = !zenkey_model::desired::v2::uses_v2(c)
+            && matches!(
+                zenkey_model::desired::declaration_of(r),
+                zenkey_model::desired::Declaration::Declared(_)
+            );
         let per_key =
             (horizon && !v2) || desired || s.metrics.contains_key(&name) || s.gate.is_some();
         let chunks: Vec<&str> = r
@@ -445,6 +449,11 @@ impl ServiceBuilder {
         }
         self.catalog = Some(Arc::new(catalog));
         Ok(self)
+    }
+
+    /// The deployment catalog it was given, if any (core §8.6).
+    pub(crate) fn catalog_held(&self) -> Option<&Catalog> {
+        self.catalog.as_deref()
     }
 
     /// The deployment epoch its `time` fields count from, in seconds: its
@@ -978,6 +987,11 @@ impl ServiceBuilder {
         if let Some(l) = &heartbeat {
             self.store.cover(Arc::clone(l));
             self.minter.cover(imp.iface());
+        }
+        // desired.v2 §2.4 (#986's J3): its desired resources leave §4.3's
+        // table, a document's version its in-band stamp.
+        if zenkey_model::desired::v2::uses_v2(imp.contract()) {
+            self.minter.version_in_band(imp.iface());
         }
         self.impls.push(ImplState {
             imp,
@@ -2317,7 +2331,12 @@ impl Service {
         // the new instance's run, descriptor or electors move. An alarm's
         // carry none, unless the session stamps every put (§8.2).
         let timed_alarms = self.alarms.is_some() && self.minter.session_timestamping();
-        if (timed_alarms || !self.desired_authors.is_empty()) && self.minter.is_ahead() {
+        // A `desired.v2` author's carry none either (`desired.v2` §2.4).
+        let timed_documents = self
+            .desired_authors
+            .iter()
+            .any(|a| a.major() == crate::desired::Major::V1 || self.minter.session_timestamping());
+        if (timed_alarms || timed_documents) && self.minter.is_ahead() {
             return Err(Error::ClockAhead);
         }
         // config.v1 §2.12: a re-mint is a restart of the configuration,
