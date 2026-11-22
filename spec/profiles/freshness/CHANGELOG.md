@@ -5,6 +5,65 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.12 — 2026-11-22: while its clock guard holds, an owner writes the ahead time, never the unknown time (#986)
+
+Core 0.113 gives a heartbeat's time a code for "this owner's clock is
+ahead" (core §7.5: the seconds all ones, the millisecond code 1022).
+This version has the owner write it. It restates §2.10 over core 0.113,
+and the header's core stays.
+
+**Changed: §2.10, one rule.**
+- **Before:** an owner MUST write all ones as its heartbeat's time while
+  its guard holds.
+- **Now:** it MUST write the ahead time, as its heartbeat's time and as
+  its owner heartbeat's, whatever instant its clock reads. `[Sc: §2]`
+  `[F: core heartbeat/times.json]` `[F: core heartbeat/owner.json]`
+- **The unknown time** is left one meaning: the owner's clock reads no
+  instant the epoch codes (§2.4). It says nothing of the guard.
+- **When the guard releases,** the next heartbeat's time is an instant
+  again, or unknown for a clock the epoch does not code.
+
+**Why.** A reader could not tell a clock ahead from a clock with no
+code. Now a heartbeat alone says which, and a profile can answer "is
+its clock ahead?" from it: `health.v2` §2.5 does.
+
+**What a reader concludes.**
+- **§2.5 says the time takes no part** in its steps. A heartbeat whose
+  time is ahead confirms as any other, and a subscriber ages a member on
+  its own clock. `[F: apply.json]`
+- **§2.10** says what it adds: the owner's guard held when it wrote the
+  heartbeat.
+- **§5:** a tool that shows a heartbeat's time shows the ahead time as
+  ahead, never as unknown and never as an instant.
+
+**The compatibility cost** is core 0.113's. A reader built before it
+refuses the heartbeat (`code`) and confirms nothing by it. Every member
+the heartbeat covers goes stale to that reader while the guard holds,
+and an owner heartbeat is refused with every group. §2.10 says so, and
+that a deployment moves its readers first.
+
+**Evidence.**
+- [`scenarios-v2.md`](scenarios-v2.md) §2, steps 4 and 6: the
+  heartbeats heard while the guard holds carry the ahead time, where
+  they carried all 42 bits set.
+- `conformance/apply.json` holds 39 cases. Two are new, each an earlier
+  case's first heartbeat with its time alone changed to the ahead time:
+  a heartbeat, and W2's owner heartbeat. Each is read as its source is.
+  They were written by a script from the bodies the file held, and
+  checked by a second that parses both bodies with a reader of its own.
+- The core's `heartbeat/times.json`, `bodies.json` and `owner.json`
+  hold the bytes.
+
+**What deliberately did not change.**
+- **The heartbeats go on vouching** while the guard holds, and a held
+  write clears its member's bit, as 0.4 and 0.5 left them.
+- **Snapshots** carry their times from the clock ahead. A GET reader
+  judges them by `freshness.v1` §2.6's band, as before.
+- **No contract, no key and no fixture's earlier case.**
+
+**Not verified.** The reference runs §2's steps 4 and 6 against all
+ones today. Its owner and its readers change with #986's code half.
+
 ## `v2.md` 0.11 — 2026-11-21: editorial: how a subscriber learns the catalog its owner names, what it does before it knows, and five cases for a gap's names, no keyword changed (#609, #1110)
 
 zk2py's rounds 113 to 115 read the owner heartbeat cold: this text's
