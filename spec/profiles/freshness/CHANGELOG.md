@@ -107,6 +107,17 @@ what a plan reads of such a collection.
 - **The header** is still written against core 0.108.
 - **Not answered here:** how long a descriptor read may wait (#1146).
 
+**Where the reference does not yet do as §2.5 says.**
+- **A put past its bound is read out of order.** The reference holds at
+  most 64 puts behind a descriptor read. One more is read at once with
+  no catalog, ahead of those held on its key. It moves that key's
+  sequence, so the held puts then read `older` and confirm nothing.
+- **What §2.5 asks:** a subscriber that holds a put "reads what it held
+  in the order of arrival, before any later put on that key".
+- **What follows.** Nothing reads fresh that should not: every group of
+  those puts goes unread, the safe side. It was read in the source, not
+  run. #1146 holds the fix, with the read's wait.
+
 ## `v2.md` 0.10 — 2026-11-21: editorial: §3 says which cause an owner that sends heartbeats alone lists, and the reference runs scenarios §8, no rule changed (#1110, #609)
 
 Text 0.9 let an owner send owner heartbeats, and no owner did.
