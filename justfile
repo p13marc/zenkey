@@ -159,7 +159,7 @@ test-live port=port namespace="spray":
 test:
     cargo test --workspace --locked
 
-# What CI runs on a pull request and no more (#1151): CI builds the benches
+# No more than a pull request's run since #1151: CI builds the benches
 # in the release profile on its nightly run, on `v1` pushes and by dispatch
 # (#1140), and here that build is `just bench-build`, 4 min 48 s of a lane's
 # gate when it ran at every one. `cargo build --all-targets` below still

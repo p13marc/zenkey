@@ -44,14 +44,18 @@ async fn descriptor_bytes(
     let instance = instance.parse().unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
-        if let zenkey::presence::Found::Descriptor(_, bytes) =
-            zenkey::presence::descriptor(tool, address, &instance, T)
-                .await
-                .unwrap()
-        {
-            return bytes;
-        }
-        assert!(tokio::time::Instant::now() < deadline, "no descriptor");
+        // A read that fails is "not yet" too, until the deadline: a GET
+        // sent before the router has heard the queryable may come back as
+        // an error as well as with no descriptor.
+        let why = match zenkey::presence::descriptor(tool, address, &instance, T).await {
+            Ok(zenkey::presence::Found::Descriptor(_, bytes)) => return bytes,
+            Ok(_) => "no descriptor answered".to_owned(),
+            Err(e) => format!("the read failed: {e:?}"),
+        };
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no descriptor in 20 s: {why}"
+        );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

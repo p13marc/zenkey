@@ -70,6 +70,12 @@ retries = 1
 # threads it took 8 min 36 s, its test build already warm, which is 3.5 min
 # more from cold.
 #
+# On the runner it ships on (vm-runner-01, 6 CPUs, shared with another
+# job): CI's `test` job ran 2,637 tests in 364 s at these settings (run
+# 2563, #1155, 2026-11-22), none retried, where 2,529 took 619 s. The job
+# took 14 min 15 s in all; the rest is its build. The override `priority`
+# is read by the nextest CI pins, 0.9.143, the lanes' own.
+#
 # Until then this was nextest's default, one test per CPU. On vm-dev (6
 # CPUs, as vm-runner-01) the suite took 5 min at 6 and 3.5 min at 12
 # (2026-10-20). The first run at 12 failed link_face's s10, 7 downsampled
