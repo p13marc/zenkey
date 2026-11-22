@@ -62,3 +62,21 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
   `codegen-test` generates the spec's `rfcfg.v1`, and `tests/config_v2.rs`
   reads `records.json`'s records and `validation.json`'s requests through
   them, agreeing with the model's codec, refusals included.
+- **desired.v2** (#986 J2): `generate` runs
+  `desired::v2::lint_contract` on every contract, a finding a lint error
+  (an invalid declaration of a desired resource, `horizon_v1` among its
+  reasons, or of a report resource; v2.md §2.2, §2.10). No codegen
+  moved: a target's contract lists the profile's `desired.v2.json` in
+  `[schemas] packed`, so its `Report` is generated as any packed type
+  (`types::Report`, `Open<report::Source>`, `Open<report::Outcome>`,
+  `report::InForce`, eight `Option<i64>`, `Option<Open<report::Code>>`,
+  two `Option<Coded<i64>>`, tag 12), its report resource a
+  `StateWriter<Packed<Report>>` on the `Server`. It carries the record's
+  fields; §2.10's consistency and the two tables are the model's.
+  `tests/desired_v2.rs` generates the scenarios' `tasking.v2` and
+  `worker.v2` from a scratch copy; `codegen-test` generates them from a
+  mirror its `build.rs` makes under `OUT_DIR` (a `contracts_dir` takes a
+  whole directory, and they live among the runtime's test contracts),
+  and its `tests/desired_v2.rs` puts every record of
+  `conformance/v2/reports.json` through the generated type, as the
+  fixture says and as the model's codec reads it.
