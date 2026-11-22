@@ -327,7 +327,7 @@ impl Config {
                     Some(c) if !zenkey_model::desired::v2::lint_contract(&c).is_empty() => {
                         let findings = zenkey_model::desired::v2::lint_contract(&c)
                             .iter()
-                            .map(|x| format!("error[desired.v2 {}] {}: {}", x.token, x.at, x.says))
+                            .map(ToString::to_string)
                             .collect::<Vec<_>>();
                         return Err(Error::Lint {
                             file: shown,

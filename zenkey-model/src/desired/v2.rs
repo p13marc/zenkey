@@ -51,6 +51,7 @@ use crate::packed::{self, Layout, ReadRefusal, Record, WriteRefusal};
 use crate::schema::TypeId;
 use crate::template::{Bindings, Template};
 use crate::wire::{Envelope, Run, Seq, Stamp, Tag};
+use crate::words;
 
 /// The profile's id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "desired.v2";
@@ -88,7 +89,7 @@ pub const MAX_REVISION: u64 = 4_294_967_295;
 pub const REMEMBERED_RUNS: usize = super::REMEMBERED_IDS;
 
 /// The reserved word of `pointer` and `detail` (§2.10, §3).
-pub const OUT_OF_RANGE: &str = "out_of_range";
+pub use crate::words::OUT_OF_RANGE;
 
 /// The greatest index a table holds (§2.10): 255 entries, from 0.
 pub const MAX_INDEX: u8 = 254;
@@ -103,7 +104,7 @@ pub fn is_published(id: &str) -> bool {
 /// and its report resources are of this major (§0).
 #[must_use]
 pub fn uses_v2(c: &Contract) -> bool {
-    c.uses.iter().any(|u| u.to_string() == PROFILE)
+    words::uses(c, PROFILE)
 }
 
 /// Which major of the profile a revision uses (§2.18): a target and a tool
@@ -314,62 +315,19 @@ impl std::fmt::Display for ReportInvalid {
 }
 
 /// An index into one of a report resource's two tables, as a report
-/// carries it (§2.10, §3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Index {
-    /// An entry's place in its table, from 0. A writer refuses one above
-    /// [`MAX_INDEX`]: 255 is `out_of_range`'s code.
-    At(u8),
-    /// A place or a line the table does not hold.
-    OutOfRange,
-}
-
-impl Index {
-    fn to_json(self) -> Value {
-        match self {
-            Index::At(i) => json!(i),
-            Index::OutOfRange => json!(OUT_OF_RANGE),
-        }
-    }
-
-    /// An index as a record's JSON reading or the profile's writes one: a
-    /// number, or `"out_of_range"`.
-    fn of_json(v: &Value) -> Result<Index, WriteRefusal> {
-        match v {
-            Value::String(s) if s == OUT_OF_RANGE => Ok(Index::OutOfRange),
-            Value::Number(n) => n
-                .as_u64()
-                .and_then(|i| u8::try_from(i).ok())
-                .map(Index::At)
-                .ok_or(WriteRefusal::Range),
-            _ => Err(WriteRefusal::Value),
-        }
-    }
-}
-
-/// What an index reads as, with the table a reader holds (§2.10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Word<'a> {
-    /// The table's entry.
-    Entry(&'a str),
-    /// An index past the table the reader holds, a later revision's, or
-    /// any index with no table in hand: shown as its number.
-    Number(u8),
-    /// `out_of_range`: the target's table did not hold the place or the
-    /// line.
-    OutOfRange,
-}
+/// carries it (§2.10, §3): a writer refuses a place above [`MAX_INDEX`],
+/// 255 being `out_of_range`'s code. What it reads as, with the table a
+/// reader holds, is a [`Word`]: the entry, the number past the table or
+/// with no revision of the target's contract in hand, or `out_of_range`
+/// (§2.10, "A reader reads an index"). The mechanism is [`crate::words`]'s,
+/// which `health.v2` shares.
+pub use crate::words::{Index, Word};
 
 /// The word of `index` in `table`, `None` when the reader holds no
 /// revision of the target's contract (§2.10, "A reader reads an index").
 #[must_use]
 pub fn word(table: Option<&[String]>, index: Index) -> Word<'_> {
-    match index {
-        Index::OutOfRange => Word::OutOfRange,
-        Index::At(i) => table
-            .and_then(|t| t.get(usize::from(i)))
-            .map_or(Word::Number(i), |w| Word::Entry(w)),
-    }
+    words::read(table, index)
 }
 
 /// A report resource's two tables (§2.10), as a reader holds them.
@@ -391,10 +349,7 @@ impl Default for Tables {
 }
 
 fn index_of(i: usize) -> Index {
-    match u8::try_from(i) {
-        Ok(i) if i <= MAX_INDEX => Index::At(i),
-        _ => Index::OutOfRange,
-    }
+    Index::at(i, MAX_INDEX)
 }
 
 impl Tables {
@@ -426,10 +381,7 @@ impl Tables {
     /// in the target's log.
     #[must_use]
     pub fn line(&self, text: &str) -> Index {
-        self.details
-            .iter()
-            .position(|d| d == text)
-            .map_or(Index::OutOfRange, index_of)
+        words::write(&self.details, text, MAX_INDEX)
     }
 
     /// The place `index` names.
@@ -458,27 +410,14 @@ fn is_json_pointer(s: &str) -> bool {
 /// `desired.pointers` read (§2.10): 1 to 255 JSON Pointers, the first
 /// `""`, none twice.
 fn read_pointers(v: &Value) -> Option<Vec<String>> {
-    let a = v.as_array()?;
-    let out: Vec<String> = a
-        .iter()
-        .map(|x| x.as_str().map(str::to_owned))
-        .collect::<Option<_>>()?;
-    let ok = (1..=usize::from(MAX_INDEX) + 1).contains(&out.len())
-        && out[0].is_empty()
-        && out.iter().all(|p| is_json_pointer(p))
-        && out.iter().enumerate().all(|(i, p)| !out[..i].contains(p));
-    ok.then_some(out)
+    words::list(v, usize::from(MAX_INDEX) + 1, is_json_pointer, true)
+        .filter(|out| out.first().is_some_and(String::is_empty))
 }
 
 /// `desired.details` read (§2.10): at most 255 strings of at least one
 /// character each. A line may be there twice.
 fn read_details(v: &Value) -> Option<Vec<String>> {
-    let a = v.as_array()?;
-    let out: Vec<String> = a
-        .iter()
-        .map(|x| x.as_str().map(str::to_owned))
-        .collect::<Option<_>>()?;
-    (out.len() <= usize::from(MAX_INDEX) + 1 && out.iter().all(|d| !d.is_empty())).then_some(out)
+    words::list(v, usize::from(MAX_INDEX) + 1, |d| !d.is_empty(), false)
 }
 
 /// A report resource's declaration (§2.10).
@@ -637,13 +576,9 @@ pub fn report_declaration_of(c: &Contract, r: &Resource) -> ReportDeclaration {
 }
 
 /// One finding of [`lint_contract`]: a resource, by its kind token and
-/// template, and the reason's token and words.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Lint {
-    pub at: String,
-    pub token: &'static str,
-    pub says: &'static str,
-}
+/// template, and the reason's token and words. [`crate::words`]'s shape,
+/// its `key` none: a reason of this profile names its key in its words.
+pub use crate::words::Lint;
 
 /// What a linter reports of a contract that lists `desired.v2` (§2.2,
 /// §2.10): each desired resource's and each report resource's invalid
@@ -655,20 +590,18 @@ pub fn lint_contract(c: &Contract) -> Vec<Lint> {
     }
     let mut out = Vec::new();
     for r in &c.resources {
-        let at = format!("{}/{}", r.token, r.template.as_str());
+        let finding = |token, says| Lint {
+            profile: PROFILE,
+            at: Lint::place(r),
+            key: None,
+            token,
+            says,
+        };
         if let super::Declaration::Invalid(why) = declaration_of(c, r) {
-            out.extend(why.iter().map(|w| Lint {
-                at: at.clone(),
-                token: w.as_str(),
-                says: w.says(),
-            }));
+            out.extend(why.iter().map(|w| finding(w.as_str(), w.says())));
         }
         if let ReportDeclaration::Invalid(why) = report_declaration_of(c, r) {
-            out.extend(why.iter().map(|w| Lint {
-                at: at.clone(),
-                token: w.as_str(),
-                says: w.says(),
-            }));
+            out.extend(why.iter().map(|w| finding(w.as_str(), w.says())));
         }
     }
     out

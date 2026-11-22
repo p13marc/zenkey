@@ -58,6 +58,11 @@
 //! - [`freshness`]: `freshness.v1`'s horizon and its pure judgement of a
 //!   member's freshness (`spec/profiles/freshness/v1.md`, #720). The
 //!   owner's re-puts are the runtime's.
+//! - [`words`]: words by table, what the profiles whose records carry an
+//!   index where an earlier major carried text share (`desired.v2` §2.10,
+//!   `health.v2` §2.10; #986): an index read as its table's entry, its
+//!   number or `out_of_range`, a word written as its index, an
+//!   annotation's value read as a table, and a lint's finding.
 //! - [`seed`]: a late joiner's merge (core §4.2, 0.26; 0.27, #752): per
 //!   key, which arriving sample replaces what is held, by the stamp — an
 //!   unstamped sample ranked below every stamped one, equal times ordered
@@ -210,3 +215,4 @@ mod toml10;
 mod unbundle;
 pub mod validate;
 pub mod wire;
+pub mod words;
