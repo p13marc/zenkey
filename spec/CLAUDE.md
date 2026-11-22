@@ -705,7 +705,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   ending no row) were written by hand over bodies the file held, and
   `freshness_v2_apply`'s count moves with them. `link.v2`: §2.9 and
   §2.16 count each listed interface with a heartbeat and a `link`
-  collection, one the revisions disagree on read `host`; §2.19, as
+  collection, one the revisions disagree on read `host`
+  (`v2/plan.json`'s case 48, derived by the reference with the code
+  half and read by hand, 49 cases: a listed `freshness.v1` interface
+  adds no group, so no `block_over_batch` and no `horizon_under_face`); §2.19, as
   data, reads a refused `mode` as `router` and a refused
   `timestamping/enabled` at its mode's default (`v2/transport.json`'s
   cases 27 to 31, written by hand, 32 cases; the last, a `mode` of
