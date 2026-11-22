@@ -325,8 +325,9 @@ impl Config {
                     // desired resource or of a report resource, in a
                     // contract that lists desired.v2, is an error too. So
                     // is an invalid table of words in one that lists
-                    // health.v2 (health.v2 §2.10): an owner would write no
-                    // word of it, and a reader would show numbers.
+                    // health.v2 (health.v2 §2.10), or of alarm rules in one
+                    // that lists alarms.v2 (alarms.v2 §4): an owner would
+                    // write no word of it, and a reader would show numbers.
                     Some(c) if !table_lints(&c).is_empty() => {
                         let findings = table_lints(&c)
                             .iter()
@@ -354,12 +355,13 @@ impl Config {
 }
 
 /// The findings of the profiles whose tables a contract declares
-/// (`zenkey_model::words`): `desired.v2`'s declarations and `health.v2`'s
-/// tables of words, each none for a contract that does not list its
-/// profile.
+/// (`zenkey_model::words`): `desired.v2`'s declarations, `health.v2`'s
+/// tables of words and `alarms.v2`'s table of rules, each none for a
+/// contract that does not list its profile.
 fn table_lints(c: &Contract) -> Vec<zenkey_model::words::Lint> {
     let mut out = zenkey_model::desired::v2::lint_contract(c);
     out.extend(zenkey_model::health::v2::lint_contract(c));
+    out.extend(zenkey_model::alarms::v2::lint_contract(c));
     out
 }
 

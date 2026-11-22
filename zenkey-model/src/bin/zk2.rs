@@ -110,7 +110,7 @@ fn lint(files: &[&str]) -> ExitCode {
             // config.v2 §2.2: its lint's findings are errors. So is an
             // invalid declaration of a contract that lists desired.v2
             // (desired.v2 §2.2, §2.10), and an invalid table of one that
-            // lists health.v2 (health.v2 §2.10).
+            // lists health.v2 (health.v2 §2.10) or alarms.v2 (alarms.v2 §4).
             Some(c) => {
                 let mut findings: Vec<String> = zenkey_model::config::v2::lint_contract(&c)
                     .iter()
@@ -120,6 +120,7 @@ fn lint(files: &[&str]) -> ExitCode {
                     zenkey_model::desired::v2::lint_contract(&c)
                         .iter()
                         .chain(&zenkey_model::health::v2::lint_contract(&c))
+                        .chain(&zenkey_model::alarms::v2::lint_contract(&c))
                         .map(ToString::to_string),
                 );
                 if findings.is_empty() {
