@@ -66,7 +66,12 @@
 //! - [`health`]: `health.v1`'s levels, fault codes, and its pure judgement
 //!   of one reading of a service, on top of [`freshness`]
 //!   (`spec/profiles/health/v1.md`, #721). The owner's puts and its
-//!   `clock_ahead` fault are the runtime's.
+//!   `clock_ahead` fault are the runtime's. [`health::v2`] is
+//!   `health.v2`'s (`spec/profiles/health/v2.md`, #986): the three packed
+//!   records, words by table (the profile's and the service's own), a late
+//!   joiner's two snapshots and whether they are one instant, and a clock
+//!   question the last read heartbeat's time answers. The judgement is one
+//!   for both majors ([`health::judge_status`], [`health::Major`]).
 //! - [`config`]: `config.v1`'s wire types, its validators, the window,
 //!   redaction, and a pure state machine of one owner's configuration
 //!   (`spec/profiles/config/v1.md`, #768). The device, the persisted layer
