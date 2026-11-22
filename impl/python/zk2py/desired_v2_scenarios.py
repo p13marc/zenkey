@@ -1,12 +1,18 @@
 """desired.v2 ``scenarios-v2.md`` §1 to §6, §8 and §13 to §15 (text 0.1), live,
-between two zk2py processes (#609, round 118)::
+in each pairing of the two implementations (#609, rounds 118 and 119)::
 
-    python -m zk2py.desired_v2_scenarios [--only 1|2|3|4|5|6|8|13|14|14-no-move|15]...
+    python -m zk2py.desired_v2_scenarios [--author zk2py|rust] [--target zk2py|rust]
+        [--only 1|2|3|4|5|6|8|13|14|14-no-move|14-ohb|15]...
 
-**The reference's runtime does not speak desired.v2** at a6aab761, so each
-party is zk2py's own (``python -m zk2py.desired_v2_owner``): this runner
-shows whether a section's steps and Expected can be run as written, and
-that zk2py's author and target agree with each other. It is no interop.
+Each party is a process: zk2py's own (``python -m zk2py.desired_v2_owner``)
+or the reference's owner example, a black box run from
+:data:`zk2py.blackbox.BLACKBOX` and learnt from its ``--help``
+(``--desired-v2``, since e1c2d9c4). Round 118 ran zk2py against itself
+alone: the reference's runtime did not speak ``desired.v2`` then. Each
+check reads the wire where it can: ``Rp``'s record by a GET, S's
+deliveries, P's GETs. A party's own words (``desired report``, ``desired
+gets``, ``desired watch``, ``desired acts``) are read through one adapter
+per implementation, :class:`PyParty` and :class:`RustParty`.
 
 The bus is zk2py's: R1, and where a section cuts a link R2 behind a TCP
 relay the runner cuts and heals; S on R1 (every delivery under
@@ -14,9 +20,11 @@ relay the runner cuts and heals; S on R1 (every delivery under
 (S4's GETs), X (§2's puts in envelopes it writes), and in §13 P, a session
 that plays the author.
 
-**A face** here is the relay and the target's word (``--desired-across``):
-it reads no presence and waits the reply timeout it is given. No
-``link.v2`` policy, and so no deny of ``@zk``, stands between R1 and R2.
+**A face** here is the relay, and for zk2py's target its word
+(``--desired-across``): it reads no presence and waits the reply timeout
+it is given. The reference's target has no such word: it follows its
+author's presence, which the relay lets cross. No ``link.v2`` policy, and
+so no deny of ``@zk``, stands between R1 and R2.
 """
 
 from __future__ import annotations
@@ -36,6 +44,7 @@ from typing import Any
 
 from . import desired_v2 as d2, zk2c
 from .alarms_scenarios import Report, _wait
+from .blackbox import BLACKBOX
 
 REPO = Path(__file__).resolve().parents[3]
 SCRATCH = Path("/srv/dev/scratch/zenkey/py")
@@ -69,13 +78,50 @@ def converged(version: str | None, revision: int) -> dict[str, Any]:
             **observed(version, revision)}
 
 
-class Party:
-    """A zk2py desired.v2 owner process."""
+#: the bus of the section that runs, for :class:`Rows`
+CURRENT_BUS: Any = None
 
-    def __init__(self, address: str, endpoint: str, flags: list[str]) -> None:
-        argv = [sys.executable, "-m", "zk2py.desired_v2_owner", "--connect", endpoint, *flags, address]
+
+class Rows(Report):
+    """The runner's report. After each numbered Expected it reads ``Rp`` by
+    a GET and prints the record it holds, ``RECORD <json>``: the section,
+    the step, the record's bytes and its fields. Two pairings' lines, set
+    side by side, say where the two targets wrote another report for the
+    same state (round 119)."""
+
+    def check(self, section: str, name: str, ok: bool, detail: str = "") -> bool:
+        out = super().check(section, name, ok, detail)
+        bus = CURRENT_BUS
+        if bus is not None and name[:1].isdigit():
+            try:
+                st = bus.get(RP, 2 if bus.r2 is not None else 1)
+                raw = next((r.raw for r in st.replies if r.key == RP and r.raw), b"")
+                if raw:
+                    record = zk2c.parse(raw, "put").record
+                    rd = d2.read_put(raw)
+                    print("RECORD " + json.dumps({"section": section.split(" [")[0], "step": name.split(" ")[0],
+                                                  "target": impl_name(TARGET_IMPL), "ch": raw[0],
+                                                  "record": record.hex(), "fields": rd.report,
+                                                  "findings": list(rd.findings)}, sort_keys=True), flush=True)
+            except Exception as e:  # noqa: BLE001 - a record not read is said, and fails nothing
+                print(f"RECORD not read: {type(e).__name__}: {e}", flush=True)
+        return out
+
+
+def impl_name(impl: str) -> str:
+    return "zk2py" if impl == "zk2py" else "rust"
+
+
+class Party:
+    """An owner process, and its words through one surface: zk2py's
+    (:class:`PyParty`) or the reference's owner example
+    (:class:`RustParty`)."""
+
+    impl = "zk2py"
+
+    def __init__(self, argv: list[str], address: str) -> None:
         env = dict(os.environ, PYTHONPATH=str(REPO / "impl" / "python"))
-        self.address, self.flags = address, flags
+        self.address, self.argv = address, argv
         self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      text=True, env=env)
         self.lines: queue.Queue[str] = queue.Queue()
@@ -116,29 +162,56 @@ class Party:
             return None
         return json.loads(got[len(prefix):])
 
+    # -- the target's words ---------------------------------------------------
+
     def report(self) -> Any:
-        return self._json("report")
+        """The target's own word of its report, as the record's fields."""
+        raise NotImplementedError
 
     def running(self) -> Any:
         return self._json("running")
 
-    def watch(self) -> Any:
-        return self._json("watch")
-
-    def gets(self, target: str = TARGET) -> list[dict[str, Any]]:
-        return self._json(f"gets {target}") or []
-
     def acts(self) -> int | None:
         got = self.cmd("desired acts")
         return int(got.split(" ")[2]) if got and got.startswith("desired acts ") else None
+
+    def held(self) -> bool:
+        """Whether the drive holds an act at its start."""
+        got = self.cmd("desired acts") or ""
+        return got.endswith("held=true")
+
+    def watch(self) -> dict[str, Any]:
+        """What its watch says, in one shape for both: ``expects``
+        (``{digest, live}`` or None), ``hb_read`` and ``hb_unread`` (the
+        heartbeats read and not read), ``asked`` (the reads its watch asked
+        for), and ``raw``, its own words."""
+        raise NotImplementedError
+
+    def word(self) -> str | None:
+        """Its last decision's word, where it says one."""
+        return None
+
+    # -- the author's words ---------------------------------------------------
+
+    def gets(self, target: str = TARGET) -> list[dict[str, Any]]:
+        """Each GET of ``target``'s slice, oldest first: the held stamp it
+        carried or None, and whether it was answered with that stamp alone."""
+        raise NotImplementedError
 
     def put(self, target: str, doc: Any) -> str | None:
         got = self.cmd(f"desired put {target} {json.dumps(doc)}")
         return got.rsplit(" ", 1)[1] if got and got.startswith("desired put ") else None
 
     def delete(self, target: str, force: bool = False) -> str | None:
-        got = self.cmd(f"desired delete{'!' if force else ''} {target}")
-        return got.rsplit(" ", 1)[1] if got and got.startswith("desired deleted ") else None
+        raise NotImplementedError
+
+    def new_epoch(self) -> str | None:
+        return self.cmd("desired new-epoch")
+
+    def adoption(self) -> str | None:
+        return self.cmd("desired adoption")
+
+    # -- its process ----------------------------------------------------------
 
     def kill(self) -> None:
         """"Its process ends without closing"."""
@@ -153,23 +226,167 @@ class Party:
         self.proc.send_signal(signal.SIGCONT)
 
 
-class Bus:
-    """R1; R2 behind a relay when ``cut``; S, its token watch, S2, G and X."""
+class PyParty(Party):
+    """``python -m zk2py.desired_v2_owner``."""
 
-    def __init__(self, cut: bool = False) -> None:
+    def __init__(self, address: str, endpoint: str, flags: list[str]) -> None:
+        super().__init__([sys.executable, "-m", "zk2py.desired_v2_owner", "--connect", endpoint, *flags, address],
+                         address)
+
+    def report(self) -> Any:
+        return self._json("report")
+
+    def watch(self) -> dict[str, Any]:
+        w = self._json("watch") or {}
+        hb = w.get("heartbeats") or {}
+        unread = sum(n for k, n in hb.items() if k.split(":")[0] in (d2.NOT_READ, d2.OLDER, "no_catalog"))
+        return {"expects": w.get("expects"), "hb_read": sum(hb.values()) - unread, "hb_unread": unread,
+                "asked": hb.get(d2.READ, 0), "raw": w}
+
+    def gets(self, target: str = TARGET) -> list[dict[str, Any]]:
+        return self._json(f"gets {target}") or []
+
+    def delete(self, target: str, force: bool = False) -> str | None:
+        got = self.cmd(f"desired delete{'!' if force else ''} {target}")
+        return got.rsplit(" ", 1)[1] if got and got.startswith("desired deleted ") else None
+
+
+class RustParty(Party):
+    """The reference's owner example, with ``--desired-v2``. Its words are
+    its ``--help``'s: ``desired report`` "the packed Report's reading, as
+    JSON: {source, outcome, last_known, observed?, in_force?, refusal?}";
+    ``desired gets <target>`` "desired gets <key> <n> then, for each GET of
+    that one key, oldest first, <held>=<unchanged|whole>"; ``desired watch``
+    "watches=<bool> expects=<digest>/<live>|none read=<n> unread=<n>
+    last=<run>/<seq>|none asked=<n> silent=<bool> reads=<n>"; ``desired
+    delete-unheld <target>`` "a delete put though no document is held"."""
+
+    impl = "rust"
+
+    def __init__(self, address: str, endpoint: str, flags: list[str]) -> None:
+        super().__init__([str(BLACKBOX / "owner"), "--connect", endpoint, *flags, address], address)
+
+    def report(self) -> Any:
+        x = self._json("report")
+        try:
+            return None if x is None else d2.fields_of(x)
+        except Exception:  # noqa: BLE001 - a reading zk2py's format does not hold is shown as it came
+            return {"unread": x}
+
+    def watch(self) -> dict[str, Any]:
+        got = self.cmd("desired watch") or ""
+        w = dict(x.split("=", 1) for x in got.split(" ")[2:] if "=" in x)
+        e = w.get("expects")
+        expects = None
+        if e and e != "none":
+            digest, live = e.split("/")
+            expects = {"digest": digest, "live": int(live)}
+        return {"expects": expects, "hb_read": int(w.get("read", 0)), "hb_unread": int(w.get("unread", 0)),
+                "asked": int(w.get("asked", 0)), "raw": got}
+
+    def gets(self, target: str = TARGET) -> list[dict[str, Any]]:
+        got = self.cmd(f"desired gets {target}") or ""
+        words = got.split(" ")
+        if words[:2] != ["desired", "gets"]:
+            return []
+        out = []
+        for x in words[4:]:
+            held, _, how = x.rpartition("=")
+            out.append({"held": None if held == "-" else held, "alone": how == "unchanged"})
+        return out
+
+    def delete(self, target: str, force: bool = False) -> str | None:
+        got = self.cmd(f"desired delete {target}")
+        if force and got and got.startswith("desired none "):
+            got = self.cmd(f"desired delete-unheld {target}")
+        return got.rsplit(" ", 1)[1] if got and got.startswith("desired deleted ") else None
+
+
+#: the pairing a run is of, set by :func:`main`
+AUTHOR_IMPL, TARGET_IMPL = "zk2py", "zk2py"
+
+
+def pairing() -> str:
+    return f"{impl_name(AUTHOR_IMPL)} author, {impl_name(TARGET_IMPL)} target"
+
+
+def _face_link(path: str) -> Any:
+    """The relay of a face: :class:`zk2py.budget_scenarios.Link`, its
+    upstream R1's ``unixsock-stream`` listener, so that R1 tells the face's
+    link from its own clients' by its protocol."""
+    import socket
+
+    from .budget_scenarios import Link
+
+    class FaceLink(Link):
+        def _accept(self) -> None:
+            while True:
+                try:
+                    c, _ = self.sock.accept()
+                except OSError:
+                    return
+                if not self.open:
+                    c.close()
+                    continue
+                try:
+                    u = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    u.connect(path)
+                except OSError:
+                    c.close()
+                    continue
+                with self.lock:
+                    self.conns += [c, u]
+                for a, b in ((c, u), (u, c)):
+                    threading.Thread(target=self._pump, args=(a, b), daemon=True).start()
+
+    return FaceLink("tcp/127.0.0.1:0")
+
+
+class Bus:
+    """R1; R2 behind a relay when ``cut``; S, its token watch, S2, G and X.
+
+    ``face``: the link between R1 and R2 carries the first deny of a
+    ``link.v2`` plan, ``zk`` (:func:`zk2py.link.plan`: ``zk2/**/@zk/**``,
+    every message, both flows), on R1, for the link's protocol alone. So
+    "no presence crosses" (§14), and no descriptor and no bundle either. It
+    is that one rule, and no other of a face: no ``adv`` or ``admin`` deny,
+    no kind's, no transport block, and R2 names no region."""
+
+    def __init__(self, cut: bool = False, face: bool = False) -> None:
         import zenoh
 
-        from . import live
+        from . import link as lk, live
         from .budget_scenarios import Link
         from .live_interop import _r1
         from .owner import free_loopback_port
 
         self.zenoh, self.live = zenoh, live
-        self.r1, self.ep1, self.r1_zid = _r1()
+        self.face = face
         self.link = self.r2 = None
+        if face:
+            self._work = tempfile.mkdtemp(prefix="r119-face-", dir=SCRATCH)
+            sock = os.path.join(self._work, "face.sock")
+            port = free_loopback_port()
+            conf = zenoh.Config()
+            conf.insert_json5("mode", json.dumps("router"))
+            conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}", f"unixsock-stream/{sock}"]))
+            conf.insert_json5("scouting/multicast/enabled", "false")
+            conf.insert_json5("timestamping/enabled", "true")
+            conf.insert_json5("access_control", json.dumps({
+                "enabled": True, "default_permission": "allow",
+                "rules": [{"id": "zk", "permission": "deny", "flows": list(lk.FLOWS), "messages": list(lk.MESSAGES),
+                           "key_exprs": ["zk2/**/@zk/**"]}],
+                "subjects": [{"id": "face", "link_protocols": ["unixsock-stream"]}],
+                "policies": [{"rules": ["zk"], "subjects": ["face"]}]}))
+            self.r1 = zenoh.open(conf)
+            self.ep1, self.r1_zid = f"tcp/127.0.0.1:{port}", str(self.r1.zid())
+            self.link = _face_link(sock)
+        else:
+            self.r1, self.ep1, self.r1_zid = _r1()
         self.ep2 = self.ep1
-        if cut:
+        if cut and self.link is None:
             self.link = Link(self.ep1)
+        if cut:
             port = free_loopback_port()
             conf = zenoh.Config()
             conf.insert_json5("mode", json.dumps("router"))
@@ -199,7 +416,9 @@ class Bus:
                 self.entities.append(self.s2.declare_subscriber(k, zenoh.handlers.Callback(self._s2)))
         self.x = live.open_client(self.ep1)
         self.parties: list[Party] = []
-        self.dir = Path(tempfile.mkdtemp(prefix="r118-desired-v2-", dir=SCRATCH))
+        self.dir = Path(tempfile.mkdtemp(prefix="r119-desired-v2-", dir=SCRATCH))
+        global CURRENT_BUS
+        CURRENT_BUS = self
         time.sleep(0.3)
 
     def _s(self, smp: Any) -> None:
@@ -237,19 +456,75 @@ class Bus:
                     return key
         return None
 
-    def party(self, address: str, flags: list[str], on: int = 1) -> Party:
-        p = Party(address, self.ep1 if on == 1 else self.ep2, flags)
+    def party(self, impl: str, address: str, flags: list[str], on: int = 1) -> Party:
+        p = (PyParty if impl == "zk2py" else RustParty)(address, self.ep1 if on == 1 else self.ep2, flags)
         self.parties.append(p)
         return p
 
-    def author(self, *flags: str, name: str = "author", run_record: bool = True) -> Party:
+    def run_record_path(self, name: str = "author") -> Path:
+        return self.dir / f"{name}.run.json"
+
+    def author(self, impl: str | None = None, *, name: str = "author", on: int = 1, window: float | None = None,
+               watched: bool = False, tokenless: tuple[str, ...] = (), record: bool = True,
+               run_record: bool = True, catalog: Path | None = None, owner_heartbeat: bool = False,
+               clock_offset_ms: int | None = None) -> Party:
         """The author, with its record and, "so it writes under 16-bit runs",
         its run's record. ``run_record`` False is an author that keeps none:
         "An owner that cannot keep such a record draws 32-bit runs" (core
-        §4.3)."""
-        runs = ["--desired-run-record", str(self.dir / f"{name}.run.json")] if run_record else []
-        return self.party(AUTHOR, ["--desired-author", "--desired-record", str(self.dir / f"{name}.record.json"),
-                                   *runs, *flags])
+        §4.3). ``watched`` is ``tasking.v2``, watched, its horizon 4 s."""
+        impl = impl or AUTHOR_IMPL
+        rec, runs = self.dir / f"{name}.record.json", self.run_record_path(name)
+        if impl == "zk2py":
+            flags = ["--desired-author", *(["--desired-record", str(rec)] if record else []),
+                     *(["--desired-run-record", str(runs)] if run_record else []),
+                     *(["--desired-window", f"{window:g}"] if window is not None else []),
+                     *(["--desired-watched"] if watched else []),
+                     *(["--desired-catalog", str(catalog)] if catalog else []),
+                     *(["--desired-owner-heartbeat"] if owner_heartbeat else [])]
+        else:
+            flags = ["--desired-author", "--desired-v2", *(["--desired-record", str(rec)] if record else []),
+                     *(["--run-file", str(runs)] if run_record else []),
+                     *(["--desired-window", f"{window:g}"] if window is not None else []),
+                     *(["--desired-ttl", "4"] if watched else []),
+                     *(["--catalog", str(catalog)] if catalog else []),
+                     *(["--owner-heartbeat"] if owner_heartbeat else [])]
+        for i in tokenless:
+            flags += ["--tokenless", i]
+        if clock_offset_ms is not None and impl != "zk2py":
+            # the reference's owner has a clock to set (its --help: "--clock-offset-ms <ms>"); zk2py's
+            # desired.v2 author reads none for a version
+            flags += ["--clock-offset-ms", str(clock_offset_ms)]
+        return self.party(impl, AUTHOR, flags, on)
+
+    def target(self, impl: str | None = None, *, on: int = 1, unbound: bool = False, reread_ms: int | None = None,
+               hold: bool = False, across: bool = False, reply_timeout_ms: int | None = None, watch: bool = False,
+               moves: bool = True, watched: bool = False, catalog: Path | None = None,
+               flags: tuple[str, ...] = ()) -> Party:
+        """The target, its role ``task`` bound to ``lab/author``, or unbound.
+        It follows its author's presence on a watch session of its own,
+        unless ``across``: zk2py's target is then told it is across a face.
+        The reference's has no such word, and follows presence all the same.
+        ``watch`` is zk2py's word for watching its author's heartbeat; the
+        reference's target "watches its author's heartbeat where the
+        revision declares a horizon", so ``watched`` alone says it."""
+        impl = impl or TARGET_IMPL
+        if impl == "zk2py":
+            f = ["--desired-unbound"] if unbound else ["--desired-target", AUTHOR,
+                                                       *(["--desired-across"] if across else ["--desired-presence-watch"])]
+            f += [*(["--desired-reread-ms", str(reread_ms)] if reread_ms is not None else []),
+                  *(["--desired-hold"] if hold else []),
+                  *(["--desired-reply-timeout-ms", str(reply_timeout_ms)] if reply_timeout_ms is not None else []),
+                  *(["--desired-watch"] if watch else []), *([] if moves else ["--desired-no-move"]),
+                  *(["--desired-watched"] if watched else []),
+                  *(["--desired-catalog", str(catalog)] if catalog else [])]
+        else:
+            f = ["--desired-v2", *(["--desired-unbound"] if unbound else ["--desired-target", AUTHOR, "--desired-watch"])]
+            f += [*(["--desired-reread-ms", str(reread_ms)] if reread_ms is not None else []),
+                  *(["--desired-hold"] if hold else []),
+                  *(["--desired-timeout-ms", str(reply_timeout_ms)] if reply_timeout_ms is not None else []),
+                  *(["--desired-ttl", "4"] if watched else []),
+                  *(["--catalog", str(catalog)] if catalog else [])]
+        return self.party(impl, TARGET, [*f, *flags], on)
 
     def get(self, key: str, on: int = 1, timeout: float = 1.0) -> Any:
         return self.live.get_state(self.g1 if on == 1 else self.g2, key, timeout)
@@ -292,14 +567,23 @@ class Bus:
     def cut(self) -> bool:
         assert self.link is not None
         self.link.cut()
+        if self.face:
+            # no presence crosses a face: the link is down when a GET of Rp
+            # from R1's side draws nothing. Never a GET of D: the author
+            # would count it among its target's.
+            return _wait(lambda: self.entry(RP, 1)[0] == "silent", 15.0, 0.05)
         return _wait(lambda: not self.author_seen(2), 15.0, 0.05)
 
     def heal(self) -> bool:
         assert self.link is not None
         self.link.heal()
+        if self.face:
+            return _wait(lambda: self.entry(RP, 1)[0] != "silent", 30.0, 0.1)
         return _wait(lambda: self.author_seen(2), 30.0, 0.1)
 
     def close(self) -> None:
+        global CURRENT_BUS
+        CURRENT_BUS = None
         for p in self.parties:
             try:
                 p.resume()
@@ -323,9 +607,6 @@ class Bus:
                     pass
 
 
-TARGET_FLAGS = ["--desired-target", AUTHOR, "--desired-presence-watch"]
-
-
 def _converge(author: Party, target: Party, n: int = 1, **kw: Any) -> str | None:
     s = author.put(TARGET, v(n, **kw))
     _wait(lambda: target.report() == converged(s, n), 10.0, 0.1)
@@ -333,13 +614,12 @@ def _converge(author: Party, target: Party, n: int = 1, **kw: Any) -> str | None
 
 
 def section1(rp: Report) -> None:
-    sec = "§1 converge after an outage"
+    sec = "§1 converge after an outage" + f" [{pairing()}]"
     bus = Bus(cut=True)
     try:
-        author = bus.party(AUTHOR, ["--desired-author", "--tokenless", "tasking.v2", "--desired-run-record",
-                                    str(bus.dir / "run.json")], on=1)
+        author = bus.author(record=False, tokenless=("tasking.v2",))
         t0 = time.monotonic()
-        target = bus.party(TARGET, TARGET_FLAGS, on=2)
+        target = bus.target(on=2)
         _wait(lambda: bus.token_put(TARGET, t0) is not None, 10.0, 0.01)
         rep, ch, _ = bus.report_at()
         st = bus.get(RP)
@@ -385,10 +665,10 @@ def section1(rp: Report) -> None:
 
 
 def section2(rp: Report) -> None:
-    sec = "§2 never an older version"
+    sec = "§2 never an older version" + f" [{pairing()}]"
     bus = Bus()
     try:
-        author, target = bus.author(), bus.party(TARGET, TARGET_FLAGS)
+        author, target = bus.author(), bus.target()
         _converge(author, target, 1)
         t = time.monotonic()
         s2 = author.put(TARGET, v(2))
@@ -442,11 +722,11 @@ def section2(rp: Report) -> None:
 
 
 def section3(rp: Report) -> None:
-    sec = "§3 a delete reverts, within the window and past it"
+    sec = "§3 a delete reverts, within the window and past it" + f" [{pairing()}]"
     bus = Bus(cut=True)
     try:
-        author = bus.author("--desired-window", "10")
-        target = bus.party(TARGET, TARGET_FLAGS, on=2)
+        author = bus.author(window=10)
+        target = bus.target(on=2)
         s1 = _converge(author, target, 1)
         rp.check(sec, "setup: the target converged on v1", target.report() == converged(s1, 1))
 
@@ -496,17 +776,18 @@ def section3(rp: Report) -> None:
                  f"GET {kind} {head}, s3 {s3}, seeds {seeds}, {target.report()}")
         st = bus.get(RP, on=2)
         raw = next((r.raw for r in st.replies if r.key == RP), b"")
-        rp.note(sec, f"the report after step 4 is {len(raw) - 6 if raw else '?'} bytes of record: "
-                     f"{raw[6:].hex() if raw else ''}")
+        record = zk2c.parse(raw, "put").record if raw else b""
+        # round 118 printed raw[6:], "5 bytes": 2 of them were the envelope's, under the target's 32-bit run
+        rp.note(sec, f"the report after step 4 is {len(record)} bytes of record: {record.hex()}")
     finally:
         bus.close()
 
 
 def section4(rp: Report) -> None:
-    sec = "§4 a refused document keeps the previous in force"
+    sec = "§4 a refused document keeps the previous in force" + f" [{pairing()}]"
     bus = Bus()
     try:
-        author, target = bus.author(), bus.party(TARGET, TARGET_FLAGS)
+        author, target = bus.author(), bus.target()
         s1 = _converge(author, target, 1)
 
         def refused(ver: str | None, rev: int | None, code: str, pointer: int, detail: int) -> dict[str, Any]:
@@ -524,12 +805,11 @@ def section4(rp: Report) -> None:
         rp.check(sec, "2. v3 with rate_hz 500: the same, observed s3, code invalid, pointer 2, detail 0",
                  ok and bus.run_doc() == v(1), str(target.report()))
         acts0 = target.acts()
-        run0 = author.cmd("desired run")
         t3 = time.monotonic()
-        author.cmd("desired new-epoch")
-        run1 = author.cmd("desired run")
+        author.new_epoch()
         _wait(lambda: any(g[2] == "put" for g in bus.since(t3, D)), 5.0)
         again = next((g[4] for g in bus.since(t3, D) if g[2] == "put"), None)
+        run0, run1 = (s3 or "/").split("/")[0], (again or "/").split("/")[0]
         ok = _wait(lambda: target.report() == refused(again, 3, "invalid", 2, 0), 5.0)
         rp.check(sec, "3. the author's instance re-minted in its own session takes a new run and puts v3's content "
                       "again under it: adopted, never refused again; the observed version moves, still refused with "
@@ -542,11 +822,18 @@ def section4(rp: Report) -> None:
         s5 = author.put(TARGET, v(5, rate_hz=20, mode="halt"))
         want = {"source": "desired", "outcome": "failed", "last_known": False, "in_force": "none",
                 **observed(s5, 5), "code": "apply"}
-        ok = _wait(lambda: target.report() == want, 5.0)
+
+        def stated(rep: Any) -> Any:
+            # Expected 5 states no place and no line: a drive may give either
+            return {k: x for k, x in (rep or {}).items() if k not in ("pointer", "detail")}
+
+        ok = _wait(lambda: stated(target.report()) == want, 5.0)
         run = bus.run_doc() or {}
         rp.check(sec, "5. the drive fails after the rate: Run holds rate_hz 20 and mode run; failed, observed s5, "
                       "code apply, in_force none", ok and run.get("rate_hz") == 20 and run.get("mode") == "run",
                  f"{target.report()}, Run {run}")
+        extra = {k: x for k, x in (target.report() or {}).items() if k in ("pointer", "detail")}
+        rp.note(sec, f"step 5: beside the code, this target's report holds {extra or 'no place and no line'}")
         s6 = author.put(TARGET, v(4294967296))
         want = {"source": "desired", "outcome": "refused", "last_known": False, "in_force": "none",
                 **observed(s6), "code": "invalid", "pointer": 4, "detail": 2}
@@ -562,16 +849,16 @@ def section4(rp: Report) -> None:
 
 
 def section5(rp: Report) -> None:
-    sec = "§5 a restart acts again"
+    sec = "§5 a restart acts again" + f" [{pairing()}]"
     bus = Bus()
     try:
-        author, target = bus.author(), bus.party(TARGET, TARGET_FLAGS)
+        author, target = bus.author(), bus.target()
         s1 = _converge(author, target, 1)
         rp.check(sec, "setup: the target converged on v1", target.report() == converged(s1, 1))
         g0 = len(author.gets())
         target.kill()
         t0 = time.monotonic()
-        new = bus.party(TARGET, [*TARGET_FLAGS, "--desired-hold"])
+        new = bus.target(hold=True)
         _wait(lambda: bus.token_put(TARGET, t0) is not None, 10.0, 0.01)
         rep, ch, ver = bus.report_at()
         d = bus.live.get_descriptor(bus.g1, new.instance or "")
@@ -592,10 +879,10 @@ def section5(rp: Report) -> None:
 
 
 def section6(rp: Report) -> None:
-    sec = "§6 the author's restart moves no target to act again"
+    sec = "§6 the author's restart moves no target to act again" + f" [{pairing()}]"
     bus = Bus()
     try:
-        author, target = bus.author(), bus.party(TARGET, TARGET_FLAGS)
+        author, target = bus.author(), bus.target()
         s1 = _converge(author, target, 1)
         author.put(SPARE, v(1))
         author.delete(SPARE)
@@ -605,7 +892,7 @@ def section6(rp: Report) -> None:
         acts0 = target.acts()
         author.kill()
         t1 = time.monotonic()
-        author = bus.author()
+        author = bus.author(clock_offset_ms=-5000)  # "In step 1 the author's clock is 5 s behind."
         _wait(lambda: bus.token_put(AUTHOR, t1) is not None, 10.0, 0.01)
         kd, vd, _ = bus.entry(D)
         k2, v2s, _ = bus.entry(D2)
@@ -649,20 +936,23 @@ def section6(rp: Report) -> None:
                  and not bus.since(t3, RUN) and k2 == "no_entry", f"{s2b}, D2 {k2} {head}, {target.report()}")
         s3 = author.put(TARGET, v(3))
         rp.check(sec, "4. v3: converged on v3", _wait(lambda: target.report() == converged(s3, 3), 5.0))
-        rp.cannot(sec, "step 1's \"the author's clock is 5 s behind\": zk2py's desired.v2 author reads no clock for "
-                       "a version, and has no offset to set")
+        if AUTHOR_IMPL == "zk2py":
+            rp.cannot(sec, "step 1's \"the author's clock is 5 s behind\": zk2py's desired.v2 author reads no clock "
+                           "for a version, and has no offset to set")
+        else:
+            rp.note(sec, "step 1 ran with the reference's author started under --clock-offset-ms -5000")
     finally:
         bus.close()
 
 
 def section8(rp: Report) -> None:
-    sec = "§8 the kill switch"
+    sec = "§8 the kill switch" + f" [{pairing()}]"
     bus = Bus()
     try:
         author = bus.author()
         author.put(TARGET, v(1))
         t0 = time.monotonic()
-        target = bus.party(TARGET, ["--desired-unbound"])
+        target = bus.target(unbound=True)
         _wait(lambda: bus.token_put(TARGET, t0) is not None, 10.0, 0.01)
         time.sleep(3.0)
         rep, ch, _ = bus.report_at()
@@ -749,7 +1039,7 @@ class Played:
 
 
 def section13(rp: Report) -> None:
-    sec = "§13 a conditional re-read, and what a read waits"
+    sec = f"§13 a conditional re-read, and what a read waits [P, {impl_name(TARGET_IMPL)} target]"
     bus = Bus()
     p = Played(bus)
     try:
@@ -758,7 +1048,7 @@ def section13(rp: Report) -> None:
         s7, s9 = d2.Version.of(16, p.R, 7).text, d2.Version.of(16, p.R, 9).text
         p.default_doc, p.default_seq = v(1), 7
         p.script = [("snapshot", v(1), 7), ("held",)]
-        target = bus.party(TARGET, [*TARGET_FLAGS, "--desired-reread-ms", "2000"])
+        target = bus.target(reread_ms=2000)
         ok = _wait(lambda: target.report() == converged(s7, 1), 10.0, 0.05)
         rp.check(sec, "setup: the seed draws v1's snapshot from P, its entry at (R, 7); the target converged on v1",
                  ok, str(target.report()))
@@ -803,19 +1093,21 @@ def section13(rp: Report) -> None:
         p.tokens.append(p.s.liveliness().declare_token(f"zk2/{AUTHOR}/@zk/instance/00000000000000a2"))
         time.sleep(max(0.0, t5 + 1.9 - time.monotonic()))
         later = [g[0] - t5 for g in p.gets[n0 + 1:p.count()]]
-        reads = (target.watch() or {}).get("reads", [])
+        raw = target.watch().get("raw")
+        reads = raw.get("reads", []) if isinstance(raw, dict) else None  # zk2py's target says why it read
         rp.check(sec, "5. P leaves a re-read unanswered and declares a second instance token 0.2 s on: no second GET "
                       "while the first is unanswered; when it ends at its timeout, 1 s, the target makes one GET, "
                       "the seed", len(later) == 1 and 0.95 <= later[0] <= 1.6
-                 and [r["why"] for r in reads[-2:]] == ["period", "seed"] and reads[-2]["drew"] == "silent",
-                 f"GETs {[round(x, 2) for x in later]} s after the unanswered one, reads {reads[-2:]}")
+                 and (reads is None or [r["why"] for r in reads[-2:]] == ["period", "seed"]
+                      and reads[-2]["drew"] == "silent"),
+                 f"GETs {[round(x, 2) for x in later]} s after the unanswered one, "
+                 f"{'reads ' + str(reads[-2:]) if reads is not None else target.cmd('desired seeds')}")
         target.kill()
         time.sleep(0.5)
         n0, t6 = p.count(), time.monotonic()
         p.default_doc, p.default_seq = v(2), 9
         p.script = [("after", 4.0, ("snapshot", v(2), 9)), ("after", 4.0, ("held",))]
-        far = bus.party(TARGET, ["--desired-target", AUTHOR, "--desired-across", "--desired-reply-timeout-ms", "6000",
-                                 "--desired-reread-ms", "8000"])
+        far = bus.target(across=True, reply_timeout_ms=6000, reread_ms=8000)
         ok = _wait(lambda: far.report() == converged(s9, 2), 9.0, 0.05)
         took = time.monotonic() - t6
         time.sleep(max(0.0, t6 + 20.0 - time.monotonic()))
@@ -830,8 +1122,7 @@ def section13(rp: Report) -> None:
         far.kill()
         time.sleep(0.5)
         t7 = time.monotonic()
-        bad = bus.party(TARGET, ["--desired-target", AUTHOR, "--desired-across", "--desired-reply-timeout-ms", "6000",
-                                 "--desired-reread-ms", "2000"])
+        bad = bus.target(across=True, reply_timeout_ms=6000, reread_ms=2000)
         time.sleep(5.0)
         rp.check(sec, "7. the same face with a period of 2 s: the target refuses to start; S sees no instance token "
                       "of lab/worker", bad.instance is None and bad.proc.poll() == 1
@@ -864,32 +1155,32 @@ def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
     under a catalog, on :data:`HBS`, and sends no heartbeat of it; the
     target holds the catalog and reads the group (§2.5)."""
     sec = "§14 the watch" + ("" if moves else ", a target that does not move what it expects") + (
-        ", by an owner heartbeat under a catalog" if ohb else "")
-    bus = Bus(cut=True)
+        ", by an owner heartbeat under a catalog" if ohb else "") + f" [{pairing()}]"
+    bus = Bus(cut=True, face=True)
     try:
         global HB
         hb_kept, HB = HB, HBS if ohb else HB
-        cat_flags = ["--desired-catalog", str(watched_catalog(bus.dir / "catalog.json"))] if ohb else []
-        a_flags = ["--desired-watched", *cat_flags, *(["--desired-owner-heartbeat"] if ohb else [])]
-        author = bus.author(*a_flags)
+        catalog = watched_catalog(bus.dir / "catalog.json") if ohb else None
+        a_kw: dict[str, Any] = {"watched": True, "catalog": catalog, "owner_heartbeat": ohb}
+        author = bus.author(**a_kw)
         s1 = author.put(TARGET, v(1))
-        flags = ["--desired-target", AUTHOR, "--desired-across", "--desired-watch", "--desired-watched", *cat_flags,
-                 *([] if moves else ["--desired-no-move"])]
         g0, t1 = len(author.gets()), time.monotonic()
-        target = bus.party(TARGET, flags, on=2)
+        target = bus.target(on=2, across=True, watch=True, watched=True, moves=moves, catalog=catalog)
         time.sleep(10.0)
         gets = author.gets()[g0:]
-        w = target.watch() or {}
-        crossed = (w.get("heartbeats") or {})
+        w = target.watch()
         rp.check(sec, "1. the target seeds and converges on v1; the first heartbeat it reads makes it read once, "
                       "carrying s1 and answered with it alone; from then on every heartbeat's section is the one it "
                       "expects; no further GET of D in the 10 s, though 4 heartbeats or more crossed",
                  target.report() == converged(s1, 1) and gets == [{"held": None, "alone": False},
                                                                   {"held": s1, "alone": True}]
-                 and crossed.get("read") == 1 and crossed.get("unmoved", 0) >= 3 and w.get("expects") is not None
-                 and sum(crossed.values()) >= 4 and len(_hb(bus, t1)) >= 4,
-                 f"gets {gets}, heartbeats {crossed}, expects {w.get('expects')}")
+                 and w["asked"] == 1 and w["hb_read"] >= 4 and w["expects"] is not None
+                 and len(_hb(bus, t1)) >= 4,
+                 f"gets {gets}, {len(_hb(bus, t1))} heartbeats on S, the target's watch: {w['raw']}")
         if not moves:
+            if TARGET_IMPL != "zk2py":
+                rp.cannot(sec, "the reference's target has no word for not moving what it expects")
+                return
             g0, t3 = len(author.gets()), time.monotonic()
             s2 = author.put(TARGET, v(2))
             time.sleep(6.0)
@@ -909,8 +1200,12 @@ def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
         s2 = author.put(TARGET, v(2))
         time.sleep(6.0)
         gets = author.gets()[g0:]
+        one = [{"held": s2, "alone": True}]
         rp.check(sec, "3. v2 on D: the target hears it live and converges on it; a target that moves what it expects "
-                      "makes no GET", target.report() == converged(s2, 2) and gets == [], f"gets {gets}")
+                      "makes no GET; one that does not makes one, at the next heartbeat; either makes at most one",
+                 target.report() == converged(s2, 2) and (gets == [] or TARGET_IMPL != "zk2py" and gets == one),
+                 f"gets {gets}")
+        rp.note(sec, f"step 3: this target {'moves what it expects: no GET' if gets == [] else 'made one GET'}")
         bus.cut()
         s3 = author.put(TARGET, v(3))
         time.sleep(5.0)
@@ -927,7 +1222,7 @@ def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
         acts0 = target.acts()
         author.kill()
         t5 = time.monotonic()
-        author = bus.author(*a_flags)
+        author = bus.author(**a_kw)
         time.sleep(8.0)
         puts = [g for g in bus.since(t5, D) if g[2] == "put"]
         new = puts[0][4] if puts else None
@@ -939,39 +1234,39 @@ def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
                  new is not None and new != s3 and target.report() == converged(new, 3) and target.acts() == acts0
                  and gets == [{"held": new, "alone": True}] and not [g for g in bus.since2(t5) if g[1] == RUN]
                  and len(hb_runs) == 1, f"put {new}, gets {gets}, heartbeat runs {hb_runs}")
-        g0, t6, w0 = len(author.gets()), time.monotonic(), target.watch() or {}
+        g0, t6, w0 = len(author.gets()), time.monotonic(), target.watch()
         author.pause()
         time.sleep(6.0)
         quiet = len(_hb(bus, t6 + 0.5))
         rep_during = target.report()
         author.resume()
         time.sleep(4.0)
-        w1 = target.watch() or {}
+        w1 = target.watch()
         gets = author.gets()[g0:]
-        h0, h1 = w0.get("heartbeats") or {}, w1.get("heartbeats") or {}
         rp.check(sec, "6. the author's process stopped for 6 s, past the 4 s horizon: no heartbeat crosses; the "
                       "target keeps v3 in force, Rp and Run receive nothing, and it makes no GET; when the author "
                       "runs again its next heartbeat is in sequence and unmoved: no GET either",
                  quiet == 0 and rep_during == converged(new, 3) and target.report() == converged(new, 3)
-                 and not bus.since2(t6) and gets == [] and h1.get("unmoved", 0) > h0.get("unmoved", 0)
-                 and h1.get("read") == h0.get("read"),
-                 f"{quiet} heartbeats while stopped, gets {gets}, heartbeats {h0} -> {h1}")
+                 and not bus.since2(t6) and gets == [] and w1["hb_read"] > w0["hb_read"]
+                 and w1["asked"] == w0["asked"],
+                 f"{quiet} heartbeats while stopped, gets {gets}, the watch {w0['raw']} -> {w1['raw']}")
         if ohb:
             own = [g for g in bus.since(t1, hb_kept) if g[2] == "put"]
             rp.check(sec, "the author sent no heartbeat of tasking.v2 beside its owner heartbeats, and the target "
                           "read each group on the owner heartbeat key's sequence",
-                     not own and set((w1.get("by_key") or {})) == {"host"}, f"{len(own)} heartbeats, {w1.get('by_key')}")
+                     not own and (not isinstance(w1["raw"], dict) or set(w1["raw"].get("by_key") or {}) == {"host"}),
+                     f"{len(own)} heartbeats of tasking.v2, the watch {w1['raw']}")
     finally:
         HB = hb_kept
         bus.close()
 
 
 def section15(rp: Report) -> None:
-    sec = "§15 a delete past the window, then a restart"
+    sec = "§15 a delete past the window, then a restart" + f" [{pairing()}]"
     bus = Bus(cut=True)
     try:
-        author = bus.author("--desired-window", "10")
-        target = bus.party(TARGET, TARGET_FLAGS, on=2)
+        author = bus.author(window=10)
+        target = bus.target(on=2)
         s1 = _converge(author, target, 1)
         rp.check(sec, "setup: the target converged on v1, under the author's run R", target.report() == converged(s1, 1))
         acts0 = target.acts()
@@ -979,8 +1274,8 @@ def section15(rp: Report) -> None:
         author.delete(TARGET)
         time.sleep(15.0)
         author.kill()
-        author = bus.author("--desired-window", "10")
-        ad = author.cmd("desired adoption")
+        author = bus.author(window=10)
+        ad = author.adoption()
         kind, head, _ = bus.entry(D)
         bus.heal()
         _wait(lambda: any(g["held"] == s1 for g in author.gets()), 10.0, 0.1)
@@ -1014,9 +1309,13 @@ SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": sec
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.desired_v2_scenarios", description=__doc__.split("\n")[0])
     ap.add_argument("--only", action="append", choices=sorted(SECTIONS))
+    ap.add_argument("--author", choices=["zk2py", "rust"], default="zk2py")
+    ap.add_argument("--target", choices=["zk2py", "rust"], default="zk2py")
     args = ap.parse_args(argv)
+    global AUTHOR_IMPL, TARGET_IMPL
+    AUTHOR_IMPL, TARGET_IMPL = args.author, args.target
     SCRATCH.mkdir(parents=True, exist_ok=True)
-    rp = Report()
+    rp = Rows()
     for name in args.only or list(SECTIONS):
         try:
             SECTIONS[name](rp)

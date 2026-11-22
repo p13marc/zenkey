@@ -66,13 +66,28 @@ def contract(name: str, watched: bool = False) -> Any:
     return load_contract((WATCHED if watched else CONTRACTS) / f"{name}.toml", spec_dir=REPO / "spec")
 
 
-def slice_key(author: str, target: str) -> str:
+def slice_key(author: str, target: str, iface: str = AUTHOR_IFACE) -> str:
     system, service = target.split("/")
-    return desired.slice_key(author, AUTHOR_IFACE, False, TEMPLATE, {"system": system, "service": service})
+    return desired.slice_key(author, iface, False, TEMPLATE, {"system": system, "service": service})
+
+
+def contract_file(path: str) -> Any:
+    """A contract of the caller's own, by its file: a revision of the
+    author's interface other than the scenarios' (round 119's mixed
+    majors)."""
+    return load_contract(Path(path), spec_dir=REPO / "spec")
 
 
 def version_of(ib: Any) -> d2.Version | None:
     return None if ib is None else d2.Version.of(ib.width, ib.run, ib.seq)
+
+
+def stamp_text(x: Any) -> str:
+    """What the owner returned for a mutation, as text: a version,
+    ``<run>/<seq>``, for a desired resource of this major. A revision that
+    still uses ``desired.v1`` (round 119's mixed majors) is per key, and its
+    owner returns the Zenoh timestamp it set: shown as it writes itself."""
+    return version_of(x).text if hasattr(x, "width") else str(x)
 
 
 def inband_of(v: d2.Version | None) -> Any:
@@ -139,7 +154,7 @@ class Author:
         return owner.instance_key
 
     def key(self, target: str) -> str:
-        return slice_key(self.address, target)
+        return slice_key(self.address, target, self.contract.interface)
 
     def gets(self, target: str) -> list[dict[str, Any]]:
         """scenarios-v2, "What a section observes of a read": each GET that
@@ -193,14 +208,14 @@ class Author:
                     self.adoption["expired"].append(target)
                 continue  # v1 §2.11: "its record SHOULD drop a delete once that window has passed"
             stamp = owner.delete_state(self.key(target), elapsed_s=elapsed_s)
-            self.deletes[target] = {"version": version_of(stamp).text, "at_ms": int(at_ms)}
+            self.deletes[target] = {"version": stamp_text(stamp), "at_ms": int(at_ms)}
             if adopting:
                 self.adoption["redeleted"].append(target)
         for target, e in sorted(docs.items()):
             if not isinstance(e, dict) or "document" not in e:
                 continue
             stamp = owner.set_state(self.key(target), canonical(e["document"]))
-            self.documents[target] = {"version": version_of(stamp).text, "document": e["document"]}
+            self.documents[target] = {"version": stamp_text(stamp), "document": e["document"]}
             if adopting:
                 self.adoption["reput"].append(target)
         self._write_record()
@@ -222,11 +237,11 @@ class Author:
             held = self.documents.get(target)
             if held is not None and desired.jcs_equal(held["document"], document):
                 return "unchanged", key, None
-            v = version_of(self.owner.set_state(key, canonical(document)))
-            self.documents[target] = {"version": v.text, "document": document}
+            v = stamp_text(self.owner.set_state(key, canonical(document)))
+            self.documents[target] = {"version": v, "document": document}
             self.deletes.pop(target, None)
             self._write_record()
-        return "put", key, v.text
+        return "put", key, v
 
     def delete(self, target: str, force: bool = False) -> tuple[str, str, str | None]:
         """A delete of the target's document. ``force`` makes one "though it
@@ -236,11 +251,11 @@ class Author:
         with self.lock:
             if target not in self.documents and not force:
                 return "none", key, None
-            v = version_of(self.owner.delete_state(key))
+            v = stamp_text(self.owner.delete_state(key))
             self.documents.pop(target, None)
-            self.deletes[target] = {"version": v.text, "at_ms": int(time.time() * 1000)}
+            self.deletes[target] = {"version": v, "at_ms": int(time.time() * 1000)}
             self._write_record()
-        return "deleted", key, v.text
+        return "deleted", key, v
 
     def new_epoch(self) -> str:
         """A re-mint in its own session: "A new instance takes a new run
@@ -291,13 +306,13 @@ class Target:
         self.author_contract = tasking or contract("tasking.v2", watched)
         self.run_record = run_record
         self.task_schema = json.loads((CONTRACTS / "tasking.json").read_text())
-        self.key = None if unbound else slice_key(author, address)
+        self.key = None if unbound else slice_key(author, address, self.author_contract.interface)
         self.rp = f"zk2/{address}/{TARGET_IFACE}/state/desired/task"
         self.run = f"zk2/{address}/{TARGET_IFACE}/state/running"
         self.role = d2.TargetRole()
         self.watch = d2.Watch()
         self.lock = threading.RLock()
-        self._seed_due = False
+        self._seed_due: Any = False
         self.running_doc: Any = dict(BASELINE)
         self.acts = 0
         self.reads = 0
@@ -340,6 +355,16 @@ class Target:
         if self.unbound:
             return
         a = self.author_contract.canonical
+        if d2.PROFILE not in a["uses"]:
+            # §2.18: "A target reads its author's revision ... It orders a
+            # desired.v1 author's versions by v1 §2.6", and "A role bound to
+            # a desired.v1 author is reported in a desired.v1.Report". This
+            # target declares the Report of this major alone, so it has no
+            # report to put for such a role. The text names no outcome for a
+            # target that serves one major: zk2py refuses the start, as an
+            # invalid binding is refused (round 119).
+            raise OwnerRefused(f"role {ROLE!r}: its author's revision of {a['interface']} does not use desired.v2, "
+                               "and this target declares no desired.v1.Report resource (desired.v2 §2.18)")
         rr = (c.get("requires") or {}).get(ROLE) or {}
         named = desired.desired_named([{"kind": r.get("kind"), "template": r.get("template"),
                                         "annotations": r.get("annotations") or {}} for r in a["resources"]],
@@ -460,7 +485,8 @@ class Target:
         with self.lock:
             if not self.watch.reading():
                 if why in ("seed", "appearance"):
-                    self._seed_due = True
+                    # an appearance that waits is still one when it is made
+                    self._seed_due = "appearance" if why == "appearance" or self._seed_due == "appearance" else True
                     return "waits"
                 return "outstanding"
         return self._reads(why)
@@ -468,12 +494,31 @@ class Target:
     def _reads(self, why: str) -> str:
         """The read the watch's flag already stands for, then the seed that
         fell due while it was out."""
+        appearance = why == "appearance"
         while True:
+            t0 = time.monotonic()
             word = self._read_once(why)
+            again = 0
+            # v1 §2.5, which §2.5 keeps "for a GET that ended with no reply
+            # before its timeout": "A seed that draws nothing at an
+            # appearance MAY be made again, a few times and soon: a token
+            # can reach the target's router before the route to its author's
+            # queryable does ... up to four times, 100 ms more apart each
+            # time". One that ended at its timeout is not made again: "at
+            # its next trigger, a period or a heartbeat, never sooner".
+            while (appearance and word == "silent" and again < 4
+                   and time.monotonic() - t0 < 0.9 * self.timeout and not self._stop.is_set()):
+                again += 1
+                time.sleep(0.1 * again)
+                with self.lock:
+                    if not self.watch.reading():
+                        return word
+                t0 = time.monotonic()
+                word = self._read_once("again")
             with self.lock:
                 if not self._seed_due or self._stop.is_set():
                     return word
-                self._seed_due = False
+                appearance, self._seed_due = self._seed_due == "appearance", False
                 if not self.watch.reading():
                     return word
             why = "seed"
@@ -525,11 +570,12 @@ class Target:
         # "A held stamp it did not send is no answer (core §4.2, held)"; "No
         # reply at all is still no verdict (core O5)"; "A read that ends at
         # its timeout is no verdict".
+        drew = "held" if st.held else "silent"
         with self.lock:
             self.role.asked = None
             self.watch.no_answer()
-            self.read_log.append((why, None if sent is None else sent.text, "held" if st.held else "silent"))
-        return "silent"
+            self.read_log.append((why, None if sent is None else sent.text, drew))
+        return drew
 
     @staticmethod
     def _sample(origin: str, deleted: bool, ib: Any, payload: bytes) -> d2.Sample:
@@ -587,7 +633,7 @@ class Target:
 
         self.layout = heartbeat.layout_of(self.author_contract.canonical, self.author_contract.fingerprint)
         system, service = self.author.split("/")
-        hb = heartbeat.heartbeat_key(system, service, AUTHOR_IFACE)
+        hb = heartbeat.heartbeat_key(system, service, self.author_contract.interface)
         self._entities.append(s.declare_subscriber(hb, zenoh.handlers.Callback(self._heartbeat)))
         cls = f2.classes_of(self.author_contract.canonical)[self.resource]
         self._entities.append(s.declare_subscriber(
@@ -638,7 +684,7 @@ class Target:
                 except cat.Refused:
                     unresolved = True  # this group may be the author's interface's: it cannot tell
                     continue
-                if entry is not None and entry[0] == AUTHOR_IFACE:
+                if entry is not None and entry[0] == self.author_contract.interface:
                     mine = (g, entry)
             if mine is None:
                 why = "no_catalog" if unresolved else None  # else: no group for the interface, no section
