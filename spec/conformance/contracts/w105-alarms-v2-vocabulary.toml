@@ -1,0 +1,14 @@
+# `alarms.v2` publishes one key, `rules` (alarms.v2 §4, core Appendix D).
+# Any other `alarms.<key>` in a contract that lists it draws W105, as the
+# interim `severity_default` does here: a record always carries its
+# severity (alarms.v2 §2.4).
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["alarms.v2"]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }
+annotations = { "alarms.severity_default" = "warning" }

@@ -1,0 +1,33 @@
+# core §10 point 2: W105 reads the table of the major the contract uses.
+# `alarms.v1`'s is empty, so `alarms.rules` draws W105 under it;
+# `ok-alarms-v2-rules` is the same contract under `alarms.v2`, whose table
+# has the key, and draws none. Under `alarms.v1` the list is no table of
+# the service's (alarms.v2 §4, `not_used`).
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["alarms.v1"]
+
+[[defaults.annotations."alarms.rules"]]
+name     = "hot"
+category = "sensor_health"
+summary  = "Temperature {argument} C"
+argument = { minimum = "-40", resolution = "0.1" }
+
+[[defaults.annotations."alarms.rules"]]
+name    = "link_down"
+summary = "Link to {peer} on {port} is down"
+labels  = [
+  { name = "peer", values = ["r1", "r2", "r3"] },
+  { name = "port", values = ["eth0", "eth1"] },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name    = "sensor_lost"
+summary = "Sensor {sensor} lost"
+labels  = [{ name = "sensor", minimum = 0, maximum = 63 }]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }

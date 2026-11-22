@@ -34,13 +34,16 @@ confirmation `freshness.v2`'s heartbeat, and its late joiner's state
   alert key is a `counter` of 64 bits, since E028 admits no `int` bound
   outside ±(2^53 − 1).
 - **Observer** stays 0.35.
-- **No fixture.** No contract in `conformance/` writes `alarms.rules`.
-  The cases that show W105 reading it by major are the reference's to
-  add with its lint.
 
-**Not verified.** The reference's linter still warns W105 for
-`alarms.rules` in a contract that lists `alarms.v2`: its change is
-#984's code half.
+**Evidence.** Three contracts in `conformance/contracts/` show W105
+reading the `alarms` row by major, with §4's example table:
+- `ok-alarms-v2-rules`: the table under `alarms.v2`, no finding;
+- `w105-alarms-rules`: the same table under `alarms.v1`, W105;
+- `w105-alarms-v2-vocabulary`: `alarms.severity_default` under
+  `alarms.v2`, W105.
+
+The reference's linter reads them so, and `expect.json` holds their
+codes and fingerprints, with their canonical forms beside them.
 
 ## 0.114 — 2026-11-27: §0 and Appendix B: zk2 is specified against zenoh 1.10.2, each fact read in 1.10.1 beside it, no keyword changed (#1165)
 
