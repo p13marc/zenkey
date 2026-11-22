@@ -68,9 +68,9 @@ case name. It exits with:
 | history | §9.7 | `history` | `[at, tag]` per history root |
 | descriptors | §3.3 | `descriptor` | the D codes (D012, a standby marked tokenless, since 0.39; `minor` optional and `null` D000 since 0.107; a descriptor over 1 KB drawing no code since 0.109, 61 cases), against `descriptors/contracts/nav.v2.toml`. That contract's fingerprint, computed here, is the `sha256:fea2…` the fixtures expect. |
 | errors | §5.2, §7.5 | `zk2c` | `forms.json`: the error form's 256 bytes, its writes and its reads by Encoding, an earlier core's three envelopes `encoding`. `cases.json`, the bare wire's envelope, went with core 0.99 (round 104). An unknown file there fails. |
-| envelope | §7.5, §5.1, §5.2 (0.72 to 0.94) | `zk2c`, `calls` | `vectors.json` (each header and case, accepted ones written back), `carries.json`, and `calls.json` (round 101): an operation's forms by its types' tags, its writes and its reads, a packed record under CH's tag |
+| envelope | §7.5, §5.1, §5.2 (0.72 to 0.110) | `zk2c`, `calls`, `held` | `vectors.json` (each header and case, accepted ones written back), `carries.json`, and `calls.json` (round 101): an operation's forms by its types' tags, its writes and its reads, a packed record under CH's tag; `held.json` (core 0.110, round 116): a held stamp written, a state GET's payload, a GET's reply, and an owner's answer to a conditional read, 88 cases, each accepted held stamp written back |
 | budget | core §2.7, observer §5 (0.24, 0.25, 0.27) | `budget` | every file of `budget/`: `bounds.json` (the bound across instances), `population.json` (a GET's or a window's population against it), `rate.json` (an event's rate per member) and `lossless.json` (whether a window is shown to have lost no delivery, 0.25; its `reader_stall` and `stall_bounds`, 0.27). An unknown file there fails. |
-| seed | §4.2 (0.27, 0.100) | `seed`, `seed_snapshot` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not); `inband.json`; and `snapshot.json` (#977 E2, round 104; core 0.100's §4.2 since round 105), a seed over snapshots: 45 cases, F-497's three mapping the index by the revision the owner's descriptor names. An unknown file there fails. |
+| seed | §4.2 (0.27, 0.100) | `seed`, `seed_snapshot` | `seed/merge.json`: `order` (two stamps, or a stamp and none, compared) and `cases` (a key's arrivals, each kept or not); `inband.json`; and `snapshot.json` (#977 E2, round 104; core 0.100's §4.2 since round 105), a seed over snapshots: 45 cases, F-497's three mapping the index by the revision the owner's descriptor names; and `held.json` (core 0.110, round 116; `seed_held`), a conditional read's reader: 12 stamps it sends or does not, and 29 merges. An unknown file there fails. |
 | compat | §9.7, §9.8 | `compat` | **all 100 cases** (spec 0.8), evaluated through `compat/README.md`'s one-resource wrapper: §9.8's six tables, the JSON Schema and protobuf rules, `same_revision`, and the FULL_TRANSITIVE cases (with each pairwise `against`). The packed cases (0.75) are wrapped as `packed` artifacts. |
 | packed | §7.6, §7.5 (0.75, 0.76) | `packed`, `zk2c` | `packed/vectors.json`: each layout's form, sha256, tag, items and bit bounds; each write's bits, pad and bytes, or the writer's refusal; each read's JSON reading, or the first refusal in §7.6's order. Every accepted write is sealed in the envelope, opened and read back; every read is made through the envelope too. Live against the reference: `python -m zk2py.packed_live` (the mend after round 94). |
 | hostid | profiles/hostid §2.1, §2.11 | `hostid` | every file of `spec/profiles/hostid/conformance/`: `vectors.json` (the derivation) and `shapes.json` (the minted shape). An unknown file there fails (`profiles/README.md`). |
@@ -8238,6 +8238,115 @@ ways a deployment leaves the owner heartbeat out, where §2.4 has a
 third). None is a blocker. F-547 and F-549 are resolved. See "At
 freshness.v2 0.10 and link.v2 0.21" in `SPEC-FINDINGS.md`.
 
+## Core 0.110: a conditional read, each half written before its fixture (round 116)
+
+Round 116 read the branch `chunk-986-j1` at ca356cc6 (#986's first
+chunk): core 0.110. A reader that holds a state member's value asks
+again while naming the mutation it holds, and an owner whose member is
+unchanged answers with that **held stamp** alone, 6 bytes.
+- **§7.5:** the held stamp, `CH · run · seq`, form 7 with tag 0; a state
+  GET's payload read in three steps; a reply told from a page by its
+  length.
+- **§4.2:** the owner's SHOULD and its MUST NOT; the reader's three
+  rules.
+- `RULES.md` lists 295 rules, 9 more. The walk holds a verdict for each
+  of its 308 rows of the claimed classes: twelve new, all met.
+
+**`just py-conformance`: 7141 of 7141** on this tree. Of them,
+`envelope` 550, `seed` 155 and `readings` 1103.
+
+### Written from the text, then run
+
+Each half was written from the text and committed before its list was
+opened. **No case was missed on a first run.**
+
+| Half | Module | Commit | First run |
+|---|---|---|---|
+| The held stamp: write, a GET's payload, a reply | `held` | 20fb2f14 | `writes` 9/9, `gets` 34/34, `replies` 22/22 |
+| The owner's answer | `held.answer`, `owner` | 91a4974a | `answers` 23/23 |
+| The reader: what it sends, its merge | `seed_held`, `seed`, `live` | 77e26bd1 | `asks` 12/12, `cases` 29/29 |
+| A held stamp on a put's key | round 115's `zk2c.reads` | no line moved | `carries.json`'s reads 46/46 |
+
+**The three answers, given from the text first:**
+1. **A lone CH byte with a tag** is `tag` on a GET, where the tag is
+   read before the length, and `short` on a reply, whose parse is a
+   put's and checks no snapshot's tag. **A payload of no byte** is no
+   payload, under any Encoding. **A byte or more under another
+   Encoding** is refused, `encoding`.
+2. **The owner compares the member's stored stamp,** "the one a snapshot
+   would list for the member", never the run it writes under now.
+3. **"By then"** is not decided by the text. zk2py decides at the
+   answer's arrival. One case needs the mutation marked heard again
+   there; none separates the arrival from the GET's end for the rest
+   (F-569).
+
+### What changed in zk2py
+
+- **`held`, new:** `write`, `read_get` (the three steps, then
+  `sample_kind`, `tag`, `short`, `trailing`), `read_reply` (a held
+  stamp, a page, another form, or the refusal) and `answer`.
+- **The owner** answers a conditional read through `held.answer`.
+  `Owner.conditional = False` answers every GET whole. It names each
+  payload it refuses (`held_refused`) and answers it whole.
+- **`seed_held`, new:** `ask`, `reading` and the fixture's merge.
+- **The late joiner** sends one (`get(conditional=True)`,
+  `conditional_read`), reads a held stamp in answer, marks the mutation
+  heard again, reads again where nothing is held, and counts every other
+  held stamp undecodable, `held`: one on its subscription too.
+  `live.get_state(held=…)` is the one-shot read.
+
+### §16, live
+
+`conditional_live`, new, on the black boxes of ca356cc6 and, for the
+older owner, of 547d202a. zenoh-python routers, zenoh 1.10.1.
+
+| Pairing | Steps 1 to 8 | The reader's merge | Steps 9 and 10 |
+|---|---|---|---|
+| zk2py's owner, zk2py's reader | 15/15 | 7/7 | 14/14: a consumer, then a tool's late joiner |
+| the reference's owner, zk2py's conditional read | 13/13 | 7/7 | not run: they play the owner |
+| zk2py's owner, `zenctl get --body @FILE` | 15/15, one bullet of step 5 not sent | not run | 1/1: the played held stamps, as the tool shows them |
+| the owner of 547d202a, zk2py's conditional read | 13/13, each held stamp read as whole | 7/7 | 1/1: its `zenctl` on a held stamp |
+
+- **The reference's owner** answers zk2py's conditional read as §16
+  says, step for step.
+- **`zenctl get --body`** sends its body under `zenoh/bytes`, and
+  zk2py's owner answers the held stamp to it.
+- **The owner that predates the rule** answers every conditional read
+  whole, and zk2py accepts each snapshot: the mutation it held is kept
+  once.
+- **Observed:** `zenctl get` shows the held stamp that answers its own
+  body as "no answer here: held" (F-572). The `zenctl` of 547d202a
+  shows a held stamp as a snapshot whose body ends short.
+
+### Appendix B, and the mend
+
+- **"A conditional read's bytes"** (`readings`): 6, 66, 21, 61, 154,
+  40, 119, 179 and the entry's 159 come out of §7.5's layouts and the
+  text's own figures. Its 12, 94, 20, the final's 6 and the entry's 222
+  are the model's, under `docs/` (F-571). An unchanged reply is 60 B
+  under a changed one at a 44-byte record: the record and 16 more, where
+  the request grew by 9 (F-570).
+- **`zenctl gen` at 513 B,** measured again on ca356cc6: no warning at a
+  rest of 512 B, "with a rest of 513 B" one character on. The text's
+  "within 512 B" and the tool agree.
+- **zenohd:** not run. `bin/current` holds none.
+
+**Not run:**
+- steps 9 and 10 with the reference's reader: no black box makes a
+  conditional read;
+- step 5's payload under `application/json` by `zenctl get`;
+- a 32-bit run live, and a conditional read across a constrained face;
+- the live runners not named here. `snapshot_live` (40/40),
+  `state_pairings` (118/118) and `stray_live` (7/7) ran whole on this
+  tree.
+
+Round 116 found F-569 to F-572: two ambiguities ("by then" names no
+instant; a tool whose GET carries a body its user gave it), one gap
+(five of Appendix B's figures are the model's) and one minor error
+(what a conditional read saves, against Appendix B's own figures). None
+is a blocker. F-548 and F-550 to F-568 stay open. See "At core 0.110" in
+`SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -8317,6 +8426,10 @@ freshness.v2 0.10 and link.v2 0.21" in `SPEC-FINDINGS.md`.
     figure is computed, never sent;
   - a tool declaring an owner heartbeat's scope again after two of its
     horizons of silence: the horizon is computed, and no run cuts one.
+- **Of a conditional read** (core 0.110, round 116): no zk2py profile
+  reader makes one, as no profile adopts it yet. zk2py's `desired.v1`
+  target re-reads whole. Not run: one across a constrained face, a
+  32-bit run live, and the reference's reader, which is no black box.
 - **A collection's snapshot** (core 0.97, round 103): zk2py reads, writes
   and cuts pages, and its echo tool shows one. Its owners answer a GET
   per key and its readers read with `Latest`, as S2 to S4 still say: no
@@ -8444,6 +8557,15 @@ impl/python/
                                 the writer and the round trip; written from the text before owner.json was
                                 opened (core 0.108, round 112); every group of one put, on past a refused one,
                                 written before `forms` and `beside` were opened (core 0.109, round 114)
+    held.py           §7.5 §4.2 the held stamp, a snapshot's header with no body: written, read on a state GET
+                                in the text's three steps, read on a reply beside a page, and an owner's answer
+                                to a conditional read; each half written before its fixture list was opened
+                                (core 0.110, round 116)
+    seed_held.py      §4.2      a conditional read's reader: the held stamp it may send, each held stamp's
+                                reading, unchanged or held, and the merge of seed/held.json (round 116)
+    conditional_live.py §4.2 §7.5 scenarios/state.md §16 live in four pairings: zk2py's owner and readers, the
+                                reference's owner read by zk2py's conditional read, zk2py's owner read by
+                                zenctl get --body, and the owner built before core 0.110 (--old) (round 116)
     snapshot.py       §7.5      the snapshot, form 7: a page read, written and written back, cut by the paging
                                 rule twice (by writing, by arithmetic), held complete (core 0.97, round 103)
     seed_snapshot.py  §4.2      a seed over snapshots, core 0.100's §4.2: the fixture's Seed, and the live

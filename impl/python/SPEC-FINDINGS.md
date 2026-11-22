@@ -28917,3 +28917,319 @@ reading names all four `host` collections" is read as each watch's own
   not on this branch; F-565 to F-568.
 
   F-365 stays open as #965's.
+
+## At core 0.110
+
+Round 116 read the branch `chunk-986-j1` at ca356cc6 (#986's first
+chunk), under round 115's head: core 0.110, a **conditional read**. It
+read cold:
+- the changelog's entry, then core §4.2 and §7.5 whole;
+- `scenarios/state.md` §16 and its common setup;
+- Appendix B's "A conditional read's bytes", and Appendix C's and E's
+  rows for the two new files.
+
+zk2py diffed `spec/`, `examples/zk2/` and `zenkey/tests/contracts/`
+between 547d202a's tree and this one. `spec/CLAUDE.md` moved too, and the
+barrier keeps it unread. `RULES.md` lists 295 rules where it listed 286:
+the owner 90, the consumer 35, the observer 87, the static rules 79.
+
+**Each half was written from the text, committed, and only then run on
+its list.** No case was missed on a first run.
+
+| Half | Written from | Commit | First run |
+|---|---|---|---|
+| The held stamp: write, a GET's payload, a reply | §7.5 | 20fb2f14 | `writes` 9/9, `gets` 34/34, `replies` 22/22 |
+| The owner's answer | §4.2 | 91a4974a | `answers` 23/23 |
+| The reader: what it sends, its merge | §4.2 | 77e26bd1 | `asks` 12/12, `cases` 29/29 |
+| A held stamp on a put's key | round 115's code, no line moved | d48277ea | `carries.json`'s reads 46/46 |
+
+No sentence misled. The three answers below were set down in each
+commit's message before its list was opened.
+
+### The three questions, answered from the text first
+
+**1. §7.5: a lone CH byte with a non-zero tag, a payload of no byte, and
+another Encoding.**
+- **On a GET, `tag`.** Step 3 refuses "for the first of these that
+  applies, in this order", and "a tag other than 0 (`tag`)" comes before
+  "fewer bytes than CH, the run and the seq need (`short`)". A lone CH of
+  another form is `sample_kind`, which comes first.
+- **On a reply, `short`: not the same.** "A GET's reply is parsed as a
+  put's payload is (above)." That parse "reports the tag of every form
+  but a delete, and checks none", and refuses a lone CH `short`. The
+  reply's `tag` is asked only "Where that parse accepts a snapshot's
+  envelope with no byte after its seq".
+- **No byte is no payload.** "No payload, or a payload of no byte,
+  carries no held stamp. Nothing is parsed, and nothing is refused." It
+  is step 1, so it holds under any Encoding.
+- **Another Encoding is refused, `encoding`,** for a payload of a byte or
+  more: "A GET whose payload is refused, at step 2 or step 3, carries no
+  held stamp."
+- **The cases agree:** `ef` and `e5` on a GET's and a reply's lists, and
+  the empty payload under `application/json`.
+
+**2. §4.2: which stamp the owner compares.** The member's stored stamp,
+never the run it writes under now or its newest seq.
+
+> "An owner SHOULD answer a conditional read with the held stamp alone
+> when the member's last mutation carries exactly that stamp: the same
+> run, in width and value, and the same seq." "Its stamp is the one a
+> snapshot would list for the member: its live entry's, or its
+> tombstone's."
+
+- §7.5 says which that is: "An entry states its own [run] when its
+  member's last mutation was under another run".
+- **What was read before the commit.** `held.json`'s description, opened
+  for part 1's three lists, says `writes_under` is the run "which the
+  answer does not read". zk2py had answered by then, and had not
+  committed.
+
+**3. §4.2: "by then".**
+- **The text does not decide.** It names no instant. "heard while its
+  GET was out" and "each as its page arrives" point to the answer's
+  arrival. "its GET gave it no value" is a thing only the GET's end can
+  say.
+- **zk2py decides at the arrival.**
+- **One case decides the mark, none the rest.** Case 23 (two instances,
+  unchanged first) needs the mutation marked heard again at the arrival:
+  marked at the GET's end, its value is dropped. For `read_again` and for
+  "a later value stands", both readings give the fixture's 29 expects.
+  `held.json`'s description says "when the answer arrives" of the mark
+  alone (F-569).
+
+### §16, live, in every pairing
+
+`conditional_live`, new. zenoh-python routers, zenoh 1.10.1; the black
+boxes of ca356cc6, and of 547d202a for the older owner. Every owner ran
+under a run file, so 16-bit runs.
+
+| Pairing | Steps 1 to 8 | The reader's merge | Steps 9 and 10 |
+|---|---|---|---|
+| zk2py's owner, zk2py's reader | 15/15 | 7/7 | 14/14: a consumer, then a tool's late joiner |
+| the reference's owner, zk2py's conditional read | 13/13 | 7/7 | not run: steps 9 and 10 play the owner |
+| zk2py's owner, `zenctl get --body @FILE` | 15/15, one bullet of step 5 not sent | not run: the tool keeps nothing | 1/1: the played held stamps, as the tool shows them |
+| the owner of 547d202a, zk2py's conditional read | 13/13, each held stamp's Expected read as whole | 7/7 | 1/1: its `zenctl` on a held stamp |
+
+- **The reference's owner, read by zk2py** (`rust-py`, 20/20). It
+  answers (R, s1) with the 6 bytes sent, `e0 0000 000001`. After a put it
+  answers (R, s1) whole and (R, s2) held. Another run, the other width,
+  s2 + 1 and the six payloads of step 5 each draw the snapshot. `plans/*`,
+  `plans/**` and `status` draw no held stamp. Within its 60 s window the
+  tombstone's stamp is answered held, and after it a snapshot of no
+  entry. The second and third instances answer under R2 and R3 as
+  Expected 8 says.
+- **zk2py's owner, read by the reference** (`py-rust`, 16/16). `zenctl
+  get <key> --body @FILE` sends its body under `zenoh/bytes`, and
+  zk2py's owner answers the held stamp to it. Step 5's five payloads it
+  can send draw the snapshot, and zk2py's owner names each refusal.
+  The bullet under `application/json` is not sent: the tool gives its
+  body no Encoding.
+- **The owner that predates this chunk** (`old-py`, 21/21). The owner of
+  547d202a answers every conditional read whole: the entry at the stamp
+  sent, live or a tombstone. zk2py accepts each snapshot: the mutation it
+  held is kept once (`same`), a changed value is merged, and a snapshot
+  of no entry after the window drops what it held.
+- **The reader's merge of each answer, on a bus,** against each of the
+  three owners: unchanged (or whole and kept once), a snapshot after a
+  put, the snapshot entry's own stamp sent next, a tombstone merged, the
+  deletion's stamp answered, a snapshot of no entry dropping it, and no
+  held stamp sent where nothing is held.
+- **Steps 9 and 10** on a played owner: after the three reads the
+  consumer holds v1 at (R, 7), v1 once, then v2 at (R, 9); (R, 8) in
+  answer to (R, 9) and (R, 9) in answer to a GET with no payload are each
+  counted `held`. Beyond §16: a held stamp on the subscription is `held`;
+  two instances answering one GET, in both orders, spare the value or
+  drop it and read again.
+
+**The reference, observed** (no finding but where one is named):
+- `zenctl get` shows a held stamp as "zk2c held stamp (run 0000, seq 1),
+  unchanged only to the GET that carried it, and no answer here: held",
+  verdict `undecodable`. It says so of the held stamp that answers its
+  own `--body` too (F-572).
+- The `zenctl` of 547d202a shows the same bytes as "a zk2c snapshot's
+  body refused … the body ends before a byte a field needs": §7.5's
+  "Read as a page, the same bytes are a body cut `short`".
+- `zenctl get --help`, `owner --help` and `consume --help` are the same
+  text in both sets of black boxes.
+
+### Appendix B, "A conditional read's bytes", recomputed
+
+`readings` holds the count. From §7.5's layouts and the figures the text
+itself states:
+
+| Figure | From | Comes out |
+|---|---|---|
+| a held stamp, 6 B | CH, a 16-bit run, the seq | yes |
+| the request, 21 B | the text's 12 B, 3 B over the payload, 6 B | yes, given 12 |
+| a payload "of up to 126 bytes" | a one-byte length over the Encoding's byte and the payload, 127 | yes |
+| the key, 61 B | a 59-byte key, a scope and a length | yes |
+| a 44-byte record's page, 66 B | 16 B with no entry, 6 over the id and the record | yes |
+| the changed reply, 154 B | 94 less 6, plus 66 | yes, given 94 |
+| the request's SDU, 40 B | 21, the lean stack's 16, the frame's 3 | yes |
+| the unchanged reply and its final, 119 B | 94, 6 and one 19 | yes, as one SDU; as two, 138 |
+| the changed ones, 179 B | 154, 6 and one 19 | yes |
+| the entry's re-read, 159 B | 40 and 119 | yes |
+| 12 B, 94 B, 20 B, the final's 6 B, the entry's 222 B | the model, a file under `docs/` | no (F-571) |
+
+Of the 94 bytes the text names 61, 20 and the payload's 6: 7 are
+unnamed.
+
+### The changelog's claims, checked
+
+- **The counts:** 9, 34, 22 and 23, 88; 12 and 29, 41; `carries.json` 46
+  reads, 9 new, and one earlier note reworded (read 25). Each as stated.
+- **"Four rules, all static"** and §4.2's five: `RULES.md` holds the
+  nine.
+- **"A page's body is 10 bytes or more"**, "6 bytes, or 8": computed.
+- **"An owner built before this version answers the reference's
+  conditional read whole, and the reference accepts it":** the first half
+  measured, by zk2py's reader. The second is the reference's reader,
+  which is no black box.
+- **"the reference built from main answered … with the member's 43-byte
+  snapshot":** the owner of 547d202a answered zk2py's with a 24-byte one,
+  its record `ok`.
+- **"the 41 cases of `seed/snapshot.json` that give `collections`":** 42
+  cases state the member, and one of them empty.
+- **Not checked:** "computed twice, by two readings of this text that
+  shared no code"; "steps 9 and 10 against a played one", the
+  reference's test.
+
+**Can an owner's answer and a reader's merge be written from §4.2 and
+§7.5 alone?** Yes. Both were, and 109 cases passed unseen.
+
+### The mend
+
+`py-carry-r114.md`, the items round 115 left.
+- **`zenctl gen` at 513 B and 512 B, measured again** on ca356cc6, with
+  `modem.v3` alone: no warning at a service chunk of 294 or 295
+  characters; at 296, "with a rest of 513 B, over the 512 B that lets it
+  exceed 1 KB (core §3.3)"; at 297, 514 B. The text's "within 512 B" is
+  at most 512, and the tool warns from 513. They agree.
+- **zenohd:** not run. `bin/current` holds `archive`, `consume`, `owner`,
+  `zenctl` and `zk2`, and no zenohd.
+
+### The answers
+
+**F-548 and F-550 to F-568 stay open:** their answers are not on this
+branch.
+
+### F-569 · ambiguity · core §4.2, "What unchanged says": "by then" names no instant
+
+> "**A later value stands.** Where the reader holds another value by
+> then, heard while its GET was out, it keeps that value." "**Nothing
+> held.** Where the reader holds nothing for the member by then, its GET
+> gave it no value. It reads again, with no held stamp."
+> `seed/held.json`'s description: "Where the reader holds the mutation
+> the stamp names when the answer arrives, that mutation counts as heard
+> after the GET was asked … Where it holds another value by then … Where
+> it holds nothing for the member by then, `expect.read_again` is true".
+
+- **The ambiguity.** "Then" is the answer's arrival or the GET's end.
+  The sentence before it dates the owner, "When the owner answered", an
+  instant no reader has. "its GET gave it no value" reads as the GET's
+  end.
+- **Where the two differ.** A snapshot of no entry, then the answer,
+  then a put heard before the final. At the arrival nothing is held, and
+  the reader reads again. At the end a value is held, and it does not.
+- **The fixture decides the mark alone.** Case 23 needs the mutation
+  marked heard again at the arrival. No case has an arrival after an
+  answer that reads again, so `read_again` is the same under both.
+- **What zk2py does:** it decides at the arrival, and reads again.
+- **Fix:** "by then" as "when the answer arrives", twice, and one case
+  with a put after such an answer.
+- **Changes:** whether a reader makes one GET more.
+
+### F-570 · minor · core §4.2, "Across a constrained face": what a conditional read saves, against Appendix B's own figures
+
+> "a conditional read saves the value's bytes and no others. The held
+> stamp rides the GET as a payload, which costs its own bytes and 3
+> more. … So it pays for a value larger than what the request grows by."
+> Appendix B: "An unchanged reply on a 59-byte key is 94 bytes." "For a
+> 44-byte record it is a 66-byte page, in a 154-byte reply." §7.5: "A
+> snapshot's page with no entry is 16 bytes … A live entry adds 6 bytes
+> over its id and its record".
+
+- **The error.** 154 less 94 is 60, for a 44-byte record. The unchanged
+  answer saves the record and 16 bytes more: the page is 22 bytes over
+  its record, and the held stamp 6. The request grows by 9. So an
+  unchanged answer pays for a record of any size, an empty one too.
+- **What the sentence leaves out** is the changed reads, which cost 9
+  bytes and save none. What decides is how often the member is
+  unchanged, not the value's size.
+- **Fix:** "saves the member's page but for 6 bytes: its record and 16
+  more", and "it pays where the member is unchanged in more than 9 reads
+  of every 16 + n, n its record's bytes".
+- **Changes:** two sentences of guidance. No rule.
+
+### F-571 · gap · core Appendix B, "A conditional read's bytes": five figures are the model's, which is outside `spec/`
+
+> "Computed from zenoh 1.10.1's layouts through the wire baseline's
+> model ([`wire-baseline`](../docs/zk2/measurements/wire-baseline/README.md)).
+> None was measured". "a 12-byte request". "An unchanged reply on a
+> 59-byte key is 94 bytes. Of them 61 are its key … and 20 its replier's
+> id. A 6-byte final follows it." "The unchanged reply and its final are
+> 119 bytes". `CHANGELOG.md`: "where `desired.v1`'s is 222 today".
+
+- **The gap.** The request's 12 bytes, the reply's 94, the replier's 20,
+  the final's 6 and the entry's 222 come out of no layout the text
+  states. Of the 94, 7 bytes are unnamed. The 119 holds for a reply and
+  its final in one SDU, which the text does not say: in two it is 138.
+- **Recomputed:** the ten other figures come out (above).
+- **Fix:** the reply's bytes itemized as the request's extension is, the
+  12 too, "in one SDU", and `desired.v1`'s 222 in its parts or left out.
+- **Changes:** one fact's wording. It is guidance, and no rule.
+
+### F-572 · ambiguity · core §4.2 and `observer.md`: a tool whose GET carries a body its user gave it
+
+> §4.2: "A held stamp is the owner's answer only as a reply to the GET
+> that carried the same one, on that GET's one concrete key." "A reader
+> that holds nothing for the member sends none". `CHANGELOG.md`:
+> "**`observer.md`.** A tool's GET merges as §4.2 says, and §4.2 names a
+> tool beside a consumer."
+
+- **The ambiguity.** A raw tool sends the body it is given, and holds no
+  mutation. Given a member's held stamp, its GET carried that stamp on
+  one concrete key, and the owner answers it. By the first sentence that
+  reply is the owner's answer. By the second the tool had none to send.
+  `observer.md` does not name a held stamp, and `state.md` §16 has no
+  step for a tool.
+- **Measured.** `zenctl get <key> --body @FILE` of ca356cc6, its body
+  the member's held stamp, is answered the held stamp by both owners. It
+  shows "unchanged only to the GET that carried it, and no answer here:
+  held", as it does for (R, 8) in answer to (R, 9) and for one that
+  answers no payload.
+- **What zk2py does:** its readers send only a stamp they hold, and read
+  the same one back as unchanged. It has no raw tool that sends a body.
+- **Fix:** one sentence in `observer.md`: what a tool shows of a held
+  stamp that answers a body it did not write.
+- **Changes:** what an operator reads of `zenctl get --body`.
+
+### Not run
+
+- **§16's steps 9 and 10 with the reference's reader:** `consume` makes
+  one GET with no payload, and no black box makes a conditional read.
+  `zenctl get` was played the three held stamps;
+- **step 5's payload under `application/json`, by `zenctl get`:** its
+  body has no Encoding to set;
+- **a 32-bit run, live:** every owner ran under a run file. The
+  fixtures hold 32-bit stamps;
+- **a conditional read across a constrained face,** and Appendix B's
+  bytes on a wire: the text measured none either;
+- **`desired.v2`,** which is on no branch zk2py read;
+- **zenohd,** and the live runners not named here. `snapshot_live`
+  (40/40), `state_pairings` (118/118) and `stray_live` (7/7) ran whole on
+  this tree.
+
+### Counts at core 0.110
+
+572 entries.
+- **New: F-569 to F-572:**
+  - two ambiguities: F-569 and F-572;
+  - one gap: F-571;
+  - one minor error: F-570.
+  None is a blocker.
+- **Answered this round:** none.
+- **Open:** F-437 to F-441; F-548 and F-550 to F-568, whose answers are
+  not on this branch; F-569 to F-572.
+
+  F-365 stays open as #965's.
