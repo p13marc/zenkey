@@ -872,8 +872,12 @@ class OwnerHeartbeatRecord:
 
 #: How long a descriptor read that named no catalog stands for its run
 #: before a subscriber asks again (§2.5: "The subscriber asks again later,
-#: and not at every put"). The figure is zk2py's: the text states none, and
-#: the reference's is 30 s.
+#: and not at every put"). The figure is zk2py's, and kept apart from the
+#: reference's 30 s on purpose (review-bot on #1150): the text states none,
+#: and freshness.v2 0.11's entry says "Those are its figures". A second
+#: implementation at another figure shows that no rule rests on it: round
+#: 117's pairings pass with zk2py at 10 s beside the reference, whose figure
+#: the text gives as 30 s and zk2py did not measure.
 ASK_AGAIN_S = 10.0
 
 
@@ -901,23 +905,44 @@ class Naming:
       again later, and not at every put."
     - :meth:`answer` takes a read's descriptors, each a parsed document. A
       descriptor of the run that states no ``catalog`` is an answer: its
-      owner names none (core §8.6), and the run is not asked again."""
+      owner names none (core §8.6), and the run is not asked again.
+    - :meth:`begin` marks a read that asks for no run, the one a subscriber
+      makes at its start. It reads every instance's descriptor, so while it
+      is under way it covers every run: :meth:`due` asks for none, and a
+      put heard meanwhile starts no second GET (review-bot on #1150).
+      :meth:`answer` with no run ends it. A run it did not name is asked
+      for at that run's next put."""
 
     word: str | None = None
     ask_again_ns: int = int(ASK_AGAIN_S * 1e9)
     known: dict[str, str | None] = field(default_factory=dict)
     failed: dict[str, int] = field(default_factory=dict)
     asking: set[str] = field(default_factory=set)
+    #: reads asked at a put, for its run
     reads: int = 0
+    #: run-less reads under way (:meth:`begin`), and how many were begun
+    starting: int = 0
+    started: int = 0
 
     def of(self, run: str | None) -> str | None:
         if self.word is not None:
             return self.word
         return None if run is None else self.known.get(run)
 
+    def begin(self) -> bool:
+        """A read for no run begins. False, and nothing begun, where the
+        deployment's word is given: no descriptor is read then."""
+        if self.word is not None:
+            return False
+        self.starting += 1
+        self.started += 1
+        return True
+
     def due(self, run: str | None, now_ns: int) -> bool:
         if self.word is not None or run is None or run in self.known or run in self.asking:
             return False
+        if self.starting:
+            return False  # the read under way reads this run's descriptor too
         f = self.failed.get(run)
         if f is not None and now_ns - f < self.ask_again_ns:
             return False
@@ -931,7 +956,9 @@ class Naming:
             if isinstance(r, str):
                 c = d.get("catalog")
                 self.known[r] = c if isinstance(c, str) else None
-        if run is not None:
+        if run is None:
+            self.starting = max(0, self.starting - 1)
+        else:
             self.asking.discard(run)
             if run in self.known:
                 self.failed.pop(run, None)
@@ -1022,9 +1049,12 @@ class Provider:
                 pending.append(iface)
         system, service = address.split("/")
         self.keys = {cls: owner_heartbeat_key(system, service, cls) for cls in self.reader.followed_classes()}
+        # The start read is marked under way before a class key is subscribed:
+        # an owner heartbeat heard before it returns asks for nothing.
+        start = read_at_start and self.naming.begin()
         self.class_subs = [session.declare_subscriber(key, zenoh.handlers.Callback(
             lambda sample, cls=cls: self._owner_beat(cls, sample))) for cls, key in self.keys.items()]
-        if named is None and read_at_start:
+        if start:
             self._name(None)
         if wait_s:
             time.sleep(wait_s)
@@ -1034,7 +1064,8 @@ class Provider:
 
     def _name(self, run: str | None) -> None:
         """One read of the owner's descriptors, for ``run`` (None at the
-        start, which asks for no run and so fails for none)."""
+        start, which asks for no run and so fails for none; the caller has
+        marked it under way, :meth:`Naming.begin`)."""
         try:
             got = descriptors_of(self.session, self.address, self._get_timeout)
         except Exception:  # noqa: BLE001 - a read that fails names no catalog

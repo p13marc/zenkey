@@ -8402,7 +8402,11 @@ the texts and committed before a fixture file was opened.
 - **`freshness_v2.Naming`, new:** the catalog an owner names, by run.
   It is read from the descriptor that states the put's run, once per
   run, and again 10 s after a read that fails, never at every put. The
-  10 s is zk2py's figure.
+  10 s is zk2py's figure, kept apart from the 30 s the text gives as
+  the reference's: the text asks none, and the pairings pass. The read a
+  subscriber makes at its start covers every run while it is under way,
+  so an owner heartbeat heard before it returns starts no second GET
+  (review-bot on #1150).
 - **`freshness_v2.Provider`:** it sets the catalog for each put by the
   put's run. It read the first instance's descriptor before, and asked
   again after every owner heartbeat while it knew no id.
