@@ -52,6 +52,11 @@ mod desired_v2;
 #[path = "profiles/health_v2.rs"]
 mod health_v2;
 
+/// `alarms.v2`'s runners (`alarms/conformance/v2/`, #984's S1), beside
+/// them.
+#[path = "profiles/alarms_v2.rs"]
+mod alarms_v2;
+
 /// The fixtures this crate runs, as (profile directory, file name).
 const KNOWN: &[(&str, &str)] = &[
     ("hostid", "vectors.json"),
@@ -98,6 +103,16 @@ const KNOWN: &[(&str, &str)] = &[
     ("alarms", "documents.json"),
     ("alarms", "transitions.json"),
     ("alarms", "conclusions.json"),
+    ("alarms", "v2/schema.json"),
+    ("alarms", "v2/records.json"),
+    ("alarms", "v2/tables.json"),
+    ("alarms", "v2/keys.json"),
+    ("alarms", "v2/slots.json"),
+    ("alarms", "v2/words.json"),
+    ("alarms", "v2/transitions.json"),
+    ("alarms", "v2/confirmations.json"),
+    ("alarms", "v2/acks.json"),
+    ("alarms", "v2/conclusions.json"),
     ("telemetry", "schema.json"),
     ("telemetry", "declarations.json"),
     ("telemetry", "samples.json"),

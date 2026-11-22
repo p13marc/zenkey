@@ -600,7 +600,9 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// 0.112, #986 J2), and `health.v2` publishes `reasons`, `details` and
 /// `codes` (`health::v2::VOCABULARY`, core 0.113's Appendix D, #986 Q1);
 /// `health.v1` publishes none, so a contract that lists it draws no W105
-/// for a `health.<key>`.
+/// for a `health.<key>`. `alarms.v2` publishes `rules`
+/// (`alarms::v2::VOCABULARY`, core 0.115's Appendix D, #984 S1), beside
+/// `alarms.v1`'s empty table.
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),
     (crate::timing::NAME, crate::timing::VOCABULARY),
@@ -634,6 +636,9 @@ fn vocabulary(name: &str, major: u32) -> Option<&'static [&'static str]> {
     }
     if name == crate::health::NAME && major == 2 {
         return Some(crate::health::v2::VOCABULARY);
+    }
+    if name == crate::alarms::NAME && major == 2 {
+        return Some(crate::alarms::v2::VOCABULARY);
     }
     VOCABULARIES
         .iter()
@@ -1555,6 +1560,26 @@ mod tests {
         };
         assert_eq!(codes(&src(1)), ["W105"]);
         assert!(codes(&src(2)).is_empty(), "{:?}", codes(&src(2)));
+    }
+
+    /// `alarms.v2` publishes `rules`, and `alarms.v1`'s table stays empty
+    /// (core Appendix D, #984 S1).
+    #[test]
+    fn alarms_v2_reads_its_own_vocabulary() {
+        let src = |major: u32, key: &str| {
+            format!(
+                "[interface]\nname = \"t\"\nmajor = 1\nminor = 0\nuses = [\"alarms.v{major}\"]\n\
+                 [resources.\"a\"]\nkind = \"stream\"\ntype = {{ raw = \"image/jpeg\" }}\n\
+                 annotations = {{ \"alarms.{key}\" = [] }}\n"
+            )
+        };
+        assert_eq!(codes(&src(1, "rules")), ["W105"]);
+        assert!(
+            codes(&src(2, "rules")).is_empty(),
+            "{:?}",
+            codes(&src(2, "rules"))
+        );
+        assert_eq!(codes(&src(2, "severity_default")), ["W105"]);
     }
 
     #[test]

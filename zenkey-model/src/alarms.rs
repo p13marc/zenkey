@@ -28,6 +28,25 @@
 //! key by the owner's stamp (core §4.2), measures what its observations
 //! hold, and hands them over as values. The owner's puts, its confirmations
 //! and its adoption at a restart (§2.5, §2.7, §2.9) are the runtime's.
+//!
+//! **Two majors** (#984's S1). [`v2`] is `alarms.v2`'s
+//! (`spec/profiles/alarms/v2.md`): an alarm in a slot, a transition in one
+//! packed record, its words by a table. It restates this text by reference,
+//! so the identity and what a reader concludes are one set for both:
+//!
+//! ```text
+//! Major::of(interfaces)   ─▶ the major a descriptor's alarms are read by: v2 where it lists both
+//! derive · alert_key      ─▶ the alert key, the identity under either major
+//! transition (§2.6)       ─▶ one table of puts against the record held, either major's
+//! any_firing              ─▶ over owners and alarms of either major
+//! ```
+//!
+//! [`firing`], [`stale_firing`] and [`owner_set`] are this major's, and
+//! [`v2::firing`], [`v2::stale_firing`] and [`v2::owner_set`] that one's:
+//! the steps before the latest sample and after it are shared, and the
+//! answers, the reasons and the counts are one set ([`Reason`]).
+
+pub mod v2;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -85,6 +104,56 @@ pub const MAX_TIME_MS: u64 = (1 << 53) - 1;
 #[must_use]
 pub fn horizon() -> Horizon {
     Horizon::Within(TTL)
+}
+
+/// Which major of the profile a service's alarms are read by (`alarms.v2`
+/// §2.1, §2.14's step 2, §2.17). The two are two interfaces: an instance
+/// implements one, and a reader reads either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Major {
+    /// `alarms.v1`: a JSON document on the alert key.
+    V1,
+    /// `alarms.v2`: a packed record on a slot ([`v2`]).
+    V2,
+}
+
+impl Major {
+    /// The major's interface id, which is its standard contract's.
+    #[must_use]
+    pub const fn iface(self) -> &'static str {
+        match self {
+            Major::V1 => IFACE,
+            Major::V2 => v2::IFACE,
+        }
+    }
+
+    /// The major an interface id names: the deployment's word across a
+    /// constrained face, where no descriptor crosses (`alarms.v2` §2.11).
+    /// `None` for any other interface, a later major among them.
+    #[must_use]
+    pub fn named(iface: &str) -> Option<Major> {
+        [Major::V2, Major::V1]
+            .into_iter()
+            .find(|m| m.iface() == iface)
+    }
+
+    /// The major a descriptor is read by, from the interface ids its
+    /// `interfaces` holds: `alarms.v2` where it lists it, `alarms.v1`
+    /// where it lists that and not `alarms.v2`, and `None` where it lists
+    /// neither, which is not asked (`not_listed`). One that lists both
+    /// breaks `alarms.v2` §2.1, and is read as `alarms.v2`.
+    #[must_use]
+    pub fn of<'a>(interfaces: impl IntoIterator<Item = &'a str>) -> Option<Major> {
+        let mut found = None;
+        for iface in interfaces {
+            match Major::named(iface) {
+                Some(Major::V2) => return Some(Major::V2),
+                Some(Major::V1) => found = Some(Major::V1),
+                None => {}
+            }
+        }
+        found
+    }
 }
 
 // --- §2.2, §2.3: the key ---------------------------------------------------------
@@ -157,7 +226,23 @@ fn frame(rule: &str, labels: &mut [(&str, &str)]) -> String {
 }
 
 fn render(input: &str) -> String {
-    format!("{:016x}", fnv1a_64(input.as_bytes()))
+    key_hex(fnv1a_64(input.as_bytes()))
+}
+
+/// An alert key's 64 bits as its 16 lowercase hexadecimal digits (§2.2):
+/// how `alarms.v2` shows the integer a record by words carries.
+#[must_use]
+pub fn key_hex(key: u64) -> String {
+    format!("{key:016x}")
+}
+
+/// An alert key's 16 lowercase hexadecimal digits as its 64 bits, `None`
+/// for any other text: the integer an `alarms.v2` record carries in `key`.
+#[must_use]
+pub fn key_integer(key: &str) -> Option<u64> {
+    crate::chunk::is_lower_hex(key, 16)
+        .then(|| u64::from_str_radix(key, 16).ok())
+        .flatten()
 }
 
 /// The strict recipe (§2.2): host-scoped labels removed, then the input
@@ -239,6 +324,14 @@ pub struct Derived {
     /// Whether the strict recipe accepts the document as it is: `false`
     /// when the key went through the sanitizing step.
     pub framed: bool,
+}
+
+impl Derived {
+    /// The alert key as its 64 bits ([`key_integer`]).
+    #[must_use]
+    pub fn integer(&self) -> u64 {
+        fnv1a_64(self.input.as_bytes())
+    }
 }
 
 /// The reader's recipe (§2.3): [`sanitize`], then frame and hash. It never
@@ -660,29 +753,65 @@ impl fmt::Display for Transition {
     }
 }
 
+/// What §2.6's table reads of one put, under either major: its state, its
+/// severity and the instant of its latest transition (`timestamp`, or
+/// `alarms.v2`'s `at`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PutFacts<S, T> {
+    pub state: State,
+    pub severity: S,
+    pub at: T,
+}
+
+/// §2.6's table for a put against the same alarm held (`None`: nothing
+/// held), `equal` saying whether the two are equal in every member:
+/// escalated on another severity, raised or resolved again on another
+/// instant, else confirmed or refreshed. One table for both majors
+/// (`alarms.v2` §2.6).
+pub(crate) fn put_reads<S: PartialEq, T: PartialEq>(
+    held: Option<PutFacts<S, T>>,
+    put: PutFacts<S, T>,
+    equal: bool,
+) -> Transition {
+    use Transition as T;
+    let Some(h) = held else {
+        return match put.state {
+            State::Firing => T::Raised,
+            State::Resolved => T::Resolved,
+        };
+    };
+    match (h.state, put.state) {
+        (State::Firing, State::Firing) if put.severity != h.severity => T::Escalated,
+        (State::Resolved, State::Firing) => T::Raised,
+        (State::Firing, State::Resolved) => T::Resolved,
+        (State::Firing, State::Firing) if put.at != h.at => T::Raised,
+        (State::Resolved, State::Resolved) if put.at != h.at => T::Resolved,
+        _ if equal => T::Confirmed,
+        _ => T::Refreshed,
+    }
+}
+
+/// §2.6's column for a delete, or a tombstone, over the state held:
+/// resolved over a firing alarm, retired over a resolved one or nothing.
+pub(crate) fn delete_reads(held: Option<State>) -> Transition {
+    match held {
+        Some(State::Firing) => Transition::Resolved,
+        Some(State::Resolved) | None => Transition::Retired,
+    }
+}
+
 /// The transition `sample` makes from the document `held` (§2.6).
 #[must_use]
 pub fn transition(held: Option<&Alarm>, sample: Sample<'_>) -> Transition {
-    use Transition as T;
-    let same = |h: &Alarm, n: &Alarm| {
-        if n == h { T::Confirmed } else { T::Refreshed }
+    let facts = |a: &Alarm| PutFacts {
+        state: a.state,
+        severity: a.severity,
+        at: a.timestamp,
     };
-    match (held, sample) {
-        (_, Sample::Unreadable) => T::Unreadable,
-        (Some(h), Sample::Delete) if h.state == State::Firing => T::Resolved,
-        (_, Sample::Delete) => T::Retired,
-        (None, Sample::Put(n)) => match n.state {
-            State::Firing => T::Raised,
-            State::Resolved => T::Resolved,
-        },
-        (Some(h), Sample::Put(n)) => match (h.state, n.state) {
-            (State::Firing, State::Firing) if n.severity != h.severity => T::Escalated,
-            (State::Resolved, State::Firing) => T::Raised,
-            (State::Firing, State::Resolved) => T::Resolved,
-            (State::Firing, State::Firing) if n.timestamp != h.timestamp => T::Raised,
-            (State::Resolved, State::Resolved) if n.timestamp != h.timestamp => T::Resolved,
-            _ => same(h, n),
-        },
+    match sample {
+        Sample::Unreadable => Transition::Unreadable,
+        Sample::Delete => delete_reads(held.map(|h| h.state)),
+        Sample::Put(n) => put_reads(held.map(facts), facts(n), held == Some(n)),
     }
 }
 
@@ -978,6 +1107,28 @@ pub enum Reason {
     Mismatch,
     /// Re-derives, not asked: a delete carries no document.
     NoDocument,
+    /// `alarms.v2`. Is it firing, no: another identity's record is on its
+    /// slot under its run, so it resolved and the reader lost that put
+    /// (§2.6, §2.14).
+    Rebound,
+    /// `alarms.v2`. An owner's alarms established: one complete snapshot,
+    /// with an entry or with none (§2.15).
+    Snapshot,
+    /// `alarms.v2`. An owner's alarms unobservable: no page of the
+    /// snapshot, or a page missing.
+    SnapshotIncomplete,
+    /// `alarms.v2`. An owner's alarms unobservable: the snapshot's run is
+    /// one no present descriptor states, an earlier instance's.
+    SnapshotRun,
+    /// `alarms.v2`. Do the slot's words derive its record's key, not
+    /// asked: the record names a table's rule (§2.4).
+    Table,
+    /// `alarms.v2`. The same, not asked: no words were read.
+    NoWords,
+    /// `alarms.v2`. The same, not asked: no record is held on the slot.
+    NoRecord,
+    /// `alarms.v2`. The same, unobservable: the words do not read.
+    Unreadable,
     /// Unobservable: the key's freshness, `freshness.v1`'s reason.
     Freshness(freshness::Reason),
 }
@@ -1025,6 +1176,14 @@ impl Reason {
             Self::Sanitized => "sanitized",
             Self::Mismatch => "mismatch",
             Self::NoDocument => "no_document",
+            Self::Rebound => "rebound",
+            Self::Snapshot => "snapshot",
+            Self::SnapshotIncomplete => "snapshot_incomplete",
+            Self::SnapshotRun => "snapshot_run",
+            Self::Table => "table",
+            Self::NoWords => "no_words",
+            Self::NoRecord => "no_record",
+            Self::Unreadable => "unreadable",
             Self::Freshness(r) => r.as_str(),
         }
     }
@@ -1086,6 +1245,18 @@ impl Reason {
             Self::Sanitized => "the key is the document's, through the sanitizing step",
             Self::Mismatch => "the key is not the one its document derives",
             Self::NoDocument => "a delete carries no document",
+            Self::Rebound => "another alarm's record is on its slot under its run, so it resolved",
+            Self::Snapshot => "its owner answered one complete snapshot of its alarms",
+            Self::SnapshotIncomplete => {
+                "the read drew no page of its alarms' snapshot, or a page is missing"
+            }
+            Self::SnapshotRun => {
+                "the snapshot's run is one no present descriptor states, an earlier instance's"
+            }
+            Self::Table => "the slot's record names a table's rule, which its table names",
+            Self::NoWords => "no words were read on the slot",
+            Self::NoRecord => "no record is held on the slot",
+            Self::Unreadable => "the slot's words do not read as alarms.v2.Words",
             Self::Freshness(r) => r.says(),
         }
     }
@@ -1128,56 +1299,105 @@ fn premises(p: Presence) -> Option<Judged> {
     }
 }
 
-/// Whether the GET that established the owner's alarms left the key out
-/// ([`Reading::left_out`]): §2.14 steps 4 and 5.
-fn left_out(r: &Reading<'_>) -> bool {
-    r.held_whole && r.left_out
+/// The latest sample of one alarm as §2.14's step 5 reads it, under either
+/// major.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Step5 {
+    /// A firing document, or a firing record, that reads.
+    Firing,
+    /// A put that does not read (§2.4).
+    Undecodable,
+    /// Not firing, and why: a resolved put, a delete, or `alarms.v2`'s
+    /// `rebound`.
+    Not(Reason),
 }
 
-/// A subscription lost deliveries, and since then no GET answered the key
-/// nor did the GET that established its owner's alarms leave it out
-/// (§2.14 step 4, text 0.5, F-136).
-fn lost(r: &Reading<'_>) -> bool {
-    let lossy = r.observations.iter().any(|o| {
-        matches!(
-            o,
-            Observation::Subscribed {
-                complete: false,
-                ..
-            }
-        )
-    });
-    let answered = r
-        .observations
-        .iter()
-        .any(|o| matches!(o, Observation::Got { reply: Some(_), .. }));
-    lossy && !answered && !left_out(r)
+/// One reading of one alarm with its freshness judged: what §2.14's steps
+/// take under either major (`alarms.v2` §2.14).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Asked {
+    pub presence: Presence,
+    /// `freshness`'s verdict over the alarm's observations, at [`TTL`].
+    pub freshness: freshness::Judged,
+    /// A subscription lost deliveries, and no GET has answered the alarm
+    /// since.
+    pub lost: bool,
+    pub latest: Option<Step5>,
+    /// [`Reading::previous_instance`].
+    pub previous_instance: bool,
+    /// [`Reading::held_whole`].
+    pub held_whole: bool,
+    /// [`Reading::left_out`].
+    pub left_out: bool,
 }
 
-/// What the reading of a key established before its freshness was asked,
-/// or its freshness. Shared by [`firing`] and [`stale_firing`].
+impl Asked {
+    /// Whether the read that established the owner's alarms left the alarm
+    /// out ([`Reading::left_out`]): §2.14 steps 4 and 5.
+    fn left_out(&self) -> bool {
+        self.held_whole && self.left_out
+    }
+
+    /// One reading of one `alarms.v1` key.
+    fn of(r: &Reading<'_>) -> Asked {
+        // A subscription lost deliveries, and since then no GET answered
+        // the key (§2.14 step 4, text 0.5, F-136).
+        let lossy = r.observations.iter().any(|o| {
+            matches!(
+                o,
+                Observation::Subscribed {
+                    complete: false,
+                    ..
+                }
+            )
+        });
+        let answered = r
+            .observations
+            .iter()
+            .any(|o| matches!(o, Observation::Got { reply: Some(_), .. }));
+        Asked {
+            presence: r.presence,
+            freshness: freshness::judge_all(&horizon(), r.observations),
+            lost: lossy && !answered,
+            latest: r.latest.map(|l| match l {
+                Latest::Firing => Step5::Firing,
+                Latest::Undecodable => Step5::Undecodable,
+                Latest::Resolved => Step5::Not(Reason::Resolved),
+                Latest::Deleted => Step5::Not(Reason::Deleted),
+            }),
+            previous_instance: r.previous_instance,
+            held_whole: r.held_whole,
+            left_out: r.left_out,
+        }
+    }
+}
+
+/// What the reading of an alarm established before its freshness was asked,
+/// or its freshness. Shared by [`firing_asked`] and [`stale_firing_asked`].
 enum Read {
     Done(Judged),
-    /// The latest is a readable firing document, or a put that does not
-    /// read, with the key's freshness.
+    /// The latest is a readable firing put, or a put that does not read,
+    /// with the alarm's freshness.
     Judge {
         firing: bool,
         freshness: freshness::Judged,
     },
 }
 
-fn read(r: &Reading<'_>, not_firing: impl Fn(Reason) -> Judged) -> Read {
+fn read(r: &Asked, not_firing: impl Fn(Reason) -> Judged) -> Read {
     use Answer::{NotAsked, Unobservable};
-    let f = freshness::judge_all(&horizon(), r.observations);
+    let f = r.freshness;
     if f.verdict == freshness::Verdict::NotAsked && f.reason == freshness::Reason::LastKnown {
         return Read::Done(Judged::new(NotAsked, Reason::LastKnown));
     }
-    if lost(r) {
+    // A loss, unless the read that established the owner's alarms left the
+    // alarm out, which heals it (step 4, text 0.5, F-136).
+    if r.lost && !r.left_out() {
         return Read::Done(Judged::new(Unobservable, Reason::Incomplete));
     }
-    // The sample a key left out by the establishing GET holds is none
+    // The sample an alarm left out by the establishing read holds is none
     // (step 5, text 0.3).
-    let latest = if left_out(r) { None } else { r.latest };
+    let latest = if r.left_out() { None } else { r.latest };
     match latest {
         None if r.held_whole => Read::Done(not_firing(Reason::NotHeld)),
         None => Read::Done(Judged::new(
@@ -1188,23 +1408,20 @@ fn read(r: &Reading<'_>, not_firing: impl Fn(Reason) -> Judged) -> Read {
                 Reason::NotRead
             },
         )),
-        Some(Latest::Deleted) => Read::Done(not_firing(Reason::Deleted)),
-        Some(Latest::Resolved) => Read::Done(not_firing(Reason::Resolved)),
-        Some(Latest::Firing | Latest::Undecodable) if r.previous_instance => {
+        Some(Step5::Not(reason)) => Read::Done(not_firing(reason)),
+        Some(Step5::Firing | Step5::Undecodable) if r.previous_instance => {
             Read::Done(Judged::new(NotAsked, Reason::PreviousInstance))
         }
-        Some(l @ (Latest::Firing | Latest::Undecodable)) => Read::Judge {
-            firing: l == Latest::Firing,
+        Some(l @ (Step5::Firing | Step5::Undecodable)) => Read::Judge {
+            firing: l == Step5::Firing,
             freshness: f,
         },
     }
 }
 
-/// §5's first question, "is this alarm firing?", by §2.14's order:
-/// presence, the descriptor, an archive alone, a loss, the latest sample,
-/// then its freshness at 900 s. Yes is the finding.
-#[must_use]
-pub fn firing(r: &Reading<'_>) -> Judged {
+/// §5's first question over a reading as judged, either major's
+/// ([`firing`], [`v2::firing`]).
+pub(crate) fn firing_asked(r: &Asked) -> Judged {
     use Answer::{No, Unobservable, Yes};
     if let Some(j) = premises(r.presence) {
         return j;
@@ -1231,11 +1448,9 @@ pub fn firing(r: &Reading<'_>) -> Judged {
     }
 }
 
-/// §5's last question, "is this firing alarm past its horizon while its
-/// owner is present?", over the reading [`firing`] takes. Yes is the
-/// finding, about the owner (§2.7).
-#[must_use]
-pub fn stale_firing(r: &Reading<'_>) -> Judged {
+/// §5's last question over a reading as judged, either major's
+/// ([`stale_firing`], [`v2::stale_firing`]).
+pub(crate) fn stale_firing_asked(r: &Asked) -> Judged {
     use Answer::{No, NotAsked, Unobservable, Yes};
     if let Some(j) = premises(r.presence) {
         return j;
@@ -1257,6 +1472,22 @@ pub fn stale_firing(r: &Reading<'_>) -> Judged {
             Judged::new(Unobservable, Reason::Freshness(f.reason))
         }
     }
+}
+
+/// §5's first question, "is this alarm firing?", by §2.14's order:
+/// presence, the descriptor, an archive alone, a loss, the latest sample,
+/// then its freshness at 900 s. Yes is the finding.
+#[must_use]
+pub fn firing(r: &Reading<'_>) -> Judged {
+    firing_asked(&Asked::of(r))
+}
+
+/// §5's last question, "is this firing alarm past its horizon while its
+/// owner is present?", over the reading [`firing`] takes. Yes is the
+/// finding, about the owner (§2.7).
+#[must_use]
+pub fn stale_firing(r: &Reading<'_>) -> Judged {
+    stale_firing_asked(&Asked::of(r))
 }
 
 /// How a reader's S4 GET of an owner's alarms ended (§2.15, core §2.7).
