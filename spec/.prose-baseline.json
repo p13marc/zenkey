@@ -74,6 +74,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/profiles/alarms/scenarios-v2.md": {
+    "mean": 10.87,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/alarms/scenarios.md": {
     "mean": 12.87,
     "over": 0,
@@ -85,7 +90,7 @@
     "tags": 0
   },
   "spec/profiles/alarms/v2.md": {
-    "mean": 13.74,
+    "mean": 13.75,
     "over": 0,
     "tags": 0
   },
