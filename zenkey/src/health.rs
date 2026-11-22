@@ -26,7 +26,7 @@
 //! | §2.3 checks on change, deleted when retired, at most 64 | [`Health::set_check`] puts only a change; [`Health::retire_check`] deletes; the 65th is refused, or past a lowered bound |
 //! | §2.3 faults as occurrences | [`Health::fault`]: one sample each, on the stream, with the contract's QoS |
 //! | §2.5 `clock_ahead` | on the guard's first hold, again every period of the heartbeat covering `health.v1` (28.5 s, [`crate::heartbeat::period`]) while it holds, none after it releases; the `detail` names the offset |
-//! | §2.5 the status not held | the guard holds no call: the status and the checks carry no Zenoh timestamp (core §4.3, "Ahead"; #978's F6), and the heartbeat goes on vouching for the status, its time unknown while the guard holds (`freshness.v2` §2.10) |
+//! | §2.5 the status not held | the guard holds no call: the status and the checks carry no Zenoh timestamp (core §4.3, "Ahead"; #978's F6), and the heartbeat goes on vouching for the status, its time the ahead time while the guard holds (`freshness.v2` §2.10, core §7.5) |
 //! | §2.6 `UNSPECIFIED` | the status only at start; a check only through [`Health::set_check_unknown`] |
 //! | §2.10 fault codes | an application's code in the form, or refused; the profile's codes are the runtime's |
 //!
@@ -525,9 +525,10 @@ impl Health {
     ///
     /// The fault repeats at the period of the heartbeat covering
     /// `health.v1` (`freshness.v2` §2.4), not the status's own horizon:
-    /// that heartbeat's time, unknown while the guard holds, is what a
-    /// reader's "no" rests on (§5), so a reader that joined during the hold
-    /// hears a fault within one period, as it hears that time. In revision
+    /// that heartbeat's time, the ahead time while the guard holds and an
+    /// instant once it releases, is what a reader's "no" rests on (§5), so
+    /// a reader that joined during the hold hears a fault within one
+    /// period, as it hears that time. In revision
     /// 1.1 the status is the interface's one collection, and both are
     /// 28.5 s.
     pub(crate) fn watch_clock(&self, closed: tokio::sync::watch::Receiver<bool>) {
