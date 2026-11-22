@@ -24,8 +24,16 @@ heartbeats"), and two of the findings turn on it.
 - **§2.16** also says that every listed service with a group is weighed
   against the batch, whether or not a heartbeat of its own crosses.
 - **The reference and zk2py** both read it so already.
-- **No case.** A plan's whole expectation is derived by the reference
-  before it is read by hand. That is the code half's to add.
+- **One case, added with the code half.** `v2/plan.json`'s case 48 is
+  case 47's face with `horizon_s` 60 and one more listed interface.
+  - **That interface** uses `freshness.v1`. Its `link` state has a 30-s
+    horizon and a cardinality of 1,000, and no heartbeat.
+  - **Expected:** no `block_over_batch` and no `horizon_under_face` at
+    the `link` key. A reader that counts every listed interface draws
+    both.
+  - **Derived by the reference, then read by hand.** It differs from
+    case 47's plan by one deny, one evidence and a window floor
+    (§2.11). 49 cases.
 
 **Answered: F-551, an ambiguity. §2.9, a collection the revisions
 disagree on.**
@@ -117,7 +125,8 @@ newest, and is corrected where it stands.
 **Deliberately not changed.**
 - **No keyword.** §2.19's "It MUST report what the fixture reports"
   stands, and now cites five cases more.
-- **No plan.** `v2/plan.json` and `plan.json` are as they were.
+- **No plan of the first 48 cases** of `v2/plan.json`, and `plan.json`
+  is as it was.
 - **`frame_over_batch`** still reads the payload alone. The put's 4 or
   5 bytes and the frame's 3 are in the appendix, and no rule counts
   them.
