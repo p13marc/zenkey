@@ -60,7 +60,8 @@
 //! **A conditional read** (core 0.110 §4.2; #986's J1): a reader that holds
 //! a member's value asks for it again and names the mutation it holds
 //! ([`held_stamp`], never anything but that mutation's in-band stamp). Its
-//! GET is an [`Asked`]; a held stamp among its arrivals is the owner's
+//! GET is an [`Asked`], on one concrete key ([`is_concrete`], read from its
+//! selector's key expression, [`selector_key`]); a held stamp among its arrivals is the owner's
 //! answer only as [`Asked::read`] says, [`HeldRead::Unchanged`], and any
 //! other is refused `held`. An answer merges nothing: [`unchanged`] says
 //! what it finds the reader holding, the mutation heard again (for
@@ -395,11 +396,24 @@ pub fn held_stamp(holds: Option<Mark>) -> Option<wire::HeldStamp> {
     }
 }
 
+/// The key expression of a GET's selector: everything before its first
+/// `?`, where zenoh's parameters begin, and the whole selector where it has
+/// none. A reply rides a key, never the parameters, and an owner reads the
+/// key alone, so the parameters decide neither whether a GET is on one
+/// concrete key nor which key its answer comes on.
+#[must_use]
+pub fn selector_key(selector: &str) -> &str {
+    selector.split_once('?').map_or(selector, |(key, _)| key)
+}
+
 /// Whether a GET's selector is one concrete key (core §4.2, "A conditional
-/// read"): no wildcard, so no `*`, no `**` and no `$*` chunk.
+/// read"): its key expression ([`selector_key`]) has no wildcard, so no
+/// `*`, no `**` and no `$*` chunk. The text counts chunks, which a
+/// selector's parameters are not: a `*` after the `?` is no wildcard, and
+/// `…/plans/vehicle-01?_time=*` is one concrete key.
 #[must_use]
 pub fn is_concrete(selector: &str) -> bool {
-    !selector.contains('*')
+    !selector_key(selector).contains('*')
 }
 
 /// A reader's state GET, as it reads a held stamp among its arrivals (core
@@ -408,7 +422,9 @@ pub fn is_concrete(selector: &str) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Asked<'a> {
     /// The GET's selector, as its reader's session spells the keys it
-    /// hears: base-relative in a namespace, a wire key in none.
+    /// hears: base-relative in a namespace, a wire key in none. It may
+    /// carry parameters after a `?`, which are not part of its key
+    /// ([`selector_key`]).
     pub key: &'a str,
     /// The held stamp the GET carried.
     pub held: Option<wire::Stamp>,
@@ -449,11 +465,16 @@ impl Asked<'_> {
     /// A held stamp that arrived on `key` carrying `stamp`, by this GET
     /// (`by_get`) or on a subscription: the owner's answer only as a reply
     /// to the GET that carried the same one, on that GET's one concrete
-    /// key. The same one has the same run, in width and value, and the
-    /// same seq. A consumer or a tool MUST NOT read any other as unchanged.
+    /// key, its selector's key expression ([`selector_key`]). The same one
+    /// has the same run, in width and value, and the same seq. A consumer
+    /// or a tool MUST NOT read any other as unchanged.
     #[must_use]
     pub fn read(&self, by_get: bool, key: &str, stamp: wire::Stamp) -> HeldRead {
-        if by_get && self.is_conditional() && key == self.key && self.held == Some(stamp) {
+        if by_get
+            && self.is_conditional()
+            && key == selector_key(self.key)
+            && self.held == Some(stamp)
+        {
             HeldRead::Unchanged
         } else {
             HeldRead::Refused
@@ -708,6 +729,104 @@ mod tests {
             versus_in(serial, ib(U16(5), 0), ib(U16(5), 9_000_000)),
             Versus::Older
         );
+    }
+
+    /// Core §4.2, "A conditional read": one concrete key is a selector
+    /// whose key expression has no wildcard chunk. A selector's parameters
+    /// are no chunks: they neither make a GET wild nor change the key its
+    /// answer comes on, so a conditional read asked with parameters still
+    /// reads its owner's answer as unchanged. `seed/held.json` has no case
+    /// with parameters.
+    #[test]
+    fn a_selectors_parameters_are_no_part_of_its_one_concrete_key() {
+        const KEY: &str = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01";
+        assert_eq!(selector_key(KEY), KEY);
+        assert_eq!(selector_key(&format!("{KEY}?_time=[now(-1h)..]")), KEY);
+        assert_eq!(
+            selector_key(&format!("{KEY}?a=1?b=*")),
+            KEY,
+            "the first `?`"
+        );
+        assert_eq!(selector_key(&format!("{KEY}?")), KEY);
+        for (selector, concrete) in [
+            (KEY.to_owned(), true),
+            (format!("{KEY}?x=*"), true),
+            (format!("{KEY}?_anyke"), true),
+            (
+                "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*".to_owned(),
+                false,
+            ),
+            (
+                "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/**".to_owned(),
+                false,
+            ),
+            (
+                "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/v$*".to_owned(),
+                false,
+            ),
+            (
+                "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*?x=1".to_owned(),
+                false,
+            ),
+        ] {
+            assert_eq!(is_concrete(&selector), concrete, "{selector}");
+        }
+        let stamp = wire::Stamp {
+            run: wire::Run::U16(5),
+            seq: wire::Seq::new(7).unwrap(),
+        };
+        let other = wire::Stamp {
+            run: wire::Run::U16(5),
+            seq: wire::Seq::new(8).unwrap(),
+        };
+        let with_parameters = format!("{KEY}?x=*");
+        for selector in [KEY, with_parameters.as_str()] {
+            let asked = Asked {
+                key: selector,
+                held: Some(stamp),
+            };
+            assert!(asked.is_conditional(), "{selector}");
+            assert_eq!(
+                asked.read(true, KEY, stamp),
+                HeldRead::Unchanged,
+                "{selector}"
+            );
+            // Any other is refused: another stamp, another key, the
+            // selector itself where it is no key, a subscription's.
+            assert_eq!(asked.read(true, KEY, other), HeldRead::Refused);
+            assert_eq!(
+                asked.read(true, &format!("{KEY}0"), stamp),
+                HeldRead::Refused
+            );
+            assert_eq!(asked.read(false, KEY, stamp), HeldRead::Refused);
+        }
+        let asked = Asked {
+            key: &with_parameters,
+            held: Some(stamp),
+        };
+        assert_eq!(
+            asked.read(true, &with_parameters, stamp),
+            HeldRead::Refused,
+            "a reply rides a key, never a selector's parameters"
+        );
+        // A wildcard in the key expression, parameters or none, and a GET
+        // that carried no held stamp: no conditional read.
+        let wild = format!("{}/*?x=1", KEY.rsplit_once('/').unwrap().0);
+        for (selector, held) in [
+            (wild.as_str(), Some(stamp)),
+            (with_parameters.as_str(), None),
+        ] {
+            let asked = Asked {
+                key: selector,
+                held,
+            };
+            assert!(!asked.is_conditional(), "{selector}");
+            assert_eq!(
+                asked.read(true, KEY, stamp),
+                HeldRead::Refused,
+                "{selector}"
+            );
+        }
     }
 
     /// Rule 6: a Zenoh-stamped held value and an in-band arrival, either

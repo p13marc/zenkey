@@ -217,7 +217,11 @@ pub enum SampleKind {
 }
 
 impl SampleKind {
-    /// Every sample, in §7.5's order.
+    /// Every sample, in §7.5's order: a put, a delete and a call's three,
+    /// then a state GET's payload, which core 0.110 added. A loop over it
+    /// meets [`SampleKind::Get`], which carries a snapshot's form alone, as
+    /// a held stamp, and is parsed by [`HeldStamp::parse`], never by
+    /// [`Envelope::parse`] or a call's readers.
     pub const ALL: [SampleKind; 6] = [
         SampleKind::Put,
         SampleKind::Delete,
@@ -856,6 +860,9 @@ impl DeleteStamp {
 /// mutation is (run, seq)", each under `zenoh/bytes` ([`ENCODING`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HeldStamp {
+    /// The in-band stamp of the mutation it names: its owner's run, in
+    /// width and value, and the mutation's seq. On a GET, the mutation its
+    /// reader holds for the member; on a reply, the member's last.
     pub stamp: Stamp,
 }
 
@@ -1442,6 +1449,63 @@ mod tests {
             "g000",
         ] {
             assert_eq!(Run::from_hex(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Every sample of [`SampleKind::ALL`] against every form: each
+    /// carries the forms §7.5 gives it and no other, a state GET's payload
+    /// (core 0.110) a snapshot's form alone; each has a name of its own;
+    /// and a state GET's parse refuses every form but 7 as `sample_kind`,
+    /// before a tag or a length is read.
+    #[test]
+    fn every_sample_carries_its_forms_and_a_state_get_form_7_alone() {
+        use std::collections::BTreeSet;
+        let names: BTreeSet<&str> = SampleKind::ALL.iter().map(|s| s.as_str()).collect();
+        assert_eq!(
+            names.into_iter().collect::<Vec<_>>(),
+            ["delete", "get", "put", "query", "reply", "reply_err"]
+        );
+        for sample in SampleKind::ALL {
+            let carried: Vec<Form> = Form::ALL
+                .into_iter()
+                .filter(|f| sample.carries(*f))
+                .collect();
+            let want: &[Form] = match sample {
+                SampleKind::Put => &[
+                    Form::Mutation,
+                    Form::Event,
+                    Form::Frame,
+                    Form::Heartbeat,
+                    Form::Snapshot,
+                ],
+                SampleKind::Delete => &[Form::Delete],
+                SampleKind::Query | SampleKind::Reply => &[Form::Value],
+                SampleKind::ReplyErr => &[Form::Error],
+                SampleKind::Get => &[Form::Snapshot],
+            };
+            assert_eq!(carried, want, "{sample}");
+        }
+        for form in Form::ALL {
+            // CH alone, with tag 5: the form is judged first.
+            let ch = Header {
+                form,
+                wide: false,
+                tag: Tag::new(5).unwrap(),
+            }
+            .byte();
+            let got = HeldStamp::parse(&[ch]);
+            if form == Form::Snapshot {
+                assert_eq!(got, Err(Refusal::HeldTag(Tag::new(5).unwrap())));
+            } else {
+                assert_eq!(
+                    got,
+                    Err(Refusal::WrongSample {
+                        form,
+                        sample: SampleKind::Get
+                    }),
+                    "{form}"
+                );
+            }
         }
     }
 

@@ -1422,11 +1422,24 @@ fn envelope_vectors() {
         };
         assert_eq!(case["expect"], got, "{note}");
     }
+    // Every sample the model names has cases here, but a state GET's
+    // payload (`SampleKind::Get`, core 0.110): core 0.110 left this file
+    // as it was, and that sample's cases are `held.json`'s `gets`, which
+    // `envelope_held` runs. A sample added to `SampleKind::ALL` with cases
+    // in neither file fails here.
+    let named: Vec<&str> = zenkey_model::wire::SampleKind::ALL
+        .iter()
+        .filter(|s| **s != zenkey_model::wire::SampleKind::Get)
+        .map(|s| s.as_str())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     assert_eq!(
         samples.into_iter().collect::<Vec<_>>(),
-        ["delete", "put", "query", "reply", "reply_err"],
-        "every sample has cases"
+        named,
+        "every sample but a state GET's has cases here"
     );
+    assert_eq!(named, ["delete", "put", "query", "reply", "reply_err"]);
 }
 
 /// `spec/conformance/errors/forms.json` (core 0.92 §7.5, §5.2 "The error
@@ -3629,6 +3642,8 @@ fn envelope_held() {
         assert_eq!(HeldStamp::parse(&bytes), Ok(held), "{note}: reads back");
     }
 
+    // A state GET's payload, `SampleKind::Get`: the one sample
+    // `vectors.json` has no case of (`envelope_vectors` says so).
     let gets = doc["gets"].as_array().expect("gets");
     assert_eq!(gets.len(), 34, "the fixture's gets");
     let mut seen = std::collections::BTreeSet::new();

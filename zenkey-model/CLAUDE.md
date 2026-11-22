@@ -451,12 +451,22 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   pure function, `Some(held stamp)` exactly for a member read whose
   payload carries the stamp of the member's last mutation. In `seed`:
   `held_stamp(Option<Mark>)` (what a reader may send: an in-band mark's,
-  never a Zenoh timestamp's), `is_concrete(selector)`, `Asked { key,
+  never a Zenoh timestamp's), `selector_key(selector)` (everything
+  before the first `?`) and `is_concrete(selector)`, read from it, so a
+  selector's parameters neither make a GET wild nor change the key its
+  answer comes on (review-bot on #1148; no fixture case has parameters,
+  and the text counts chunks), `Asked { key,
   held }` with `is_conditional()` and `read(by_get, key, stamp)` →
   `HeldRead::{Unchanged, Refused}` (`unchanged`, `held`), and
   `unchanged(Held, stamp)` → `Unchanged::{HeardAgain, Stands, ReadAgain}`,
   read as the answer arrives: `HeardAgain` sets `HeldMember::heard_after`
-  for `apply_snapshot`'s guard. `tests/conformance.rs`: `envelope_held`
+  for `apply_snapshot`'s guard. `SampleKind::ALL` has six since 0.110, a breaking
+  change of the published 0.22.0 for 0.23.0's notes, with
+  `Refusal::{Held, HeldTag}`; nothing in the tree loops over it but
+  `wire`'s own `every_sample_carries_its_forms_and_a_state_get_form_7_alone`
+  and `envelope_vectors`, which names `get` as the one sample with no
+  case in `vectors.json` (its cases are `held.json`'s `gets`).
+  `tests/conformance.rs`: `envelope_held`
   (`envelope/held.json`, 88 cases), `seed_held` (`seed/held.json`'s 12
   asks, and its 29 cases through `seed_cases`, which `seed_snapshot`
   shares), `envelope_carries` (46 reads), all as written, none blessed.
