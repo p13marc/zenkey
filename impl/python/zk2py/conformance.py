@@ -5301,6 +5301,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round113_readings(root)
     out += _round114_readings(root)
     out += _round115_readings(root)
+    out += _round116_readings(root)
     return out
 
 
@@ -6298,6 +6299,217 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # Round 111's findings, F-535 to F-539, are answered by core 0.109 and
     # desired.v1 0.14: `_round114_readings` holds each answer as its text
     # states it, and the sentences the findings quoted gone.
+    return out
+
+
+def _round116_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.110, a conditional read, read cold (#609, round 116): the
+    version and its entry's claims, the three answers zk2py gave from the
+    text before a case was seen, each as its code reads it, what a reader
+    built before this version reads, Appendix B's "A conditional read's
+    bytes" recomputed from §7.5's layouts, and round 116's findings, each
+    text as it quotes it, so an answer moves it."""
+    import re
+
+    from . import held, seed_held, snapshot, zk2c
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    core, log = flat("core.md"), flat("CHANGELOG.md")
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    env = _load_json(root / "envelope" / "held.json")
+    sfx = _load_json(root / "seed" / "held.json")
+    car = _load_json(root / "envelope" / "carries.json")
+    snaps = _load_json(root / "seed" / "snapshot.json")
+    obs = flat("observer.md")
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.110 or later, with its entry; observer.md 0.34 or later; RULES.md lists 295 rules, the owner 90, the "
+         "consumer 35 and the static rules 79; envelope/held.json holds 9 writes, 34 gets, 22 replies and 23 answers, "
+         "88 cases; seed/held.json 12 asks and 29 cases, 41; carries.json 46 reads, the last nine a held stamp's "
+         "bytes on a put's key; seed/snapshot.json 45 cases, of which 42 state `collections` and 41 give one (the "
+         "entry counts \"the 41 cases … that give `collections`\")",
+         [m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.110"),
+          bool(re.search(r"\| \*\*Text version\*\* \| 0\.(3[4-9]|[4-9]\d) ", obs)),
+          int(once.group(1)) if once else None, counted.get("Owner"), counted.get("Consumer"),
+          counted.get("Implementation: the static rules"),
+          [len(env[k]) for k in ("writes", "gets", "replies", "answers")], [len(sfx["asks"]), len(sfx["cases"])],
+          len(car["reads"]), sum(1 for c in car["reads"][-9:] if "held stamp" in c["note"]),
+          [len(snaps["cases"]), sum(1 for c in snaps["cases"] if "collections" in c),
+           sum(1 for c in snaps["cases"] if c.get("collections"))]]
+         + missing(log, "## 0.110 — 2026-11-21: a conditional read: §7.5's held stamp, and §4.2's owner and reader",
+                   "`conformance/envelope/held.json` is new: 9 writes, 34 GET payloads, 22 replies and 23 answers of "
+                   "an owner.",
+                   "`conformance/seed/held.json` is new: 12 stamps a reader sends or does not, and 29 merges.",
+                   "`conformance/envelope/carries.json` gains 9 reads",
+                   "- **Four rules**, all static: the writer's, the GET's parse, the reply's tag, and the round "
+                   "trip.", "`observer.md` stays 0.34."),
+         [True, True, 295, 90, 35, 79, [9, 34, 22, 23], [12, 29], 46, 9, [45, 42, 41]]),
+        ("core 0.110, §7.5 and §4.2: the nine rules as the texts state them, and S2's and the member read's one "
+         "exception",
+         missing(core,
+                 "An implementation that writes a held stamp MUST write it so: CH with form 7 and tag 0, the run and "
+                 "the seq, and no byte after.",
+                 "An implementation MUST refuse a state GET's payload at step 3 for the first of these that applies, "
+                 "in this order, naming the refusal:",
+                 "An implementation MUST refuse a held stamp on a reply whose tag is not 0 (`tag`).",
+                 "Every held stamp an implementation accepts MUST write back to the same bytes.",
+                 "An owner SHOULD answer a conditional read with the held stamp alone when the member's last mutation "
+                 "carries exactly that stamp: the same run, in width and value, and the same seq.",
+                 "An owner MUST NOT answer a GET with a held stamp in any other case.",
+                 "A consumer or a tool MUST NOT send a held stamp other than the in-band stamp of the mutation it "
+                 "holds for that member, as the owner wrote it.",
+                 "A consumer or a tool MUST NOT read any other held stamp as unchanged.",
+                 "A consumer or a tool that sent a held stamp MUST accept a snapshot in answer, and merge it as any "
+                 "member read's (above).",
+                 "A conditional read's answer is the one exception (below).",
+                 "- **A conditional read** is the one exception to these two answers."),
+         []),
+    ]
+    # -- the three answers given from the text, before a case was seen -----------
+    b16 = held.write(zk2c.InBand(16, 5, 7))
+
+    def reply_of(raw: bytes) -> Any:
+        r = held.read_reply(raw)
+        return r.refusal or r.reads
+
+    out.append(("answer 1 (§7.5), from the text: (a) a lone CH byte of form 7 with a tag is `tag` on a state GET, the "
+                "tag read before the length, and `short` on a reply, whose parse is a put's and checks no snapshot's "
+                "tag; a lone CH of another form with a tag is `sample_kind` on a GET; a whole held stamp with a tag "
+                "is `tag` on both; (b) a payload of no byte is none, refused for nothing, under any Encoding, step 1 "
+                "first; a byte or more under another Encoding, a schema suffix among them, is `encoding`",
+                [held.get_token(zk2c.ENCODING, b"\xe5"), reply_of(b"\xe5"), held.get_token(zk2c.ENCODING, b"\x25"),
+                 held.get_token(zk2c.ENCODING, bytes([b16[0] | 5]) + b16[1:]), reply_of(bytes([b16[0] | 5]) + b16[1:]),
+                 [held.read_get(e, x) for e in (zk2c.ENCODING, "application/json", None) for x in (None, b"")],
+                 [held.get_token(e, b16) for e in ("application/json", "zenoh/bytes;zk2c", zk2c.ENCODING)]],
+                ["tag", "short", "sample_kind", "tag", "tag", [None] * 6, ["encoding", "encoding", None]]))
+    old, now = zk2c.InBand(16, 5, 7), zk2c.InBand(16, 6, 2)
+    out.append(("answer 2 (§4.2), from the text: the owner compares the GET's stamp with the member's stored stamp, "
+                "\"the one a snapshot would list for the member: its live entry's, or its tombstone's\", never with "
+                "the run it writes under now or its newest seq: a member last put under run 5 at seq 7 answers (5, 7) "
+                "held whatever the owner writes under, and answers the run it writes under, its newest seq and the "
+                "other width whole",
+                [held.answer("member", zk2c.ENCODING, held.write(old), old) == held.write(old),
+                 held.answer("member", zk2c.ENCODING, held.write(now), old),
+                 held.answer("member", zk2c.ENCODING, held.write(zk2c.InBand(16, 6, 7)), old),
+                 held.answer("member", zk2c.ENCODING, held.write(zk2c.InBand(32, 5, 7)), old),
+                 [held.answer(r, zk2c.ENCODING, held.write(old), old) is None for r in held.READS]]
+                + missing(core, "Its stamp is the one a snapshot would list for the member: its live entry's, or its "
+                                "tombstone's."),
+                [True, None, None, None, [False, True, True, True]]))
+    key = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+    cols = [{"coll": 0, "template": "plans/{vehicle}", "snapshot_key": key.rsplit("/", 1)[0]}]
+    view = [{"key": key, "sample": "put", "stamp": {"width": 16, "run": 5, "seq": 7}, "record": "7631"}]
+    none6 = snapshot.write_page({"tag": 0, "run_width": 16, "run": 6, "asof": 0, "time": None, "index": 0,
+                                 "more": False, "coll": 0, "live": [], "tombs": []}).hex()
+    answer = {"via": "get", "key": key, "hex": held.write(old).hex()}
+    absent = {"via": "get", "key": key, "hex": none6, "page": snapshot.read_page(bytes.fromhex(none6), "state")}
+    later = {"via": "sub", "key": key, "sample": "put", "stamp": {"width": 16, "run": 6, "seq": 1}, "record": "7632"}
+
+    def after(*arrivals: dict[str, Any]) -> list[Any]:
+        seed = seed_held.HeldSeed(cols, view, key, old)
+        for a in arrivals:
+            seed.arrive(dict(a))
+        return [sorted(seed.view), seed.again, [x["reads"] for x in seed.readings]]
+
+    # what separates the two readings of "by then" for read_again: a value
+    # that arrives after an answer that found nothing held
+    cases_after = [c for c in sfx["cases"]
+                   if c["expect"]["read_again"] and any("held" in a for a in c["arrivals"][:-1])]
+    out.append(("answer 3 (§4.2), \"by then\": the text names no instant, and zk2py decides at the answer's arrival: "
+                "the answer first, then another run's snapshot of no entry, spares the value, heard again by the GET; "
+                "the snapshot first drops it, the answer finds nothing held and the reader reads again; a put heard "
+                "after that answer leaves `again` set, where the GET's end would find a value held; held.json's "
+                "description says \"when the answer arrives\" of the mark alone, and no case of its 29 has an arrival "
+                "after an answer that reads again (F-569)",
+                [after(answer, absent), after(absent, answer), after(absent, answer, later), len(cases_after)]
+                + missing(core, "Where the reader holds another value by then, heard while its GET was out, it keeps "
+                                "that value.",
+                          "Where the reader holds nothing for the member by then, its GET gave it no value.")
+                + missing(" ".join(sfx["description"].split()),
+                          "Where the reader holds the mutation the stamp names when the answer arrives",
+                          "Where it holds another value by then", "Where it holds nothing for the member by then"),
+                [[[key], False, ["unchanged"]], [[], True, ["unchanged"]], [[key], True, ["unchanged"]], 0]))
+    # -- a reader built before this version, and the lengths that tell the two -------
+    def as_page(raw: bytes) -> str:
+        try:
+            snapshot.read_page(raw, "state")
+        except (snapshot.Refused, zk2c.Refused) as e:
+            return e.token
+        return "page"
+
+    empty = {"tag": 0, "asof": 0, "time": None, "index": 0, "more": False, "coll": 0, "live": [], "tombs": []}
+    out.append(("§7.5: read as a page, a held stamp is a body cut `short`, 16-bit and 32-bit; a page with no entry is "
+                "16 bytes, or 18, so its body is 10 and no page is a header alone; a held stamp is 6 or 8, a delete's "
+                "attachment's size; on a put's key it reads as a snapshot's envelope (carries.json), on a stream's "
+                "`key_kind`",
+                [as_page(b16), as_page(held.write(zk2c.InBand(32, 5, 7))),
+                 [len(snapshot.write_page({**empty, "run_width": w, "run": 1})) for w in (16, 32)],
+                 [held.size(w) for w in (16, 32)], [len(zk2c.deletion(zk2c.InBand(w, 1, 1))) for w in (16, 32)],
+                 zk2c.reads(key, b16), zk2c.reads("zk2/rf0/modem/modem.v3/stream/frames/link", b16)],
+                ["short", "short", [16, 18], [6, 8], [6, 8], {"reads": "snapshot"}, {"refused": "key_kind"}]))
+    # every `answers` case that answers held, read by the reader that asked
+    back = [seed_held.reading("k", held.read_get(c["encoding"], bytes.fromhex(c["hex"])), "k", "get",
+                              held.read_reply(bytes.fromhex(c["expect"]["hex"])).stamp)
+            for c in env["answers"] if c["expect"]["answer"] == "held"]
+    out.append(("envelope/held.json's answers and seed_held's reading, end to end: each of the four held answers is "
+                "the GET's own bytes, and reads `unchanged` to the reader that sent them; the same bytes on a "
+                "subscription, on another key, or to a GET that carried none read `held`",
+                [back, [c["expect"]["hex"] == c["hex"] for c in env["answers"] if c["expect"]["answer"] == "held"],
+                 seed_held.reading("k", old, "k", "sub", old), seed_held.reading("k", old, "j", "get", old),
+                 seed_held.reading("k", None, "k", "get", old),
+                 seed_held.reading("k/*", old, "k/a", "get", old)],
+                [["unchanged"] * 4, [True] * 4, "held", "held", "held", "held"]))
+    # -- Appendix B, "A conditional read's bytes", from the layouts ---------------------
+    record = 44
+    page = snapshot.write_page({**empty, "run_width": 16, "run": 1,
+                                "live": [{"id": "", "run_width": None, "run": None, "seq": 1,
+                                          "confirmation": "none", "record": "00" * record}]})
+    stamp, over, request, unchanged, final, key_b, lean, frame = len(b16), 3, 12, 94, 6, 59, 16, 3
+    changed = unchanged - stamp + len(page)
+    sdu = lean + frame
+    out.append(("core Appendix B, \"A conditional read's bytes\", recomputed: from §7.5's layouts a held stamp is 6 B "
+                "and a 44-byte record's page 66 B; with the text's 3 B over a query's payload, its 12-byte request, "
+                "its 94-byte unchanged reply and 6-byte final, link.v2's lean stack of 16 B and frame of 3 B: the "
+                "request 21 B, the key 61 B of a 59-byte key, the changed reply 154 B, the SDUs 40 B, 119 B (the reply "
+                "and its final in one SDU; in two, 138) and 179 B, and the entry's 159 B for a re-read; a payload of "
+                "126 B is the longest whose extension's length is one byte; an unchanged reply is 60 B under a changed "
+                "one, the record's 44 and the page's 16 over it, where the request grew by 9 (F-570); the text leaves "
+                "7 B of the 94 unnamed, and its 12, 94, 20, 6 and the entry's 222 are the model's (F-571)",
+                [stamp, len(page), request + over + stamp, key_b + 2, changed, request + over + stamp + sdu,
+                 unchanged + final + sdu, unchanged + final + 2 * sdu, changed + final + sdu,
+                 (request + over + stamp + sdu) + (unchanged + final + sdu), 127 - 1, changed - unchanged,
+                 len(page) - record - stamp, over + stamp, unchanged - (key_b + 2) - 20 - stamp]
+                + missing(core, "So a 6-byte held stamp makes a 12-byte request 21 bytes.",
+                          "**An unchanged reply** on a 59-byte key is 94 bytes. Of them 61 are its key (fact 5 of "
+                          "\"Keys across a face\") and 20 its replier's id. A 6-byte final follows it.",
+                          "For a 44-byte record it is a 66-byte page, in a 154-byte reply.",
+                          "the request is a 40-byte SDU. The unchanged reply and its final are 119 bytes, and the "
+                          "changed ones 179.")
+                + missing(log, "On the simulated radio a re-read is 159 bytes in SDUs, where `desired.v1`'s is 222 "
+                               "today."),
+                [6, 66, 21, 61, 154, 40, 119, 138, 179, 159, 126, 60, 16, 9, 7]))
+    # -- round 116's findings, each text as it quotes it, so an answer moves it ----------
+    out.append(("round 116's findings, the texts they quote: F-569, §4.2's two \"by then\"; F-570, §4.2's \"saves the "
+                "value's bytes and no others\" and \"pays for a value larger than what the request grows by\", beside "
+                "Appendix B's 94 and 154; F-571, Appendix B's figures \"through the wire baseline's model\", a file "
+                "under docs/; F-572, §4.2 names \"the GET that carried the same one\" and observer.md says nothing of "
+                "a held stamp; state.md §16 has no step for a tool",
+                missing(core, "Where the reader holds another value by then", "Where the reader holds nothing for the "
+                              "member by then",
+                        "a conditional read saves the value's bytes and no others.",
+                        "So it pays for a value larger than what the request grows by.",
+                        "Computed from zenoh 1.10.1's layouts through the wire baseline's model",
+                        "A held stamp is the owner's answer only as a reply to the GET that carried the same one, on "
+                        "that GET's one concrete key.")
+                + ["held stamp" in obs, "zenctl" in flat("scenarios/state.md").split("## §16", 1)[1]],
+                [False, False]))
     return out
 
 
