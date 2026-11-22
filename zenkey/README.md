@@ -9,7 +9,8 @@ This crate brings the service up on a Zenoh session in the spec's order
 tokens), writes every sample with its contract's QoS,
 reads data through a role's bindings, serves and calls operations, and
 runs the owner's half of each profile that has one (`hostid.v1`,
-`health.v1`, `freshness.v2`, `alarms.v1`, `config.v1`, `telemetry.v1`, …).
+`health.v1`, `freshness.v2`, `alarms.v1`, `config.v1`, `telemetry.v1`,
+`desired.v1` and `desired.v2`, …).
 
 What needs no session (keys, contracts, bundles) is
 [`zenkey-model`](https://crates.io/crates/zenkey-model)'s, re-exported as
