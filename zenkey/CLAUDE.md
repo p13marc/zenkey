@@ -286,6 +286,61 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `"starting"` by default) and never deleted; checks on change, faults on
   the stream, and `clock_ahead` while the guard holds (the `Minter`'s hold
   watch). The owner example drives it from stdin.
+  `health.v2` (#986's Q2, text 0.1) is the same handle on the other
+  embedded bundle (`health::v2::{BUNDLE, FINGERPRINT, iface(),
+  implementation()}`, `bundles/health.v2/`, revision 2.0 `b447f613…`,
+  and the model's records and words re-exported): opt-in through
+  `ServiceBuilder::health_v2()`, `health()` still `health.v1`'s, the
+  default (flipping it is Q3). **One major per instance** (v2 §2.3):
+  `health()` beside `health_v2()`, either order, and `implement` of the
+  other major's contract are refused, `Error::Contract` naming §2.3
+  (`service.rs`'s `other_health_major`). `Health::major()` says which;
+  `Inner` holds the major, the checks' `PackedType`, the deployment
+  epoch (the catalog's, so the catalog comes first) and the instance's
+  tables. What v2 changes in `health.rs`: a status and a check are
+  `v2::Status`/`v2::Check` written through `record()` and sealed by
+  their writers under tag 3, a fault a `v2::Fault` under tag 11 put
+  through `Writer::put` (no Zenoh timestamp of the owner's, where v1's
+  `publish_fault` sets one with `put_at`); `since` and `at` are
+  `seconds(ns, epoch)`, absent where the epoch has no code; a reason, a
+  detail and a code are given as text and written by `Health::word`
+  (`v2::write_word` over `Health::tables()`), an unnamed text
+  `out_of_range` with an `info` line on `zenkey::health` naming the
+  service and the words; a status raised to a check carries the
+  profile's `check`; "unchanged" compares the record, so the level and
+  the word (`Published::word`, `CheckState::word`, `Effective::word`),
+  never the text. **The tables** are
+  `ServiceBuilder::health_tables()` (`v2::Tables::of_instance` over every
+  implemented contract's `Tables::of`), read at `health_v2()` and again
+  at each `implement` (`Health::retable`); `bring_up` puts again a check
+  or a status whose word they now write otherwise, the status's `since`
+  kept. A contract that carries a table and does not list `health.v2`
+  (`not_used`, which the model reads as none) implements and adds none.
+  **The clock** (v2 §2.5): `clock_ahead_once` publishes
+  `Fault::clock_ahead(offset, at)` when `Minter::held()` goes to
+  `Some`, then waits for `None`: one per hold, where v1's `clock_ahead`
+  repeats each heartbeat period. The heartbeat's ahead time is Q0's.
+  `Health::fault(code, level, detail)` under v2 logs the detail and
+  writes `not_available`; `Health::fault_argument(code, level,
+  Option<u16>)` gives the number, refused under v1 and for 65,535; a
+  code of the profile's table is the runtime's and refused; a malformed
+  one is written `out_of_range`, where v1 refuses it. **One instant**
+  (v2 §2.2): `Store::answer` takes its mark once per GET, so the
+  status's and the checks' snapshots share a run and an asof, and since
+  Q2 it takes the mark again (`AS_OF_TAKES`, 4) while an entry of that
+  run under the queryable's root shows above it: a put recorded between
+  the mark and the store read. `tests/profile_health_v2.rs` runs
+  `scenarios-v2.md` §1 to §5 and §9 (ten tests; `lab/svc` and
+  `lab/ahead` on a `FileRunStore` for the 12- and 16-byte figures, a
+  32-bit run's put being 14), `tests/common`'s `Beat` gained `len`,
+  `tests/contracts/health/` holds §9's `tc.v1` and the earlier revision
+  T2 holds, and `health.rs`'s unit tests hold the bundle to the model's
+  tags. The owner example: `--health-v2` (or the standard `health.v2`
+  contract among the files), `--health-status`/`--health-check` then
+  taking words, `fault <code> <LEVEL> [<argument>]`, every answer
+  ending ` word=<n>`, `clock-guard` → `clock-guard held|released`, and
+  `zenkey::health=info` in its default log filter
+  (`owner_example.rs`'s `the_owner_example_implements_health_v2`).
   `config_v1` (#768, CB; `config` is the deployment's) is `config.v1`'s
   owner on the embedded standard bundle: `ServiceBuilder::config_v1(startup,
   device)` wraps `zenkey_model::config`'s `Owner` over the application's

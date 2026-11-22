@@ -564,8 +564,9 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   snapshot with no entry fails; reads a version at exactly a remembered
   asof as older; and holds no stamp to send while a snapshot with no
   entry waits or after one was acted on.
-  `health.v2` (#986's Q1, text 0.1, experimental; the session-free half,
-  no owner and no reader on a bus until Q2) is `health::v2`
+  `health.v2` (#986's Q1, text 0.1, experimental; the session-free half:
+  its owner is the runtime's `health` since Q2, its readers a later
+  chunk's) is `health::v2`
   (`src/health/v2.rs`), and what a reader concludes is `health`'s for
   both majors: `health::Major` (`of(interfaces)`, v2 where a descriptor
   lists both; `named(iface)`, the deployment's word across a face;
@@ -624,3 +625,24 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   A case that expects `{"major": 1}` is checked for the major alone;
   `clock.json`'s across-face cases state no `deployment` and are read as
   `health.v2`'s. `spec/profiles/.history/health.v2/` holds revision 2.0.
+  `words` (`src/words.rs`, #986's Q2) is what `desired.v2` and
+  `health.v2` share of "an index into a contract's table", and what
+  `alarms.v2` (#984) is to use: `OUT_OF_RANGE`, `uses(contract,
+  profile)`, `Index::{At, OutOfRange}` (`at(i, max)`, `to_json`,
+  `of_json`), `Word::{Entry, Number, OutOfRange}`, `read(table, index)`,
+  `write(table, word, max)`, `list(value, max, entry, once)` (an
+  annotation's value as a table) and `Lint { profile, at, key, token,
+  says }` with `Lint::place(resource)` and a `Display` that is the
+  linter's line, `error[<profile> <token>] <at>: [<key>: ]<says>`.
+  `desired::v2::{Index, Word, Lint, OUT_OF_RANGE}` and
+  `health::v2::Lint` are re-exports, `desired::v2::word` a wrapper over
+  `words::read`, and both `lint_contract`s return `Vec<words::Lint>`
+  (`health::v2::Lint`'s `reason: Invalid` became `token` and `says`, its
+  `key` an `Option`). Each profile keeps what differs in meaning:
+  desired's `Tables` (a report resource's two, 0 to 254) and its
+  `ReportDeclaration`, health's `Word` (6 bits, the profile's half and
+  the service's), `Named`, `Declared`, `Instance` and `Growth`, and each
+  `Major` (a contract's `uses` for one, a descriptor's `interfaces` for
+  the other). A third profile whose tables are an instance's would lift
+  health's `Declared`/`Instance`/`instance_table`, generic over the
+  table's type; they were left where one profile uses them.
