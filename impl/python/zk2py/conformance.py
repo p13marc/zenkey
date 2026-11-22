@@ -6526,6 +6526,12 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
     t += [n.of("0007"), n.of("00000007"), n.due("0007", 99), n.due("00000007", 99), n.reads]
     w = f2.Naming("deadbeef")
     t += [w.of("0001"), w.due("0001", 0), w.reads]
+    # the read a subscriber makes at its start, and an owner heartbeat heard before it returns
+    st = f2.Naming(ask_again_ns=10)
+    u: list[Any] = [st.begin(), st.due("0007", 1), st.due("0009", 2), st.of("0007")]
+    st.answer(None, [{"run": "0007", "catalog": "11223344"}], 3)
+    u += [st.of("0007"), st.due("0007", 4), (st.started, st.reads), st.due("0009", 5), (st.started, st.reads),
+          st.starting, w.begin(), w.started]
     out.append(("freshness.v2 0.11 §2.5 \"The catalog its owner names\", zk2py's Naming: the id is its run's, read "
                 "from \"the one that states the put's run\"; unknown, a put asks once, and a second put asks nothing "
                 "while that read is under way; \"A read that fails names no catalog. Neither does one whose "
@@ -6534,14 +6540,19 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "run names that run's catalog and not this one's; a 16-bit run and a 32-bit one of one value are "
                 "two runs (core §3.3); a descriptor of the run that states no catalog is an answer, its owner "
                 "naming none, and is not asked again; given the deployment's word, no descriptor is read; the "
-                "bound, 10 s, is zk2py's, where the text gives none and the reference's is 30 s",
-                t + [f2.ASK_AGAIN_S]
+                "bound, 10 s, is zk2py's, where the text gives none and the reference's is 30 s; and the read a "
+                "subscriber makes at its start, for no run, covers every run while it is under way (review-bot on "
+                "#1150): an owner heartbeat heard before it returns asks for nothing, of its run or another, and "
+                "reads `unknown_catalog`; the read's answer names the run, and one read was made in all; a run it "
+                "did not name is asked for at its next put, the second read; given the word, no start read begins",
+                t + [f2.ASK_AGAIN_S, u]
                 + missing(fv, "- **A read that fails** names no catalog. Neither does one whose descriptors all state "
                               "another run. The subscriber asks again later, and not at every put. Until an answer "
                               "comes, each group is `unknown_catalog`.",
                           "A read that fails stands for its run for 30 s."),
                 [None, True, False, None, False, True, None, "aabbccdd", False, True,
-                 "11223344", None, False, False, 3, "deadbeef", False, 0, 10.0]))
+                 "11223344", None, False, False, 3, "deadbeef", False, 0, 10.0,
+                 [True, False, False, None, "11223344", False, (1, 0), True, (1, 1), 0, False, 0]]))
 
     # -- §2.4 "The class ... is one revision's" (F-551's answer, the reader's half) --------
     text_link = lay["contracts"]["vital.v1"].replace('annotations = { "freshness.ttl_s" = 60 }',
