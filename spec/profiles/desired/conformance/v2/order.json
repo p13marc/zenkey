@@ -1,0 +1,4255 @@
+{
+ "description": "desired.v2 §2.4, §2.6 to §2.10: one target's role, and the steps it takes, in order -> what each step does, and the report after the last, in the profile's reading (reports.json). Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A step is one of: {sample: {from, kind, version, revision?, document? | bytes?}}, a sample or an answer received from either path (§2.5), from \"owner\" (the author's own put, delete or snapshot entry) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" (a put, or a live entry) or \"delete\" (a delete, or a tombstone), its version <run>/<seq> (§2.4) or null for a sample with no envelope, revision the document type's own when it carries one, and a put's document, decoded JSON holding integers and strings only, equal when its members and values are (v1 §2.7's comparison, which v1's order.json pins), or its bytes in hex, equal byte for byte; {sample: {from: \"owner\", kind: \"no_entry\", snapshot: {run, asof}}}, a member's snapshot with no entry, its header's run and its asof (§2.8); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete or a snapshot with no entry reverted), refused whole, or failed partway (a refusal of a revert is read as a failure), a Refusal being {code, pointer?, detail?} with its indices; {finish: \"check\"}, the running act's put ends as §2.4's bound judges it: done when its revision is at most 4,294,967,295 or it has none, else refused whole, {code: invalid}; {call: true}, the target's own operation changed what is in force; {restart: true}, a new process of the target, holding nothing. The target starts holding nothing, its report {source: baseline, outcome: not_acted, last_known: false}. Two runs are the same when their widths and values are. The target remembers, per run, the highest seq it acted on or adopted a version of, or the asof of a snapshot with no entry it reverted on where that is higher; no case names more than 16 runs. expect.steps, for a put or a delete: unstamped (no envelope); older (a seq below the remembered run's highest, or at or below a remembered asof, or below the one held waiting's in its run); same_version (a seq equal to the remembered run's highest, or to the one held waiting's), or confirmed where that version is the one held, or held waiting, came from an archive, and this delivery is the owner's; held (admitted while an act runs: it replaces what waits); and, admitted otherwise, adopted when the target has acted on or adopted a version in this process and the last of them has the same document (two equal documents, or two that are no document: a delete, or a snapshot with no entry), else act or revert, the act starting. For a snapshot with no entry: no_verdict (the target holds no put's version of the snapshot's run: nothing held, a delete held, or another run), older (it holds one whose seq is above the asof), each judged of the version last acted on or adopted, the running act's while one runs, then of the one held waiting; else held while an act runs, or revert. For finish: done, or adopted, act or revert for a version held waiting, as it starts. called; restarted. expect.report is the report after the last step, as §2.10 builds it: observed the last version acted on or adopted, with its revision for a put that has one of at most 4,294,967,295, and absent after a revert on a snapshot with no entry; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline otherwise, no in_force; reverted: source baseline, no in_force; adopted: observed the adopted version, in_force too when it named the previous one, outcome, refusal and source kept; last_known true when the version acted on or adopted came from an archive and no owner's delivery of the same version confirmed it; call: source call, no in_force.",
+ "cases": [
+  {
+   "note": "a first put, acted on and converged (§2.6 step 2, §2.7)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a higher seq of the held run is acted on (step 3)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/9",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0007/9",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "a lower seq of the held run is older, never acted on",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "older"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/9",
+      "revision": 2
+     },
+     "in_force": {
+      "version": "0007/9",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "an equal seq is the same version, received again",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "same_version"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "seqs compare as integers: 16,777,215 after 8,388,609 is higher, where serial order would not order them",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/8388609",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/16777215",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "older"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/16777215",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0007/16777215",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "a put with no envelope is ignored (step 1)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": null,
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "unstamped"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a delete with no envelope is ignored too",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": null
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "unstamped"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a put with no envelope, nothing held: still ignored, and the next is the first",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": null,
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "unstamped",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "another run is admitted, whatever its seq, and acted on (step 4)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/900",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0008/0",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0008/0",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "an author's restart: the same document under a new run is adopted, and the report moves (step 5, §2.11)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "adopted"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0008/0",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0008/0",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a run of the other width with the same value is another run: adopted, and each is remembered apart",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "00000007/1",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/2",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "00000007/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "adopted",
+     "older",
+     "older"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "00000007/1",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "00000007/1",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "never an older version of a remembered run: the old run's lower seq, the new run held (step 4)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "older"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0008/0",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0008/0",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "a remembered run's equal seq is the same version, whichever run is held",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "same_version"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0008/0",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0008/0",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "the residual, kept from v1: the old run's value in transit, its seq higher than any acted on, is admitted after the new run's first; the author's answer of the new run's version is then the same version, and its next put is acted on (§2.6)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/11",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/1",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "same_version",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0008/1",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0008/1",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "remembered by adoption: a run whose version was adopted orders its later arrivals",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/4",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "adopted",
+     "older",
+     "same_version"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0008/5",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0008/5",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "sixteen remembered runs: after versions of sixteen runs, the first run's lower seq is older and its equal seq the same version",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0001/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0002/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0003/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0004/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 4
+      },
+      "revision": 4
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0005/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 5
+      },
+      "revision": 5
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0006/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 6
+      },
+      "revision": 6
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 7
+      },
+      "revision": 7
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 8
+      },
+      "revision": 8
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0009/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 9
+      },
+      "revision": 9
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "000a/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 10
+      },
+      "revision": 10
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "000b/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 11
+      },
+      "revision": 11
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "000c/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 12
+      },
+      "revision": 12
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "000d/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 13
+      },
+      "revision": 13
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "000e/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 14
+      },
+      "revision": 14
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "000f/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 15
+      },
+      "revision": 15
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0010/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 16
+      },
+      "revision": 16
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0001/4",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0001/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0010/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "act",
+     "done",
+     "older",
+     "same_version",
+     "same_version"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0010/5",
+      "revision": 16
+     },
+     "observed": {
+      "version": "0010/5",
+      "revision": 16
+     }
+    }
+   }
+  },
+  {
+   "note": "a delete heard, or read as a tombstone, reverts (§2.8)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0007/4"
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "observed": {
+      "version": "0007/4"
+     }
+    }
+   }
+  },
+  {
+   "note": "a delete of a lower seq is older",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0007/2"
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "older"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a first delete, nothing held: admitted, and reverted",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0007/4"
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "observed": {
+      "version": "0007/4"
+     }
+    }
+   }
+  },
+  {
+   "note": "the author's delete made again under its new run: a delete after a delete, adopted (§2.11)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0007/4"
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0008/0"
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done",
+     "adopted"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "observed": {
+      "version": "0008/0"
+     }
+    }
+   }
+  },
+  {
+   "note": "a put after a delete is acted on",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0007/4"
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/5",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/5",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry under the held run reverts, with no observed version (§2.8)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "never under another run: the author restarted, and its new run's snapshot with no entry is no verdict",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0008",
+       "asof": 0
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "no_verdict"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "the held run's value at the other width is another run: no verdict",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "00000007",
+       "asof": 20
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "no_verdict"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry, nothing held: no verdict",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "no_verdict"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "a snapshot of the held run built before the held version, its asof below the seq: older",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/30",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "older"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/30",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/30",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "after that revert, a put of the run at or below the asof is older, and one above it is acted on",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/15",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/20",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/21",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done",
+     "older",
+     "older",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/21",
+      "revision": 2
+     },
+     "in_force": {
+      "version": "0007/21",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "after that revert, another run's put is acted on",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0008/0",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0008/0",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "after that revert, the delete itself arriving late, at or below the asof, is older; a delete of another run is adopted, and gives the report its version",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0007/18"
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0008/0"
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done",
+     "older",
+     "adopted"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "observed": {
+      "version": "0008/0"
+     }
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry after a delete was acted on: nothing to revert, no verdict",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0007/4"
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 90
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done",
+     "no_verdict"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false,
+     "observed": {
+      "version": "0007/4"
+     }
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry after a refused document, under its run: the refused version is the one held, so it reverts",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": {
+      "refused": {
+       "code": "invalid",
+       "pointer": 2
+      }
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry while an act runs waits, then reverts",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "held",
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "under another run while an act runs: no verdict, and nothing waits",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0008",
+       "asof": 0
+      }
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "no_verdict",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "judged against the one held waiting too: a waiting put of the run above the asof makes it older",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/30",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "held",
+     "older",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/30",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0007/30",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "a put above the asof replaces a waiting snapshot with no entry; one at or below it is older",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 20
+      }
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/20",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/21",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "held",
+     "older",
+     "held",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/21",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0007/21",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "a delete past the window, then a restart: the target holds the old run's document, the new run answers no entry, and the document stays in force (§2.8, the residual)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0008",
+       "asof": 4
+      }
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0008",
+       "asof": 9
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "no_verdict",
+     "no_verdict"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a version that arrives while an act runs is held, then acted on (§2.7)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/4",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "held",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/4",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0007/4",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "the latest replaces the one held waiting, which is passed over",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/4",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "held",
+     "held",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/5",
+      "revision": 3
+     },
+     "observed": {
+      "version": "0007/5",
+      "revision": 3
+     }
+    }
+   }
+  },
+  {
+   "note": "older than the one held waiting is older; equal to it is the same version",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "held",
+     "older",
+     "same_version",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/9",
+      "revision": 3
+     },
+     "observed": {
+      "version": "0007/9",
+      "revision": 3
+     }
+    }
+   }
+  },
+  {
+   "note": "another run replaces the one held waiting",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 3
+      },
+      "revision": 3
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "held",
+     "held",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0008/0",
+      "revision": 3
+     },
+     "observed": {
+      "version": "0008/0",
+      "revision": 3
+     }
+    }
+   }
+  },
+  {
+   "note": "the running act's version, delivered again, is the same version",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "same_version",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a waiting version with the running act's document is adopted when the act ends",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "held",
+     "adopted"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0008/0",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0008/0",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a refused document keeps the previous in force: in_force is another version (§2.7, §2.10)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": {
+      "refused": {
+       "code": "reach",
+       "pointer": 3,
+       "detail": 1
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "observed": {
+      "version": "0007/5",
+      "revision": 2
+     },
+     "refusal": {
+      "code": "reach",
+      "pointer": 3,
+      "detail": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "refused from the baseline: nothing in force",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": {
+      "refused": {
+       "code": "invalid",
+       "pointer": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "refusal": {
+      "code": "invalid",
+      "pointer": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "a refused version is acted on once: delivered again, it is the same version",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": {
+      "refused": {
+       "code": "invalid"
+      }
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "same_version"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "observed": {
+      "version": "0007/5",
+      "revision": 2
+     },
+     "refusal": {
+      "code": "invalid"
+     }
+    }
+   }
+  },
+  {
+   "note": "a refused document put again under a new run is adopted refused: observed moves, in_force stays",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": {
+      "refused": {
+       "code": "invalid",
+       "pointer": 2
+      }
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "adopted"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "observed": {
+      "version": "0008/0",
+      "revision": 2
+     },
+     "refusal": {
+      "code": "invalid",
+      "pointer": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "the next document after a refusal converges",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": {
+      "refused": {
+       "code": "invalid"
+      }
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/4",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/4",
+      "revision": 2
+     },
+     "in_force": {
+      "version": "0007/4",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "a put applied in part: failed, source desired, nothing wholly in force",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/5",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": {
+      "failed": {
+       "code": "apply"
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "failed",
+     "last_known": false,
+     "observed": {
+      "version": "0007/5",
+      "revision": 2
+     },
+     "refusal": {
+      "code": "apply"
+     }
+    }
+   }
+  },
+  {
+   "note": "a revert that could not finish is failed, source baseline; a refusal of a revert is read as a failure",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "delete",
+      "version": "0007/4"
+     }
+    },
+    {
+     "finish": {
+      "refused": {
+       "code": "apply",
+       "detail": 0
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "failed",
+     "last_known": false,
+     "observed": {
+      "version": "0007/4"
+     },
+     "refusal": {
+      "code": "apply",
+      "detail": 0
+     }
+    }
+   }
+  },
+  {
+   "note": "an archive's last-known is acted on, and reported so (§2.9)",
+   "steps": [
+    {
+     "sample": {
+      "from": "archive",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": true,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "the author's own sample of it confirms it: not acted again, last_known gone",
+   "steps": [
+    {
+     "sample": {
+      "from": "archive",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "confirmed"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "confirmed while the act runs",
+   "steps": [
+    {
+     "sample": {
+      "from": "archive",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "confirmed",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "an archive's equal delivery of an author's version is the same version, never a confirmation",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "archive",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "same_version"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "an archive's stale last-known of a remembered run is older, the new run held",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "archive",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done",
+     "older"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0008/0",
+      "revision": 2
+     },
+     "observed": {
+      "version": "0008/0",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "last-known, then the restarted author's put of the same document under a new run: adopted, last_known gone",
+   "steps": [
+    {
+     "sample": {
+      "from": "archive",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "adopted"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0008/0",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0008/0",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "an archive's tombstone reverts, last-known",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "archive",
+      "kind": "delete",
+      "version": "0007/4"
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": true,
+     "observed": {
+      "version": "0007/4"
+     }
+    }
+   }
+  },
+  {
+   "note": "a call: the target's own change since; the same version again is not acted on (§2.7, not a lock)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "call": true
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "called",
+     "same_version"
+    ],
+    "report": {
+     "source": "call",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "after a call, the same document under a new run is adopted, and the call stands",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "call": true
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "called",
+     "adopted"
+    ],
+    "report": {
+     "source": "call",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0008/0",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "after a call, the next document is acted on",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "call": true
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/4",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "called",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/4",
+      "revision": 2
+     },
+     "in_force": {
+      "version": "0007/4",
+      "revision": 2
+     }
+    }
+   }
+  },
+  {
+   "note": "a restart acts again on the version its previous process acted on (§2.7)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "restart": true
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "restarted",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a restart's first report is the baseline's",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "restart": true
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "restarted"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "not_acted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "a restart forgets every run: the previous process's older version is acted on",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 2
+      },
+      "revision": 2
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "restart": true
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "restarted",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     }
+    }
+   }
+  },
+  {
+   "note": "a revision above 4,294,967,295 is refused whole, invalid, and the report carries no revision (§2.4)",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 4294967296
+      },
+      "revision": 4294967296
+     }
+    },
+    {
+     "finish": "check"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "refused",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3"
+     },
+     "refusal": {
+      "code": "invalid"
+     }
+    }
+   }
+  },
+  {
+   "note": "a revision of 4,294,967,295 is the last one a document may carry",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 4294967295
+      },
+      "revision": 4294967295
+     }
+    },
+    {
+     "finish": "check"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3",
+      "revision": 4294967295
+     },
+     "in_force": {
+      "version": "0007/3",
+      "revision": 4294967295
+     }
+    }
+   }
+  },
+  {
+   "note": "over a document in force, a revision above the bound keeps the previous in force",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/4",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 18446744073709551615
+      },
+      "revision": 18446744073709551615
+     }
+    },
+    {
+     "finish": "check"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "refused",
+     "last_known": false,
+     "in_force": {
+      "version": "0007/3",
+      "revision": 1
+     },
+     "observed": {
+      "version": "0007/4"
+     },
+     "refusal": {
+      "code": "invalid"
+     }
+    }
+   }
+  },
+  {
+   "note": "a document whose type carries no revision",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "document": {
+       "mode": "idle"
+      }
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "observed": {
+      "version": "0007/3"
+     },
+     "in_force": {
+      "version": "0007/3"
+     }
+    }
+   }
+  },
+  {
+   "note": "a document as bytes, compared byte for byte: equal bytes under a new run are adopted",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/3",
+      "bytes": "0a02080a"
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/0",
+      "bytes": "0a02080a"
+     }
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0008/1",
+      "bytes": "0a02080b"
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "adopted",
+     "act",
+     "done"
+    ],
+    "report": {
+     "source": "desired",
+     "outcome": "converged",
+     "last_known": false,
+     "in_force": {
+      "version": "0008/1"
+     },
+     "observed": {
+      "version": "0008/1"
+     }
+    }
+   }
+  }
+ ]
+}
