@@ -48,8 +48,22 @@ and :func:`zk2py.owner_heartbeat.read` go through it.
 zero byte; a byte holding its run's width bit …; its run, then its seq,
 big-endian". "An implementation MUST compute a digest so."
 
+**The time's three readings** (core 0.113; :func:`read_time`,
+:func:`time_bits`, :func:`reading_of`): "Two of its codes carry no instant.
+Unknown. All 42 bits set say the owner's clock is unknown. Ahead. The seconds
+all ones, with the millisecond code 1022, say the owner's clock is ahead: its
+clock guard holds (§4.3, "Ahead"). It is the unknown time with its last bit
+clear." "Unused. Every other millisecond code from 1000 up is unused: 1000 to
+1021 under any seconds, and 1022 or 1023 under seconds that are not all
+ones." "An implementation that reads a heartbeat's time MUST read it as an
+instant, as unknown or as ahead ... An implementation MUST NOT read the ahead
+time as unknown, nor as an instant." Here an instant is ``{"s", "ms"}``, the
+unknown time None, and the ahead time :data:`AHEAD`, a value of its own:
+no code path that asks ``time is None`` takes it for unknown, and none that
+reads ``time["s"]`` takes it for an instant without raising.
+
 A body's value is the fixtures' (``conformance/heartbeat/bodies.json``):
-``{"time": {"s", "ms"} | None, "sections": {resource: section}}``, a
+``{"time": {"s", "ms"} | None | AHEAD, "sections": {resource: section}}``, a
 resource named ``<kind token>/<template>``; a section of one member
 ``{"digest": hex8, "vouched": bool}``, a templated one's ``{"digest", "live",
 "vouched": [ranks], "form"?}``.
@@ -63,6 +77,13 @@ from typing import Any, Iterable
 
 #: core §7.5: "All 42 bits set say the owner's clock is unknown."
 UNKNOWN_S, UNKNOWN_MS = 2**32 - 1, 1023
+#: core §7.5 (0.113): "The seconds all ones, with the millisecond code 1022,
+#: say the owner's clock is ahead": ``0x3fffffffffe`` in 42 bits, "the unknown
+#: time with its last bit clear". The value of a time read so, and written so.
+AHEAD_MS = 1022
+AHEAD = "ahead"
+#: the three readings of a heartbeat's time (:func:`reading_of`)
+INSTANT, UNKNOWN = "instant", "unknown"
 TIME_BITS, SECOND_BITS, MS_BITS, DIGEST_BITS = 42, 32, 10, 32
 #: freshness.v2 §3: the standard contract's interface, and its one resource
 PROFILE = "freshness.v2"
@@ -220,14 +241,35 @@ def _put(out: list[str], v: int, n: int, what: str) -> None:
         out.append(format(v, f"0{n}b"))
 
 
-def time_bits(t: dict[str, int] | None) -> str:
-    """The 42-bit time: 32 bits of seconds, then 10 of milliseconds; all
-    ones for the unknown time, None."""
-    out: list[str] = []
+def reading_of(t: Any) -> str:
+    """Which of §7.5's three readings a time's value is: :data:`INSTANT`,
+    :data:`UNKNOWN` or :data:`AHEAD`. A value that is none of them raises:
+    nothing falls through to unknown, nor to an instant."""
     if t is None:
+        return UNKNOWN
+    if isinstance(t, str):
+        if t == AHEAD:
+            return AHEAD
+        raise ValueError(f"{t!r}: no reading of a heartbeat's time")
+    if isinstance(t, dict) and type(t.get("s")) is int and type(t.get("ms")) is int:
+        return INSTANT
+    raise ValueError(f"{t!r}: no reading of a heartbeat's time")
+
+
+def time_bits(t: dict[str, int] | str | None) -> str:
+    """The 42-bit time: 32 bits of seconds, then 10 of milliseconds; all
+    ones for the unknown time, None; the seconds all ones and the code 1022
+    for the ahead time, :data:`AHEAD`."""
+    out: list[str] = []
+    reading = reading_of(t)
+    if reading == UNKNOWN:
         _put(out, UNKNOWN_S, SECOND_BITS, "the time's seconds")
         _put(out, UNKNOWN_MS, MS_BITS, "the time's milliseconds")
+    elif reading == AHEAD:
+        _put(out, UNKNOWN_S, SECOND_BITS, "the time's seconds")
+        _put(out, AHEAD_MS, MS_BITS, "the time's milliseconds")
     else:
+        assert isinstance(t, dict)
         if not 0 <= t["ms"] <= 999:
             raise ValueError(f"{t['ms']} ms: a known time's milliseconds are 0 to 999")
         _put(out, t["s"], SECOND_BITS, "the time's seconds")
@@ -291,15 +333,23 @@ def write(layout: Layout, value: dict[str, Any]) -> bytes:
     return int(bits, 2).to_bytes(len(bits) // 8, "big") if bits else b""
 
 
-def read_time(b: _Bits) -> dict[str, int] | None:
-    """The 42-bit time, read whole, then judged: "All 42 bits set say the
-    owner's clock is unknown. Any other millisecond code from 1000 up is
-    unused" (``code``)."""
+def read_time(b: _Bits) -> dict[str, int] | str | None:
+    """The 42-bit time, read whole, then judged (core 0.113): an instant;
+    None, the unknown time, for all 42 bits set; :data:`AHEAD` for the
+    seconds all ones with the millisecond code 1022. "Every other millisecond
+    code from 1000 up is unused: 1000 to 1021 under any seconds, and 1022 or
+    1023 under seconds that are not all ones" (``code``). Seconds all ones
+    under a code below 1000 are an instant, the last second the field
+    holds."""
     s = b.take(SECOND_BITS, "the time's seconds")
     ms = b.take(MS_BITS, "the time's milliseconds")
-    if ms >= 1000 and not (s == UNKNOWN_S and ms == UNKNOWN_MS):
-        raise Refused("code", f"a millisecond code of {ms}, unused")
-    return None if ms >= 1000 else {"s": s, "ms": ms}
+    if ms < 1000:
+        return {"s": s, "ms": ms}
+    if s == UNKNOWN_S and ms == UNKNOWN_MS:
+        return None
+    if s == UNKNOWN_S and ms == AHEAD_MS:
+        return AHEAD
+    raise Refused("code", f"a millisecond code of {ms} under seconds {s}, unused")
 
 
 def read_sections(layout: Layout, b: _Bits) -> dict[str, Any]:
@@ -393,19 +443,45 @@ def read_put(layout: Layout, payload: bytes, key_token: str | None = None, envel
     return {**read(layout, env.record or b""), "tag": env.tag, "tag_matches": env.tag == layout.tag}
 
 
-def instant_of(time: dict[str, int] | None, epoch_s: int) -> int | None:
+def instant_of(time: dict[str, int] | str | None, epoch_s: int) -> int | None:
     """A heartbeat's time read back to an instant in Unix milliseconds,
     counted from the deployment epoch ``epoch_s`` (core §7.6, ``freshness.v2``
-    0.6 §2.4: the catalog's epoch, else 0); None for the unknown time."""
-    if time is None:
+    0.6 §2.4: the catalog's epoch, else 0); None where it carries none, the
+    unknown time and the ahead time. The two are told apart by
+    :func:`reading_of`, never here: "It carries no instant." """
+    if reading_of(time) != INSTANT:
         return None
+    assert isinstance(time, dict)
     return (epoch_s + time["s"]) * 1000 + time["ms"]
 
 
-def time_of(now_ns: int, epoch_s: int) -> dict[str, int] | None:
-    """The time field of an owner's clock ``now_ns`` (Unix ns), counted from
-    the deployment epoch ``epoch_s`` (core §7.6): None, the unknown time,
-    where it falls outside the 32 bits of seconds."""
+def shown(time: dict[str, int] | str | None, epoch_s: int) -> dict[str, Any]:
+    """A heartbeat's time as a tool shows it (``freshness.v2`` 0.12 §5): "A
+    tool that shows one shows the ahead time as ahead: never as unknown, and
+    never as an instant. It shows the unknown time as unknown, never as the
+    epoch." ``{"clock": "instant", "unix_ms"}``, ``{"clock": "unknown"}`` or
+    ``{"clock": "ahead"}``."""
+    reading = reading_of(time)
+    if reading == INSTANT:
+        return {"clock": INSTANT, "unix_ms": instant_of(time, epoch_s)}
+    return {"clock": reading}
+
+
+def time_of(now_ns: int | None, epoch_s: int, guard: bool = False) -> dict[str, int] | str | None:
+    """The time field an owner writes (core §7.5, ``freshness.v2`` 0.12
+    §2.10 and §2.4). "An owner MUST write core §7.5's ahead time as its
+    heartbeat's time while its guard holds, and as its owner heartbeat's
+    ... Whatever its clock reads. The ahead time carries no instant. An
+    owner writes it for an instant the epoch codes and for one it does not":
+    ``guard`` decides first, :data:`AHEAD`. Otherwise the clock ``now_ns``
+    (Unix ns), counted from the deployment epoch ``epoch_s`` (core §7.6):
+    None, the unknown time, "while its clock reads such an instant", one
+    "before the epoch, or 2^32 s or more after it", and for a clock that
+    reads none (``now_ns`` None)."""
+    if guard:
+        return AHEAD
+    if now_ns is None:
+        return None
     total_ms = now_ns // 1_000_000 - epoch_s * 1000
     s, ms = divmod(total_ms, 1000)
     return {"s": s, "ms": ms} if 0 <= s <= UNKNOWN_S else None

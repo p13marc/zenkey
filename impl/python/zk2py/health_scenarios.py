@@ -537,7 +537,7 @@ def section4(report: Report) -> None:
         q = h.clock_from(s, "lab/ahead")
         # every heartbeat from the detection on (one already on its way excepted)
         held_beats = _beats(s, "lab/ahead", t_det + 200_000_000)
-        all_held = bool(held_beats) and all(b.get("time") is None and _vouches(b, sk) for _, b in held_beats)
+        all_held = bool(held_beats) and all(heartbeat.reading_of(b.get("time")) != heartbeat.INSTANT and _vouches(b, sk) for _, b in held_beats)
         report.check(sec, "step 2: the guard does not hold the status: the owner's put succeeds, and S receives it; "
                           "the fault again within 31 s; the tokens stay present",
                      put_ok == "ok" and len(ahead_put) == 1 and gap is not None and gap <= 31
@@ -560,7 +560,7 @@ def section4(report: Report) -> None:
         t_rel = time.monotonic_ns()
         _sleep_until(t_fix + 35 * fr.NS)
         reput = _puts([x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_put + fr.NS])
-        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if b.get("time") is not None and _vouches(b, sk)]
+        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if heartbeat.reading_of(b.get("time")) == heartbeat.INSTANT and _vouches(b, sk)]
         first = (known[0] - t_fix) / fr.NS if known else None
         faults_after = [x for x, f in ((x, h.decode_fault(x.payload)) for x in s.of(fk))
                         if f and f["code"] == "clock_ahead" and known and x.arrival_ns > known[0]]
@@ -645,7 +645,7 @@ def section4r(report: Report) -> None:
         a = h.judge(r)
         q = h.clock_from(s, "lab/ahead")
         held_beats = _beats(s, "lab/ahead", t_det + 200_000_000)
-        all_held = bool(held_beats) and all(b.get("time") is None and _vouches(b, sk) for _, b in held_beats)
+        all_held = bool(held_beats) and all(heartbeat.reading_of(b.get("time")) != heartbeat.INSTANT and _vouches(b, sk) for _, b in held_beats)
         report.check(sec, "step 2: the guard does not hold the status: the owner's put succeeds, and S receives it; "
                           "the fault again within 31 s; the tokens stay present",
                      not got.startswith("refused") and len(ahead_put) == 1 and gap is not None and gap <= 31
@@ -660,7 +660,7 @@ def section4r(report: Report) -> None:
         fixed = p.command("clock-offset 0") or ""
         _sleep_until(t_fix + 35 * fr.NS)
         reput = _puts([x for x in s.of(sk) if x.kind == "put" and x.arrival_ns > t_put + fr.NS])
-        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if b.get("time") is not None and _vouches(b, sk)]
+        known = [t for t, b in _beats(s, "lab/ahead", t_fix) if heartbeat.reading_of(b.get("time")) == heartbeat.INSTANT and _vouches(b, sk)]
         first = (known[0] - t_fix) / fr.NS if known else None
         faults_after = [x for x in ahead_faults() if known and x.arrival_ns > known[0]]
         r, _ = bus.read("lab/ahead", s, get=False)

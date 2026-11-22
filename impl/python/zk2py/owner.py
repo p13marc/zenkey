@@ -2316,17 +2316,20 @@ class Owner:
     def heartbeat_body(self, iface: str, now: zenoh.Timestamp | None) -> dict[str, Any]:
         """The value of ``iface``'s next body (§2.4): each exposed
         collection's map bit, its digest over the members held live, a bit
-        for each it vouches for; under the clock guard (§2.10, 0.4) the bits
-        as at any other time, and the time unknown: "An owner MUST write all
-        ones as its heartbeat's time while its guard holds"."""
+        for each it vouches for; under the clock guard (§2.10, 0.12) the bits
+        as at any other time, and the time the ahead time: "An owner MUST
+        write core §7.5's ahead time as its heartbeat's time while its guard
+        holds, and as its owner heartbeat's", "Whatever its clock reads",
+        "Never the unknown time". An owner heartbeat takes each group's
+        sections from here and its one time from here too."""
         lo = self.hb_layouts[iface]
         exposed = {f"{r['token']}/{r['template']}" for r, status in self._plan_made.get(iface, [])
                    if status == "exposed"}
         prefix = f"zk2/{self.system}/{self.service}/{iface}/"
         members = {k: freshness_v2.OwnerView(k, h.inband, k not in self.unvouched)
                    for k, h in self._held.items() if k.startswith(prefix) and h.payload is not None}
-        known = None if now is None or self.ahead else hbeat.time_of(
-            now.get_time_as_ntp64().as_nanos(), self.writing_epoch())
+        known = hbeat.time_of(None if now is None else now.get_time_as_ntp64().as_nanos(),
+                              self.writing_epoch(), guard=self.ahead)
         return freshness_v2.owner_body(lo, exposed, members, known)
 
     def _put_heartbeat(self, iface: str) -> None:

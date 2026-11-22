@@ -1177,7 +1177,7 @@ class OwnerView:
 
 
 def owner_body(layout: heartbeat.Layout, exposed: set[str], members: dict[str, OwnerView],
-               time_value: dict[str, int] | None, vouch: bool = True) -> dict[str, Any]:
+               time_value: dict[str, int] | str | None, vouch: bool = True) -> dict[str, Any]:
     """The value of the body an owner writes (§2.4): each exposed collection's
     map bit set, its digest over the members it holds live, and a bit for
     each member it vouches for; with ``vouch`` False (the clock guard,
