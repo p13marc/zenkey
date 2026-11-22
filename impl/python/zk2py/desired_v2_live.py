@@ -86,9 +86,13 @@ class Author:
 
     def __init__(self, address: str, endpoint: str, *, record: str | None = None, run_record: str | None = None,
                  window_s: float = 60.0, tasking: Any = None, watched: bool = False,
-                 tokenless: tuple[str, ...] = ()) -> None:
+                 tokenless: tuple[str, ...] = (), catalog: str | None = None,
+                 owner_heartbeat: bool = False) -> None:
         self.address, self.endpoint = address, endpoint
         self.tokenless = set(tokenless)
+        #: core §8.6's catalog, by its file's path, and whether the author
+        #: confirms its interface by owner heartbeats (freshness.v2 §2.4)
+        self.catalog, self.owner_heartbeat = catalog, owner_heartbeat
         self.record_path = None if record is None else Path(record)
         #: core §4.3: "A 16-bit run is a counter in a record the owner keeps
         #: ... An owner that cannot keep such a record draws 32-bit runs."
@@ -109,6 +113,11 @@ class Author:
         self.owner = Owner(system, service, [self.contract], connect=self.endpoint, tombstone_s=self.window_s,
                            before_tokens=self._adopt, run_record=self.run_record, tokenless=self.tokenless)
         owner = self.owner
+        if self.catalog is not None:
+            from . import catalog as cat
+
+            owner.catalog = cat.read(Path(self.catalog).read_bytes())
+            owner.owner_heartbeats = True if self.owner_heartbeat else None
 
         def answered(query: Any) -> None:
             from . import held as held_stamp
@@ -259,8 +268,16 @@ class Target:
                  presence_watch: bool = False, reread_ms: int | None = None, hold: bool = False, poll_ms: int = 500,
                  timeout: float = 1.0, across: bool = False, reply_timeout_ms: int | None = None, watch: bool = False,
                  moves: bool = True, worker: Any = None, tasking: Any = None, watched: bool = False,
-                 run_record: str | None = None) -> None:
+                 run_record: str | None = None, catalog: str | None = None) -> None:
         self.address, self.endpoint, self.author = address, endpoint, author
+        #: the catalogs the target holds (core §8.6), and the id its author
+        #: names, read once it is needed
+        self.catalogs: list[Any] = []
+        if catalog is not None:
+            from . import catalog as cat
+
+            self.catalogs = [cat.read(Path(catalog).read_bytes())]
+        self._named: str | None = None
         self.unbound, self.presence_watch = unbound, presence_watch
         self.reread_s = None if reread_ms is None else reread_ms / 1000
         self.poll_s = poll_ms / 1000
@@ -562,24 +579,88 @@ class Target:
 
     def _watch_heartbeats(self, s: Any) -> None:
         """"A target subscribes to both forms' keys, as a freshness.v2
-        subscriber does". It reads the heartbeat covering its author's
-        interface "with the author's revision". It holds no catalog, so an
-        owner heartbeat's group is one "in a group whose catalog it does not
-        hold": counted, and not read."""
+        subscriber does": the heartbeat covering its author's interface, and
+        the owner heartbeat key of its collection's class (freshness.v2
+        §2.5, "one for each class that the collections it follows have").
+        It reads each "with the author's revision"."""
         from . import freshness_v2 as f2
 
         self.layout = heartbeat.layout_of(self.author_contract.canonical, self.author_contract.fingerprint)
         system, service = self.author.split("/")
         hb = heartbeat.heartbeat_key(system, service, AUTHOR_IFACE)
         self._entities.append(s.declare_subscriber(hb, zenoh.handlers.Callback(self._heartbeat)))
-        for cls in f2.CLASSES:
-            self._entities.append(s.declare_subscriber(
-                f2.owner_heartbeat_key(system, service, cls),
-                zenoh.handlers.Callback(lambda smp, c=cls: self._owner_heartbeat(c))))
+        cls = f2.classes_of(self.author_contract.canonical)[self.resource]
+        self._entities.append(s.declare_subscriber(
+            f2.owner_heartbeat_key(system, service, cls),
+            zenoh.handlers.Callback(lambda smp, c=cls: self._owner_heartbeat(c, smp))))
 
-    def _owner_heartbeat(self, cls: str) -> None:
+    def _catalog_named(self) -> str | None:
+        """The catalog the author names: its descriptor's (core §3.3), or
+        across a face, where no descriptor is read, the one the target was
+        provisioned (core §8.6)."""
+        if self._named is None and self.catalogs:
+            if self.across:
+                self._named = self.catalogs[0].id
+            else:
+                from . import freshness_v2 as f2
+
+                assert self.owner is not None and self.owner.session is not None
+                self._named = f2.descriptor_catalog(self.owner.session, self.author)
+        return self._named
+
+    def _owner_heartbeat(self, cls: str, sample: Any) -> None:
+        """§2.5: "A group of an owner heartbeat is read as a heartbeat is,
+        its sequence the owner heartbeat key's. A group whose sections
+        freshness.v2 §2.5 does not read is a heartbeat not read. An owner
+        heartbeat with no group for the author's interface has no section."
+        With no catalog it is one "in a group whose catalog it does not
+        hold": counted, never read, and "the deployment's period stands"."""
+        from . import catalog as cat, owner_heartbeat as oh
+
+        if sample.kind != zenoh.SampleKind.PUT:
+            return
+        if not self.catalogs:
+            with self.lock:
+                self.heartbeat_log.append((cls, "no_catalog"))
+            return
+        why, section, stamp = None, None, None
+        try:
+            put = oh.read(sample.payload.to_bytes(), enveloped=zk2c.envelope_encoding(str(sample.encoding)))
+            stamp = put.stamp
+        except (oh.Refused, zk2c.Refused, heartbeat.Refused):
+            why = "refused"
+        if why is None:
+            named = self._catalog_named()
+            mine, unresolved = None, False
+            for g in put.body.groups:
+                try:
+                    entry = cat.resolve(self.catalogs, named, g.index).entry
+                except cat.Refused:
+                    unresolved = True  # this group may be the author's interface's: it cannot tell
+                    continue
+                if entry is not None and entry[0] == AUTHOR_IFACE:
+                    mine = (g, entry)
+            if mine is None:
+                why = "no_catalog" if unresolved else None  # else: no group for the interface, no section
+            else:
+                g, entry = mine
+                if entry[1] != self.layout.fingerprint or g.tag != self.layout.tag:
+                    why = "revision"
+                else:
+                    try:
+                        sec = oh.read_sections(self.layout, g.bits).get(self.resource)
+                        if sec is not None:
+                            section = d2.Section(int(sec["digest"], 16), sec["live"])
+                    except oh.Refused:
+                        why = "refused"
         with self.lock:
-            self.heartbeat_log.append((cls, "no_catalog"))
+            if why is not None or stamp is None:
+                word = self.watch.heartbeat(d2.Run(16, 0), 0, None, read=False, key=cls)
+            else:
+                word = self.watch.heartbeat(d2.Run(stamp.width, stamp.run), stamp.seq, section, key=cls)
+            self.heartbeat_log.append((cls, word if why is None else f"{word}:{why}"))
+        if word == d2.READ:
+            threading.Thread(target=self._reads, args=("heartbeat",), daemon=True).start()
 
     def _heartbeat(self, sample: Any) -> None:
         if sample.kind != zenoh.SampleKind.PUT:
@@ -692,11 +773,13 @@ class Target:
         with self.lock:
             e, last = self.watch.expects, self.watch.last
             words: dict[str, int] = {}
-            for _, w in self.heartbeat_log:
+            by_key: dict[str, dict[str, int]] = {}
+            for k, w in self.heartbeat_log:
                 words[w] = words.get(w, 0) + 1
+                by_key.setdefault(k, {})[w] = by_key.setdefault(k, {}).get(w, 0) + 1
             return {"expects": None if e is None else {"digest": format(e.digest, "08x"), "live": e.live},
                     "last": None if last is None else [last[0].text, last[1]],
-                    "outstanding": self.watch.outstanding, "heartbeats": words,
+                    "outstanding": self.watch.outstanding, "heartbeats": words, "by_key": by_key,
                     "reads": [{"why": w, "held": s, "drew": d} for w, s, d in self.read_log]}
 
     def close(self) -> None:
