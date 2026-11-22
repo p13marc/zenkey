@@ -1588,6 +1588,10 @@ time a profile reads (the table below).
     ([`profiles/health/v1.md`](profiles/health/v1.md) §2.5). Its status is
     a `freshness.v2` state, which the guard does not hold, so the status
     says nothing of the clock. `[Sc: profiles/health/scenarios.md §4]`
+    - An owner that sends heartbeats reports it in their time too, by
+      §7.5's ahead time. A `health.v2` owner publishes the sample once,
+      and its reader answers from one heartbeat
+      ([`profiles/health/v2.md`](profiles/health/v2.md) §2.5).
     - Where the owner stamps the sample from its clock, which is ahead
       (the table above), a router re-stamps it, or drops it under
       `timestamping.drop_future_timestamp`, which loses the report.
@@ -6067,6 +6071,7 @@ profile's own table replaces its interim one.
 | `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 |
 | `telemetry` | `kind`, `unit`, `buckets`, `semantic`; `telemetry.v2` §4 adds `series` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, [`profiles/telemetry/v2.md`](profiles/telemetry/v2.md) §4 |
 | `desired` | `target_param`; `desired.v2` §4 adds `report`, `pointers` and `details` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4, [`profiles/desired/v2.md`](profiles/desired/v2.md) §4 |
+| `health` | `health.v2` §4: `reasons`, `details`, `codes`. `health.v1` publishes no table | [`profiles/health/v2.md`](profiles/health/v2.md) §4 |
 | `redundancy` | `election` | [`profiles/redundancy/v1.md`](profiles/redundancy/v1.md) §4 |
 | `timing` | `period_ms`, `deadline_ms`, `lifespan_ms` | [`profiles/timing/v1.md`](profiles/timing/v1.md) §4 |
 | `arbitration` | `policy`, on a requirement | [`profiles/arbitration/v1.md`](profiles/arbitration/v1.md) §4 |
@@ -6086,6 +6091,13 @@ A contract that writes `alarms.<key>` draws W105.
 already says which identity fills each target parameter (R2), and no
 contract wrote it, so it is outside `desired.v1`'s published table, and a
 contract that writes it draws W105. `[F: contracts/w105-desired-target]`
+
+`health.v2` publishes three keys, each a service's own table of words:
+`reasons`, `details` and `codes`, which a contract writes once on
+`[defaults]` (`health.v2` §2.10). W105 reads them for a contract that
+lists `health.v2`. `health.v1` publishes no table and had no interim
+one, so a key `health.<key>` in a contract that lists `health.v1` draws
+no W105, as before (`health.v1` §1).
 
 `redundancy.v1` publishes the interim `redundancy` row's one key
 unchanged: `election`, `claim` or `external`, which a contract
