@@ -1842,11 +1842,45 @@ def _desired_v2_watch(path: Path) -> list[Result]:
     return out
 
 
+def _desired_v2_declarations(path: Path) -> list[Result]:
+    """desired.v2 §2.2, §2.10: a resolved resource -> its declaration as a
+    desired resource (v1's reading and ``horizon_v1``), and as a report
+    resource. An explicit state is read as its kind token, ``@state``."""
+    from . import desired as ds, desired_v2 as d2
+
+    def token(r: dict[str, Any]) -> str:
+        return "@state" if r.get("explicit") and r["kind"] == "state" else r["kind"]
+
+    data = _load_json(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["resources"]):
+        r = c["resource"]
+        got = d2.declare(token(r), r["template"], r["annotations"], r["params"], c["uses"]).expect()
+        out.append(_check(f"v2 declarations, resource #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(data["reports"]):
+        r = c["resource"]
+        ty = r["type"]
+        mine = d2.ReportResource(token(r), r["template"], r["annotations"],
+                                 ty["kind"] == "packed" and ty["name"] == d2.REPORT_TYPE
+                                 and d2.is_published(ty["artifact"]))
+        # the file gives the other resources by their desired.report values alone
+        others = [d2.ReportResource("state", "", {d2.REPORT_KEY: v}, True) for v in c["others"]]
+        d = d2.declare_report(mine, set(c["requires"]), others)
+        if d.declaration == ds.NOT_THIS:
+            got = {"declaration": ds.NOT_THIS}
+        elif d.declaration == ds.INVALID:
+            got = {"declaration": ds.INVALID, "reasons": list(d.reasons)}
+        else:
+            got = {"declaration": ds.DECLARED, d.form: d.name, "pointers": list(d.pointers), "details": list(d.details)}
+        out.append(_check(f"v2 declarations, report #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 #: desired.v2's fixtures (``conformance/v2/``), by file name; an unknown file
 #: fails, as in :data:`PROFILE_FIXTURES`.
 DESIRED_V2_FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": _desired_v2_schema, "reports.json": _desired_v2_reports, "order.json": _desired_v2_order,
-    "watch.json": _desired_v2_watch,
+    "watch.json": _desired_v2_watch, "declarations.json": _desired_v2_declarations,
 }
 
 
