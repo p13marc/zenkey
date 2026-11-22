@@ -42,7 +42,9 @@ and fails when a row's is stale.
 No adopter's mapping and no shipped service uses these, yet or any
 longer. Their texts, fixtures, runtimes and tools are as complete as the
 others'. Only the walkthrough exercises them, or for `freshness.v1` and
-`desired.v2` their scenarios' own contracts. A profile leaves this table when one does
+`desired.v2` their scenarios' own contracts. `health.v2` has its
+standard contract. It is a text and its fixtures so far. No
+implementation runs it yet. A profile leaves this table when one does
 (the process, below).
 
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
@@ -65,7 +67,7 @@ profiles/
     scenarios.md          the rules a fixture cannot check; scenarios-v<major>.md for a later major
     conformance/          fixtures; each file states its format in its description; v<major>/ for a later major
     <name>.v<major>.toml  the standard contract, for a profile that defines one
-    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, desired.v2, config.v2)
+    <name>.v<major>.json  the standard schema, for a profile that defines one (core §10 point 1: telemetry.v1, desired.v1, desired.v2, config.v2); for health.v2, its standard contract's packed types
 ```
 
 ## The template
@@ -211,6 +213,9 @@ thing in the same place.
     §4.2's list of per-key resources name a desired resource only where
     its contract does not use it. Its packed report needed no change:
     it uses §7.6's kinds as they stand;
+  - `health.v2`: that §7.5 gives a heartbeat's time a code for a clock
+    ahead. Its clock question reads it. Also that Appendix D publishes
+    its vocabulary. Its packed records needed no change;
   - `redundancy.v1`: that a descriptor marks a standby (`"standby":
     true`, D012 when tokenless), and that the core defines what a standby
     holds and exposes. Also that a standby taking over and an incumbent
