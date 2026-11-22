@@ -2945,8 +2945,9 @@ impl Res {
 /// - a per-key resource (core §4.2,
 ///   [`crate::collection::per_key_in`]): a state that declares
 ///   `freshness.ttl_s` above 0, of a revision that does not use
-///   `freshness.v2`; one whose annotations hold `desired.target_param`; a
-///   metric resource of `telemetry.v1` or `telemetry.v2` (a key of its
+///   `freshness.v2`; one whose annotations hold `desired.target_param`,
+///   of a revision that does not use `desired.v2` (0.23); a metric
+///   resource of `telemetry.v1` or `telemetry.v2` (a key of its
 ///   vocabulary), of a revision that uses one; any state of a revision
 ///   that uses `redundancy.v1`;
 /// - a template whose first chunk is a parameter, which has no snapshot

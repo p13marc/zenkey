@@ -42,6 +42,11 @@ use zenkey_model::timing::{self, Mono};
 #[path = "profiles/config_v2.rs"]
 mod config_v2;
 
+/// `desired.v2`'s runners (`desired/conformance/v2/`, #986's J2), beside
+/// them.
+#[path = "profiles/desired_v2.rs"]
+mod desired_v2;
+
 /// The fixtures this crate runs, as (profile directory, file name).
 const KNOWN: &[(&str, &str)] = &[
     ("hostid", "vectors.json"),
@@ -99,6 +104,13 @@ const KNOWN: &[(&str, &str)] = &[
     ("desired", "reports.json"),
     ("desired", "conclusions.json"),
     ("desired", "slices.json"),
+    ("desired", "v2/schema.json"),
+    ("desired", "v2/reports.json"),
+    ("desired", "v2/order.json"),
+    ("desired", "v2/watch.json"),
+    ("desired", "v2/declarations.json"),
+    ("desired", "v2/slices.json"),
+    ("desired", "v2/conclusions.json"),
     ("redundancy", "declarations.json"),
     ("redundancy", "elections.json"),
     ("redundancy", "heals.json"),

@@ -1,0 +1,33 @@
+# desired.v2's scenarios (#986), as `spec/profiles/desired/scenarios-v2.md`
+# states the contract: what a worker runs, its report of its task role (the
+# packed `Report` of the profile's schema, listed by its path from here, and
+# found by `desired.report`, never by the resource's name), the places and
+# the lines a refusal's indices read, and the role, optional, so that a
+# deployment can leave it unbound.
+[interface]
+name  = "worker"
+major = 2
+minor = 0
+uses  = ["desired.v2"]
+
+[schemas]
+packed     = ["../../../spec/profiles/desired/desired.v2.json"]
+jsonschema = ["tasking.json"]
+
+[resources.running]
+kind = "state"
+type = "json:Task"
+
+[resources."desired/task"]
+kind = "state"
+type = "packed:Report"
+
+[resources."desired/task".annotations]
+"desired.report"   = "task"
+"desired.pointers" = ["", "/mode", "/rate_hz", "/endpoint", "/revision"]
+"desired.details"  = ["above what the drive supports", "names how the worker reaches the bus", "a revision above 4,294,967,295"]
+
+[requires.task]
+interface = "tasking.v2"
+resources = ["tasks/{system}/{service}"]
+optional  = true

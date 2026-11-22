@@ -96,7 +96,12 @@
 //!   adopted without an act, refused whole or reverted), and §5's four
 //!   questions (`spec/profiles/desired/v1.md`,
 //!   #840). The author's writes and record, and the target's subscription,
-//!   seed and archive read, are the runtime's.
+//!   seed and archive read, are the runtime's. [`desired::v2`] is
+//!   `desired.v2`'s (`spec/profiles/desired/v2.md`, #986): a version its
+//!   put's in-band stamp, written `<run>/<seq>`; the same state machine
+//!   over runs and seqs, with a snapshot with no entry; the watch of the
+//!   author's heartbeat; the packed `Report`, a refusal's place and line
+//!   indices into the report resource's two tables; and the same judges.
 //! - [`redundancy`]: `redundancy.v1`'s vocabulary, the declaration read
 //!   from a contract (governed, its election `claim` or `external`), how
 //!   instance ids compare, the descriptor's standby mark read and checked,

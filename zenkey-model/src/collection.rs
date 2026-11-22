@@ -1117,8 +1117,10 @@ pub fn is_member(resource: &Resource, key: &str) -> bool {
 ///
 /// - a state that declares `freshness.ttl_s` above 0, of a revision that
 ///   does not use `freshness.v2`;
-/// - a `desired.v1` desired resource: its annotations hold
-///   `desired.target_param`;
+/// - a desired resource, its annotations holding `desired.target_param`,
+///   of a revision that does not use `desired.v2` (core 0.112: a
+///   `desired.v2` one is answered by snapshot, its version its in-band
+///   stamp);
 /// - a metric resource of `telemetry.v1` or `telemetry.v2` (a key of its
 ///   vocabulary), of a revision that uses one;
 /// - every state of a revision that uses `redundancy.v1`.
@@ -1140,7 +1142,8 @@ pub fn per_key_in(
         .ttl()
         .is_some()
         && !uses(crate::freshness::PROFILE_V2);
-    let desired = annotations.contains_key(crate::desired::TARGET_PARAM);
+    let desired = annotations.contains_key(crate::desired::TARGET_PARAM)
+        && !uses(crate::desired::v2::PROFILE);
     let metric = (uses(crate::telemetry::PROFILE) || uses(crate::telemetry::PROFILE_V2))
         && crate::telemetry::VOCABULARY
             .iter()

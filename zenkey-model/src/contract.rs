@@ -595,7 +595,9 @@ fn check_history(h: Option<&a::History>, at: &str, report: &mut Report) {
 /// three keys (`timing::VOCABULARY`, core 0.53), and `arbitration.v1` the
 /// interim row's `policy`, read on a requirement (`arbitration::VOCABULARY`,
 /// core 0.54). A later major's own is [`vocabulary`]'s: `telemetry.v2`
-/// adds `series` (`telemetry::VOCABULARY_V2`, #983 T1).
+/// adds `series` (`telemetry::VOCABULARY_V2`, #983 T1), and `desired.v2`
+/// `report`, `pointers` and `details` (`desired::v2::VOCABULARY`, core
+/// 0.112, #986 J2).
 const VOCABULARIES: &[(&str, &[&str])] = &[
     (crate::freshness::NAME, crate::freshness::VOCABULARY),
     (crate::timing::NAME, crate::timing::VOCABULARY),
@@ -623,6 +625,9 @@ const VOCABULARIES: &[(&str, &[&str])] = &[
 fn vocabulary(name: &str, major: u32) -> Option<&'static [&'static str]> {
     if name == crate::telemetry::NAME && major == 2 {
         return Some(crate::telemetry::VOCABULARY_V2);
+    }
+    if name == crate::desired::NAME && major == 2 {
+        return Some(crate::desired::v2::VOCABULARY);
     }
     VOCABULARIES
         .iter()
