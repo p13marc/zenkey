@@ -261,3 +261,221 @@ def level_of(r: Read | None) -> v1.Level | None:
     if r is None:
         return None
     return r.level if r.level is not None else v1.Unknown(r.unknown or "unknown_level")
+
+
+# -- §2.10, §4: the words ----------------------------------------------------------------
+#
+# Written from v2.md §2.10 and §4 and committed before tables.json was opened.
+
+REASON, DETAIL, CODE = "reason", "detail", "code"
+KINDS = (REASON, DETAIL, CODE)
+#: §4: the three keys, one for each kind of word
+KEYS = {REASON: "health.reasons", DETAIL: "health.details", CODE: "health.codes"}
+#: a record type's kind of word
+KIND_OF = {STATUS: REASON, CHECK: DETAIL, FAULT: CODE}
+#: §2.10's table of numbers: "0 none given; 1 to 31 the profile's; 32 to 62
+#: the service's own; 63 no table's: the record's out_of_range"
+PROFILE_LAST, OWN_FIRST, OWN_LAST, TABLE_MAX = 31, 32, 62, 31
+#: §2.10 "The profile's tables. A number in them means what the table says,
+#: from any owner."
+PROFILE_TABLES: dict[str, dict[int, str]] = {
+    REASON: {1: "starting", 2: "serving", 3: "stopping", 4: "check", 5: "upstream_lost", 6: "fallback",
+             7: "backlog", 8: "misconfigured"},
+    DETAIL: {1: "ok", 2: "unreachable", 3: "timeout", 4: "refused", 5: "cannot_run"},
+    CODE: {1: "clock_ahead"},
+}
+#: §2.10's codes table: a code's level, and what its argument counts
+PROFILE_CODE_LEVEL = {"clock_ahead": "failed"}
+#: "A name is [a-z][a-z0-9_]*, as v1 §2.10's codes are."
+NAME = v1.CODE_FORM
+#: a contract's declaration is invalid "for the first of these"
+NOT_USED, VALUE, DISAGREES = "not_used", "value", "disagrees"
+#: an instance's table: "Where two hold two different lists, it has none (differ)."
+DIFFER = "differ"
+
+
+def is_name(x: Any) -> bool:
+    return isinstance(x, str) and x.isascii() and NAME.fullmatch(x) is not None
+
+
+def is_table(value: Any) -> bool:
+    """§4: "a list of at most 31 names, each [a-z][a-z0-9_]*, none twice".
+    A list of no name is one."""
+    return (isinstance(value, list) and len(value) <= TABLE_MAX and all(is_name(x) for x in value)
+            and len(set(value)) == len(value))
+
+
+@dataclass(frozen=True)
+class Declared:
+    """One contract's table of one kind (§2.10 "A contract's table"): the
+    list its resources carry, or none; and why its declaration is invalid,
+    where it is: "Its declaration is invalid, and it holds none, for the
+    first of these"."""
+
+    table: tuple[str, ...] | None
+    invalid: str | None = None
+
+    def expect(self) -> dict[str, Any]:
+        if self.invalid is not None:
+            return {"invalid": self.invalid}
+        return {"table": None if self.table is None else list(self.table)}
+
+
+def contract_table(kind: str, uses: Any, annotations: Any) -> Declared:
+    """A contract's table of ``kind``, from its ``uses`` and each resource's
+    resolved annotations (a list of mappings, one per resource). "A resource
+    that does not carry the key takes no part." In the text's order:
+
+    1. ``not_used``: "a resource carries the key, and the contract's
+       ``uses`` does not list ``health.v2``";
+    2. ``value``: "a resource's value is not a list of at most 31 names,
+       none twice";
+    3. ``disagrees``: "two resources carry two different lists"."""
+    key = KEYS[kind]
+    carried = [a[key] for a in annotations if isinstance(a, dict) and key in a]
+    if not carried:
+        return Declared(None)
+    if PROFILE not in (uses or []):
+        return Declared(None, NOT_USED)
+    if not all(is_table(v) for v in carried):
+        return Declared(None, VALUE)
+    if any(v != carried[0] for v in carried[1:]):
+        return Declared(None, DISAGREES)
+    return Declared(tuple(carried[0]))
+
+
+def contract_tables(canonical: dict[str, Any]) -> dict[str, Declared]:
+    """A revision's three tables, read from its canonical form: "The
+    canonical form carries it on each (core §9.5), which is where a reader
+    of a bundle finds it." """
+    ann = [r.get("annotations") or {} for r in canonical.get("resources", [])]
+    return {k: contract_table(k, canonical.get("uses"), ann) for k in KINDS}
+
+
+@dataclass(frozen=True)
+class Table:
+    """An instance's table of one kind (§2.10 "An instance's table"): "the
+    one table among the contracts it implements: the revisions its
+    descriptor names". None where no named revision in hand holds one;
+    ``differ`` where "two hold two different lists, it has none"."""
+
+    names: tuple[str, ...] | None
+    differ: bool = False
+
+    def expect(self) -> dict[str, Any]:
+        return {"table": None, "reason": DIFFER} if self.differ else \
+            {"table": None if self.names is None else list(self.names)}
+
+
+def instance_table(kind: str, named: Any, held: dict[str, Any]) -> Table:
+    """The instance's table of ``kind``. ``named`` is the revisions its
+    descriptor names, or the deployment's word across a face, each by its
+    fingerprint; None where the reader holds neither: "A reader that holds
+    neither the descriptor nor the deployment's word shows numbers".
+    ``held`` maps a fingerprint to what the reader holds of that revision:
+    its canonical form, or its :class:`Declared` table of this kind.
+
+    "A reader reads it from those of the named revisions it holds. A
+    revision it does not hold adds no table, and neither does one it holds
+    that the descriptor does not name." A contract whose declaration is
+    invalid "holds none", so it adds none."""
+    if named is None:
+        return Table(None)
+    lists: list[tuple[str, ...]] = []
+    for fp in named:
+        rev = held.get(fp)
+        if rev is None:
+            continue
+        d = rev if isinstance(rev, Declared) else contract_tables(rev)[kind]
+        if d.table is not None and d.table not in lists:
+            lists.append(d.table)
+    if not lists:
+        return Table(None)
+    if len(lists) > 1:
+        return Table(None, True)
+    return Table(lists[0])
+
+
+def write_word(kind: str, word: str | None, own: Table | None = None) -> Any:
+    """A word as an owner writes it (§2.10 "Writing a word"), in the text's
+    order: "No word given: 0. A name of the profile's table of that kind:
+    its number. A name of its instance's own table: 32 plus its index. Any
+    other word: ``out_of_range``. The words stay in the owner's log." An
+    instance whose tables differ has none, so its "owner then writes no word
+    from 32 to 62"."""
+    if word is None:
+        return 0
+    for number, name in PROFILE_TABLES[kind].items():
+        if name == word:
+            return number
+    if own is not None and own.names is not None and word in own.names:
+        return OWN_FIRST + own.names.index(word)
+    return OUT_OF_RANGE
+
+
+@dataclass(frozen=True)
+class Word:
+    """A word as a reader shows it (§2.10 "Reading a word", §5): ``shown``
+    is ``none`` (0, "shown as no word"), ``name`` (with whose table names
+    it, ``profile`` or ``own``), ``number`` ("as its number where none
+    does") or ``out_of_range`` ("a word no table names: never as a name, and
+    never as no word")."""
+
+    shown: str
+    number: int | None = None
+    name: str | None = None
+    whose: str | None = None
+
+    def expect(self) -> dict[str, Any]:
+        if self.shown == "name":
+            return {"name": self.name}
+        if self.shown == "number":
+            return {"number": self.number}
+        return {"word": None} if self.shown == "none" else {"out_of_range": True}
+
+    def text(self) -> str:
+        return {"none": "no word", "name": str(self.name), "number": str(self.number),
+                "out_of_range": "a word no table names"}[self.shown]
+
+
+def read_word(kind: str, number: Any, own: Table | None = None) -> Word:
+    """A record's word read (§2.10): "0: no word. 1 to 31: the profile's
+    name, or the number where this text names none. 32 to 62: the name at
+    that index of the instance's own table, or the number where the reader
+    holds no table or the table ends before it. ``out_of_range``: a word no
+    table names. A reader shows that, never a name." ``own`` is
+    :func:`instance_table`'s: never a table "read from a revision its
+    owner's descriptor does not name"."""
+    if number == OUT_OF_RANGE:
+        return Word("out_of_range")
+    if isinstance(number, bool) or not isinstance(number, int) or not 0 <= number <= OWN_LAST:
+        raise ValueError(f"{number!r}: a word is a number from 0 to 62, or out_of_range")
+    if number == 0:
+        return Word("none", 0)
+    if number <= PROFILE_LAST:
+        name = PROFILE_TABLES[kind].get(number)
+        return Word("number", number) if name is None else Word("name", number, name, "profile")
+    index = number - OWN_FIRST
+    if own is None or own.names is None or index >= len(own.names):
+        return Word("number", number)
+    return Word("name", number, own.names[index], "own")
+
+
+def growth(earlier: Any, later: Any) -> dict[str, Any]:
+    """A table's change from one revision to a later one (§2.10 "A table
+    grows by appending": "A later revision SHOULD append names, and SHOULD
+    NOT remove, reorder or rename one. Then every number keeps its word
+    across revisions."). ``keeps`` is whether every number the earlier table
+    names keeps its word: the earlier list is a prefix of the later.
+    ``change`` names what the later one did: ``same``, ``appended``,
+    ``removed`` (a name gone and none in its place), ``renamed`` (a name
+    gone and another at its index) or ``reordered`` (every name kept, one at
+    another index). None is no table: the list of no name."""
+    a, b = list(earlier or []), list(later or [])
+    if b[:len(a)] == a:
+        return {"keeps": True, "change": "same" if len(a) == len(b) else "appended"}
+    gone = [x for x in a if x not in b]
+    if not gone:
+        return {"keeps": False, "change": "reordered"}
+    renamed = any(i < len(b) and b[i] not in a for i, x in enumerate(a) if x in gone)
+    return {"keeps": False, "change": "renamed" if renamed else "removed"}
