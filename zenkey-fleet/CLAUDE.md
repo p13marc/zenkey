@@ -589,7 +589,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `freshness.v2` collection in hand has, with a face the one
   `FacePlan::owner_heartbeat_crosses` lets cross, its horizon the
   shortest `class_horizon`; `of` is it given none, and
-  `tests/face_scope.rs` passes `scope/faces.json`'s 29 cases as written.
+  `tests/face_scope.rs` passes `scope/faces.json`'s 33 cases as written
+  (observer 0.35's four, by hand: a GET given a catalog, which takes
+  state tokens alone, and a `host` collection beside a crossing `link`
+  key).
   The lens reads a put on a class key as an owner heartbeat
   (`Lens::check_sample` → `inband::owner_heartbeat_check`/
   `owner_heartbeat_value`, declared `zk2c owner heartbeat (<class>)`):
