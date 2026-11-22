@@ -139,6 +139,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/profiles/desired/v2.md": {
+    "mean": 12.67,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/freshness/CHANGELOG.md": {
     "mean": 16.66,
     "over": 0,
