@@ -596,3 +596,121 @@ def late_joiner(status: dict[str, Any] | None, checks: dict[str, Any] | None, ep
               and LEVELS.index(worst) > LEVELS.index(st.level))
     return Joined(st, deleted, confirmation, got, retired, instant, why, worst, breaks,
                   None if not breaks else ("finding" if instant else "two_readings"))
+
+
+# -- §2.11, §2.12: is this service healthy? ----------------------------------------------
+#
+# Written from v2.md §2.1, §2.4, §2.6 to §2.8, §2.11 and §2.12, with v1
+# §2.11's five steps beside them, and committed before judgements.json was
+# opened.
+
+V1, V2 = v1.IFACE, IFACE
+FRESH, STALE, UNOBSERVABLE, NOT_ASKED = "fresh", v1.STALE, v1.UNOBSERVABLE, v1.NOT_ASKED
+
+
+def major_of(interfaces: Any) -> str | None:
+    """§2.11 step 2, §2.12: "A descriptor whose ``interfaces`` holds
+    ``health.v2`` is read by this text. One that holds ``health.v1`` and not
+    ``health.v2`` is read by ``health.v1``'s. One that holds neither: not
+    asked, ``not_listed``. One that holds both breaks §2.3. A reader reads
+    ``health.v2``." The interfaces are the descriptor's list: no interface
+    token plays a part (§2.7)."""
+    names = set(interfaces or [])
+    return V2 if V2 in names else V1 if V1 in names else None
+
+
+@dataclass(frozen=True)
+class Reading:
+    """One reading of one service, for §2.11's steps:
+    - ``presence``: ``present``, ``absent``, ``incomplete`` or
+      ``across_face``;
+    - ``interfaces``: the descriptor's ``interfaces``, None for a descriptor
+      not read; read only when present;
+    - ``face``: ``{"status_crosses": bool}``, read only across a face, where
+      "the deployment's word stands for the descriptor"; its ``major`` where
+      that word names ``health.v1``;
+    - ``freshness``: ``freshness.v2``'s verdict over every observation of
+      ``state/status`` and its reason, as judged: ``fresh``, ``stale``,
+      ``unobservable`` or ``not_asked``;
+    - ``status``: the status's record read, a :class:`Read`, or None for no
+      value read;
+    - ``checks``: None when not read, else each current check's
+      :class:`Read` by name."""
+
+    presence: str
+    interfaces: Any = None
+    face: dict[str, Any] | None = None
+    freshness: tuple[str, str] | None = None
+    status: Read | None = None
+    checks: dict[str, Read] | None = None
+
+
+@dataclass(frozen=True)
+class Answer:
+    """"The answer is a verdict, a reason, and, for healthy and unhealthy,
+    the level it rests on. The verdicts and the reasons are v1's." ``major``
+    is the major the reading is judged under (§2.12), None where no
+    descriptor and no deployment's word names one."""
+
+    verdict: str
+    reason: str
+    level: str | None = None
+    major: str | None = None
+
+    def expect(self) -> dict[str, Any]:
+        return {"verdict": self.verdict, "reason": self.reason, "level": self.level}
+
+
+def judge(r: Reading) -> Answer:
+    """§2.11: v1's five steps "read over this major's interface and
+    records", "the first of these steps that answers"."""
+    across = r.presence == "across_face"
+    major: str | None = None
+    # 1. Presence (§2.1: "Absent is presence's word, not a level").
+    if r.presence == "absent":
+        return Answer(NOT_ASKED, "absent")
+    if r.presence == "incomplete":
+        return Answer(UNOBSERVABLE, "presence_incomplete")
+    if across:
+        major = (r.face or {}).get("major", V2)
+        if not (r.face or {}).get("status_crosses"):
+            return Answer(UNOBSERVABLE, "face_closed", None, major)
+    elif r.presence == "present":
+        # 2. The descriptor (§2.7): never the interface token.
+        if r.interfaces is None:
+            return Answer(UNOBSERVABLE, "no_descriptor")
+        major = major_of(r.interfaces)
+        if major is None:
+            return Answer(NOT_ASKED, "not_listed")
+    else:
+        raise ValueError(f"presence {r.presence!r}")
+    # 3. The status's freshness, freshness.v2's verdict, as judged.
+    verdict, reason = r.freshness if r.freshness is not None else (STALE, "no_delivery")
+    if verdict == STALE:
+        if across and reason == "no_delivery":
+            return Answer(UNOBSERVABLE, "nothing_crossed", None, major)
+        return Answer(STALE, reason, None, major)
+    if verdict == UNOBSERVABLE:
+        return Answer(UNOBSERVABLE, reason, None, major)
+    if verdict == NOT_ASKED:
+        if reason == "deleted":
+            return Answer(UNOBSERVABLE, "deleted", None, major)   # "The owner broke §2.3"
+        return Answer(NOT_ASKED, reason, None, major)             # last_known, core S6
+    if verdict != FRESH:
+        raise ValueError(f"freshness {verdict!r}")
+    # 4. The status's level, then 5. the checks: "Only current checks count:
+    # those the owner answers with a record at a level."
+    worst = worst_of(c.level for c in (r.checks or {}).values())
+    st = r.status
+    if st is not None and st.level is not None:
+        if worst is not None and LEVELS.index(worst) > LEVELS.index(st.level):
+            return Answer(v1.UNHEALTHY, "inconsistent", worst, major)
+        if st.level == "ok":
+            return Answer(v1.HEALTHY, "ok", "ok", major)
+        return Answer(v1.UNHEALTHY, st.level, st.level, major)
+    # "With the status unknown: a current check DEGRADED or FAILED:
+    # unhealthy, check, at the worst check's level"; "otherwise:
+    # unobservable, unknown_level, or undecodable" (§2.6: never ok).
+    if worst is not None and worst != "ok":
+        return Answer(v1.UNHEALTHY, "check", worst, major)
+    return Answer(UNOBSERVABLE, "unknown_level" if st is None else (st.unknown or "unknown_level"), None, major)
