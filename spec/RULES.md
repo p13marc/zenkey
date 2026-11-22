@@ -442,7 +442,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 | Rule | Sentence | Evidence |
 |---|---|---|
-| [§8.1](core.md#81-tokens) | These [the tokenless set's interfaces] SHOULD be the interfaces every service of the deployment implements: `health.v1` ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1` ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13), `freshness.v2` ([`profiles/freshness/v2.md`](profiles/freshness/v2.md) §3) and the rest of a framework set. | `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]` |
+| [§8.1](core.md#81-tokens) | These [the tokenless set's interfaces] SHOULD be the interfaces every service of the deployment implements: `health.v1` ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1` ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) or `alarms.v2` ([`profiles/alarms/v2.md`](profiles/alarms/v2.md) §2.13), `freshness.v2` ([`profiles/freshness/v2.md`](profiles/freshness/v2.md) §3) and the rest of a framework set. | `[F: descriptors/ok-tokenless]` `[Sc: presence.md §5]` |
 
 ### [core §8.2 Start-up order](core.md#82-start-up-order)
 
