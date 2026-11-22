@@ -1480,3 +1480,38 @@ def _converged(r: Reading, rep: dict[str, Any]) -> v1.Answer:
     if observed.seq == cur.seq:
         return Answer(YES if outcome in (CONVERGED, REVERTED) else NO, outcome)
     return Answer(NOT_YET, "behind") if observed.seq < cur.seq else Answer(UNOBSERVABLE, "ahead")
+
+
+# -- a contract's declarations (round 118, beside `zk2 contract lint`) -----------------------------
+
+def lint_contract(canonical: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every resource of one contract's canonical form that this profile
+    reads, with its declaration: a desired resource's (§2.2) and a report
+    resource's (§2.10). "A contract linter SHOULD warn of one" that is
+    invalid (v1 §2.2). Only for a contract that lists ``desired.v2``: under
+    ``desired.v1`` the three keys this major adds are W105's (§4)."""
+    if PROFILE not in canonical.get("uses", ()):
+        return []
+    rows = canonical["resources"]
+    reports = [ReportResource(r["token"], r["template"], r.get("annotations") or {},
+                              (r.get("type") or {}).get("kind") == "packed"
+                              and (r.get("type") or {}).get("name") == REPORT_TYPE
+                              and is_published((r.get("type") or {}).get("schema")))
+               for r in rows]
+    roles = set(canonical.get("requires") or {})
+    out: list[dict[str, Any]] = []
+    for r, rr in zip(rows, reports):
+        ann = r.get("annotations") or {}
+        name = f"{r['token']}/{r['template']}"
+        if v1.KEY in ann:
+            d = declare(r["token"], r["template"], ann, r.get("params") or {}, canonical["uses"])
+            out.append({"resource": name, "as": "desired", **d.expect()})
+        if rr.holds_key:
+            rd = declare_report(rr, roles, reports)
+            row: dict[str, Any] = {"resource": name, "as": "report", "declaration": rd.declaration}
+            if rd.declaration == v1.INVALID:
+                row["reasons"] = list(rd.reasons)
+            else:
+                row[rd.form or ""] = rd.name
+            out.append(row)
+    return out

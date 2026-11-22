@@ -4325,8 +4325,261 @@ def family_readings(root: Path) -> list[Result]:
         + _round95_readings(root) + _round96_readings(root) + _round96_k1_readings(root) + _round97_readings(root) \
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
-        + _round104_readings(root)
+        + _round104_readings(root) + _round118_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
+
+
+def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """desired.v2 0.1, core 0.112 and link.v2 0.23 (#609, round 118; #986):
+    each text at its version, the sentences zk2py's four answers and its
+    findings quote, read where they are stated; §3's sizes; the four answers
+    as zk2py's machines give them; and what the files of ``conformance/v2/``
+    do not tell apart, by readers changed in one place. No session is
+    opened."""
+    from . import conformance as me
+    from . import desired as ds, desired_v2 as d2
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    v2, core, l2, log = (flat("profiles/desired/v2.md"), flat("core.md"), flat("profiles/link/v2.md"),
+                         flat("profiles/desired/CHANGELOG.md"))
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("desired.v2 at text 0.1, written against core 0.112, with link.v2 at 0.23: each header says so",
+                missing(v2, "| **Text version** | 0.1 ([`CHANGELOG.md`](CHANGELOG.md)) |",
+                        "| **Written against** | core 0.112 ([`../../core.md`](../../core.md)) |")
+                + missing(core, "**Version 0.112**") + missing(l2, "| **Text version** | 0.23 ("), []))
+    out.append(("core 0.112 and link.v2 0.23: a desired resource is per key, and floored, only where its contract "
+                "does not use desired.v2; one of desired.v2 with a snapshot key has no floor",
+                missing(core, "- a desired resource of a contract that does not use `desired.v2`;",
+                        "| A desired resource of a contract that does not use `desired.v2` |",
+                        "- **A `desired.v2` desired resource** carries none.")
+                + missing(l2, "one whose resolved annotations hold `desired.target_param`, of a contract that does "
+                              "not use `desired.v2`;",
+                          "- **A `desired.v2` desired resource has no floor,** unless its template's first chunk is a "
+                          "parameter."), []))
+    out.append(("round 118's four answers, the sentences each quotes (v2.md §2.5, §2.6, §2.8, §2.10)",
+                missing(v2, "So a version of that run at or below the asof is older (§2.6).",
+                        "Lower is **older**, and a target MUST NOT act on it. Equal is **the same version**. Higher "
+                        "is admitted.",
+                        "- A revert on a snapshot with no entry has no observed version (§2.8).",
+                        "- `observed_outcome`: an observed version stated with `not_acted`; or `converged`, "
+                        "`refused` or `failed` with none stated.",
+                        "A target that holds no version sends none. Core §4.2 forbids any other stamp.",
+                        "- **After it,** the target holds no document.",
+                        "- **It MUST read** when its section moves, after a heartbeat lost and after a heartbeat of "
+                        "another run, as steps 3 and 6 say."), []))
+
+    rec = d2.report_record()
+    v16, v32 = d2.Version.of(16, 7, 12), d2.Version.of(32, 7, 12)
+
+    def refused(v: Any, w: Any) -> dict[str, Any]:
+        return {"source": "desired", "outcome": "refused", "last_known": False, "in_force": "other",
+                **d2.version_fields(v, 4), **d2.version_fields(w, 3, d2.IN_FORCE_FIELDS), "code": "invalid",
+                "pointer": 2, "detail": 0}
+
+    rows = [d2.baseline_report(),
+            {"source": "desired", "outcome": "converged", "last_known": False, "in_force": "observed",
+             **d2.version_fields(v16, 3)},
+            {"source": "desired", "outcome": "converged", "last_known": False, "in_force": "observed",
+             **d2.version_fields(v32, 3)},
+            refused(d2.Version.of(16, 7, 13), v16), refused(d2.Version.of(32, 7, 13), v32)]
+    out.append(("desired.v2 §3, \"Its sizes\": the table's five reports are 20, 92, 108, 183 and 215 bits, records of "
+                "3, 12, 14, 23 and 27 bytes, puts of 9, 18, 20, 29 and 33 bytes under a 16-bit run; the tag is 12, "
+                "and each is consistent",
+                [[len(d2.write_bits(r)), len(d2.write_report(r)), len(d2.put_payload(r, 3, 5)), d2.consistency(r)]
+                 for r in rows] + [rec.tag, d2.put_payload(rows[0], 3, 5)[0], d2.put_payload(rows[0], 3, 5, 32)[0]],
+                [[20, 3, 9, []], [92, 12, 18, []], [108, 14, 20, []], [183, 23, 29, []], [215, 27, 33, []],
+                 12, 0x0C, 0x1C]))
+
+    # The four answers, as the machines give them.
+    def put(run: int, seq: int, doc: Any, width: int = 16) -> Any:
+        return d2.Sample(d2.OWNER, False, d2.Version.of(width, run, seq), ds.Payload(value=doc), doc.get("revision"))
+
+    t = d2.TargetRole()
+    w1 = [t.receive(put(7, 5, {"revision": 1})), t.finish(d2.Finish(d2.DONE)),
+          t.receive_no_entry(d2.NoEntry(d2.Run(16, 7), 20)), t.finish(d2.Finish(d2.DONE)),
+          t.receive(put(7, 20, {"revision": 2})), t.receive(put(7, 21, {"revision": 2}))]
+    out.append(("answer 1 (v2.md §2.8, against §2.6 step 4's \"Equal is the same version\"): after a revert on a "
+                "snapshot with no entry at asof 20, a version of the run at seq 20 is older, and one at 21 is acted "
+                "on; order.json's case 26 pins it",
+                w1, ["act", "done", "revert", "done", "older", "act"]))
+    t = d2.TargetRole()
+    t.receive(put(7, 5, {"revision": 1}))
+    t.finish(d2.Finish(d2.DONE))
+    during = [t.receive_no_entry(d2.NoEntry(d2.Run(16, 7), 20)), t.stamp_to_send()]
+    t.finish(d2.Finish(d2.FAILED, "apply"))
+    failed = t.report()
+    order = _load_json(spec / "profiles/desired/conformance/v2/order.json")["cases"]
+
+    def ends_no_entry_otherwise(c: dict[str, Any]) -> bool:
+        """Whether a case ends a revert on a snapshot with no entry by a
+        ``finish`` other than ``done``: its steps run, each finish looked at
+        before it is taken."""
+        m = d2.TargetRole()
+        hit = False
+        for s in c["steps"]:
+            if "finish" in s and m.running and m.current is not None and m.current.no_entry is not None:
+                hit = hit or s["finish"] != "done"
+            if "sample" in s:
+                x = d2.sample_of(s["sample"])
+                m.receive_no_entry(x) if isinstance(x, d2.NoEntry) else m.receive(x)
+            elif "finish" in s:
+                f = s["finish"]
+                m.finish(d2.Finish(d2.DONE) if f in ("done", "check") else d2.Finish(*next(iter(f.items()))[:1]))
+            elif s.get("call"):
+                m.call()
+            else:
+                m.restart()
+        return hit
+
+    out.append(("answer 2 (v2.md §2.10): a revert on a snapshot with no entry that fails is written with no observed "
+                "version, failed, apply, baseline, none in force, and the reader's own check finds observed_outcome "
+                "(F-577); no case of order.json's 67 ends such a revert otherwise than done",
+                [failed, d2.consistency(failed), sum(1 for c in order if ends_no_entry_otherwise(c)), len(order)],
+                [{"source": "baseline", "outcome": "failed", "last_known": False, "in_force": "none", "code": "apply"},
+                 ["observed_outcome"], 0, 67]))
+    out.append(("answer 3 (v2.md §2.5, \"The stamp it sends\"): while a snapshot with no entry is acted on, and after "
+                "it, zk2py's target sends no held stamp; with a version it sends that version's",
+                [during, t.stamp_to_send(), (lambda m: (m.receive(put(7, 5, {"revision": 1})),
+                                                        m.stamp_to_send().text))(d2.TargetRole())[1]],
+                [["revert", None], None, "0007/5"]))
+    w = d2.Watch()
+    a_run, b_run, sec = d2.Run(16, 0x21), d2.Run(16, 0x22), d2.Section(0xA78DBBD2, 2)
+    words = [w.heartbeat(a_run, 0, sec)]
+    w.unchanged(True)
+    words += [w.heartbeat(a_run, 1, sec), w.heartbeat(b_run, 0, sec)]
+    w.unchanged(True)
+    words += [w.heartbeat(b_run, 1, sec), w.heartbeat(b_run, 2, None), w.heartbeat(b_run, 3, sec)]
+    out.append(("answer 4 (v2.md §2.5, steps 3 and 6): the first heartbeat of another run than the last read one's "
+                "makes the target read once, whatever run its held version is of; answered unchanged, it waits on "
+                "the section alone; a heartbeat with no section makes it expect none, and the next reads",
+                words, ["read", "unmoved", "read", "unmoved", "no_section", "read"]))
+
+    # What the files do not tell apart: readers changed in one place.
+    base = spec / "profiles/desired/conformance/v2"
+
+    def failing(run: Any, path: Path) -> list[int]:
+        return [i for i, r in enumerate(run(path)) if not r[1]]
+
+    T, W = d2.TargetRole, d2.Watch
+    kept = (T.receive, T._judge_no_entry, T.finish, W.heartbeat, W.own_change, d2.declare_report, d2.names_role)
+    got: dict[str, Any] = {}
+    try:
+        def at_asof_same(self: Any, s: Any) -> str:
+            if s.version is not None:
+                latest = self.remembered.get(s.version.run)
+                held = self.current is not None and self.current.version is not None
+                if latest and latest[1] and s.version.seq == latest[0] and not (
+                        held and self.current.version.run == s.version.run):
+                    return d2.SAME_VERSION
+            return kept[0](self, s)
+
+        T.receive = at_asof_same  # type: ignore[method-assign]
+        got["order: a version at a remembered asof is the same version"] = [i // 2 for i in failing(
+            me._desired_v2_order, base / "order.json")]
+        T.receive = kept[0]  # type: ignore[method-assign]
+
+        def asof_at_seq_older(n: Any, held: Any) -> Any:
+            r = kept[1](n, held)
+            return d2.OLDER if r is None and n.asof == held.version.seq else r
+
+        T._judge_no_entry = staticmethod(asof_at_seq_older)  # type: ignore[method-assign,assignment]
+        got["order: an asof equal to the held version's seq is older, where the text reverts"] = failing(
+            me._desired_v2_order, base / "order.json")
+        T._judge_no_entry = staticmethod(kept[1])  # type: ignore[method-assign,assignment]
+
+        def failed_keeps_observed(self: Any, f: Any) -> str:
+            h, prev = self.current, self.observed
+            word = kept[2](self, f)
+            if h.no_entry is not None and self.outcome == d2.FAILED and self.observed is None:
+                self.observed = prev
+            return word
+
+        T.finish = failed_keeps_observed  # type: ignore[method-assign]
+        got["order: a failed revert on a snapshot with no entry keeps the version it held as observed"] = failing(
+            me._desired_v2_order, base / "order.json")
+        T.finish = kept[2]  # type: ignore[method-assign]
+
+        def not_read_moves(self: Any, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
+            if not read:
+                self.expects = None
+                self.lasts[key] = (run, seq)
+                return d2.NOT_READ
+            return kept[3](self, run, seq, section, read, key)
+
+        W.heartbeat = not_read_moves  # type: ignore[method-assign]
+        got["watch: a heartbeat not read moves the sequence"] = failing(me._desired_v2_watch, base / "watch.json")
+
+        def half_apart_read(self: Any, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
+            last = self.lasts.get(key)
+            if read and last is not None and last[0] == run and (seq - last[1]) % d2.SEQ_MOD == 1 << 23:
+                del self.lasts[key]
+            return kept[3](self, run, seq, section, read, key)
+
+        W.heartbeat = half_apart_read  # type: ignore[method-assign]
+        got["watch: a seq exactly 2^23 after the last read one's is read"] = failing(
+            me._desired_v2_watch, base / "watch.json")
+        W.heartbeat = kept[3]  # type: ignore[method-assign]
+
+        def moves_holding_none(self: Any, key: str, old: Any, new: Any) -> bool:
+            return kept[4](self, key, (new[0], True) if old is None else old, new)
+
+        W.own_change = moves_holding_none  # type: ignore[method-assign]
+        got["watch: it moves what it expects while it holds no version"] = failing(
+            me._desired_v2_watch, base / "watch.json")
+        W.own_change = kept[4]  # type: ignore[method-assign]
+
+        def two_reports_skipped(r: Any, roles: Any, others: Any = ()) -> Any:
+            x = kept[5](r, roles, others)
+            if {"not_state", "not_a_role", "not_a_param", "rest_param"} & set(x.reasons):
+                return d2.ReportDeclaration(x.declaration, tuple(k for k in x.reasons if k != "two_reports"))
+            return x
+
+        d2.declare_report = two_reports_skipped
+        got["declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param"] = failing(
+            me._desired_v2_declarations, base / "declarations.json")
+        d2.declare_report = kept[5]
+
+        def any_kind_names(r: Any, role: str) -> bool:
+            if not r.holds_key or r.named is None:
+                return False
+            return r.named[0] == d2.PARAM or r.named[1] == role
+
+        d2.names_role = any_kind_names
+        got["slices: a resource of another kind that holds desired.report names the role"] = failing(
+            me._desired_v2_slices, base / "slices.json")
+    finally:
+        T.receive, T.finish, W.heartbeat, W.own_change = kept[0], kept[2], kept[3], kept[4]  # type: ignore[method-assign]
+        T._judge_no_entry = staticmethod(kept[1])  # type: ignore[method-assign,assignment]
+        d2.declare_report, d2.names_role = kept[5], kept[6]
+    out.append(("conformance/v2/, what its files tell apart (F-579): a reader changed in one place fails order.json's "
+                "case 26 for a version at a remembered asof, and no case for each of the other seven",
+                got,
+                {"order: a version at a remembered asof is the same version": [26],
+                 "order: an asof equal to the held version's seq is older, where the text reverts": [],
+                 "order: a failed revert on a snapshot with no entry keeps the version it held as observed": [],
+                 "watch: a heartbeat not read moves the sequence": [],
+                 "watch: a seq exactly 2^23 after the last read one's is read": [],
+                 "watch: it moves what it expects while it holds no version": [],
+                 "declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param": [],
+                 "slices: a resource of another kind that holds desired.report names the role": []}))
+    out.append(("desired.v2 0.1's entry, its evidence: seven files, 293 cases (reports 22 writes, 57 reads, 12 places "
+                "and 6 words; order 67; watch 25; declarations 12 and 34; slices 16; conclusions 39; schema 3)",
+                [(lambda d: [len(d["writes"]), len(d["reads"]), len(d["places"]), len(d["words"])])(
+                    _load_json(base / "reports.json")), len(order), len(_load_json(base / "watch.json")["cases"]),
+                 (lambda d: [len(d["resources"]), len(d["reports"])])(_load_json(base / "declarations.json")),
+                 len(_load_json(base / "slices.json")["cases"]), len(_load_json(base / "conclusions.json")["cases"]),
+                 len(_load_json(base / "schema.json")["cases"])]
+                + missing(log, "- `reports.json`: 22 writes, 57 reads, 12 places and 6 words.",
+                          "- `order.json`: 67 cases. `watch.json`: 25.",
+                          "- `declarations.json`: 12 desired resources and 34 report resources.",
+                          "- `slices.json`: 16. `conclusions.json`: 39. `schema.json`: 3."),
+                [[22, 57, 12, 6], 67, 25, [12, 34], 16, 39, 3]))
+    return out
 
 
 def _round97_readings(root: Path) -> list[tuple[str, Any, Any]]:
