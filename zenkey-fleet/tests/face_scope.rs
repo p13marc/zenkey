@@ -1,8 +1,9 @@
 //! `spec/conformance/scope/faces.json` (observer §7.5, #990 V1): a tool's
 //! scope across a constrained face, from the contracts in hand and, given a
-//! face policy and its face, the face's plan. Ten of its cases state
+//! face policy and its face, the face's plan. Fourteen of its cases state
 //! whether the tool was given a catalog (observer 0.34, #1110), and so
-//! whether its scopes hold an owner heartbeat's key. The fixture is evidence,
+//! whether its scopes hold an owner heartbeat's key; the last four were
+//! written by hand (observer 0.35). The fixture is evidence,
 //! written from the text by an independent reading and never blessed: every
 //! case must pass as written.
 
@@ -36,7 +37,7 @@ fn every_case_of_faces_json() {
         .expect("faces.json");
     let doc: Value = serde_json::from_str(&text).expect("JSON");
     let cases = doc["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 29, "the fixture's cases");
+    assert_eq!(cases.len(), 33, "the fixture's cases");
     let mut failures = Vec::new();
     for (i, case) in cases.iter().enumerate() {
         let note = case["note"].as_str().unwrap_or_default();
