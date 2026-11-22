@@ -479,3 +479,120 @@ def growth(earlier: Any, later: Any) -> dict[str, Any]:
         return {"keeps": False, "change": "reordered"}
     renamed = any(i < len(b) and b[i] not in a for i, x in enumerate(a) if x in gone)
     return {"keeps": False, "change": "renamed" if renamed else "removed"}
+
+
+# -- §2.2, §2.4: a late joiner's reading of the two snapshots ----------------------------
+#
+# Written from v2.md §2.2, §2.4 and §3 and committed before snapshots.json
+# was opened.
+
+#: §3 "In a snapshot the checks are collection 0 and the status collection
+#: 1: the contract's state resources in the canonical form's order (core
+#: §7.5). A snapshot's CH carries the tag 3 for either."
+CHECKS_COLL, STATUS_COLL = 0, 1
+#: why a reading is not one instant, the first of §2.2's three items that
+#: fails
+INCOMPLETE, RUN, ASOF, ABOVE_ASOF = "incomplete", "run", "asof", "above_asof"
+
+
+def _entry_run(e: dict[str, Any], snap: dict[str, Any]) -> tuple[int, int]:
+    """An entry's run: its own where it states one, else its snapshot's."""
+    if e.get("run") is not None:
+        return (e["run_width"], e["run"])
+    return (snap["run_width"], snap["run"])
+
+
+def one_instant(status: dict[str, Any] | None, checks: dict[str, Any] | None) -> tuple[bool, str | None]:
+    """§2.2 "One instant": "A reading is one instant when all of these
+    hold: both snapshots are complete (core §7.5); they are under one run,
+    in width and value, and one asof; no live entry and no tombstone of that
+    run has a seq above that asof. An entry that states another run is an
+    earlier run's, and breaks nothing." Each argument is a complete snapshot
+    as :func:`zk2py.snapshot.complete` gives one, or None for one that is
+    not complete, or not answered. Returns whether, and the first item that
+    fails."""
+    if status is None or checks is None:
+        return False, INCOMPLETE
+    if (status["run_width"], status["run"]) != (checks["run_width"], checks["run"]):
+        return False, RUN
+    if status["asof"] != checks["asof"]:
+        return False, ASOF
+    run, asof = (status["run_width"], status["run"]), status["asof"]
+    for snap in (status, checks):
+        for e in list(snap["live"]) + list(snap["tombs"]):
+            if _entry_run(e, snap) == run and e["seq"] > asof:
+                return False, ABOVE_ASOF
+    return True, None
+
+
+def worst_of(levels: Any) -> str | None:
+    """The worst of some levels, None for none."""
+    got = [lv for lv in levels if lv in LEVELS]
+    return max(got, key=LEVELS.index) if got else None
+
+
+@dataclass(frozen=True)
+class Joined:
+    """A late joiner's reading of one service's two snapshots (§2.4 "How a
+    late joiner reads"):
+    - ``status``: the status's record read, None where its snapshot holds
+      no live entry; ``status_deleted`` where it holds a tombstone;
+    - ``confirmation``: the status entry's, ``time`` ("vouched for at the
+      snapshot's time"), ``conf`` ("its last confirmation") or ``none``;
+    - ``checks``: each current check's record read, by its name;
+      ``retired``: "each one retired within the window as a tombstone";
+    - ``instant``: whether the reading is one instant, and ``why_not``;
+    - ``worst``: the worst current check's level, "those the owner answers
+      with a record at a level" (§2.11 step 5);
+    - ``breaks``: "A status better than a check breaks the rule";
+      ``report``: how a tool reports it, ``finding`` ("from one reading
+      that is one instant") or ``two_readings`` ("From any other reading it
+      SHOULD see the break in two readings a grace apart")."""
+
+    status: Read | None
+    status_deleted: bool
+    confirmation: str | None
+    checks: dict[str, Read]
+    retired: tuple[str, ...]
+    instant: bool
+    why_not: str | None
+    worst: str | None
+    breaks: bool
+    report: str | None
+
+
+def check_name(entry_id: str) -> str:
+    """A check's name from its entry's id: "It is the {check} parameter in
+    the key, slugged like any value (core §1.4)"."""
+    from . import slug
+
+    name = slug.unslug(entry_id)
+    return entry_id if name is None else name
+
+
+def late_joiner(status: dict[str, Any] | None, checks: dict[str, Any] | None, epoch: int | None = None) -> Joined:
+    """Both snapshots of one GET over ``health.v2/state/**`` read (§2.4,
+    §2.2). Each record is read under its snapshot's tag: "A snapshot's CH
+    carries the tag 3 for either", so one under another tag is refused,
+    ``tag``, and read as unknown (§2.6). A check at ``unknown``, and one
+    whose record is refused, "bound nothing"."""
+    st: Read | None = None
+    deleted, confirmation = False, None
+    if status is not None:
+        for e in status["live"]:
+            st = read(STATUS, status["tag"], bytes.fromhex(e["record"]), epoch)
+            confirmation = e.get("confirmation")
+        if st is None and status["tombs"]:
+            deleted = True
+    got: dict[str, Read] = {}
+    retired: tuple[str, ...] = ()
+    if checks is not None:
+        for e in checks["live"]:
+            got[check_name(e["id"])] = read(CHECK, checks["tag"], bytes.fromhex(e["record"]), epoch)
+        retired = tuple(check_name(e["id"]) for e in checks["tombs"])
+    instant, why = one_instant(status, checks)
+    worst = worst_of(r.level for r in got.values())
+    breaks = (st is not None and st.level is not None and worst is not None
+              and LEVELS.index(worst) > LEVELS.index(st.level))
+    return Joined(st, deleted, confirmation, got, retired, instant, why, worst, breaks,
+                  None if not breaks else ("finding" if instant else "two_readings"))
