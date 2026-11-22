@@ -184,6 +184,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/profiles/health/conformance/v2/README.md": {
+    "mean": 12.23,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/health/scenarios.md": {
     "mean": 13.5,
     "over": 0,
