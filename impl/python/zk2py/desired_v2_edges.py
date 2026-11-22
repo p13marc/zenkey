@@ -41,8 +41,7 @@ from typing import Any
 
 from . import desired, desired_v2 as d2, zk2c
 from .alarms_scenarios import Report, _wait
-from .desired_v2_scenarios import (AUTHOR, BASELINE, D, RP, RUN, SCRATCH, TARGET, Bus, Played, converged,
-                                   impl_name, v)
+from .desired_v2_scenarios import BASELINE, D, RP, RUN, SCRATCH, TARGET, Bus, Played, converged, impl_name, v
 
 ASOF = 9
 

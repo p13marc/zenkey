@@ -40,11 +40,10 @@ import json
 import sys
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from . import desired_v2 as d2, zk2c
-from .alarms_scenarios import Report, _wait
+from .alarms_scenarios import Report
 from .blackbox import BLACKBOX
 from .desired_v2_scenarios import AUTHOR, REPO, TARGET, Party, impl_name
 

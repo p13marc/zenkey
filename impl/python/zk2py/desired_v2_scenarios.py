@@ -1,8 +1,8 @@
-"""desired.v2 ``scenarios-v2.md`` §1 to §6, §8 and §13 to §15 (text 0.1), live,
+"""desired.v2 ``scenarios-v2.md`` §1 to §8, §10 and §13 to §15 (text 0.1), live,
 in each pairing of the two implementations (#609, rounds 118 and 119)::
 
     python -m zk2py.desired_v2_scenarios [--author zk2py|rust] [--target zk2py|rust]
-        [--only 1|2|3|4|5|6|8|13|14|14-no-move|14-ohb|15]...
+        [--only 1|2|3|4|5|6|7|8|10|13|14|14-no-move|14-ohb|15]...
 
 Each party is a process: zk2py's own (``python -m zk2py.desired_v2_owner``)
 or the reference's owner example, a black box run from
@@ -213,6 +213,18 @@ class Party:
 
     # -- its process ----------------------------------------------------------
 
+    def close_cleanly(self) -> int | None:
+        """"The author closes cleanly": its standard input closed."""
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            return self.proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            self.kill()
+            return None
+
     def kill(self) -> None:
         """"Its process ends without closing"."""
         if self.proc.poll() is None:
@@ -300,6 +312,39 @@ class RustParty(Party):
         if force and got and got.startswith("desired none "):
             got = self.cmd(f"desired delete-unheld {target}")
         return got.rsplit(" ", 1)[1] if got and got.startswith("desired deleted ") else None
+
+
+class ArchiveBox(Party):
+    """The reference's ``archive`` example (its ``--help``): ``--record
+    <owner> <selector> <contract.toml>``; ``last-known <origin>`` answers
+    what it holds, "run=<run>|none seq=<seq>|none ... bytes=<n> value=...",
+    or ``none``. Its lines come as events happen, so an answer is matched
+    by its first word."""
+
+    impl = "rust"
+    ADDRESS = "lab/archive"
+
+    def __init__(self, endpoint: str) -> None:
+        super().__init__([str(BLACKBOX / "archive"), "--connect", endpoint, "--system", "lab", "--service", "archive",
+                          "--record", AUTHOR, f"zk2/{AUTHOR}/tasking.v2/state/**",
+                          str(REPO / "impl" / "python" / "interop" / "desired-v2" / "tasking.v2.toml")],
+                         self.ADDRESS)
+
+    def last_known(self, origin: str, timeout: float = 5.0) -> str | None:
+        try:
+            self.proc.stdin.write(f"last-known {origin}\n")
+            self.proc.stdin.flush()
+        except OSError:
+            return None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                line = self.lines.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if line.startswith(("last-known ", "refused ")):
+                return line
+        return None
 
 
 #: the pairing a run is of, set by :func:`main`
@@ -499,7 +544,7 @@ class Bus:
     def target(self, impl: str | None = None, *, on: int = 1, unbound: bool = False, reread_ms: int | None = None,
                hold: bool = False, across: bool = False, reply_timeout_ms: int | None = None, watch: bool = False,
                moves: bool = True, watched: bool = False, catalog: Path | None = None,
-               flags: tuple[str, ...] = ()) -> Party:
+               archive: str | None = None, flags: tuple[str, ...] = ()) -> Party:
         """The target, its role ``task`` bound to ``lab/author``, or unbound.
         It follows its author's presence on a watch session of its own,
         unless ``across``: zk2py's target is then told it is across a face.
@@ -523,8 +568,16 @@ class Bus:
                   *(["--desired-hold"] if hold else []),
                   *(["--desired-timeout-ms", str(reply_timeout_ms)] if reply_timeout_ms is not None else []),
                   *(["--desired-ttl", "4"] if watched else []),
-                  *(["--catalog", str(catalog)] if catalog else [])]
+                  *(["--catalog", str(catalog)] if catalog else []),
+                  *(["--desired-archive", archive] if archive else [])]
         return self.party(impl, TARGET, [*f, *flags], on)
+
+    def archive(self, on: int = 1) -> "ArchiveBox":
+        """``lab/archive`` (core §4.4), the reference's ``archive`` example, a
+        black box, recording ``zk2/lab/author/tasking.v2/state/**``."""
+        a = ArchiveBox(self.ep1 if on == 1 else self.ep2)
+        self.parties.append(a)  # type: ignore[arg-type]
+        return a
 
     def get(self, key: str, on: int = 1, timeout: float = 1.0) -> Any:
         return self.live.get_state(self.g1 if on == 1 else self.g2, key, timeout)
@@ -605,6 +658,12 @@ class Bus:
                     r.close()
                 except Exception:  # noqa: BLE001
                     pass
+        # a run leaves nothing behind: its records, its catalog, its face's socket
+        import shutil
+
+        for d in (self.dir, getattr(self, "_work", None)):
+            if d is not None:
+                shutil.rmtree(d, ignore_errors=True)
 
 
 def _converge(author: Party, target: Party, n: int = 1, **kw: Any) -> str | None:
@@ -941,6 +1000,122 @@ def section6(rp: Report) -> None:
                            "for a version, and has no offset to set")
         else:
             rp.note(sec, "step 1 ran with the reference's author started under --clock-offset-ms -5000")
+    finally:
+        bus.close()
+
+
+def _archived(archive: ArchiveBox, version: str | None) -> bool:
+    """Whether the archive's record of ``D`` keeps that version: "The
+    archive's record of D keeps v1's envelope" (§7)."""
+    ver = d2.Version.parse(version)
+    line = archive.last_known(D) or ""
+    return ver is not None and f"run={ver.run.text} seq={ver.seq} " in line and "tombstone" not in line
+
+
+def section7(rp: Report) -> None:
+    sec = "§7 last-known from an archive, the author absent" + f" [{pairing()}, the reference's archive]"
+    if TARGET_IMPL == "zk2py":
+        rp.cannot(sec, "zk2py's desired.v2 target reads no archive")
+        return
+    bus = Bus()
+    try:
+        archive = bus.archive()
+        author, target = bus.author(), bus.target(archive=ArchiveBox.ADDRESS)
+        s1 = _converge(author, target, 1)
+        ok = _wait(lambda: _archived(archive, s1), 5.0, 0.3)
+        rp.check(sec, "setup: the target converged on v1, and the archive recorded it, keeping v1's envelope",
+                 target.report() == converged(s1, 1) and ok, f"s1 {s1}, {archive.last_known(D)}")
+        author.close_cleanly()
+        target.kill()
+        _wait(lambda: not bus.author_seen(1), 15.0, 0.1)
+        t1 = time.monotonic()
+        new = bus.target(archive=ArchiveBox.ADDRESS)
+        want = {**converged(s1, 1), "last_known": True}
+        ok = _wait(lambda: new.report() == want, 10.0, 0.05)
+        p = bus.live.list_presence(bus.g1, f"zk2/{AUTHOR}/@zk/instance/*")
+        rp.check(sec, "1. the author closed cleanly and the target restarted: a complete presence read shows no "
+                      "author token; the target reads the archive, acts on v1 under s1, and its report is converged "
+                      "on v1 with last_known true",
+                 ok and p.kind == bus.live.COMPLETE and not p.instances and new.acts() == 1 and bus.run_doc() == v(1),
+                 f"{new.report()}, {new.cmd('desired seeds')}")
+        acts0, t2 = new.acts(), time.monotonic()
+        author = bus.author()
+        _wait(lambda: any(g[2] == "put" for g in bus.since(t2, D)), 8.0)
+        again = next((g[4] for g in bus.since(t2, D) if g[2] == "put"), None)
+        ok = _wait(lambda: new.report() == converged(again, 1), 10.0, 0.05)
+        time.sleep(0.5)
+        rp.check(sec, "2. the restarted author puts v1's document again under a new run: the target adopts it; Run "
+                      "receives nothing, and its report moves to that version with last_known false",
+                 ok and again is not None and again.split("/")[0] != (s1 or "").split("/")[0]
+                 and new.acts() == acts0 and not bus.since(t2, RUN), f"s1 {s1}, again {again}, {new.report()}")
+    finally:
+        bus.close()
+
+
+def section10(rp: Report) -> None:
+    sec = ("§10 last-known confirmed by its author; a present author's silence"
+           + f" [{pairing()}, the reference's archive]")
+    if TARGET_IMPL == "zk2py":
+        rp.cannot(sec, "zk2py's desired.v2 target reads no archive")
+        return
+    bus = Bus(cut=True)
+    try:
+        archive = bus.archive(on=2)
+        author = bus.author()
+        target = bus.target(on=2, archive=ArchiveBox.ADDRESS)
+        s1 = _converge(author, target, 1)
+        ok = _wait(lambda: _archived(archive, s1), 5.0, 0.3)
+        rp.check(sec, "setup: the target converged on v1, and the archive on R2 recorded it",
+                 target.report() == converged(s1, 1) and ok, f"s1 {s1}, {archive.last_known(D)}")
+        bus.cut()
+        target.kill()
+        t1 = time.monotonic()
+        new = bus.target(on=2, archive=ArchiveBox.ADDRESS)
+        want = {**converged(s1, 1), "last_known": True}
+        ok = _wait(lambda: new.report() == want, 10.0, 0.05)
+        rep_s2 = bus.report_at(2)[0]
+        rp.check(sec, "1. the link cut and the target restarted: no author token crosses, its GET draws no reply; "
+                      "it reads the archive, acts on v1 under s1, and, read through R2, its report is converged on "
+                      "v1 with last_known true", ok and rep_s2 == want and new.acts() == 1,
+                 f"{rep_s2}, {new.cmd('desired seeds')}")
+        acts0, g0, t2 = new.acts(), len(author.gets()), time.monotonic()
+        bus.heal()
+        ok = _wait(lambda: new.report() == converged(s1, 1), 10.0, 0.05)
+        time.sleep(0.5)
+        seeds = [g for g in author.gets()[g0:] if g["held"] is not None]
+        rp.check(sec, "2. the link healed: the target's seed carries the held stamp s1, the archive's record's; the "
+                      "author, the same instance throughout, answers with that stamp alone: confirmed; the target "
+                      "acts on nothing, and puts its report again with last_known false",
+                 ok and bool(seeds) and seeds[0] == {"held": s1, "alone": True} and new.acts() == acts0
+                 and not [g for g in bus.since2(t2) if g[1] == RUN] and any(g[1] == RP for g in bus.since2(t2)),
+                 f"seeds {seeds}, {new.report()}")
+        bus.cut()
+        s2 = author.put(TARGET, v(2))
+        x = bus.live.open_client(bus.ep2)
+        xtok = x.liveliness().declare_token(f"zk2/{AUTHOR}/@zk/instance/" + "f" * 16)
+        try:
+            _wait(lambda: bool(bus.live.list_presence(bus.g2, f"zk2/{AUTHOR}/@zk/instance/*").instances), 5.0, 0.05)
+            new.kill()
+            third = bus.target(on=2, archive=ArchiveBox.ADDRESS)
+            time.sleep(4.0)
+            seeds3 = third.cmd("desired seeds") or ""
+            words = dict(w.split("=", 1) for w in seeds3.split()[3:] if "=" in w)
+            rp.check(sec, "3. the link cut, v2 put, X's instance token at the author's address on R2, and the target "
+                          "restarted: its author present and its GET silent, it reads no archive, acts on nothing, "
+                          "and its report stays the baseline's",
+                     third.report() == BASELINE_REPORT and third.acts() == 0 and bus.run_doc(on=2) == BASELINE
+                     and words.get("author") == "present" and words.get("archive") == "-",
+                     f"{seeds3!r}, {third.report()}")
+            bus.heal()
+            _wait(lambda: len(bus.live.list_presence(bus.g2, f"zk2/{AUTHOR}/@zk/instance/*").instances) >= 2, 10.0,
+                  0.05)
+            xtok.undeclare()
+            ok = _wait(lambda: third.report() == converged(s2, 2), 10.0, 0.05)
+            rp.check(sec, "4. the link healed, X's token withdrawn once the author's own is on R2: the target seeds, "
+                          "the author answers v2, and the target acts on it: converged on v2, last_known false",
+                     ok and third.acts() == 1, f"{third.report()}")
+        finally:
+            bus.live.close(x)
     finally:
         bus.close()
 
@@ -1301,7 +1476,8 @@ def section15(rp: Report) -> None:
         bus.close()
 
 
-SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6, "8": section8,
+SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
+            "7": section7, "8": section8, "10": section10,
             "13": section13, "14": section14, "14-no-move": lambda rp: section14(rp, moves=False),
             "14-ohb": lambda rp: section14(rp, ohb=True), "15": section15}
 
