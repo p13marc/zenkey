@@ -494,3 +494,406 @@ def reading_of_fields(fields: dict[str, Any]) -> dict[str, Any]:
             if k in fields:
                 out["refusal"][k] = fields[k]
     return out
+
+
+# -- §2.5 to §2.10: the target --------------------------------------------------------------------
+#
+# Written from §2.4 to §2.10 before conformance/v2/order.json was opened
+# (round 118).
+
+OWNER, ARCHIVE = v1.OWNER, v1.ARCHIVE
+UNSTAMPED, SAME_VERSION, CONFIRMED, OLDER, HELD = "unstamped", "same_version", "confirmed", "older", "held"
+ADOPTED, ACT, REVERT, DONE, CALLED, RESTARTED = "adopted", "act", "revert", "done", "called", "restarted"
+#: §2.8: "Never under another run ... It is no verdict (``no_verdict``)."
+NO_VERDICT = "no_verdict"
+#: §2.5's answers to a conditional read: "Answered unchanged, by the held
+#: stamp it sent, the target judges nothing"; "A held stamp it did not send
+#: is no answer (core §4.2, ``held``)". zk2py's own words for the two: the
+#: text gives the step no token.
+UNCHANGED, NOT_SENT = "unchanged", "not_sent"
+#: §2.6 "What it remembers": "for at least the 16 runs it most lately acted
+#: on or adopted a version of". zk2py remembers exactly that many.
+REMEMBERED_RUNS = 16
+
+
+@dataclass(frozen=True)
+class Sample:
+    """One delivery of the slice (§2.5 "What a read draws"), from either
+    path: a put or a live entry (``put``), a delete or a tombstone
+    (``delete``), each with its version, or None for "a sample whose payload
+    carries no in-band stamp"; from the author (``owner``) or an archive's
+    last-known (``archive``, §2.9)."""
+
+    origin: str
+    delete: bool
+    version: Version | None
+    payload: v1.Payload | None = None
+    revision: int | None = None
+
+
+@dataclass(frozen=True)
+class NoEntry:
+    """§2.5: "A snapshot with no entry is the author's word that it holds no
+    document for the target." It "names no version" (§2.6): its header's run
+    and its asof."""
+
+    run: Run
+    asof: int
+
+
+@dataclass
+class _Held:
+    """What the target admitted: a version (a put with its document, or a
+    delete), or a snapshot with no entry (``version`` None, ``no_entry``
+    set)."""
+
+    version: Version | None
+    delete: bool
+    payload: v1.Payload | None
+    revision: int | None
+    last_known: bool
+    no_entry: NoEntry | None = None
+
+    @property
+    def document(self) -> bool:
+        """§2.8: "A target that holds a document's version"."""
+        return self.version is not None and not self.delete
+
+
+@dataclass
+class Finish:
+    """How the running act ended (v1 §2.7 "Two phases"): ``done``,
+    ``refused`` or ``failed``, with the refusal's code, its place (a JSON
+    Pointer, or None for nowhere) and its line (or None)."""
+
+    how: str
+    code: str | None = None
+    place: str | None = None
+    line: str | None = None
+
+
+class TargetRole:
+    """One target's role on a desired resource of this major, §2.6 to §2.10,
+    as a pure state machine. v1's :class:`zk2py.desired.TargetRole` with "a
+    stamp, its id or its time" read "the version, its run and its seq" (§0),
+    and §2.8's snapshot with no entry.
+
+    ``pointers`` and ``details`` are its report resource's two tables
+    (§2.10), by which a refusal's place and line are written."""
+
+    def __init__(self, pointers: Any = None, details: Any = None, memory: int = REMEMBERED_RUNS) -> None:
+        self.pointers = list(DEFAULT_POINTERS if pointers is None else pointers)
+        self.details = list(DEFAULT_DETAILS if details is None else details)
+        self.memory = memory
+        self._fresh()
+
+    def _fresh(self) -> None:
+        #: The version last acted on or adopted: the running act's while one
+        #: runs (v1 §2.7: "records it as acted on when the act starts").
+        self.current: _Held | None = None
+        self.running = False
+        self.waiting: _Held | None = None
+        self.source = BASELINE
+        self.outcome = NOT_ACTED
+        #: (version, revision) of §2.10's observed version and of the one
+        #: wholly in force.
+        self.observed: tuple[Version, int | None] | None = None
+        self.in_force: tuple[Version, int | None] | None = None
+        self.refusal: dict[str, Any] | None = None
+        self.last_known = False
+        self.report_puts = 1
+        #: §2.6: "per run, the highest seq it acted on or adopted a version
+        #: of in this process", the most lately used last; the flag says the
+        #: seq is a snapshot's asof (§2.8 "What it records").
+        self.remembered: dict[Run, tuple[int, bool]] = {}
+        #: The stamp of the conditional read outstanding (§2.5), if any.
+        self.asked: Version | None = None
+
+    # -- §2.6: what it remembers --------------------------------------------
+
+    def _remember(self, run: Run, seq: int, asof: bool = False) -> None:
+        m = self.remembered
+        old = m.pop(run, None)
+        if old is not None and (old[0] > seq or (old[0] == seq and old[1])):
+            seq, asof = old
+        m[run] = (seq, asof)
+        while len(m) > self.memory:
+            del m[next(iter(m))]  # "A run it forgot beyond them is read as a new one"
+
+    # -- §2.6: the order ------------------------------------------------------
+
+    @staticmethod
+    def _judge(v: Version, held: _Held) -> str | None:
+        """Steps 3 and 4 against one held thing. Against a version: "ordered
+        by seq" in its run, else admitted (None). Against a snapshot with no
+        entry that waits (§2.8): "of its run, at or below the asof, it is
+        older"."""
+        if held.no_entry is not None:
+            return OLDER if v.run == held.no_entry.run and v.seq <= held.no_entry.asof else None
+        assert held.version is not None
+        if v.run != held.version.run:
+            return None
+        if v.seq == held.version.seq:
+            return SAME_VERSION
+        return OLDER if v.seq < held.version.seq else None
+
+    def _same(self, held: _Held, origin: str) -> str:
+        """Step 3 "equal": "the same version ... One equal delivery is not:
+        its author's own sample or answer of a version the target holds from
+        an archive, or holds waiting from one, confirms it"."""
+        if origin == OWNER and held.last_known:
+            held.last_known = False
+            if held is self.current and not self.running:
+                self.last_known = False
+                self.report_puts += 1
+            return CONFIRMED
+        return SAME_VERSION
+
+    def receive(self, s: Sample) -> str:
+        """§2.6, one version, "against the one it holds and the runs it
+        remembers. While an act runs ... against the running act's version,
+        and then against the one it holds waiting"."""
+        if s.version is None:
+            return UNSTAMPED  # step 1: "Nothing it holds changes."
+        v = s.version
+        cur = self.current
+        if cur is not None and cur.version is not None:
+            word = self._judge(v, cur)
+            if word == SAME_VERSION:
+                return self._same(cur, s.origin)
+            if word == OLDER:
+                return OLDER
+        # Step 4: "never an older version of a run the target remembers ...
+        # Lower is older ... Equal is the same version. Higher is admitted."
+        # And §2.8: "The target remembers the asof as the seq it acted on
+        # under that run. So a version of that run at or below the asof is
+        # older".
+        latest = self.remembered.get(v.run)
+        if latest is not None:
+            if v.seq < latest[0] or (v.seq == latest[0] and latest[1]):
+                return OLDER
+            if v.seq == latest[0]:
+                return SAME_VERSION
+        if self.running and self.waiting is not None:
+            word = self._judge(v, self.waiting)
+            if word == SAME_VERSION:
+                return self._same(self.waiting, s.origin)
+            if word == OLDER:
+                return OLDER
+        held = _Held(v, s.delete, None if s.delete else s.payload, None if s.delete else s.revision,
+                     s.origin == ARCHIVE)
+        if self.running:
+            self.waiting = held  # "A version admitted so waits (held), in place of the one that waited."
+            return HELD
+        return self._start(held)
+
+    # -- §2.8: a snapshot with no entry -------------------------------------------
+
+    @staticmethod
+    def _judge_no_entry(n: NoEntry, held: _Held | None) -> str | None:
+        """§2.8 against one held thing: None when the snapshot is admitted.
+
+        - "A target that holds a document's version of the snapshot's run,
+          with a seq at or below the snapshot's asof, reverts".
+        - "A snapshot of the held run whose asof is below the held version's
+          seq was built before that version. It is older".
+        - "A target MUST NOT revert on a snapshot with no entry under another
+          run than its held version's. ... A target that holds no document's
+          version has nothing to revert: no verdict either."
+        """
+        if held is None or not held.document:
+            return NO_VERDICT
+        assert held.version is not None
+        if held.version.run != n.run:
+            return NO_VERDICT
+        return OLDER if n.asof < held.version.seq else None
+
+    def receive_no_entry(self, n: NoEntry) -> str:
+        """§2.8: "While an act runs, a snapshot with no entry is judged
+        against the running act's version, then against the one held
+        waiting, each as above. Admitted by both, it waits as a delete
+        does.\""""
+        word = self._judge_no_entry(n, self.current)
+        if word is not None:
+            return word
+        if self.running and self.waiting is not None:
+            word = self._judge_no_entry(n, self.waiting)
+            if word is not None:
+                return word
+        held = _Held(None, True, None, None, False, n)
+        if self.running:
+            self.waiting = held
+            return HELD
+        return self._start(held)
+
+    # -- §2.7: acting -----------------------------------------------------------
+
+    def _start(self, h: _Held) -> str:
+        """An admitted version, nothing running: adopted when its document
+        equals that of the last version acted on or adopted (step 5), "a
+        delete is equal to a delete" (v1 §2.7), else acted on. A snapshot
+        with no entry is acted on: it was admitted against a document."""
+        prev = self.current
+        if h.no_entry is not None:
+            self.current = h
+            # §2.8 "What it records": "the asof as the seq it acted on under
+            # that run", recorded as an act is, when it starts.
+            self._remember(h.no_entry.run, h.no_entry.asof, asof=True)
+            self.running = True
+            return REVERT
+        assert h.version is not None
+        if prev is not None and v1.same_document(prev.payload, h.payload):
+            # v1 §2.7 "The report moves": observed to the adopted version,
+            # in_force with it "when it named the previous one"; outcome,
+            # refusal and source stay. After a snapshot with no entry: "A
+            # delete it admits next is a delete after a delete, adopted
+            # (§2.7), and gives the report its version."
+            new = (h.version, self._revision(h))
+            if self.in_force is not None and self.observed is not None and self.in_force[0] == self.observed[0]:
+                self.in_force = new
+            self.current = h
+            self._remember(h.version.run, h.version.seq)
+            self.observed = new
+            self.last_known = h.last_known
+            self.report_puts += 1
+            return ADOPTED
+        self.current = h
+        self._remember(h.version.run, h.version.seq)
+        self.running = True
+        return REVERT if h.delete else ACT
+
+    @staticmethod
+    def _revision(h: _Held) -> int | None:
+        """§2.4: "A delete has no document, so its version has no revision";
+        and of a revision above 4,294,967,295, "The report of that refusal
+        carries no revision: it has no code.\""""
+        if h.delete or h.revision is None or h.revision > MAX_REVISION:
+            return None
+        return h.revision
+
+    def must_refuse(self) -> bool:
+        """§2.4: "A target MUST refuse whole a document whose revision is
+        above 4,294,967,295, with the code ``invalid``." True while the
+        running act is of such a document."""
+        h = self.current
+        return bool(self.running and h is not None and h.document and h.revision is not None
+                    and h.revision > MAX_REVISION)
+
+    def finish(self, f: Finish) -> str:
+        """§2.7, §2.8, §2.10: the running act ended. The report moves, then
+        what waits, if anything, is acted on or adopted."""
+        if not self.running or self.current is None:
+            raise ValueError("no act runs")
+        h = self.current
+        self.running = False
+        how, code = f.how, f.code
+        revert = h.delete  # a delete, a tombstone, or a snapshot with no entry
+        if self.must_refuse_of(h) and how != REFUSED:
+            how, code = REFUSED, "invalid"
+        if how == REFUSED and revert:
+            how = FAILED  # v1 §2.8: "A revert is never refused; one that could not finish is failed."
+        if how == DONE:
+            self.outcome, self.refusal = (REVERTED if revert else CONVERGED), None
+            self.source = BASELINE if revert else DESIRED
+        elif how in (REFUSED, FAILED):
+            self.outcome = how
+            self.refusal = {"code": code_field(code or (FAILURE_CODE if how == FAILED else None))}
+            p, ln = place_index(self.pointers, f.place), line_index(self.details, f.line)
+            if p is not None:
+                self.refusal["pointer"] = p
+            if ln is not None:
+                self.refusal["detail"] = ln
+            if how == FAILED:
+                self.source = BASELINE if revert else DESIRED
+        else:
+            raise ValueError(f"an unknown end {f.how!r}")
+        # §2.10 "The observed version is the last the target acted on or
+        # adopted in this process." "A revert on a snapshot with no entry has
+        # no observed version (§2.8)."
+        self.observed = None if h.version is None else (h.version, self._revision(h))
+        if how == DONE:
+            self.in_force = None if revert else self.observed
+        elif how == FAILED:
+            self.in_force = None
+        self.last_known = h.last_known
+        self.report_puts += 1
+        if self.waiting is not None:
+            w, self.waiting = self.waiting, None
+            return self._start(w)
+        return DONE
+
+    @staticmethod
+    def must_refuse_of(h: _Held) -> bool:
+        return bool(h.document and h.revision is not None and h.revision > MAX_REVISION)
+
+    def call(self) -> str:
+        """§2.10: "A call makes ``source`` ``call`` and ``in_force``
+        ``none``. The rest stays.\""""
+        self.source, self.in_force = CALL, None
+        self.report_puts += 1
+        return CALLED
+
+    def restart(self) -> str:
+        """§2.6: "A new process forgets every run, as it forgets every act"."""
+        self._fresh()
+        return RESTARTED
+
+    # -- §2.5: the conditional re-read ---------------------------------------------
+
+    def stamp_to_send(self) -> Version | None:
+        """§2.5 "The stamp it sends is that of the latest version it admitted
+        (§2.6): the one it holds waiting, else the running act's, else the
+        last it acted on or adopted. A target that holds no version sends
+        none. Core §4.2 forbids any other stamp."
+
+        The latest thing admitted may be a snapshot with no entry, which
+        "names no version" (§2.6): zk2py then sends none, while it waits,
+        while it is acted on and after it. Core §4.2 allows only "the in-band
+        stamp of the mutation it holds for that member", and "Never a
+        snapshot's asof" (round 118's third answer)."""
+        latest = self.waiting if (self.running and self.waiting is not None) else self.current
+        return None if latest is None else latest.version
+
+    def ask(self) -> Version | None:
+        """Make a read of the slice: the stamp it carries, None for a read
+        that is not conditional."""
+        self.asked = self.stamp_to_send()
+        return self.asked
+
+    def unchanged(self, stamp: Version) -> str:
+        """§2.5 "Answered unchanged, by the held stamp it sent, the target
+        judges nothing. Its author holds that version still. It is the
+        author's own word of the version, so it confirms a last-known one
+        (§2.9)." "A held stamp it did not send is no answer (core §4.2,
+        ``held``)." The read it answers has then ended."""
+        sent, self.asked = self.asked, None
+        if sent is None or stamp != sent:
+            return NOT_SENT
+        for held in (self.waiting if self.running else None, self.current):
+            if held is not None and held.version == stamp:
+                return CONFIRMED if self._same(held, OWNER) == CONFIRMED else UNCHANGED
+        return UNCHANGED
+
+    # -- §2.10: the report ---------------------------------------------------------
+
+    def report(self) -> dict[str, Any]:
+        """§2.10: the report after the last step, as its record's fields."""
+        out: dict[str, Any] = {"source": self.source, "outcome": self.outcome, "last_known": self.last_known}
+        if self.in_force is None:
+            out["in_force"] = IN_NONE
+        elif self.observed is not None and self.in_force[0] == self.observed[0]:
+            out["in_force"] = IN_OBSERVED
+        else:
+            out["in_force"] = IN_OTHER
+        if self.observed is not None:
+            out.update(version_fields(*self.observed))
+        if out["in_force"] == IN_OTHER:
+            assert self.in_force is not None
+            out.update(version_fields(self.in_force[0], self.in_force[1], IN_FORCE_FIELDS))
+        if self.refusal is not None:
+            out.update(self.refusal)
+        return out
+
+
+#: v1 §2.10: "`apply` for a failure".
+FAILURE_CODE = "apply"
