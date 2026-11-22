@@ -1,0 +1,58 @@
+# alarms.v2's standard contract (spec/profiles/alarms/v2.md §3): the active
+# alarms of one service on a bandwidth-first wire. An alarm lives in a slot,
+# its key's last chunk, and each transition is one packed record of 9 bytes
+# that carries its rule and its labels as numbers. The service's own table
+# names them (the annotation `alarms.rules`, v2.md §4), in a contract of its
+# own. An alarm no table names has its words on `words/{slot}`.
+# An instance implements alarms.v1 or alarms.v2, never both (v2.md §2.1).
+# Doc strings are outside the fingerprint (core §9.5), and so are comments;
+# the two schemas' descriptions are inside it.
+#
+# Keys:       zk2/<system>/<service>/alarms.v2/state/alarms/<slot>
+#             zk2/<system>/<service>/alarms.v2/state/words/<slot>
+# Example:    zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/0
+# Fleet-wide: zk2/*/*/alarms.v2/state/alarms/*   (one major per subscription, core §1.7)
+#
+# THE IDENTITY is alarms.v1's alert key (v1.md §2.2, §2.3), over the rule's
+# name and its discriminating labels as text. The slot is its alias on the
+# wire while it holds one (v2.md §2.2).
+#
+# Lifecycle (v2.md §2.5): put firing; escalate or refresh it; put resolved.
+# No delete: the resolved record stays until another alarm takes the slot.
+[interface]
+name    = "alarms"
+major   = 2
+minor   = 0
+summary = "The active alarms of one service, one packed record per slot"
+uses    = ["freshness.v2"]
+
+[schemas]
+packed     = ["alarms.v2.json"]
+jsonschema = ["schemas/alarms.v2.json"]
+
+[resources."alarms/{slot}"]
+kind        = "state"
+type        = "packed:Alarm"
+params      = { slot = "uint" }
+cardinality = 256
+reliability = "reliable"
+congestion  = "block"
+priority    = "interactive_high"
+express     = true
+annotations = { "freshness.ttl_s" = 900 }
+doc         = """
+One alarm's record, on the slot its identity holds (alarms.v2 §2.2). Put firing, put again on an
+escalation or a refresh, vouched for by its owner's heartbeat at least every 450 s while it fires
+and is evaluated (§2.7, freshness.v2 §2.4), put resolved and never deleted (§2.5). QoS is
+alarms.v1's: reliable, block, interactive-high, express.
+At most 256 firing per service, or the descriptor's lower bound (§2.8)."""
+
+[resources."words/{slot}"]
+kind        = "state"
+type        = "json:alarms.v2.Words"
+params      = { slot = "uint" }
+cardinality = 256
+doc         = """
+The words of the alarm on the same slot, only where no table names it: its rule, its labels, its
+summary and its category (alarms.v2 §2.4). Put before the slot's record at a raise, and again when
+its summary, its category or a host-scoped label changes. No horizon, and never exposed."""
