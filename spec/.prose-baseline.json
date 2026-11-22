@@ -194,6 +194,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/profiles/health/v2.md": {
+    "mean": 12.78,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/hostid/CHANGELOG.md": {
     "mean": 15.18,
     "over": 1,

@@ -73,6 +73,19 @@ owner heartbeat whole, with every group.
   Both are the drafter's, kept out of the repository. No file was
   blessed.
 
+**Also changed, for `health.v2` text 0.1**
+([`profiles/health/CHANGELOG.md`](profiles/health/CHANGELOG.md)).
+- **Appendix D's vocabulary table** gains a row for `health`:
+  `health.v2` §4's `reasons`, `details` and `codes`. W105 reads the
+  table of the major a contract uses, as §10 already says. `health.v1`
+  publishes none, so a contract that lists it draws no W105 for a
+  `health.<key>`, as before.
+- **§4.3, "The report"** names both ways: the heartbeat's ahead time,
+  and the `clock_ahead` sample, which a `health.v2` owner publishes
+  once.
+- **No keyword, and no lint's rule.** No contract in `conformance/`
+  writes a `health.<key>`, so no fixture moved.
+
 **What deliberately did not change.**
 - **A frame's time, an event's and a snapshot's.** None has an ahead
   code. A snapshot's times are minted from the clock ahead, as before,
