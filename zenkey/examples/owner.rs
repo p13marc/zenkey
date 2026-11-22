@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! cargo run -p zenkey --example owner -- [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
-//!     [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
+//!     [--health] [--health-v2] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
 //!     [--tokenless <iface>]... [--first-hop] [--clock-reference <key>] [--clock-offset-ms <ms>]
 //!     [--cardinality <iface>:<resource>=<n>]...
 //!     [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>]
@@ -92,6 +92,24 @@
 //! one it cannot run (§2.3). The status is never re-put: the heartbeat
 //! covering `health.v1` vouches for it every 28.5 s (`freshness.v2` §2.4).
 //!
+//! **`health.v2`** (`spec/profiles/health/v2.md`, #986's Q2) is implemented
+//! in its place with `--health-v2`, or when a contract file given is its
+//! standard one (`spec/profiles/health/health.v2.toml`, `b447f613…`):
+//! never both majors (§2.3). `--health-status` and `--health-check` then
+//! put packed records, and the text after the level is a **word** (§2.10):
+//! a name of the profile's tables (`serving`, `fallback`, `timeout`, …) or
+//! of the tables a contract file given declares (`health.reasons`,
+//! `health.details`, `health.codes`), written as its number; no text is no
+//! word, and any other text is written `out_of_range` and logged on
+//! standard error (`zenkey::health=info`, in the default filter). `fault <code> <LEVEL>
+//! [<argument>]` publishes a fault with its argument, a number from 0 to
+//! 65,534, or none; text there stays in the log. With `--clock-reference
+//! <key>`, the owner publishes one `clock_ahead` fault each time its clock
+//! guard begins to hold, and its heartbeat covering `health.v2` carries the
+//! ahead time meanwhile (§2.5): `clock-offset <ms>` moves its clock, the
+//! reference's next sample moves the guard, and `clock-guard` says whether
+//! it holds.
+//!
 //! **Commands**, one per line on standard input, each answered by one line
 //! on standard output, while the owner runs:
 //!
@@ -100,8 +118,10 @@
 //! check <name> <LEVEL> [<detail>...]     set_check (UNSPECIFIED: set_check_unknown)
 //! retire <name>                          retire_check
 //! fault <code> <LEVEL> [<detail>...]     fault: an application's code (§2.10)
+//!                                        (health.v2: [<argument>], 0 to 65,534)
 //! confirm on|off                         set_confirming: off lets the status go stale (§2.4)
 //! clock-offset <ms>                      the clock's simulated offset (0: set right)
+//! clock-guard                            whether the clock guard holds: `clock-guard held|released`
 //! seq <n>                                the next state and event seq (core §4.3)
 //! put <iface> <resource> [<value>...]    one write on a member (core §2.7)
 //! delete <iface> <resource> [<value>...] a state member's delete
@@ -139,6 +159,8 @@
 //! A `health.v1` command is answered `health status=<LEVEL> declared=<LEVEL>
 //! raised_by=<name>` (`UNSPECIFIED` for no level, `-` for none): the status
 //! as published, the level declared, and the check that raised it (§2.2).
+//! Under `--health-v2` the answer ends ` word=<n>`: the number the
+//! status's reason was written as, 63 for `out_of_range` (§2.10).
 //! `clock-offset` is answered `clock-offset <ms>`, and `seq <n>` with
 //! `seq <n> run <run>`, the run as the descriptor states it (state.md §7
 //! step 3: the owner takes a new run before its seq would pass
@@ -660,6 +682,9 @@ pub struct Options {
     /// `--health`, or implied by `--health-status`, `--health-check` or
     /// the standard contract among the files: `health.v1` by the runtime.
     pub health: bool,
+    /// `--health-v2`, or the standard `health.v2` contract among the
+    /// files: `health.v2` by the runtime, in place of `health.v1`.
+    pub health_v2: bool,
     /// `--health-status <LEVEL>[:<reason>]`: the status put before start.
     pub health_status: Option<(Level, String)>,
     /// `--health-check <name>=<LEVEL>[:<detail>]`: checks put before start
@@ -842,7 +867,8 @@ owner: a zk2 owner to interoperate with (#609, #610). It brings up one service
 implementing the given contracts, and runs until its standard input closes.
 
 usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
-    [--health] [--health-status <LEVEL>[:<reason>]] [--health-check <name>=<LEVEL>[:<detail>]]...
+    [--health] [--health-v2] [--health-status <LEVEL>[:<reason>]]
+    [--health-check <name>=<LEVEL>[:<detail>]]...
     [--tokenless <iface>]... [--first-hop] [--clock-reference <key>] [--clock-offset-ms <ms>]
     [--cardinality <iface>:<resource>=<n>]...
     [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>]
@@ -885,8 +911,11 @@ here, is answered `refused <line>: <why>`; an unknown command word is answered
 that word's usage.
 
 Command words:
-  status, check, retire, fault, confirm   health.v1 (--health)
+  status, check, retire, fault, confirm   health.v1 (--health) or health.v2
+                                          (--health-v2), below
   clock-offset <ms>                       the clock's simulated offset
+  clock-guard                             whether the clock guard holds (core
+                                          §4.3): `clock-guard held|released`
   seq <n>                                 the next state and event seq (core §4.3):
                                           `seq <n> run <run>`
   put, delete, fill                       one write on a member (core §2.7)
@@ -904,6 +933,48 @@ Command words:
   frame ...                               core §7.7's frames (--frames), below
   arbitrate ...                           arbitration.v1's actuator (--arbitrate), below
   commander ...                           arbitration.v1's commander (--commander), below
+
+health.v2 (spec/profiles/health/v2.md)
+  Implemented by the runtime with --health-v2, or when a contract file given
+  is its standard contract (spec/profiles/health/health.v2.toml), in place of
+  health.v1: an instance implements one major, never both (§2.3). Its status,
+  checks and faults are packed records of 6, 6 and 8 bytes, put on change only;
+  the heartbeat covering health.v2 confirms the status every 28.5 s.
+
+  --health-v2                     implement health.v2; needs nothing more
+  --health-status <LEVEL>[:<reason>]
+                                  the status put before the tokens; unknown with
+                                  the reason `starting` without it
+  --health-check <name>=<LEVEL>[:<detail>]
+                                  a check put before the tokens
+  A reason, a detail and a fault's code are words (§2.10): a name of the
+  profile's tables (reasons: starting, serving, stopping, check, upstream_lost,
+  fallback, backlog, misconfigured; details: ok, unreachable, timeout, refused,
+  cannot_run), or of the tables a contract file given declares on [defaults]
+  (health.reasons, health.details, health.codes; it lists health.v2 in uses).
+  No text is no word. Any other text is written out_of_range, and logged on
+  standard error.
+
+  status <LEVEL> [<reason>]       needs --health-v2; LEVEL is OK, DEGRADED or FAILED
+  check <name> <LEVEL> [<detail>] sets a check (UNSPECIFIED: one it cannot run,
+                                  with the detail cannot_run or its own)
+  retire <name>                   deletes a check
+  fault <code> <LEVEL> [<argument>]
+                                  raises a fault: the code a name of the
+                                  service's health.codes, the argument 0 to 65534
+                                  or none (not_available). clock_ahead is the
+                                  runtime's own and is refused
+  confirm on|off                  off lets the status go stale (§2.4)
+  each answered `health status=<LEVEL> declared=<LEVEL> raised_by=<name> word=<n>`,
+  word the number the status's reason was written as (63: out_of_range).
+
+  To hold the clock guard (§2.5), start with --clock-reference <key>, a key a
+  router stamps and something else puts, then `clock-offset 2000`: at the
+  reference's next sample the guard holds, `clock-guard` answers
+  `clock-guard held`, one clock_ahead fault is published with the offset in
+  whole seconds as its argument, and every heartbeat carries the ahead time
+  until `clock-offset 0` and the next sample release it. --clock-offset-ms
+  <ms> starts the owner with that offset.
 
 config.v2 (spec/profiles/config/v2.md)
   Implemented by the runtime with --config-v2, on rfcfg.v1, the scenarios'
@@ -1441,7 +1512,7 @@ impl Options {
     pub fn parse(args: &[String]) -> Result<Self, String> {
         let usage = || {
             "usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral] \
-             [--health] [--health-status <LEVEL>[:<reason>]] \
+             [--health] [--health-v2] [--health-status <LEVEL>[:<reason>]] \
              [--health-check <name>=<LEVEL>[:<detail>]]... [--tokenless <iface>]... [--first-hop] \
              [--clock-reference <key>] [--clock-offset-ms <ms>] \
              [--cardinality <iface>:<resource>=<n>]... \
@@ -1471,6 +1542,7 @@ impl Options {
             hostid_root: None,
             hostid_ephemeral: false,
             health: false,
+            health_v2: false,
             health_status: None,
             health_checks: Vec::new(),
             tokenless: Vec::new(),
@@ -1547,6 +1619,11 @@ impl Options {
                 }
                 [flag, tail @ ..] if flag == "--health" => {
                     o.health = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--health-v2" => {
+                    o.health = true;
+                    o.health_v2 = true;
                     rest = tail;
                 }
                 [flag, value, tail @ ..] if flag == "--health-status" => {
@@ -2047,6 +2124,14 @@ pub async fn run_with(
             && imp.fingerprint().hex().to_string() == health::FINGERPRINT
         {
             opts.health = true;
+            continue;
+        }
+        // And the standard health.v2, in its place (#986's Q2).
+        if imp.iface() == &health::v2::iface()
+            && imp.fingerprint().hex().to_string() == health::v2::FINGERPRINT
+        {
+            opts.health = true;
+            opts.health_v2 = true;
             continue;
         }
         // So is the standard config.v1 (#768).
@@ -2801,7 +2886,12 @@ impl Ctx<'_> {
         // health.v1 §2.3: its status and checks before the tokens; the status
         // is UNSPECIFIED, "starting", when none is given.
         let health = if opts.health {
-            let h = b.health().await?;
+            // health.v2 §2.3: one major per instance.
+            let h = if opts.health_v2 {
+                b.health_v2().await?
+            } else {
+                b.health().await?
+            };
             if let Some((level, reason)) = &opts.health_status {
                 h.set_status(*level, reason.as_str()).await?;
             }
@@ -3050,12 +3140,17 @@ impl Ctx<'_> {
 
 /// The status as a command's answer.
 fn describe(e: &Effective) -> String {
-    format!(
+    let mut line = format!(
         "health status={} declared={} raised_by={}",
         level_name(e.level),
         e.declared.map_or_else(|| "-".to_owned(), |l| l.to_string()),
         e.raised_by.as_deref().unwrap_or("-")
-    )
+    );
+    // health.v2 §2.10: the number the reason was written as.
+    if let Some(word) = e.word {
+        line.push_str(&format!(" word={}", word.code()));
+    }
+    line
 }
 
 /// A member's writer, kept for its next write.
@@ -4116,6 +4211,19 @@ async fn command(line: &str, up: &mut Up, device: Option<&config::SimDevice>) ->
             Err(e) => refuse(&e.to_string()),
         };
     }
+    // Core §4.3, "Ahead": whether the clock guard holds this owner's
+    // timed state writes, which health.v2 §2.5's fault and its
+    // heartbeat's ahead time follow.
+    if let ["clock-guard"] = words.as_slice() {
+        return format!(
+            "clock-guard {}",
+            if svc.minter().is_ahead() {
+                "held"
+            } else {
+                "released"
+            }
+        );
+    }
     if let ["clock-offset", ms] = words.as_slice() {
         return match ms.parse::<i64>() {
             Ok(ms) => {
@@ -4205,7 +4313,7 @@ async fn command(line: &str, up: &mut Up, device: Option<&config::SimDevice>) ->
         return refuse("unknown command");
     }
     let Some(h) = health else {
-        return refuse("health.v1 is not implemented here (--health)");
+        return refuse("health is not implemented here (--health, or --health-v2)");
     };
     let done = match words.as_slice() {
         ["status", level, ..] => match parse_level(level) {
@@ -4222,6 +4330,17 @@ async fn command(line: &str, up: &mut Up, device: Option<&config::SimDevice>) ->
         },
         ["retire", name] => h.retire_check(name).await,
         ["fault", code, level, ..] => match parse_level(level) {
+            // health.v2 §2.3: a fault's argument, a number or none; any
+            // other text stays in the owner's log.
+            Some(Some(l)) if h.major() == health::Major::V2 => {
+                let text = rest(3);
+                let published = match (text.is_empty(), text.parse::<u16>()) {
+                    (true, _) => h.fault_argument(code, l, None).await,
+                    (false, Ok(n)) => h.fault_argument(code, l, Some(n)).await,
+                    (false, Err(_)) => h.fault(code, l, text).await,
+                };
+                published.map(|()| h.status().expect("put at start"))
+            }
             Some(Some(l)) => h
                 .fault(code, l, rest(3))
                 .await
@@ -4235,7 +4354,8 @@ async fn command(line: &str, up: &mut Up, device: Option<&config::SimDevice>) ->
         _ => {
             return refuse(
                 "usage: status <LEVEL> [<reason>] | check <name> <LEVEL> [<detail>] | \
-                 retire <name> | fault <code> <LEVEL> [<detail>] | confirm on|off",
+                 retire <name> | fault <code> <LEVEL> [<detail>, or health.v2's <argument>] | \
+                 confirm on|off",
             );
         }
     };
@@ -4256,7 +4376,8 @@ async fn main() {
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
                 tracing_subscriber::EnvFilter::new(
-                    "warn,zenkey::config_v1=info,zenkey::config_v2=info,zenkey::alarms=info",
+                    "warn,zenkey::config_v1=info,zenkey::config_v2=info,zenkey::alarms=info,\
+                     zenkey::health=info",
                 )
             }),
         )
