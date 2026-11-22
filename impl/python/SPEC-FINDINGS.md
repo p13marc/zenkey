@@ -29233,3 +29233,356 @@ branch.
   not on this branch; F-569 to F-572.
 
   F-365 stays open as #965's.
+
+## At freshness.v2 0.11, link.v2 0.22, observer 0.35 and core 0.111
+
+Round 117 read the branch `chunk-answers-r115-code` at dedcf083, merged
+under round 116's head: the answers to F-548 and F-550 to F-568, texts
+and fixtures. It read cold:
+- the four changelog entries, then `freshness.v2` §2.4, §2.5, §2.9, §3
+  and §5 whole;
+- `link.v2` §2.9, §2.16, §2.19, §5 and Appendix B's "What a horizon
+  costs a medium";
+- observer §7.5, core §7.5's "Another form on a heartbeat's key", §8.6,
+  and Appendix C and E.
+
+zk2py diffed `spec/`, `examples/zk2/` and `zenkey/tests/contracts/`
+between round 116's tree and this one. `spec/CLAUDE.md` moved too, and
+the barrier keeps it unread. `RULES.md` lists 295 rules, as before. No
+rule and no section number moved: the walk's 308 rows keep their
+verdicts.
+
+### The new cases: what zk2py got wrong
+
+**The order kept, and where it was not.** The suite ran once on the
+merged tree, for the re-key, before any line moved. So its three
+failures on the new cases were seen first. The code was then written
+from the texts and committed (e20229ce) before a fixture file was
+opened.
+
+| List | New cases | As zk2py stood at round 116 | After the text was read |
+|---|---|---|---|
+| `freshness` `apply.json` | 5 (32 to 36) | 5 of 5 | 5 of 5, no line moved |
+| `scope/faces.json` | 4 (29 to 32) | 4 of 4 | 4 of 4, no line moved |
+| `link` `v2/transport.json` | 5 (27 to 31) | 4 of 5 | 5 of 5 |
+| `link` `v2/plan.json` | 1 (48) | 1 of 1 | 1 of 1, no line moved |
+| `heartbeat/owner.json`, `forms` | 1 (the sixth) | 0 of 1, on both keys | 1 of 1 |
+| `envelope/carries.json` | 3 | 3 of 3 | 3 of 3, no line moved |
+
+**Wrong, each with its reason:**
+- **`v2/transport.json`, case 30:** a `mode` of 5 beside timestamping
+  stated off for a router and a peer. zk2py drew `face_timestamping`,
+  and the case draws nothing. That was zk2py's own reading of a `mode`
+  zenoh refuses, since round 109: a router that stamps, whatever the
+  file states (F-562). Text 0.22 reads it as `router`. `stamps` is
+  rewritten from that sentence.
+- **`owner.json`, `forms`, the sixth case, on an owner heartbeat's key
+  and on a heartbeat's:** an owner heartbeat's own bytes under
+  `application/octet-stream`. zk2py's runner gave its reader no
+  `Encoding`, since no case stated one, and the reader read the bytes.
+  The reader itself was right: given the Encoding it refused `form`
+  since round 114, in its own readings and on a bus. The runner now
+  reads the case's `encoding`, `zenoh/bytes` where it states none
+  (core 0.111, Appendix E).
+
+**After the text: none wrong.** The suite is 7189 of 7189.
+
+**What each new case pins** (`readings`):
+- **`apply.json`'s five,** each under a reader changed where the entry
+  says it pins, over the 22 owner heartbeat cases. A reader that loses
+  every followed collection fails case 32 alone. So does one that keeps
+  the names across runs. One whose group stopped at another revision
+  names nothing fails 33. One that starts a count again with a run
+  fails 34. One that reads a collection's class before whether it is
+  followed fails 35. One for which `other_class` ends a row fails 36.
+  Each of round 113's six sentences has its case.
+- **`v2/plan.json`'s case 48.** Counting the listed interfaces with a
+  heartbeat: a longest put of 160 bytes at a 160-byte batch, and a
+  horizon of 60 s at `horizon_s` 60. Counting every listed interface:
+  1,074 bits more, 294 bytes and 30 s, and both findings.
+- **`faces.json`'s four:** a GET given a catalog has no owner heartbeat
+  key, and refuses one given; a `host` collection in hand adds no
+  `host` key across the face; with no policy, both keys.
+- **`carries.json`'s three,** by `zk2c.carries` as round 114 left it.
+
+### The twenty answers
+
+Every one holds. Each sentence a finding quoted is gone, and the
+sentence that answers it is read by a reading keyed to it.
+
+| Finding | Class | Holds | Why |
+|---|---|---|---|
+| F-548 | minor | yes | Five cases, each pinning one sentence, by the six changed readers above. |
+| F-550 | ambiguity | yes | §2.9 and §2.16 say "that have a heartbeat". §2.16 says every listed service with a group is weighed. Case 48 pins it. Its three other unpinned shapes are not spoken of. |
+| F-551 | ambiguity | yes | §2.9: such a collection "is read `host`", no section and no horizon. `freshness.v2` §2.4: a class "is one revision's". See below. |
+| F-552 | minor | yes | Expected 1 names the `link` key, the evidence and the `host` deny. |
+| F-553 | minor | yes | "two resources, the heartbeat and the owner heartbeat". |
+| F-554 | minor | yes | 0.20's entry says `link.v2` 0.19. |
+| F-555 | minor | yes | §2.4 and §2.9: no face "where `freshness.v2` is a listed interface", and no deny where it is not. |
+| F-556 | gap | yes | §2.5 "Without the catalog", §2.4 "And hold its catalog", §5's item, observer §7.5. `zenctl watch` says so on a bus. |
+| F-557 | gap | yes | §2.5, "The catalog its owner names". See below, and F-574. |
+| F-558 | minor | yes | Four cases for a GET and a `host` collection. The `link.v1` clause is a MAY now, with no case, and the entry says why. |
+| F-559 | minor | yes | The clause is its own item, of a tool on the near side. |
+| F-560 | minor | yes | 0.111's entry corrects 0.109's, which stands as a record. |
+| F-561 | minor | yes | `profiles/README.md` says what "written against" is. Both entries name core 0.100. A reader of either text alone still needs its changelog to date a sentence. |
+| F-562 | ambiguity | yes | §2.19, "As data": read at the default. Five cases. See below. |
+| F-563 | minor | yes | `forms`' sixth case, three of `carries.json`, the description's two sentences, and §7.5 naming `apply.json`, whose case 26 is a reader of one revision. |
+| F-564 | minor | yes | Appendix C's two rows and Appendix E's `heartbeat/` entry, its five files named. |
+| F-565 | minor | yes | "An SDU is 23 bytes over its payload", the put's 4 named, and why 5 above. |
+| F-566 | gap | yes | The formula, five parameters, symbol times and the SF12 tile. Every LoRa cell comes out. |
+| F-567 | ambiguity | yes | §2.19, "Two files": a refusal is of the file refused; a tool may ask the router's rows or stop, and never reports a clean check. §5's two rows say so. |
+| F-568 | minor | yes | §3 names the third way. |
+
+### Three answers, read cold
+
+**F-551: a collection whose revisions disagree is read `host`. zk2py
+agrees.**
+- zk2py's plan read it so already. Its finding asked for the other
+  reading of the longest put, since an owner on the revision that reads
+  `link` sends a longer one.
+- **The answer is sound.** The text now says what the plan misses:
+  "That owner's put can be longer than the plan's longest, and its
+  period shorter than the plan's cadence." `exposure_disagrees` names
+  the collection on that face. A plan that counted it would move two
+  warnings for a deployment already warned.
+- **The reader's half holds by a rule that stood:** a subscriber on the
+  other revision reads that owner's group `revision`, by §2.5's
+  "Another revision", and confirms nothing (`readings`, two revisions of
+  `vital.v1`).
+- **What is left:** no case of `v2/plan.json` holds such a collection
+  (F-573).
+
+**F-562: a refused `mode` reads as `router`, as data. zk2py agrees, and
+has changed.**
+- **Why the answer is the better reading.** A `null` there already read
+  as left out. zk2py's warning named the wrong fault: timestamping,
+  where the fault is the `mode`.
+- **What it costs, as the text says:** "That reading names no fault at
+  the `mode`. Only the loader's layer says that no router starts from
+  such a file." Under `zm-1.10.2-r1` the reference has no loader's
+  layer. So a file with a `mode` of `"bogus"` and timestamping off
+  draws no finding of §2.19's from either tool there (measured, below).
+  The text states that and does not mend it. zk2py files nothing.
+
+**F-557: two ways before a subscriber knows the catalog. zk2py refuses.
+The latitude is sound.**
+- **Which zk2py does:** the first. It reads each group
+  `unknown_catalog`, the put still a read one, and holds no put. Its
+  `Naming` keeps the id by run, read from the descriptor that states
+  the put's run.
+- **What changed in zk2py for the text:** it read the first instance's
+  descriptor, whatever its run, and read again after every owner
+  heartbeat while it knew no id. The text says "The descriptor is the
+  one that states the put's run", and "asks again later, and not at
+  every put". It now asks once per run, and again 10 s after a read
+  that fails. The figure is zk2py's.
+- **Can a peer tell the two ways apart? By one thing only.** Both send
+  the same descriptor GET. Over the same puts (`readings`):
+  - the members a held put confirms are confirmed one put later where
+    the subscriber refuses;
+  - a gap after the first put loses a collection only where that put
+    named its interface, which a refused put does not;
+  - two divergences in a row are due after the second put where it
+    holds, and after the third where it refuses.
+  
+  The first two are the subscriber's own verdicts. A lost delivery
+  sends nothing. The third moves the re-read's GET one owner heartbeat
+  earlier, and that GET is all a peer can see.
+- **No Expected of scenarios §8 turns on it:** the reference's owner
+  read by zk2py's readers, and zk2py's by `zenctl watch`, pass it whole.
+- **Where zk2py still reads the text another way than the reference:**
+  a read on the near side that draws no reply (F-574).
+
+### Appendix B's LoRa columns
+
+Recomputed from the formula and the parameters the text gives, and
+nothing else (`readings`):
+- **All 30 LoRa cells come out,** on the puts a day not rounded, as the
+  text says. On the rounded count 21 of 30 do.
+- With RF's 10 that is the table's **40 cells of 40**, and the puts a
+  day 5 of 5.
+- **The seven times on air it states come out to the microsecond:**
+  82.176 and 267.264 ms for 39 bytes, 107.776 and 349.184 ms for 56,
+  and at SF12 2,138.112 ms, 2,465.792 ms and 1,155.072 ms.
+- **The tiles:** a 39-byte SDU is one of 45 bytes, a 56-byte one tiles
+  of 51 and 13.
+- **W2:** 175.8 KB by the layout and 245 KB by the model come out.
+  The measured 176.6 KB and 226.8 KB are measurements, under `docs/`.
+  "46 of 153 puts went two to an SDU" gives about 227 KB.
+
+### Live
+
+On the black boxes of dedcf083. Every router is zenoh-python's, zenoh
+1.10.1. Every listener took port 0.
+
+**`zenctl watch` given no catalog, beside an owner that sends owner
+heartbeats** (`owner_heartbeat_live --reference`, zk2py's owner;
+`freshness_v2_s8_live`, the reference's):
+- It prints no confirmation row and counts no heartbeat, as before. It
+  ends at exit 2 where no sample arrived.
+- **It now says why, on stderr, one line:** "no heartbeat read, and no
+  catalog given (--catalog): the owner heartbeat key of the `link` class
+  was not subscribed, so an owner that confirms by owner heartbeats is
+  heard as one that confirms nothing; no finding about the owner
+  (freshness.v2 §2.5, §5)".
+- **Against §2.5:** "A subscriber that holds no catalog … need not
+  subscribe to one." It subscribes to none. On `peer/{peer}`, a `host`
+  collection, the line names the `host` class: the key "for each class
+  that the collections it follows have".
+- **Against §5 and observer §7.5:** the line is §5's "It cannot tell an
+  owner that sends them from one that confirms nothing", and its "no
+  finding about the owner". It names no catalog's id. §5 lets a tool
+  name it and asks nothing.
+- **It is drawn where no heartbeat was read, whatever the owner.**
+  Beside an owner that sends heartbeats alone, the verb prints its
+  confirmation rows and no line. On an address no owner serves, by
+  hand, it prints the same line: silence, and no verdict.
+
+**`zenctl check face` on a file with a `mode` zenoh refuses**
+(`link_v2_live --only mode`), nine shapes under each binding:
+- **The loader's layer, `zenoh-1.10.1`:** exit 2, "zenoh refused the
+  config", no row, for all nine. zenoh-python 1.10.1 refuses each file
+  too: "unknown variant `bogus`", "invalid type: integer `5`".
+- **As data, `zm-1.10.2-r1`:** no `transport_differs` for any. A `mode`
+  of `"bogus"` or of 5 beside timestamping off for both draws nothing.
+  Beside the peer's value alone it draws `face_timestamping`. A string
+  for `timestamping/enabled`, or at the router's mode, draws it. For a
+  peer, a string draws nothing.
+- **zk2py's check reads each of the nine as the tool does,** the two the
+  text does not name among them (F-575).
+- **Both layers are as §2.19 states them.** Under the fork's binding no
+  layer names the `mode`.
+
+| Runner | What | Result |
+|---|---|---|
+| `owner_heartbeat_live --reference` | zk2py's owner beside `zenctl watch` and `zenctl echo`, with the no-catalog line on both classes and beside heartbeats alone | 16/16 |
+| `owner_heartbeat_live` | whole, with a reader that knows no catalog at its first owner heartbeat: one put refused, one descriptor read, then every group read | 27/27 |
+| `owner_heartbeat_live --silent`, new | an owner whose descriptor answers no GET: zk2py's subscriber, 3 descriptor reads over 9 puts, every group `unknown_catalog`; one given the word; `zenctl watch --catalog`, 9 confirmation rows | 6/6 |
+| `owner_heartbeat_live --forms` | whole | 4/4 |
+| `link_v2_live --only mode`, new | as above | 18/18 |
+| `link_v2_live --only peer`, `--only null` | whole: the reference still stops at a far end's refused file, which "Two files" allows | 12/12, 40/40 |
+| `freshness_v2_s8_live` | §8 in the three pairings, with a reader given no word beside each owner, and `zenctl watch` with no catalog beside the reference's | 34/34, 35/35 and 30/30 |
+| `freshness_v2_s8_live --only cause`, `--only forms` | whole | 18/18 |
+
+- **A reader given no word, beside the reference's owner:** it read two
+  puts `unknown_catalog`, one on each class key, read the descriptors
+  once, found the one whose `run` is the puts', and read every group
+  from then on. The same beside zk2py's owner.
+- **One check failed once.** The first whole run of
+  `freshness_v2_s8_live`, before its two new checks, was 95 of 96:
+  `zenctl watch` on `config` and on `pulse.v1`'s `status` each showed
+  two put rows where one was expected. That pairing alone then passed
+  twice, 21/21, and the whole run passed twice, 96/96 and 99/99. The
+  runner dates a row at its line's arrival. The cause was not
+  established further.
+
+### F-573 · minor · `link` `v2/plan.json`: no case holds a collection the revisions disagree on
+
+> `link.v2` §2.9: "**A collection the revisions disagree on** is read
+> `host`, as `link.v1` §2.3 reads it. The plan gives it no section and
+> weighs no horizon of it (below, §2.16)." §2.16: "The plan warns of a
+> face the `link` key crosses when a listed service's longest owner
+> heartbeat is above `batch_bytes` (`block_over_batch`).
+> `[F: v2/plan.json]`" `CHANGELOG.md`, link.v2 0.22: "**Now:** the plan
+> reads it `host`, for the horizon and for the longest put. Both
+> implementations do."
+
+- **The error.** None of the 49 cases draws `exposure_disagrees`, so
+  none holds such a collection. A plan that counted it `link`, for
+  `horizon_under_face` or for `block_over_batch`, passes the file
+  whole. The answer to F-551 rests on the two implementations agreeing.
+  `link.v1`'s `plan.json` draws the code, in cases that weigh no owner
+  heartbeat.
+- **What zk2py does:** `host`, for both, as before.
+- **Fix:** case 48's face with one more revision of `vital.v1` that
+  reads `status` `host`, or of `quiet.v1` that reads `note` `link`.
+- **Changes:** the fixture.
+
+### F-574 · ambiguity · `freshness.v2` §2.5: a read on the near side that draws no reply, and which catalog is "the catalog it was provisioned"
+
+> §2.5: "**Where no descriptor answers,** as across a constrained
+> face, the subscriber takes the deployment's word: the catalog it was
+> provisioned (core §8.6, R7)." And: "**A read that fails** names no
+> catalog. … The subscriber asks again later, and not at every put.
+> Until an answer comes, each group is `unknown_catalog`." And, of the
+> reference: "A read that fails stands for its run for 30 s. Of several
+> catalogs given, the deployment's word is the last." `CHANGELOG.md`,
+> 0.11: "**The deployment's word after silence.** A reader on the near
+> side whose read drew no reply cannot tell that from a face. It reads
+> through the catalog it was provisioned, as across one."
+
+- **Two readings** of one case: a subscriber with no face, whose
+  descriptor GET draws no reply.
+  - No descriptor answered, so it takes the deployment's word and reads
+    every group through the catalog it holds. The entry says so.
+  - Its read failed, so each group is `unknown_catalog` until an answer
+    comes. The text's last item says so, and names no exception for a
+    subscriber that holds a catalog. Every subscriber that could read a
+    group holds one.
+- **Also unsaid:** which catalog the word is, for a subscriber that
+  holds several and no successor of one another. "The last" is in the
+  reference's parenthesis alone.
+- **Measured** (`owner_heartbeat_live --silent`): zk2py's owner under a
+  catalog, its descriptor queryable undeclared, on the near side.
+  `zenctl watch --catalog` prints 9 confirmation rows over 9 owner
+  heartbeats, 7 of them confirming `status`. zk2py's subscriber that
+  holds the same catalog reads every group `unknown_catalog`, and asks
+  again 3 times in 9 s. **The two implementations differ on a bus.**
+- **What zk2py does:** the second. It takes the deployment's word only
+  where its caller gives one as such, as across a face.
+- **Fix:** the entry's sentence in §2.5, with what "a read that fails"
+  then means: one that drew a descriptor of another run, or an error.
+  And one sentence on several catalogs.
+- **Changes:** whether a subscriber beside a tokenless or slow owner
+  confirms its members.
+
+### F-575 · ambiguity · `link.v2` §2.19, "As data": a value per mode that zenoh refuses at another mode than the one read
+
+> "A refused `timestamping/enabled` reads as its mode's default. So
+> does a refused value of it for the mode."
+
+- **Two readings** of `{ router: false, peer: "yes" }` in a router's
+  file, which zenoh refuses whole. It is a refused
+  `timestamping/enabled`, so the router's default, on, and
+  `face_timestamping`. Or its value for the mode read is `false`, so no
+  finding. The same holds of a mode name that is none of the three
+  inside it.
+- **No case:** `v2/transport.json`'s case 28 puts the string at the
+  mode read.
+- **Measured** (`link_v2_live --only mode`, `zm-1.10.2-r1`): `zenctl
+  check face` and zk2py's check both draw no finding for either file.
+- **What zk2py does:** the second.
+- **Fix:** "the value for the mode read alone decides", and a case.
+- **Changes:** one warning on one file.
+
+### Not run
+
+- **zenohd:** `bin/current` holds none. Every router was zenoh-python's;
+- **a router started from a file with a refused `mode`:** zenoh-python's
+  loader refuses each, and the run stops there;
+- **a subscriber that holds a put** while it reads the descriptor:
+  zk2py's refuses. The reference's was read by its rows alone;
+- **the reference's `consume`** as an owner heartbeat's reader: it takes
+  no catalog;
+- **F-574 across a real face,** a tokenless owner, and a subscriber that
+  holds several catalogs;
+- **§8 with the reference's owner as §8's owner:** the example exposes
+  `route`, as in round 115;
+- **a `link.v1` policy given to `zenctl echo --across-face`,** which the
+  text now lets a tool refuse;
+- **W2 on LoRa:** Appendix B's columns are a model, recomputed and not
+  measured;
+- **the live runners not named here.**
+
+### Counts at freshness.v2 0.11, link.v2 0.22, observer 0.35 and core 0.111
+
+575 entries.
+- **New: F-573 to F-575:**
+  - two ambiguities: F-574 and F-575;
+  - one minor error: F-573.
+  None is a blocker.
+- **Answered this round:** F-548 and F-550 to F-568, each resolved.
+- **Open:** F-437 to F-441; F-569 to F-572, whose answers are not on
+  this branch; F-573 to F-575.
+
+  F-365 stays open as #965's.
