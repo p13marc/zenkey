@@ -2951,7 +2951,10 @@ impl Res {
 ///   vocabulary), of a revision that uses one; any state of a revision
 ///   that uses `redundancy.v1`;
 /// - a template whose first chunk is a parameter, which has no snapshot
-///   key (core §4.2).
+///   key (core §4.2). A `desired.v2` desired resource at such a template
+///   keeps its floor so, as 0.23's "unless its template's first chunk is
+///   a parameter" says (`v2/plan.json`'s case 50, beside case 49's no
+///   floor).
 ///
 /// Every other state is read by snapshot, whose complete answer omits a
 /// member deleted beyond the window.
