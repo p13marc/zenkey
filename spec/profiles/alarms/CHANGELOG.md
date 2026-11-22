@@ -1,8 +1,184 @@
-# `alarms.v1` changelog
+# `alarms` changelog
 
-Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
-what deliberately did not, and why. A breaking change is a new major, a new
-file, never an entry here ([`../README.md`](../README.md)).
+Versions of the texts of [`v1.md`](v1.md) (`alarms.v1`) and
+[`v2.md`](v2.md) (`alarms.v2`). Each entry records what changed, what
+deliberately did not, and why. A breaking change is a new major, a new
+file, never an entry here ([`../README.md`](../README.md)). An entry
+headed `alarms.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
+`v1.md`'s.
+
+## alarms.v2 0.1 — 2026-11-22: a new major: an alarm in a slot, a transition in one packed record, words by table, a resolve with no delete, and "nothing fires" from one snapshot (#984)
+
+**Half of what #984 set out to remove is already gone, and that is said
+first.** The issue's "What happens" lists a firing alarm put again every
+period, and a GET answered document by document.
+- **No alarm is put again.** Since `alarms.v1`'s revision 1.1 its
+  owner's heartbeat confirms it (#978).
+- **A GET is answered by snapshot** (#977).
+- **What is left** is the JSON document at each transition, its key of
+  16 hexadecimal digits, and the delete after a resolve.
+
+**What `alarms.v2` still saves,** on zenoh-modem's RF face, the lean
+stack and a 16-bit run:
+- **W2's ten transitions a day** cost 1.98 KB under `alarms.v1`, as
+  measured. Here they cost 0.45 KB, computed: one SDU of 45 bytes each.
+  The issue asked for about 0.5.
+- **A late joiner's seed** of three firing alarms is 672 B in 4 SDUs
+  under `alarms.v1`. Here it is 163 B in one.
+- **The heartbeat is unchanged,** 8.1 KB a day, and it is the larger
+  cost. This major does not touch it.
+
+`alarms.v2` is a new file, [`v2.md`](v2.md), and no entry of `v1.md`'s:
+it changes what a conforming owner puts on the wire. It restates
+`alarms.v1` 0.14 by reference, and is written against core 0.114 and
+`freshness.v2` 0.12. Its status is `experimental`: no adopter's mapping
+uses it yet.
+
+**What it replaces.**
+- **§2.2, the key.** An alarm's record is on a slot, a number from 0 to
+  255 that is its key's last chunk. An identity takes the slot it
+  holds, else the lowest that does not fire. The alert key stays the
+  identity, by v1's recipe.
+- **§2.4 and §3, the document.** A packed `Alarm`: its state, its
+  severity, an optional `at`, its rule's index, its label codes, an
+  argument, and its alert key where no table names it. The usual one
+  is 67 bits, 9 bytes.
+- **§4, the words.** One annotation, `alarms.rules`: the service's own
+  table of rules, each a name, a summary template, a category, an
+  argument and labels. An alarm no table names has its words in a JSON
+  document on `words/{slot}`.
+- **§2.5, the lifecycle.** A resolve is one put, and no delete follows.
+  The resolved record stays until its slot is retaken.
+- **§2.6, reading.** By identity: a slot's record replaced by another
+  identity's reads `rebound`, `replaced` or `dropped`.
+- **§2.8 and §2.9.** A resolved record takes no room, and a restart
+  adopts onto the same slots, by name.
+- **§2.15, established.** One complete snapshot, with an entry or with
+  none. The 900 s window goes.
+
+**New keyword rules, each with its evidence.**
+- §2.1: an owner MUST NOT implement both majors in one instance. A
+  reader MUST read by the major the descriptor lists.
+  `[F: v2/conclusions.json]` `[Sc: §1, §11]`
+- §2.2: an owner MUST put a record on the slot the rule gives. It MUST
+  NOT hold one identity on two slots, nor take a slot whose record
+  fires. `[F: v2/slots.json]` `[Sc: §1, §4, §7]`
+- §2.4: an owner MUST write each record as the fixture does. A reader
+  MUST read as undecodable one that core §7.6 refuses, or whose `key`
+  disagrees with its `rule`. `[F: v2/records.json]`
+- §2.4: an owner MUST put an alarm's words before its record at a
+  raise. A reader MUST take words only where they derive the record's
+  `key`. `[F: v2/words.json]` `[Sc: §9]`
+- §2.5: an owner MUST put each act as the table says, with a new `at`
+  at a transition. `[F: v2/acks.json]` `[Sc: §1–§4]`
+- §2.5: an owner MUST NOT delete a slot whose record fires, and SHOULD
+  NOT refresh an alarm more than once in 450 s. `[Sc: §2, §3]`
+- §2.6: a reader MUST read the state from the record, and each put as
+  the table does. `[F: v2/transitions.json]`
+- §2.7: a reader MUST NOT read a live count, or a bit, as a state.
+  `[F: v2/confirmations.json]` `[Sc: §6]`
+- §2.8: an owner MUST NOT resolve an alarm, nor put over one, to make
+  room. `[F: v2/slots.json]` `[Sc: §7]`
+- §2.9: an owner MUST put each adopted alarm again before it answers a
+  GET with it, SHOULD before its token, and SHOULD keep its record by
+  slot. `[F: v2/slots.json]` `[Sc: §5]`
+- §2.14, §2.15: a reader MUST answer as the fixture does, `rebound` and
+  an unnamed alarm among its cases, and MUST judge an owner's alarms in
+  the stated order. `[F: v2/conclusions.json]` `[Sc: §10]`
+- §4: an owner MUST write, and a reader MUST read, by the instance's
+  table as the fixture does. A reader MUST read a contract's table as
+  the fixture does, and MUST NOT show a name from a revision the
+  descriptor does not name. A later revision SHOULD append.
+  `[F: v2/tables.json, v2/keys.json]` `[Sc: §9]`
+- Restated from v1 with this major's evidence: owners are found by
+  descriptor, never by token (§2.13), and a face closed to the alarms
+  is unobservable (§2.11).
+
+**Where it narrows what `alarms.v1` guaranteed.** Each is a default of
+the design, which the maintainer saw and did not overrule.
+- **The acknowledgement identity is `at` alone, to the second.** v1's
+  `timestamp` was to the millisecond. A burst of n transitions of one
+  alarm within one second dates the last ones up to n − 1 seconds ahead
+  of the clock. With no `at`, no acknowledgement applies.
+- **A resolved record is kept** until its slot is retaken. It is a live
+  member with its bit clear. So a section's live count is not the count
+  of firing alarms, and a subscriber holds each kept record to stay in
+  step.
+- **"Nothing fires" does not lapse,** as v1's did not. An owner that
+  hangs with nothing firing reads "nothing fires" until its health says
+  otherwise.
+- **No member read by reference.** A reference still has three members.
+  It names no key: the alarm is found by a collection read.
+- **When a refresh was observed** is gone. No reader concluded from
+  `observed_at_ms`.
+- **Words across a face.** The collection stays `host`, and
+  `words/{slot}` is never exposed. A far reader names an alarm only by
+  its owner's table, and shows one by words by its alert key.
+- **A table's words** are printable ASCII. A rule's category is one for
+  all its alarms. Host-scoped labels are not written for a table's
+  rule.
+- **Readers ship before owners.** A reader built for `alarms.v1` reads
+  an `alarms.v2` owner `not_listed`. It goes quiet, not stale. Nothing
+  on the wire guards the order.
+
+**Where it departs from the issue's "The fix".**
+- **No separate binding record.** The slot is the key's chunk, and each
+  record carries its rule's index and its label codes. A snapshot's
+  entry is the member's last put, so a binding would need a collection
+  of its own and two puts a raise.
+- **The record is 9 bytes,** where the issue fixed 8.
+- **The acknowledgement identity is `at`,** not `t32` and the seq. A
+  refresh takes a new seq, and a late joiner sees only the latest.
+
+**What the design could not have as written, and what stands instead.**
+- **`key` is a `counter` of 64 bits,** not an `int` from 0 to 2^64 − 1.
+  A schema file holds no integer outside ±(2^53 − 1) (core E028), and
+  the reference's linter refuses that bound. The bits are the same, and
+  so is every size.
+- **A table's strings are printable ASCII.** The canonical form admits
+  no other (core E027), so the design's "°C" does not lint. Such words
+  go by `words/{slot}`.
+
+**Settled here, where the design left a choice.**
+- **An argument with no code** is written `not_available`, and shown as
+  `?`. The alarm still fires.
+- **A table's findings** are the design's four and four more:
+  `not_used`, `value`, `label` and `disagrees`. An invalid declaration
+  holds no table.
+- **An instance's table** is the one list among its contracts, as
+  `health.v2`'s tables are. Two different lists are none. The design
+  read any two holders as none.
+- **Unnamed** has three reasons: `no_table`, `rule` and `labels`. Two
+  unnamed records are one identity when their `rule` and `labels` are
+  equal.
+- **A new `at`** is later than the greatest `at` the owner knows it
+  wrote for the identity, not only than the one before. An `at` absent
+  between two others would otherwise let an acknowledgement apply
+  again.
+- **A table grows** as `same`, `kept` or `moved`. A summary, a category
+  and an argument may change in place.
+- **The record's tag is 0,** as its layout hashes. It refuses no
+  untagged payload: the length and the pad do.
+- **A slot's words stay** until other words are put there.
+
+**What deliberately did not change.**
+- **The identity:** v1's alert key, byte for byte, over the same words.
+- **What a reader may conclude,** by v1 §2.14's steps and reasons.
+- **The confirmation, the horizon, the QoS, the bound and the
+  exposure.**
+- **No core rule on the wire.** Core 0.114 adds the vocabulary's row to
+  Appendix D, and names `alarms.v2` in §8.1's tokenless list.
+- **Observer** is unchanged.
+
+**Not verified.**
+- **No `alarms.v2` byte has crossed a wire.** Every figure is computed.
+- **The 5-byte frame and the 2-byte key suffix** are inferred from
+  `alarms.v1`'s measured totals, as the design says.
+- **No implementation runs this text.** The standard contract lints
+  with the reference's `zk2 contract lint`, which also accepts a table
+  as a list of TOML tables. It still warns W105 for `alarms.rules`.
+- **The revision is not published** in `../.history/`. The reference's
+  lane publishes it.
 
 ## 0.14 — 2026-11-07: a GET's alarm attributed by its snapshot's run (#977, #609)
 
