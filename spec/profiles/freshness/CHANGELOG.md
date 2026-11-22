@@ -5,6 +5,119 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.11 — 2026-11-21: editorial: how a subscriber learns the catalog its owner names, what it does before it knows, and five cases for a gap's names, no keyword changed (#609, #1110)
+
+zk2py's rounds 113 to 115 read the owner heartbeat cold: this text's
+0.9 and 0.10, its readers and its owner. Seven of their findings are
+answered here. Two are gaps in §2.5: nothing said where a subscriber learns
+the catalog its owner names, nor what it does with an owner heartbeat
+heard before it knows. The reference chose an answer to each while it
+was built (#1139). This version words §2.5 to what is sound in those
+choices, and says where a reader has latitude.
+
+**Answered: F-557, a gap. §2.5, "The catalog its owner names".**
+- **Where the id is.** An owner states it in its descriptor, as core
+  §3.3's `catalog`. The descriptor is the one that states the put's run.
+- **Where no descriptor answers,** as across a constrained face, the
+  subscriber takes the deployment's word: the catalog it was
+  provisioned (core §8.6, R7).
+- **Before it knows,** a subscriber does one of two things. It reads
+  each group `unknown_catalog`, the put still a read one. Or it holds
+  the put while it reads the descriptor, then reads what it held in the
+  order of arrival, each member confirmed at its put's arrival.
+- **Why both.** zk2py does the first, and the reference the second.
+  Neither reads an index through a catalog the owner was not said to
+  name, which is all core §8.6 forbids.
+- **What a reader holds is bounded,** and a read that fails is asked
+  again later, never at every put.
+- **Not taken: reading through the one catalog held** while a
+  descriptor can still answer. That is a guess, which core §8.6 refuses.
+- **The deployment's word after silence.** A reader on the near side
+  whose read drew no reply cannot tell that from a face. It reads
+  through the catalog it was provisioned, as across one. A wrong
+  catalog there gives an index another revision. The group's tag stops
+  it 15 times in 16, and the digest is over the keys of the view's own
+  interface. So it confirms nothing wrongly.
+
+**Answered: F-556, a gap. What a reader without the catalog reads.**
+- **§2.5** now says what only 0.9's entry said. A subscriber that does
+  not hold the catalog its owner names reads no group, and the covered
+  members go stale to it. That is the safe side, and no finding about
+  the owner.
+- **§2.4, "Readers first"** names that reader beside the one that reads
+  heartbeats alone. A deployment provisions the catalog to its readers
+  before it turns the owner heartbeat on.
+- **§2.5, "Both forms".** A subscriber that holds no catalog need not
+  subscribe to an owner heartbeat key. The reference's consumer
+  declares none.
+- **§5** has a tool's word. Stale for want of a catalog is no finding
+  about the owner. A tool that sees a descriptor name a catalog it does
+  not hold can say so. One that subscribed to no owner heartbeat key
+  cannot tell an owner that sends them from one that confirms nothing.
+- **The reference's `zenctl watch`** given no catalog printed no row and
+  no word. This text asks no more of it: §5 states what a tool may
+  conclude. Observer 0.35 says the same of a tool's scope.
+  - **It says so since the code half.** Where it was given no catalog
+    and read no heartbeat of a collection, it prints one line on stderr.
+    The line names the class key it did not subscribe.
+  - It names no catalog's id: the verb reads no descriptor's `catalog`.
+
+**Answered: F-548, minor. `conformance/apply.json`, five cases.**
+- **Named within the run.** A gap before any group has named a followed
+  interface leaves its collection out of `lost`. Another run starts the
+  names again. A reader that loses every followed collection fails it.
+- **A group stopped at "Another revision"** names its interface.
+- **One count.** A collection's divergences in a row run across two
+  runs.
+- **Not followed, in a read group:** a collection of the key's class,
+  and one of the other class.
+- **`other_class` ends no row.** A group on the other class's key,
+  where the collection's map bit is 0, comes between two divergences.
+  A read is still due.
+- **How they were made.** Each expectation was written by hand from
+  §2.5, over bodies the 17 cases already hold. A reading of §2.5
+  written for this entry then ran them, and 15 of the 17 before them.
+  The reference's reader was checked by its source
+  (`zenkey_model::freshness::Views`), since no black box runs the
+  fixture. Never blessed.
+- **37 cases,** 22 of them over owner heartbeats.
+
+**Answered: F-551, an ambiguity. §2.4, "The class".** A class is one
+revision's. An owner reads it in the revision it implements, and a
+subscriber in the one it holds. Where two revisions disagree, a reader
+of the other revision reads the group `revision`. `link.v2` 0.22 says
+what a plan reads of such a collection.
+
+**Answered: F-553, F-555 and F-568, minor.**
+- **§1** counts the standard contract's two resources.
+- **§2.4 and §2.9.** The `host` class's key crosses no face where
+  `freshness.v2` is a listed interface. Where it is not listed, no deny
+  names either key (`link.v1` §2.9). Both link texts said so already.
+- **§3.** The cause is `config` also where the owner's catalog lists
+  none of the interfaces it serves. Both owners list it so.
+
+**Deliberately not changed.**
+- **No keyword, and no rule a reader could fail.** §2.5's MUSTs stand
+  as written. The new paragraph states what core §8.6 and R7 already
+  ask, and two sound ways to meet them.
+- **How long a reader holds a put, and when it asks again.** The
+  reference holds at most 64 and asks again after 30 s. Those are its
+  figures.
+- **A heartbeat,** its 15 cases, and the 17 owner heartbeat cases.
+- **The header** is still written against core 0.108.
+- **Not answered here:** how long a descriptor read may wait (#1146).
+
+**Where the reference does not yet do as §2.5 says.**
+- **A put past its bound is read out of order.** The reference holds at
+  most 64 puts behind a descriptor read. One more is read at once with
+  no catalog, ahead of those held on its key. It moves that key's
+  sequence, so the held puts then read `older` and confirm nothing.
+- **What §2.5 asks:** a subscriber that holds a put "reads what it held
+  in the order of arrival, before any later put on that key".
+- **What follows.** Nothing reads fresh that should not: every group of
+  those puts goes unread, the safe side. It was read in the source, not
+  run. #1146 holds the fix, with the read's wait.
+
 ## `v2.md` 0.10 — 2026-11-21: editorial: §3 says which cause an owner that sends heartbeats alone lists, and the reference runs scenarios §8, no rule changed (#1110, #609)
 
 Text 0.9 let an owner send owner heartbeats, and no owner did.

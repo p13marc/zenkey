@@ -1,6 +1,6 @@
 """``link.v2``'s ``scenarios-v2.md`` §1, §4 and §5, live, on in-process
 zenoh-python routers (zenoh 1.10.1; #609, rounds 110 and 111): ``python -m
-zk2py.link_v2_live [--only s1|s1ref|s4|s4ref|s5|null|peer]``. §3 is
+zk2py.link_v2_live [--only s1|s1ref|s4|s4ref|s5|null|peer|mode]``. §3 is
 :mod:`zk2py.stamp_live`'s.
 
 - **s1**, "The router runs the block" (§2.16, §2.18, §2.19; round 111, the
@@ -1190,12 +1190,116 @@ def _peer(work: str) -> list[Result]:
     return out
 
 
+def _zenctl_findings(work: str, name: str, policy_text: str, conf: dict[str, Any]) -> tuple[int, list[str], str, int]:
+    """``zenctl check face`` over a router's configuration file: its exit,
+    its finding rows of §2.19's codes as ``<code> <at>``, its stderr's
+    first line, and the count of its stdout's lines."""
+    files = {}
+    for what, text in (("policy.face.toml", policy_text), ("router.json5", json.dumps(conf, indent=1))):
+        files[what] = os.path.join(work, f"{name}-{what}")
+        with open(files[what], "w") as f:
+            f.write(text)
+    p = subprocess.run([str(BLACKBOX / "zenctl"), "check", "face", "--face-policy", files["policy.face.toml"],
+                        "--enrollment", str(ENROLLMENT), "--contracts", str(RADIO), files["router.json5"]],
+                       capture_output=True, text=True, timeout=120)
+    rows = []
+    for line in p.stdout.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("row") == "finding" and row.get("code") in (
+                "transport_differs", "wait_under_lease", "face_timestamping", "peer_differs"):
+            rows.append(f"{row['code']} {row.get('at')}")
+    return (p.returncode, sorted(rows), (p.stderr.strip().splitlines() or [""])[0][:200],
+            len([ln for ln in p.stdout.splitlines() if ln.strip()]))
+
+
+def run_mode() -> list[Result]:
+    with workdir("zk2py-mode-") as work:
+        try:
+            return _mode(work)
+        except Exception as e:  # noqa: BLE001 - a run that could not finish is a failure
+            return [("a mode zenoh refuses: the run finished", False, f"{type(e).__name__}: {e}")]
+
+
+def _mode(work: str) -> list[Result]:
+    """link.v2 0.22 §2.19, "As data": "A ``mode`` or a
+    ``timestamping/enabled`` that zenoh refuses" (F-562's answer, round
+    117), on a router's file under both bindings. N's configuration as
+    zk2py's generator writes it, timestamping off for a router and a peer,
+    with each shape of ``v2/transport.json``'s cases 27 to 31 put in, and
+    three the text does not name. For each: whether zenoh-python 1.10.1
+    loads the file; what :func:`zk2py.link_v2.check_transport` reports, as
+    data; and what ``zenctl check face`` (a black box) reports: through
+    zenoh's loader under ``zenoh-1.10.1``, "Only the loader's layer says
+    that no router starts from such a file", and as data under
+    ``zm-1.10.2-r1``."""
+    import zenoh
+
+    from . import link_v2
+
+    out: list[Result] = []
+    stock = conventions_policy()
+    fork = stock.replace('"zenoh-1.10.1"', '"zm-1.10.2-r1"')
+    face = f"unixsock-stream/{os.path.join(work, 'face.sock')}"
+    warn = ["face_timestamping timestamping"]
+    #: (what, the file's mode or ..., its timestamping/enabled or ..., the text's finding, whether the text says)
+    shapes: list[tuple[str, Any, Any, list[str], bool]] = [
+        ("a mode of \"bogus\" beside timestamping off for a router and a peer", "bogus", ..., [], True),
+        ("a mode of 5 beside timestamping off for both (case 30)", 5, ..., [], True),
+        ("a mode of \"bogus\" beside the peer's value alone (case 31)", "bogus", {"peer": False}, warn, True),
+        ("a mode of 5 beside the peer's value alone (case 29)", 5, {"peer": False}, warn, True),
+        ("a string for timestamping/enabled (case 27)", ..., "yes", warn, True),
+        ("a string at the router's mode (case 28)", "router", {"peer": False, "router": "yes"}, warn, True),
+        ("a peer, a string for timestamping/enabled: the peer's default, off", "peer", "yes", [], True),
+        ("a router's value off beside a string at the peer's, which the text does not name", ...,
+         {"router": False, "peer": "yes"}, [], False),
+        ("a router's value off beside a mode name that is none of the three, which the text does not name", ...,
+         {"router": False, "relay": True}, [], False),
+    ]
+    for binding, text in (("zenoh-1.10.1", stock), ("zm-1.10.2-r1", fork)):
+        conf, _ = near_config(text, work, "tcp/127.0.0.1:0", face)
+        for n, (what, mode, stamping, want, said) in enumerate(shapes):
+            doc = json.loads(json.dumps(conf))
+            if mode is not ...:
+                doc["mode"] = mode
+            if stamping is not ...:
+                doc["timestamping"] = {"enabled": stamping}
+            mine = sorted(f"{f['code']} {f['at']}" for f in link_v2.check_transport(
+                text, link_v2.read_config(doc))["findings"])
+            code, rows, err, lines = _zenctl_findings(work, f"{binding}-mode-{n}", text, doc)
+            if binding == "zenoh-1.10.1":
+                try:
+                    zenoh.Config.from_json5(json.dumps(doc, indent=1))
+                    loaded = "loads"
+                except Exception as e:  # noqa: BLE001 - zenoh's refusal, whatever its type
+                    loaded = "refuses: " + str(e).strip().splitlines()[0][:90]
+                out.append((f"{what}, binding zenoh-1.10.1: zenoh-python 1.10.1 refuses the file, and zenctl check "
+                            "face, through zenoh's loader, names zenoh's refusal and ends at exit 2 with no row, the "
+                            f"loader's layer; zk2py's check, as data, reports {want or 'no finding'}"
+                            + ("" if said else " (zk2py's reading)"),
+                            loaded.startswith("refuses") and code == 2 and "zenoh refused the config" in err
+                            and lines == 0 and mine == want,
+                            f"zenoh-python {loaded}; zenctl exit {code}, {lines} lines, {err[:110]}; zk2py {mine}"))
+            else:
+                theirs = [r for r in rows if r.startswith("face_timestamping") or r.startswith("transport_differs")]
+                same = theirs == want
+                out.append((f"{what}, binding zm-1.10.2-r1, as data: "
+                            + (f"§2.19 reads {want or 'no finding'}, and no transport_differs; zk2py's check and "
+                               "zenctl check face both report it" if said else
+                               f"zk2py's check reports {want or 'no finding'}; zenctl check face, observed"),
+                            mine == want and (same or not said),
+                            f"zk2py {mine}; zenctl exit {code}, {theirs}"))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.link_v2_live", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=("s1", "s1ref", "s4", "s4ref", "s5", "null", "peer"))
+    ap.add_argument("--only", action="append", choices=("s1", "s1ref", "s4", "s4ref", "s5", "null", "peer", "mode"))
     args = ap.parse_args(argv)
     runs = {"s1": run_s1, "s1ref": lambda: run_s1(True), "s4": run_s4, "s4ref": run_s4_ref, "s5": run_s5,
-            "null": run_null, "peer": run_peer}
+            "null": run_null, "peer": run_peer, "mode": run_mode}
     failed = 0
     for name in args.only or list(runs):
         for what, ok, detail in runs[name]():

@@ -5670,11 +5670,12 @@ fn freshness_v2_apply() {
         }
     }
     // A count that moves is a fixture that moved: the text's 15 cases for a
-    // heartbeat and its 17 for an owner heartbeat.
-    assert_eq!(cases.len(), 32, "apply.json's cases");
+    // heartbeat and its 22 for an owner heartbeat, the last five written by
+    // hand over bodies the file held (`freshness.v2` 0.11).
+    assert_eq!(cases.len(), 37, "apply.json's cases");
     assert_eq!(
         cases.iter().filter(|c| c.get("catalog").is_some()).count(),
-        17,
+        22,
         "the owner heartbeat's cases"
     );
     assert!(heartbeats > 0 && owner_heartbeats > 0);

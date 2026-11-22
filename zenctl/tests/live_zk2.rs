@@ -13091,6 +13091,10 @@ async fn watch_reads_a_real_owners_owner_heartbeats() {
             .expect("a summary");
         assert_eq!(summary["heartbeats"], rows.len() as u64, "{summary}");
         assert_eq!(summary["heartbeats_lost"], 0, "{summary}");
+        assert!(
+            !run.stderr.contains("no catalog given"),
+            "given a catalog, no word about one: {run}"
+        );
     }
 
     // The table form names the class key and the group.
@@ -13145,6 +13149,19 @@ async fn watch_reads_a_real_owners_owner_heartbeats() {
         .find(|l| l["row"] == "summary")
         .expect("a summary");
     assert_eq!(summary["heartbeats"], 0, "{summary}");
+    // And it says what it did not listen to, one line on stderr
+    // (`freshness.v2` 0.11 §5, observer 0.35 §7.5): `"heartbeats":0` here is
+    // silence, never the owner's.
+    let said: Vec<&str> = run
+        .stderr
+        .lines()
+        .filter(|l| l.contains("no catalog given (--catalog)"))
+        .collect();
+    assert_eq!(said.len(), 1, "one line: {run}");
+    assert!(
+        said[0].contains("`host` class") && said[0].contains("no finding about the owner"),
+        "{run}"
+    );
 }
 
 /// Core 0.110 §4.2 and §7.5 through the raw `get` (#986's J1): `--body

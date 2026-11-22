@@ -1,5 +1,5 @@
 {
-  "description": "observer §7.5, a tool's scope across a constrained face. Computed by a reading of the text (Python, standard library) over the authoring contracts and the face policies, checked by a second reading over link.v2's `plan.json` (cases 14, 17 and 18, each policy read equal to its file) and the published bundles, never blessed. Each case: `contracts`, the contracts in hand; `across`, the addresses read; `policy` and `face`, the face policy and its face, or null; `reads`, `samples` for a subscription or `state` for a GET; `typed`, the selectors given, or null for the tool's own. Keys are base-relative. The plan is derived as link.v2 §2.3 says, each service the policy lists, and each device of its faces, taken to implement every contract in hand. `expect`: `selectors`, the selectors the tool declares, sorted by their bytes; or `refused`, the selectors given that meet none of its scopes, for which the tool refuses the read and declares none; or `plan_refused`, the codes of the plan's errors, where the tool has no scope. With no selector given they are the scopes: each resource's, its exact key or its template with each parameter `*` (an event's occurrence chunk `*` too), and the heartbeat `…/freshness.v2/stream/heartbeat/<iface>` of each interface whose contract uses freshness.v2 and has a collection. With a face, a subscription's scopes are what crosses (link.v1 §2.7, §2.9; link.v2 §2.7), and a GET's every state resource. Given selectors, each declares the scopes it includes, and itself where it meets a scope it does not include. A case's `catalog`, where it states one, says whether the tool was given a catalog (core §8.6); a case that states none was given none. Given one, the scopes hold an owner heartbeat key too, `…/freshness.v2/stream/heartbeats/<class>`, for each class a collection of the contracts in hand has (`link` where its resolved `link.exposure` reads `link`, `host` otherwise); with a face, the `link` class's alone, where the plan lets it cross (link.v2 §2.9). The ten cases that state `catalog` were computed twice, by two readings of the text that shared no code.",
+  "description": "observer §7.5, a tool's scope across a constrained face. Computed by a reading of the text (Python, standard library) over the authoring contracts and the face policies, checked by a second reading over link.v2's `plan.json` (cases 14, 17 and 18, each policy read equal to its file) and the published bundles, never blessed. Each case: `contracts`, the contracts in hand; `across`, the addresses read; `policy` and `face`, the face policy and its face, or null; `reads`, `samples` for a subscription or `state` for a GET; `typed`, the selectors given, or null for the tool's own. Keys are base-relative. The plan is derived as link.v2 §2.3 says, each service the policy lists, and each device of its faces, taken to implement every contract in hand. `expect`: `selectors`, the selectors the tool declares, sorted by their bytes; or `refused`, the selectors given that meet none of its scopes, for which the tool refuses the read and declares none; or `plan_refused`, the codes of the plan's errors, where the tool has no scope. With no selector given they are the scopes: each resource's, its exact key or its template with each parameter `*` (an event's occurrence chunk `*` too), and the heartbeat `…/freshness.v2/stream/heartbeat/<iface>` of each interface whose contract uses freshness.v2 and has a collection. With a face, a subscription's scopes are what crosses (link.v1 §2.7, §2.9; link.v2 §2.7), and a GET's every state resource. Given selectors, each declares the scopes it includes, and itself where it meets a scope it does not include. A case's `catalog`, where it states one, says whether the tool was given a catalog (core §8.6); a case that states none was given none. Given one, the scopes hold an owner heartbeat key too, `…/freshness.v2/stream/heartbeats/<class>`, for each class a collection of the contracts in hand has (`link` where its resolved `link.exposure` reads `link`, `host` otherwise); with a face, the `link` class's alone, where the plan lets it cross (link.v2 §2.9). The first ten cases that state `catalog` were computed twice, by two readings of the text that shared no code. The last four were written by hand from the text (observer 0.35): a GET given a catalog, and a `host` collection in hand beside a `link` key that crosses.",
   "cases": [
     {
       "note": "rf0 with no face policy: every resource of the three contracts, and the three heartbeats",
@@ -910,6 +910,105 @@
       "expect": {
         "refused": [
           "zk2/lab/radio-a/freshness.v2/stream/heartbeats/host"
+        ]
+      }
+    },
+    {
+      "note": "probe.v1 across the RF medium's face, to GET, given a catalog: its two state resources, a request crossing by grant; the catalog adds a subscription's scope alone, so no owner heartbeat key, and no heartbeat's",
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml"
+      ],
+      "across": [
+        "lab/radio-a"
+      ],
+      "policy": "examples/zk2/link/media/rf.face.toml",
+      "face": "radio",
+      "reads": "state",
+      "typed": null,
+      "catalog": true,
+      "expect": {
+        "selectors": [
+          "zk2/lab/radio-a/probe.v1/state/config",
+          "zk2/lab/radio-a/probe.v1/state/status"
+        ]
+      }
+    },
+    {
+      "note": "the `link` owner heartbeat key given to GET across the face, with a catalog: a GET's scopes are the state resources, so it meets none and is refused, never dropped",
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml"
+      ],
+      "across": [
+        "lab/radio-a"
+      ],
+      "policy": "examples/zk2/link/media/rf.face.toml",
+      "face": "radio",
+      "reads": "state",
+      "typed": [
+        "zk2/lab/radio-a/freshness.v2/stream/heartbeats/link"
+      ],
+      "catalog": true,
+      "expect": {
+        "refused": [
+          "zk2/lab/radio-a/freshness.v2/stream/heartbeats/link"
+        ]
+      }
+    },
+    {
+      "note": "probe.v1 and health.v1 across the RF medium's face, given a catalog: a `host` collection in hand, health.v1's `status`, beside the `link` key that crosses; nothing of health.v1 crosses, so its heartbeat does not, and the `host` owner heartbeat key never does: the scope is probe.v1's alone",
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "lab/radio-a"
+      ],
+      "policy": "examples/zk2/link/media/rf.face.toml",
+      "face": "radio",
+      "reads": "samples",
+      "typed": null,
+      "catalog": true,
+      "expect": {
+        "selectors": [
+          "zk2/lab/radio-a/freshness.v2/stream/heartbeat/probe.v1",
+          "zk2/lab/radio-a/freshness.v2/stream/heartbeats/link",
+          "zk2/lab/radio-a/probe.v1/state/config",
+          "zk2/lab/radio-a/probe.v1/state/status",
+          "zk2/lab/radio-a/probe.v1/stream/frames/detail",
+          "zk2/lab/radio-a/probe.v1/stream/frames/link",
+          "zk2/lab/radio-a/probe.v1/stream/level"
+        ]
+      }
+    },
+    {
+      "note": "the same two contracts with no face policy, given a catalog: every resource, both heartbeats, and both owner heartbeat keys, `link` for probe.v1's `status` and `host` for health.v1's",
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "across": [
+        "lab/radio-a"
+      ],
+      "policy": null,
+      "face": null,
+      "reads": "samples",
+      "typed": null,
+      "catalog": true,
+      "expect": {
+        "selectors": [
+          "zk2/lab/radio-a/freshness.v2/stream/heartbeat/health.v1",
+          "zk2/lab/radio-a/freshness.v2/stream/heartbeat/probe.v1",
+          "zk2/lab/radio-a/freshness.v2/stream/heartbeats/host",
+          "zk2/lab/radio-a/freshness.v2/stream/heartbeats/link",
+          "zk2/lab/radio-a/health.v1/state/checks/*",
+          "zk2/lab/radio-a/health.v1/state/status",
+          "zk2/lab/radio-a/health.v1/stream/faults",
+          "zk2/lab/radio-a/probe.v1/state/config",
+          "zk2/lab/radio-a/probe.v1/state/status",
+          "zk2/lab/radio-a/probe.v1/stream/frames/detail",
+          "zk2/lab/radio-a/probe.v1/stream/frames/link",
+          "zk2/lab/radio-a/probe.v1/stream/level",
+          "zk2/lab/radio-a/probe.v1/stream/setpoint"
         ]
       }
     }

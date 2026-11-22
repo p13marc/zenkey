@@ -241,7 +241,13 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   group on the class key, `host` index 2 for `pulse.v1` and `link` index
   0 for `beacon.v2`'s status, the table's head line, and with no
   `--catalog` no row at all and `heartbeats` 0, the regression
-  `freshness.v2` §2.4's "Readers first" names; `gen --owner-heartbeat`
+  `freshness.v2` §2.4's "Readers first" names, and one line on stderr
+  in every format (`cmd::subscribe::unheard_owner_heartbeats`,
+  `freshness.v2` 0.11 §5, observer 0.35 §7.5): given no catalog, a
+  collection followed (`Subscription::followed_class`) and no heartbeat
+  read, it names the class key it did not subscribe, so the summary's
+  `"heartbeats":0` is silence and no finding about the owner; it names
+  no catalog's id, since `watch` reads no descriptor's `catalog`; `gen --owner-heartbeat`
   sets the option on its mock owner (`GenSpec::owner_heartbeat`), refused
   without `--catalog` before any session, exit 2
   (`tests/cmd/mock-owner.trycmd`); `serve` takes no such flag, and an owner with

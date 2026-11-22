@@ -8347,6 +8347,150 @@ instant; a tool whose GET carries a body its user gave it), one gap
 is a blocker. F-548 and F-550 to F-568 stay open. See "At core 0.110" in
 `SPEC-FINDINGS.md`.
 
+## `freshness.v2` 0.11, `link.v2` 0.22, observer 0.35 and core 0.111: rounds 113 to 115 answered (round 117)
+
+Round 117 read the branch `chunk-answers-r115-code` at dedcf083, merged
+under round 116's head: the answers to F-548 and F-550 to F-568.
+- **`freshness.v2` 0.11:** §2.5's "The catalog its owner names", a class
+  as one revision's, §3's third `config` cause, five cases of
+  `apply.json`;
+- **`link.v2` 0.22:** "listed interfaces" with a heartbeat, a disagreed
+  collection read `host`, §2.19's refused `mode` and its "Two files",
+  Appendix B's 23 bytes and LoRa's formula;
+- **observer 0.35:** §7.5's scope for a GET, a `host` collection and a
+  `link.v1` policy, and what a tool given no catalog hears;
+- **core 0.111:** `conformance/heartbeat/` in Appendix C and E, a put
+  with no envelope pinned, and what "written against" says.
+
+No rule and no section number moved. `RULES.md` lists its 295 rules,
+and the walk's 308 rows keep their verdicts.
+
+**`just py-conformance`: 7189 of 7189** on this tree. Of them,
+`readings` 1114, `freshness` 299, `link` 356, `heartbeat` 316, `envelope`
+553 and `scope` 33.
+
+### The new cases
+
+The suite ran once on the merged tree, for the re-key, before any line
+moved, so its failures were seen first. The code was then written from
+the texts and committed before a fixture file was opened.
+
+| List | Cases now | New | As zk2py stood | After the text |
+|---|---|---|---|---|
+| `freshness` `apply.json` | 37, 22 over owner heartbeats | 5 | 5 of 5 | no line moved |
+| `scope/faces.json` | 33 | 4 | 4 of 4 | no line moved |
+| `link` `v2/transport.json` | 32 | 5 | 4 of 5 | 5 of 5 |
+| `link` `v2/plan.json` | 49 | 1 | 1 of 1 | no line moved |
+| `heartbeat/owner.json`, `forms` | 6, of the file's 105 | 1 | 0 of 1, on both keys | 1 of 1 |
+| `envelope/carries.json` | 29 | 3 | 3 of 3 | no line moved |
+
+**Wrong, as zk2py stood:**
+- **`transport.json`'s case 30,** a `mode` of 5 beside timestamping
+  stated off: zk2py drew `face_timestamping`. It read a refused `mode`
+  as a router that stamps, its own choice since round 109 (F-562).
+- **`forms`' sixth case, on both keys:** the runner gave its reader no
+  `Encoding`, since no case stated one. The reader refused such a put
+  already.
+
+**After the text: none.**
+
+### What changed in zk2py
+
+- **`link_v2.stamps`:** a `mode` that is none of zenoh's three reads as
+  `router`. A refused `timestamping/enabled`, or a refused value of it
+  for the mode, reads as the mode's default.
+- **`freshness_v2.Naming`, new:** the catalog an owner names, by run.
+  It is read from the descriptor that states the put's run, once per
+  run, and again 10 s after a read that fails, never at every put. The
+  10 s is zk2py's figure, kept apart from the 30 s the text gives as
+  the reference's: the text asks none, and the pairings pass. The read a
+  subscriber makes at its start covers every run while it is under way,
+  so an owner heartbeat heard before it returns starts no second GET
+  (review-bot on #1150).
+- **`freshness_v2.Provider`:** it sets the catalog for each put by the
+  put's run. It read the first instance's descriptor before, and asked
+  again after every owner heartbeat while it knew no id.
+- **The `forms` runner** reads a case's `encoding`.
+- **`apply_owner_case`** takes a reader, for the readings that change
+  one.
+
+### The twenty answers
+
+**Every one holds.** F-548 and F-550 to F-568 are resolved. The table
+is in `SPEC-FINDINGS.md`.
+
+- **F-551:** a collection whose revisions disagree is read `host`.
+  zk2py's plan read it so. The text now says what that misses, and
+  `exposure_disagrees` names the collection. zk2py agrees. No case
+  holds one (F-573).
+- **F-562:** a refused `mode` reads as `router`, as data. zk2py agrees
+  and has changed: its warning named timestamping, where the fault is
+  the `mode`. Under `zm-1.10.2-r1` no layer names that fault, which the
+  text states.
+- **F-557:** zk2py refuses, the first of the two ways. A peer can tell
+  the two apart by one thing: where the first put diverges, the re-read's
+  GET comes one owner heartbeat earlier from a subscriber that holds.
+  Confirmation one put later and what a gap loses are the subscriber's
+  own verdicts.
+
+**What each new case pins** (`readings`): six changed readers each fail
+their one case of `apply.json` and no other; case 48 by its figures,
+160 bytes and 60 s against 294 bytes and 30 s.
+
+### Appendix B's LoRa columns
+
+From the formula, the five parameters and the SF12 tile the text gives:
+**all 30 LoRa cells**, on the puts a day not rounded. With RF's 10, the
+table's 40 of 40. The seven times on air it states come out to the
+microsecond. Round 115 needed a formula from outside `spec/` (F-566).
+
+### Live
+
+On the black boxes of dedcf083. zenoh-python routers, zenoh 1.10.1.
+
+| Runner | What | Result |
+|---|---|---|
+| `owner_heartbeat_live --reference` | `zenctl watch` given no catalog: no confirmation row, and one line on stderr naming the class key it did not subscribe, `link` or `host`; no line beside heartbeats alone | 16/16 |
+| `owner_heartbeat_live` | whole, with a reader that knows no catalog at its first owner heartbeat | 27/27 |
+| `owner_heartbeat_live --silent`, new | an owner whose descriptor answers no GET | 6/6 |
+| `link_v2_live --only mode`, new | nine shapes of a refused `mode` or `timestamping/enabled`, both bindings | 18/18 |
+| `link_v2_live --only peer`, `--only null` | whole | 12/12, 40/40 |
+| `freshness_v2_s8_live` | §8 in the three pairings, with a reader given no word beside each owner | 34/34, 35/35 and 30/30 |
+| `freshness_v2_s8_live --only cause`, `--only forms` | whole | 18/18 |
+| `owner_heartbeat_live --forms` | whole | 4/4 |
+
+- **`zenctl watch` with no catalog** says that an owner that confirms
+  by owner heartbeats "is heard as one that confirms nothing; no
+  finding about the owner (freshness.v2 §2.5, §5)". That is §5's
+  sentence. It names no catalog's id, which §5 lets it name.
+- **`zenctl check face` on a refused `mode`:** under `zenoh-1.10.1`,
+  exit 2, "zenoh refused the config" and no row. Under `zm-1.10.2-r1`,
+  as data, the finding zk2py's check draws, for all nine.
+- **An owner whose descriptor does not answer, on the near side:**
+  zk2py's subscriber reads every group `unknown_catalog` and asks 3
+  times over 9 puts. `zenctl watch --catalog` confirms by the catalog
+  it was given. §2.5 gives the case both outcomes (F-574).
+- **One check failed once:** the first whole run of
+  `freshness_v2_s8_live` was 95 of 96, a count of put rows that
+  `zenctl watch` showed. It passed in four runs after. The cause was
+  not established.
+
+**Not run:**
+- zenohd: `bin/current` holds none;
+- a subscriber that holds a put while it reads the descriptor;
+- F-574 across a real face, and with several catalogs held;
+- a `link.v1` policy given to `zenctl echo --across-face`;
+- the reference's `consume` as an owner heartbeat's reader;
+- the live runners not named in the table.
+
+Round 117 found F-573 to F-575: one minor error (no case of
+`v2/plan.json` holds a collection the revisions disagree on) and two
+ambiguities (a near-side descriptor read that draws no reply, where
+the two implementations differ on a bus; a value per mode that zenoh
+refuses at another mode than the one read). None is a blocker. F-569 to
+F-572 stay open. See "At freshness.v2 0.11, link.v2 0.22, observer 0.35
+and core 0.111" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -8412,6 +8556,10 @@ is a blocker. F-548 and F-550 to F-568 stay open. See "At core 0.110" in
 - **Of the owner heartbeat** (`freshness.v2` 0.9, round 113): zk2py's
   owner sends one per class under a catalog, and
   `freshness_v2.Provider` reads both forms. Not covered:
+  - holding a put while the descriptor is read, the second of §2.5's two
+    ways (text 0.11, round 117): zk2py's subscriber refuses. It takes
+    the deployment's word only where its caller gives one, never after
+    a read that drew no reply (F-574);
   - zk2py's `health.v1`, `alarms.v1` and `config` readers subscribe to
     no owner heartbeat key. To them a covered interface's members go
     stale, §2.4's "Readers first". Its echo tool shows one, and
@@ -8575,19 +8723,24 @@ impl/python/
     freshness_v2.py   freshness.v2 §2.5's rule (the view), a subscriber that re-reads, the owner's body (round 96);
                                 text 0.9's Reader over an owner heartbeat, a sequence per class key in front of
                                 the views, written from the text before apply.json's cases were opened, and
-                                Provider, both forms on a session (round 113)
+                                Provider, both forms on a session (round 113); Naming, the catalog an owner
+                                names by its run, asked again later and not at every put (text 0.11, round 117)
     owner_heartbeat_live.py freshness.v2 0.9 §2.4, §2.5, §3: an owner heartbeat between two zk2py processes, three
                                 interfaces in one put, one lost, a divergence in one group, a host collection
                                 never on the link key, a reader with no catalog, an owner with none (round 113);
                                 --reference: zk2py's owner with zenctl watch and zenctl echo, given the catalog
-                                and not, zk2py's reader and echo tool beside them (observer 0.34)
+                                and not, zk2py's reader and echo tool beside them (observer 0.34); zenctl
+                                watch's line given no catalog, a reader that knows no catalog at its first
+                                owner heartbeat, and --silent, an owner whose descriptor does not answer
+                                (text 0.11, round 117)
     freshness_v2_scenarios.py freshness.v2 scenarios-v2.md §1–§7 in three pairings: zk2py's owner and readers, the
                                 Rust owner with zk2py's, zk2py's owner with zenctl watch and get state (round 96)
     freshness_v2_s8_live.py freshness.v2 scenarios-v2.md §8 as worded (text 0.10, round 115), in the same three
                                 pairings: the reference's owner heartbeats read by zk2py's reader, zk2py's by
                                 zenctl watch and echo, a face under a link.v2 plan and a link.v1 one; --only
                                 cause, §3's cause on each side; --only forms; --dump and --side-by-side, one
-                                put of each owner on each class key
+                                put of each owner on each class key; a reader given no word beside each
+                                owner (round 117)
     health.py         health.v1 levels, §2.11's reader, roll-ups, codes, the payloads, the owner half
     health_scenarios.py health.v1 scenarios.md §1–§8 on in-process routers
     config.py         config.v1 time, values, the orders of refusals, desired state, redaction, Core,
@@ -8709,7 +8862,9 @@ impl/python/
                                 relay (round 110); §1 over a relay that holds both directions, and §1 and §4
                                 on the reference's generated pair (--only s1, s1ref, s4ref; round 111); a null
                                 at each of the eight keys, zenoh-python's load, zk2py's check and zenctl check
-                                face under both bindings (--only null; round 112)
+                                face under both bindings (--only null; round 112); a far end's refused file
+                                (--only peer; round 115); a mode or a timestamping/enabled zenoh refuses
+                                (--only mode; link.v2 0.22, round 117)
     link_v2_frames_live.py link.v2 scenarios-v2.md §2, frames per face, on zk2py's block and on zenctl acl gen's
                                 (round 111); the class keys on both, and a face of each kind beside zenctl acl
                                 gen's block (--only blocks; round 113)

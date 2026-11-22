@@ -533,7 +533,8 @@ def _fixture_group(g: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def apply_owner_case(contracts: dict[str, Any], case: dict[str, Any]) -> list[tuple[str, Any, Any]]:
+def apply_owner_case(contracts: dict[str, Any], case: dict[str, Any],
+                     reader: Any = None) -> list[tuple[str, Any, Any]]:
     """One ``apply.json`` case with a ``catalog`` (text 0.9) through a
     :class:`Reader`: each heartbeat's and owner heartbeat's answer and each
     check, as (what, got, want). ``contracts`` are the layouts' contracts,
@@ -543,13 +544,14 @@ def apply_owner_case(contracts: dict[str, Any], case: dict[str, Any]) -> list[tu
     where the owner names none." """
     from . import catalog as cat
 
+    make = Reader if reader is None else reader  # a changed reader, for what a case pins
     if case["catalog"] is None:
-        r = Reader()
+        r = make()
     else:
         entries = [(contracts[e].interface, contracts[e].fingerprint) if isinstance(e, str)
                    else (e["iface"], e["contract"]) for e in case["catalog"]]
         c = cat.Catalog(epoch=0, entries=entries, id="00000000")
-        r = Reader([c], c.id)
+        r = make([c], c.id)
     names = {}  # interface id -> layout name
     for name, follows in case["follows"].items():
         v = r.follow(contracts[name].canonical, contracts[name].fingerprint, follows)
@@ -868,6 +870,126 @@ class OwnerHeartbeatRecord:
     answer: dict[str, Any]
 
 
+#: How long a descriptor read that named no catalog stands for its run
+#: before a subscriber asks again (§2.5: "The subscriber asks again later,
+#: and not at every put"). The figure is zk2py's, and kept apart from the
+#: reference's 30 s on purpose (review-bot on #1150): the text states none,
+#: and freshness.v2 0.11's entry says "Those are its figures". A second
+#: implementation at another figure shows that no rule rests on it: round
+#: 117's pairings pass with zk2py at 10 s beside the reference, whose figure
+#: the text gives as 30 s and zk2py did not measure.
+ASK_AGAIN_S = 10.0
+
+
+@dataclass
+class Naming:
+    """§2.5 "The catalog its owner names" (text 0.11), run by run: "An owner
+    states it in its descriptor, as ``catalog`` (core §3.3). The descriptor
+    is the one that states the put's run: a run is one instance's".
+
+    zk2py's subscriber does the first of the two things the text allows
+    "before it knows": "It refuses. It reads each group ``unknown_catalog``,
+    as step 3 says. The owner heartbeat is still a read one." It holds no
+    put.
+
+    - ``word``: "Where no descriptor answers, as across a constrained face,
+      the subscriber takes the deployment's word: the catalog it was
+      provisioned". Given, no descriptor is read, and every run reads
+      through it.
+    - :meth:`of` is the id a put of ``run`` is read through, None where
+      none is known: each group is then ``unknown_catalog``.
+    - :meth:`due` says whether to read the descriptors for ``run`` now: no
+      read is under way for it, and none failed for it within
+      ``ask_again_ns``. "A read that fails names no catalog. Neither does
+      one whose descriptors all state another run. The subscriber asks
+      again later, and not at every put."
+    - :meth:`answer` takes a read's descriptors, each a parsed document. A
+      descriptor of the run that states no ``catalog`` is an answer: its
+      owner names none (core §8.6), and the run is not asked again.
+    - :meth:`begin` marks a read that asks for no run, the one a subscriber
+      makes at its start. It reads every instance's descriptor, so while it
+      is under way it covers every run: :meth:`due` asks for none, and a
+      put heard meanwhile starts no second GET (review-bot on #1150).
+      :meth:`answer` with no run ends it. A run it did not name is asked
+      for at that run's next put."""
+
+    word: str | None = None
+    ask_again_ns: int = int(ASK_AGAIN_S * 1e9)
+    known: dict[str, str | None] = field(default_factory=dict)
+    failed: dict[str, int] = field(default_factory=dict)
+    asking: set[str] = field(default_factory=set)
+    #: reads asked at a put, for its run
+    reads: int = 0
+    #: run-less reads under way (:meth:`begin`), and how many were begun
+    starting: int = 0
+    started: int = 0
+
+    def of(self, run: str | None) -> str | None:
+        if self.word is not None:
+            return self.word
+        return None if run is None else self.known.get(run)
+
+    def begin(self) -> bool:
+        """A read for no run begins. False, and nothing begun, where the
+        deployment's word is given: no descriptor is read then."""
+        if self.word is not None:
+            return False
+        self.starting += 1
+        self.started += 1
+        return True
+
+    def due(self, run: str | None, now_ns: int) -> bool:
+        if self.word is not None or run is None or run in self.known or run in self.asking:
+            return False
+        if self.starting:
+            return False  # the read under way reads this run's descriptor too
+        f = self.failed.get(run)
+        if f is not None and now_ns - f < self.ask_again_ns:
+            return False
+        self.asking.add(run)
+        self.reads += 1
+        return True
+
+    def answer(self, run: str | None, descriptors: Iterable[Any], now_ns: int) -> None:
+        for d in descriptors:
+            r = d.get("run") if isinstance(d, dict) else None
+            if isinstance(r, str):
+                c = d.get("catalog")
+                self.known[r] = c if isinstance(c, str) else None
+        if run is None:
+            self.starting = max(0, self.starting - 1)
+        else:
+            self.asking.discard(run)
+            if run in self.known:
+                self.failed.pop(run, None)
+            else:
+                self.failed[run] = now_ns
+
+
+def descriptors_of(session: Any, address: str, timeout: float = 1.0) -> list[Any]:
+    """Every descriptor ``address``'s instances answer with, each a parsed
+    document: one GET of ``zk2/<address>/@zk/instance/*`` to every
+    queryable (core §3.3 "The GET"), so a tokenless owner's is read too. A
+    reply that is no JSON object is left out."""
+    import json
+
+    import zenoh
+
+    from . import live
+
+    out = []
+    for a in live._answers(session, f"zk2/{address}/@zk/instance/*", zenoh.QueryTarget.ALL, timeout):
+        if not a.ok or a.key is None or "*" in a.key:
+            continue
+        try:
+            d = json.loads(a.payload)
+        except ValueError:
+            continue
+        if isinstance(d, dict):
+            out.append(d)
+    return out
+
+
 def descriptor_catalog(session: Any, address: str, timeout: float = 1.0) -> str | None:
     """The id of the catalog ``address``'s present instance names in its
     descriptor (core §3.3: "An owner given a catalog MUST state its id"), or
@@ -895,23 +1017,25 @@ class Provider:
     - ``revisions``: ``(canonical, fingerprint, follows)`` per interface,
       ``follows`` None for every collection;
     - ``held``: the catalogs the reader holds (core §8.6);
-    - ``named``: the id of the catalog the owner names; None reads it from
-      the owner's descriptor, at the start and, while none was read, after
-      each owner heartbeat heard ("The catalog is needed to confirm. A
-      reader that does not hold the catalog its owner names reads no
-      group");
+    - ``named``: the deployment's word for the catalog the owner names, as
+      across a face, taken with no descriptor read. None reads it from the
+      owner's descriptors, run by run (:class:`Naming`, text 0.11): once at
+      the start, then at the first owner heartbeat of a run it knows no
+      catalog for, and after a read that fails no sooner than
+      ``ask_again_s`` later. Until then each group is ``unknown_catalog``;
     - ``seed``: the interfaces seeded by their own S4 GET at the start."""
 
     def __init__(self, session: Any, address: str, revisions: Iterable[tuple[dict[str, Any], str, Any]],
                  held: Iterable[Any] = (), named: str | None = None, seed: Iterable[str] = (),
-                 reread: bool = True, get_timeout: float = 1.0, wait_s: float = 0.2):
+                 reread: bool = True, get_timeout: float = 1.0, wait_s: float = 0.2,
+                 ask_again_s: float = ASK_AGAIN_S, read_at_start: bool = True):
         import zenoh
 
         self.session, self.address = session, address
         self.lock = threading.RLock()
         self.reader = Reader(held, named)
-        self._named_given = named is not None
-        self._naming = False
+        self.naming = Naming(named, int(ask_again_s * 1e9))
+        self._get_timeout = get_timeout
         self.owner_heartbeats: list[OwnerHeartbeatRecord] = []
         self.closed = False
         seed = set(seed)
@@ -925,25 +1049,29 @@ class Provider:
                 pending.append(iface)
         system, service = address.split("/")
         self.keys = {cls: owner_heartbeat_key(system, service, cls) for cls in self.reader.followed_classes()}
+        # The start read is marked under way before a class key is subscribed:
+        # an owner heartbeat heard before it returns asks for nothing.
+        start = read_at_start and self.naming.begin()
         self.class_subs = [session.declare_subscriber(key, zenoh.handlers.Callback(
             lambda sample, cls=cls: self._owner_beat(cls, sample))) for cls, key in self.keys.items()]
-        if not self._named_given:
-            self._name()
+        if start:
+            self._name(None)
         if wait_s:
             time.sleep(wait_s)
         for iface in pending:
             for resource in list(self.subs[iface].selectors):
                 self.subs[iface]._read(resource, seed=True)
 
-    def _name(self) -> None:
+    def _name(self, run: str | None) -> None:
+        """One read of the owner's descriptors, for ``run`` (None at the
+        start, which asks for no run and so fails for none; the caller has
+        marked it under way, :meth:`Naming.begin`)."""
         try:
-            got = descriptor_catalog(self.session, self.address)
-        except Exception:  # noqa: BLE001 - no descriptor read names none
-            got = None
+            got = descriptors_of(self.session, self.address, self._get_timeout)
+        except Exception:  # noqa: BLE001 - a read that fails names no catalog
+            got = []
         with self.lock:
-            if got is not None:
-                self.reader.named = got
-            self._naming = False
+            self.naming.answer(run, got, time.monotonic_ns())
 
     def _owner_beat(self, cls: str, sample: Any) -> None:
         at = time.monotonic_ns()
@@ -952,7 +1080,16 @@ class Provider:
         payload = sample.payload.to_bytes()
         due: list[tuple[str, str]] = []
         name = False
+        stamp = None
+        try:
+            stamp = zk2c.parse(payload, "put").stamp
+        except zk2c.Refused:
+            pass
+        run = None if stamp is None else stamp.run_hex()
         with self.lock:
+            # "The descriptor is the one that states the put's run": the
+            # catalog this put is read through is its run's, or none yet
+            self.reader.named = self.naming.of(run)
             # each view is its subscriber's, mutated under that subscriber's
             # lock by the puts it hears: hold them all for the one read
             locks = [self.subs[i].lock for i in sorted(self.subs)]
@@ -964,11 +1101,6 @@ class Provider:
             finally:
                 for lk in reversed(locks):
                     lk.release()
-            stamp = None
-            try:
-                stamp = zk2c.parse(payload, "put").stamp
-            except zk2c.Refused:
-                pass
             self.owner_heartbeats.append(OwnerHeartbeatRecord(at, cls, stamp, payload, answer))
             for g in answer.get("read", {}).get("groups", []):
                 sub = self.subs.get(g.get("iface", ""))
@@ -986,10 +1118,10 @@ class Provider:
                         mine = [r for r in sub.view.reread_due() if r not in sub._reading]
                         sub._reading.update(mine)
                         due += [(sub.layout.interface, r) for r in mine]
-            if self.reader.named is None and not self._named_given and not self._naming:
-                self._naming = name = True
+            # only a put the envelope's parse accepted states a run to ask for
+            name = "refused" not in answer and self.naming.due(run, at)
         if name:
-            threading.Thread(target=self._name, daemon=True).start()
+            threading.Thread(target=self._name, args=(run,), daemon=True).start()
         for iface, resource in due:
             threading.Thread(target=self.subs[iface]._read, args=(resource,), daemon=True).start()
 

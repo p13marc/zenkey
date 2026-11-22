@@ -1117,35 +1117,36 @@ def read_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def stamps(config: dict[str, Any]) -> bool:
-    """§2.19 (0.13): whether the router stamps what it routes, "read at the
-    mode it runs". "A tool reads the configuration's ``mode``, ``router``
-    where it states none, as zenohd runs. It reads ``timestamping/enabled``
-    as a boolean, whatever the mode, or as a value per mode. A mode it
-    leaves out is at its default: on for a router, off for a peer and a
-    client." ``config`` is :func:`read_config`'s.
+    """§2.19: whether the router stamps what it routes, "read at the mode
+    it runs". "A tool reads the configuration's ``mode``, ``router`` where
+    it states none, as zenohd runs. It reads ``timestamping/enabled`` as a
+    boolean, whatever the mode, or as a value per mode. A mode it leaves out
+    is at its default: on for a router, off for a peer and a client."
+    ``config`` is :func:`read_config`'s.
 
-    Where the text says nothing, zk2py's reading: a value that is neither a
-    boolean nor a value per mode of booleans, or a ``mode`` that is none of
-    the three, is no setting zenoh runs (as a string lease is, §2.19); the
-    router is then read as stamping, so the warning holds until the file
-    shows timestamping off."""
+    0.22, "As data": "A ``mode`` or a ``timestamping/enabled`` that zenoh
+    refuses draws no ``transport_differs`` … A tool reads it at the
+    binding's default, as it reads one left out. So a ``mode`` that is none
+    of zenoh's three reads as ``router``. A refused ``timestamping/enabled``
+    reads as its mode's default. So does a refused value of it for the
+    mode." Until 0.22 zk2py read each such shape as stamping (F-562).
+
+    Where the text says nothing, zk2py's reading: a value per mode is read
+    at the mode read alone, so a refused value at another mode, or a mode
+    name that is none of the three beside it, changes nothing."""
     # 0.15: "A null reads as left out: as the value, at a mode, or as the
     # mode. zenoh 1.10.1 fills each such optional value with its default."
     mode = config.get("mode")
-    if mode is None:
+    if not isinstance(mode, str) or mode not in STAMPS_BY_DEFAULT:
         mode = DEFAULT_MODE
-    if mode not in STAMPS_BY_DEFAULT:
-        return True
     v = config.get("timestamping/enabled")
-    if v is None:
-        return STAMPS_BY_DEFAULT[mode]
     if isinstance(v, bool):
         return v
-    if isinstance(v, dict) and all(k in STAMPS_BY_DEFAULT and (x is None or isinstance(x, bool))
-                                   for k, x in v.items()):
+    if isinstance(v, dict):
         at_mode = v.get(mode)
-        return STAMPS_BY_DEFAULT[mode] if at_mode is None else at_mode
-    return True
+        if isinstance(at_mode, bool):
+            return at_mode
+    return STAMPS_BY_DEFAULT[mode]
 
 
 def _read(config: dict[str, Any], binding: str) -> dict[str, Any]:
