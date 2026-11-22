@@ -14,6 +14,7 @@
 //!     [--desired-author] [--desired-record <file>] [--desired-window <s>]
 //!     [--desired-target <system>/<service>] [--desired-unbound] [--desired-archive <system>/<service>]
 //!     [--desired-watch] [--desired-reread-ms <ms>] [--desired-hold]
+//!     [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>]
 //!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
@@ -426,6 +427,22 @@
 //! runner's: a target reads presence through its session, and a router
 //! alone reaches no other node.
 //!
+//! **`desired.v2`** (`spec/profiles/desired/v2.md`, #986's J3) is the same
+//! author and target on `scenarios-v2.md`'s contracts, `tasking.v2` and
+//! `worker.v2`, with `--desired-v2`. `--desired-ttl <s>` is "tasking.v2,
+//! watched": the same file with that `freshness.ttl_s`, so the author sends
+//! a heartbeat and a target watches it (§2.5); it implies `--desired-v2`,
+//! and both sides are given it, since the horizon is the revision's.
+//! `--desired-timeout-ms <ms>` is the timeout of each of the target's
+//! reads, 1 s by default: across a face, its reply timeout (§2.5). A
+//! version is written `<run>/<seq>` (§2.4), the report is the packed
+//! `Report`'s reading as JSON, and `--desired-record`'s file holds no
+//! stamp. `desired gets` then lists each GET of the one key, oldest
+//! first, as `<held>=<unchanged|whole>`, `-` for a GET that carried no held
+//! stamp; `desired delete-unheld <target>` puts a delete where no document
+//! is held (`scenarios-v2.md` §15); and `desired watch` says what the
+//! target's watch holds.
+//!
 //! Its commands, each answered by one line:
 //!
 //! ```text
@@ -443,6 +460,8 @@
 //! desired reread <ms>|off                   target: the re-read period (§2.5)
 //! desired acts                              target: the acts and seeds so far
 //! desired seeds                             target: what its last seed found (§2.5, §2.9)
+//! desired delete-unheld <target>            author: a delete put though no document is held (desired.v2 §2.8)
+//! desired watch                             target, desired.v2: what its watch of its author's heartbeat holds (§2.5)
 //! ```
 //!
 //! `put` puts the rest of the line byte for byte, once it reads as strict
@@ -708,6 +727,14 @@ pub struct Options {
     pub desired_watch: bool,
     /// `--desired-reread-ms <ms>`: the target's re-read period (§2.5).
     pub desired_reread_ms: Option<u64>,
+    /// `--desired-v2`, or implied by `--desired-ttl`: `scenarios-v2.md`'s
+    /// `tasking.v2` and `worker.v2` in place of v1's (desired.v2).
+    pub desired_v2: bool,
+    /// `--desired-ttl <s>`: "tasking.v2, watched", its `freshness.ttl_s`.
+    pub desired_ttl_s: u64,
+    /// `--desired-timeout-ms <ms>`: the timeout of each of the target's
+    /// reads (desired.v2 §2.5).
+    pub desired_timeout_ms: Option<u64>,
     /// `--desired-hold`: the drive holds its first act until `desired
     /// release`.
     pub desired_hold: bool,
@@ -825,7 +852,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--desired-author] [--desired-record <file>] [--desired-window <s>]
     [--desired-target <system>/<service>] [--desired-unbound]
     [--desired-archive <system>/<service>] [--desired-watch] [--desired-reread-ms <ms>]
-    [--desired-hold]
+    [--desired-hold] [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>]
     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
@@ -1131,6 +1158,44 @@ desired.v1 (spec/profiles/desired/v1.md)
   A restart is the process's: kill it, or close standard input, and start it
   again (an author with the same --desired-record).
 
+desired.v2 (spec/profiles/desired/v2.md)
+  The same author and target on scenarios-v2.md's contracts, tasking.v2 and
+  worker.v2, embedded; a tasking.v2 or worker.v2 file given is used instead.
+  An author needs --desired-author --desired-v2, and --run-file to write
+  under 16-bit runs; a target --desired-target <sys>/<svc> --desired-v2, and
+  nothing more: it reads its author's revision, makes each re-read
+  conditional, and watches its author's heartbeat where the revision
+  declares a horizon.
+
+  --desired-v2                    tasking.v2 and worker.v2 in place of v1's: a version
+                                  is its put's run and seq, written <run>/<seq>; no Zenoh
+                                  timestamp; GETs answered by snapshot; the report packed
+  --desired-ttl <s>               tasking.v2, watched: its freshness.ttl_s, so the author
+                                  sends a heartbeat at most every <s>/2 and a target
+                                  watches it in place of its period. Implies --desired-v2;
+                                  give it to the author and to the target (one revision)
+  --desired-timeout-ms <ms>       the target's timeout of each read, 1000 by default:
+                                  across a face, its reply timeout. A --desired-reread-ms
+                                  below it refuses the start
+
+  desired put|delete              answered with the version: desired put <key> <run>/<seq>
+  desired delete-unheld <target>  author: a delete put though no document is held, which
+                                  heals a target cut off across a delete past the window
+                                  and a restart (v2.md §2.8)
+  desired gets <target>           author: desired gets <key> <n> then, for each GET of
+                                  that one key, oldest first, <held>=<unchanged|whole>:
+                                  the held stamp it carried (- for none), and whether it
+                                  was answered with that stamp alone
+  desired report                  target: the packed Report's reading, as JSON:
+                                  {source, outcome, last_known, observed?, in_force?,
+                                  refusal?}, a place and a line by index
+  desired watch                   target: desired watch watches=<bool>
+                                  expects=<digest>/<live>|none read=<n> unread=<n>
+                                  last=<run>/<seq>|none asked=<n> silent=<bool> reads=<n>:
+                                  the section it expects, the heartbeats read and not
+                                  read, the reads its watch asked for, whether it reads
+                                  no heartbeat (its period stands), and its GETs in all
+
 redundancy.v1 (spec/profiles/redundancy/v1.md)
   For every contract given that lists redundancy.v1 in uses (a governed
   interface; the scenarios' ledger.v1 and valve.v1). A governed contract needs
@@ -1388,6 +1453,7 @@ impl Options {
              [--desired-target <system>/<service>] [--desired-unbound] \
              [--desired-archive <system>/<service>] [--desired-watch] \
              [--desired-reread-ms <ms>] [--desired-hold] \
+             [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>] \
              [--standby] [--election claim|external] [--instance-id <id>] [--name <word>] \
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
@@ -1431,6 +1497,9 @@ impl Options {
             desired_archive: None,
             desired_watch: false,
             desired_reread_ms: None,
+            desired_v2: false,
+            desired_ttl_s: 0,
+            desired_timeout_ms: None,
             desired_hold: false,
             standby: false,
             election: None,
@@ -1650,6 +1719,25 @@ impl Options {
                     );
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--desired-v2" => {
+                    o.desired_v2 = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--desired-ttl" => {
+                    o.desired_ttl_s = value
+                        .parse()
+                        .map_err(|e| format!("--desired-ttl {value:?}: {e}"))?;
+                    o.desired_v2 = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--desired-timeout-ms" => {
+                    o.desired_timeout_ms = Some(
+                        value
+                            .parse()
+                            .map_err(|e| format!("--desired-timeout-ms {value:?}: {e}"))?,
+                    );
+                    rest = tail;
+                }
                 [flag, tail @ ..] if flag == "--desired-hold" => {
                     o.desired_hold = true;
                     rest = tail;
@@ -1814,11 +1902,18 @@ impl Options {
             && (o.desired_archive.is_some()
                 || o.desired_watch
                 || o.desired_hold
+                || o.desired_timeout_ms.is_some()
                 || o.desired_reread_ms.is_some())
         {
-            return Err(
-                "--desired-archive, --desired-watch, --desired-reread-ms and --desired-hold are \
+            return Err("--desired-archive, --desired-watch, --desired-reread-ms, \
+                 --desired-timeout-ms and --desired-hold are \
                  the target's: give --desired-target or --desired-unbound"
+                .to_owned());
+        }
+        if o.desired_v2 && !(o.desired_author || target) {
+            return Err(
+                "--desired-v2 and --desired-ttl choose the contracts of --desired-author, \
+                 --desired-target or --desired-unbound: give one"
                     .to_owned(),
             );
         }
@@ -1979,11 +2074,16 @@ pub async fn run_with(
                 continue;
             }
         }
-        if (opts.desired_author || target) && imp.iface().to_string() == "tasking.v1" {
+        let (tasking_iface, worker_iface) = if opts.desired_v2 {
+            ("tasking.v2", "worker.v2")
+        } else {
+            ("tasking.v1", "worker.v1")
+        };
+        if (opts.desired_author || target) && imp.iface().to_string() == tasking_iface {
             tasking = Some(imp);
             continue;
         }
-        if target && imp.iface().to_string() == "worker.v1" {
+        if target && imp.iface().to_string() == worker_iface {
             worker = Some(imp);
             continue;
         }
@@ -1998,7 +2098,11 @@ pub async fn run_with(
         imps.push(imp);
     }
     let desired_ctx = if opts.desired_author || target {
-        let (t, w) = drive::contracts()?;
+        let (t, w) = if opts.desired_v2 {
+            drive::contracts_v2(opts.desired_ttl_s)?
+        } else {
+            drive::contracts()?
+        };
         Some(DesiredCtx {
             tasking: tasking.unwrap_or_else(|| Implementation::new(t)),
             worker: worker.unwrap_or_else(|| Implementation::new(w)),
@@ -2790,7 +2894,11 @@ impl Ctx<'_> {
                 b.implement(d.worker.clone())?;
                 let run = b.declare_state_writer(&wi, drive::RUNNING, &none).await?;
                 run.put_value(&drive::baseline()).await?;
-                let dr = Arc::new(drive::Drive::new(run));
+                let dr = Arc::new(if opts.desired_v2 {
+                    drive::Drive::new_v2(run)
+                } else {
+                    drive::Drive::new(run)
+                });
                 if opts.desired_hold {
                     dr.hold();
                 }
@@ -2800,6 +2908,9 @@ impl Ctx<'_> {
                 }
                 if let Some(ms) = opts.desired_reread_ms {
                     st = st.with_reread(Duration::from_millis(ms));
+                }
+                if let Some(ms) = opts.desired_timeout_ms {
+                    st.timeout = Duration::from_millis(ms);
                 }
                 st.watch = d.watch.clone();
                 target = Some(
@@ -3549,6 +3660,7 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
     };
     let err = |e: zenkey::Error| e.to_string();
     let stamp = |ts: &zenoh::time::Timestamp| desired::stamp(ts).to_string();
+    let version = zenkey::model::desired::v2::version_text;
     match words {
         ["desired", "put", t, _, ..] => {
             let a = author()?;
@@ -3565,6 +3677,7 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
             let key = a.key(t).map_err(err)?;
             match a.put(t, rest.as_bytes().to_vec()).await.map_err(err)? {
                 Written::Put(ts) => Ok(format!("desired put {key} {}", stamp(&ts))),
+                Written::PutV2(v) => Ok(format!("desired put {key} {}", version(v))),
                 _ => Ok(format!("desired unchanged {key}")),
             }
         }
@@ -3573,13 +3686,62 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
             let key = a.key(t).map_err(err)?;
             match a.delete(t).await.map_err(err)? {
                 Written::Deleted(ts) => Ok(format!("desired deleted {key} {}", stamp(&ts))),
+                Written::DeletedV2(v) => Ok(format!("desired deleted {key} {}", version(v))),
+                _ => Ok(format!("desired none {key}")),
+            }
+        }
+        ["desired", "delete-unheld", t] => {
+            let a = author()?;
+            let key = a.key(t).map_err(err)?;
+            match a.delete_unheld(t).await.map_err(err)? {
+                Written::Deleted(ts) => Ok(format!("desired deleted {key} {}", stamp(&ts))),
+                Written::DeletedV2(v) => Ok(format!("desired deleted {key} {}", version(v))),
                 _ => Ok(format!("desired none {key}")),
             }
         }
         ["desired", "gets", t] => {
             let a = author()?;
             let key = a.key(t).map_err(err)?;
-            Ok(format!("desired gets {key} {}", a.gets(t).map_err(err)?))
+            let gets = a.gets(t).map_err(err)?;
+            if a.major() == desired::Major::V1 {
+                return Ok(format!("desired gets {key} {gets}"));
+            }
+            // desired.v2 §2.5: for each GET of the one key, the held stamp
+            // it carried, and whether it was answered with that stamp alone.
+            let reads: String = a
+                .reads(t)
+                .map_err(err)?
+                .iter()
+                .map(|r| {
+                    format!(
+                        " {}={}",
+                        r.held.map_or_else(|| "-".to_owned(), version),
+                        if r.unchanged { "unchanged" } else { "whole" }
+                    )
+                })
+                .collect();
+            Ok(format!("desired gets {key} {gets}{reads}"))
+        }
+        ["desired", "watch"] => {
+            let t = target()?;
+            let Some(w) = t.watching().await else {
+                return Err(
+                    "no watch: the role is bound to a desired.v1 author, or unbound".to_owned(),
+                );
+            };
+            Ok(format!(
+                "desired watch watches={} expects={} read={} unread={} last={} asked={} \
+                 silent={} reads={}",
+                w.watches,
+                w.expects
+                    .map_or_else(|| "none".to_owned(), |s| format!("{}/{}", s.digest, s.live)),
+                w.read,
+                w.unread,
+                w.last.map_or_else(|| "none".to_owned(), version),
+                w.asked,
+                w.silent,
+                t.reads()
+            ))
         }
         ["desired", "documents"] => {
             let docs = author()?.documents().await;
@@ -3615,8 +3777,12 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
             ))
         }
         ["desired", "report"] => {
-            let r = target()?.report().await;
-            Ok(format!("desired report {}", r.to_json()))
+            let t = target()?;
+            // desired.v2 §2.10: the packed Report's reading.
+            if let Some(r) = t.report_v2().await {
+                return Ok(format!("desired report {}", r.reading()));
+            }
+            Ok(format!("desired report {}", t.report().await.to_json()))
         }
         ["desired", "running"] => {
             let d = drive()?;
@@ -3671,9 +3837,10 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
             ))
         }
         _ => Err(
-            "usage: desired put <target> <json> | delete <target> | documents | adoption | \
-             gets <target> | new-epoch | report | running | fail-next | refuse-next <code> \
-             [<pointer>] | hold | release | reread <ms>|off | acts | seeds"
+            "usage: desired put <target> <json> | delete <target> | delete-unheld <target> | \
+             documents | adoption | gets <target> | new-epoch | report | running | fail-next | \
+             refuse-next <code> [<pointer>] | hold | release | reread <ms>|off | acts | seeds | \
+             watch"
                 .to_owned(),
         ),
     }
