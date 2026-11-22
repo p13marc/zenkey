@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.114** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.115** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -3456,7 +3456,8 @@ Liveliness tokens carry no payload; everything is in the key.
     no interface token. These SHOULD be the interfaces every service of the
     deployment implements: `health.v1`
     ([`profiles/health/v1.md`](profiles/health/v1.md) §2.7), `alarms.v1`
-    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13),
+    ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) or
+    `alarms.v2` ([`profiles/alarms/v2.md`](profiles/alarms/v2.md) §2.13),
     `freshness.v2` ([`profiles/freshness/v2.md`](profiles/freshness/v2.md)
     §3) and the rest of a framework set.
   - The owner's descriptor marks each such interface `"token": false`
@@ -6093,7 +6094,7 @@ profile's own table replaces its interim one.
 |---|---|---|
 | `freshness` | `ttl_s` | [`profiles/freshness/v1.md`](profiles/freshness/v1.md) §4 |
 | `link` | `exposure` | [`profiles/link/v1.md`](profiles/link/v1.md) §4 |
-| `alarms` | none | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4 |
+| `alarms` | none; `alarms.v2` §4 adds `rules` | [`profiles/alarms/v1.md`](profiles/alarms/v1.md) §4, [`profiles/alarms/v2.md`](profiles/alarms/v2.md) §4 |
 | `telemetry` | `kind`, `unit`, `buckets`, `semantic`; `telemetry.v2` §4 adds `series` | [`profiles/telemetry/v1.md`](profiles/telemetry/v1.md) §4, [`profiles/telemetry/v2.md`](profiles/telemetry/v2.md) §4 |
 | `desired` | `target_param`; `desired.v2` §4 adds `report`, `pointers` and `details` | [`profiles/desired/v1.md`](profiles/desired/v1.md) §4, [`profiles/desired/v2.md`](profiles/desired/v2.md) §4 |
 | `health` | `health.v2` §4: `reasons`, `details`, `codes`. `health.v1` publishes no table | [`profiles/health/v2.md`](profiles/health/v2.md) §4 |
@@ -6109,8 +6110,13 @@ writes it draws W105. `[F: contracts/w105-link-downsample]`
 `alarms.severity_default` left with the interim `alarms` row: an
 alarm's document always carries its `severity` (`alarms.v1` §2.4), so
 there is nothing for a default to fill, and `alarms.v1` publishes no key.
-A contract that writes `alarms.<key>` draws W105.
+A contract that lists `alarms.v1` and writes `alarms.<key>` draws W105.
 `[F: contracts/w105-alarms-vocabulary]`
+
+`alarms.v2` publishes one key, `rules`: a service's own table of its
+alarm rules, which a contract writes once on `[defaults]` (`alarms.v2`
+§4). W105 reads it for a contract that lists `alarms.v2`, and any other
+`alarms.<key>` there draws W105.
 
 `desired.target` left with the interim `desired` row: the binding
 already says which identity fills each target parameter (R2), and no
