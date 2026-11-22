@@ -3,6 +3,45 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.114 — 2026-11-22: Appendix D and §8.1 name `alarms.v2` (#984)
+
+`alarms.v2` text 0.1 is a new major of the alarms profile, on a
+bandwidth-first wire
+([`profiles/alarms/CHANGELOG.md`](profiles/alarms/CHANGELOG.md)). It
+needs no core rule on the wire: its record is §7.6's as it stands, its
+confirmation `freshness.v2`'s heartbeat, and its late joiner's state
+§4.2's snapshot. The core names it in two places.
+
+**What changed.**
+- **Appendix D's vocabulary table.** The `alarms` row gains
+  `alarms.v2` §4's one key, `rules`: a service's own table of its alarm
+  rules. W105 reads the table of the major a contract uses, as §10
+  already says, and as `telemetry.v2`'s `series` is read.
+  - `alarms.v1`'s table stays empty. The paragraph under the table now
+    says "a contract that lists `alarms.v1`", where it said "a
+    contract".
+- **§8.1, the tokenless set.** The framework interfaces a deployment
+  SHOULD name there read "`alarms.v1` or `alarms.v2`". An instance
+  implements one of the two (`alarms.v2` §2.1), and either is one every
+  service of such a deployment implements.
+
+**What deliberately did not change.**
+- **No rule, and no lint's rule.** The SHOULD of §8.1 is the same
+  SHOULD, with one more name. 297 rules.
+- **§4.3's table.** A state of a contract that uses `freshness.v2`
+  carries no Zenoh timestamp, and `alarms.v2`'s two states are such.
+- **§7.6.** `alarms.v2`'s record uses its kinds as they stand. Its
+  alert key is a `counter` of 64 bits, since E028 admits no `int` bound
+  outside ±(2^53 − 1).
+- **Observer** stays 0.35.
+- **No fixture.** No contract in `conformance/` writes `alarms.rules`.
+  The cases that show W105 reading it by major are the reference's to
+  add with its lint.
+
+**Not verified.** The reference's linter still warns W105 for
+`alarms.rules` in a contract that lists `alarms.v2`: its change is
+#984's code half.
+
 ## 0.113 — 2026-11-22: §7.5: a heartbeat's time says "ahead" while its owner's clock guard holds (#986)
 
 An owner whose clock guard holds wrote its heartbeat's time as unknown,
