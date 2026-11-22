@@ -1,0 +1,343 @@
+{
+ "description": "desired.v2 §2.10, §3: the standard packed schema's published artifact ids. file is the profile's schema, a path relative to this profile's directory, and current its artifact's id: sha256 over the document's JCS bytes (RFC 8785; core §7.1, §9.4), as sha256:<64 lowercase hex>. published lists every id the profile publishes, oldest first, each with the text that published it; a type of an artifact whose id is listed is the profile's. types are the profile's type names, each with the first revision that defines it and its tag (core §7.6: the low four bits of the last byte of the sha256 of its layout form's JCS bytes). Each case names a file (path, from the repository's root) or gives a document, decoded -> its id, and whether the profile publishes it. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed.",
+ "file": "desired.v2.json",
+ "current": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd",
+ "published": [
+  {
+   "id": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd",
+   "revision": "0.1",
+   "note": "desired.v2 0.1: Report."
+  }
+ ],
+ "types": [
+  {
+   "name": "Report",
+   "since": "0.1",
+   "tag": 12
+  }
+ ],
+ "cases": [
+  {
+   "note": "the profile's file: the current revision",
+   "path": "spec/profiles/desired/desired.v2.json",
+   "expect": {
+    "id": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd",
+    "published": true
+   }
+  },
+  {
+   "note": "a copy, its members in any order and its whitespace its own: JCS-equal, so the same artifact",
+   "document": {
+    "description": "desired.v2's standard schema (spec/profiles/desired/v2.md, sections 2.10 and 3; core section 10, point 1). A target's contract lists this file, or a copy whose JCS bytes are equal, in [schemas] packed, and types its report resource packed:Report. The type is the profile's by this artifact's id, never by its name alone.",
+    "types": {
+     "Report": {
+      "description": "What one target did with its author's document, and what is in force: a packed record of 3 to 27 bytes.",
+      "fields": [
+       {
+        "name": "source",
+        "type": "enum",
+        "values": [
+         "baseline",
+         "desired",
+         "call"
+        ],
+        "escape": true,
+        "description": "What is in force: the target's baseline, a document it acted on, or a change its own operation made since."
+       },
+       {
+        "name": "outcome",
+        "type": "enum",
+        "values": [
+         "not_acted",
+         "converged",
+         "refused",
+         "failed",
+         "reverted"
+        ],
+        "escape": true,
+        "description": "How the last act ended, which an adoption keeps. not_acted: no act yet in this process."
+       },
+       {
+        "name": "last_known",
+        "type": "bool",
+        "description": "True when the observed version was read from an archive and its author has not confirmed it."
+       },
+       {
+        "name": "in_force",
+        "type": "enum",
+        "values": [
+         "none",
+         "observed",
+         "other"
+        ],
+        "description": "The version wholly in force: none, the observed version, or another, which the four in_force fields then name."
+       },
+       {
+        "name": "observed_run16",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 65535,
+        "optional": true,
+        "description": "The run of the version last acted on or adopted, when it is a 16-bit run."
+       },
+       {
+        "name": "observed_run32",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "optional": true,
+        "description": "The same, when it is a 32-bit run. A version has one run, of one width."
+       },
+       {
+        "name": "observed_seq",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 16777215,
+        "optional": true,
+        "description": "The seq of the version last acted on or adopted."
+       },
+       {
+        "name": "revision",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "optional": true,
+        "description": "The observed document's own revision, where its type carries one."
+       },
+       {
+        "name": "in_force_run16",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 65535,
+        "optional": true,
+        "description": "With in_force other: the run of the version in force, when it is a 16-bit run."
+       },
+       {
+        "name": "in_force_run32",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "optional": true,
+        "description": "With in_force other: the same, when it is a 32-bit run."
+       },
+       {
+        "name": "in_force_seq",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 16777215,
+        "optional": true,
+        "description": "With in_force other: the seq of the version in force."
+       },
+       {
+        "name": "in_force_revision",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "optional": true,
+        "description": "With in_force other: the revision of the document in force, where its type carries one."
+       },
+       {
+        "name": "code",
+        "type": "enum",
+        "values": [
+         "undecodable",
+         "reach",
+         "sensitive",
+         "invalid",
+         "apply"
+        ],
+        "escape": true,
+        "optional": true,
+        "description": "With refused or failed: why. The escape is a code of the document type's own."
+       },
+       {
+        "name": "pointer",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 254,
+        "reserved": [
+         "out_of_range"
+        ],
+        "optional": true,
+        "description": "Where in the document: an index into the report resource's desired.pointers. 0 is the document itself."
+       },
+       {
+        "name": "detail",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 254,
+        "reserved": [
+         "out_of_range"
+        ],
+        "optional": true,
+        "description": "A line for a person: an index into the report resource's desired.details."
+       },
+       "..."
+      ]
+     }
+    }
+   },
+   "expect": {
+    "id": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd",
+    "published": true
+   }
+  },
+  {
+   "note": "one description reworded: another artifact, whose Report is not the profile's, though its layout and its tag are the same",
+   "document": {
+    "description": "desired.v2's standard schema (spec/profiles/desired/v2.md, sections 2.10 and 3; core section 10, point 1). A target's contract lists this file, or a copy whose JCS bytes are equal, in [schemas] packed, and types its report resource packed:Report. The type is the profile's by this artifact's id, never by its name alone.",
+    "types": {
+     "Report": {
+      "description": "A report.",
+      "fields": [
+       {
+        "name": "source",
+        "type": "enum",
+        "values": [
+         "baseline",
+         "desired",
+         "call"
+        ],
+        "escape": true,
+        "description": "What is in force: the target's baseline, a document it acted on, or a change its own operation made since."
+       },
+       {
+        "name": "outcome",
+        "type": "enum",
+        "values": [
+         "not_acted",
+         "converged",
+         "refused",
+         "failed",
+         "reverted"
+        ],
+        "escape": true,
+        "description": "How the last act ended, which an adoption keeps. not_acted: no act yet in this process."
+       },
+       {
+        "name": "last_known",
+        "type": "bool",
+        "description": "True when the observed version was read from an archive and its author has not confirmed it."
+       },
+       {
+        "name": "in_force",
+        "type": "enum",
+        "values": [
+         "none",
+         "observed",
+         "other"
+        ],
+        "description": "The version wholly in force: none, the observed version, or another, which the four in_force fields then name."
+       },
+       {
+        "name": "observed_run16",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 65535,
+        "optional": true,
+        "description": "The run of the version last acted on or adopted, when it is a 16-bit run."
+       },
+       {
+        "name": "observed_run32",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "optional": true,
+        "description": "The same, when it is a 32-bit run. A version has one run, of one width."
+       },
+       {
+        "name": "observed_seq",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 16777215,
+        "optional": true,
+        "description": "The seq of the version last acted on or adopted."
+       },
+       {
+        "name": "revision",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "optional": true,
+        "description": "The observed document's own revision, where its type carries one."
+       },
+       {
+        "name": "in_force_run16",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 65535,
+        "optional": true,
+        "description": "With in_force other: the run of the version in force, when it is a 16-bit run."
+       },
+       {
+        "name": "in_force_run32",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "optional": true,
+        "description": "With in_force other: the same, when it is a 32-bit run."
+       },
+       {
+        "name": "in_force_seq",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 16777215,
+        "optional": true,
+        "description": "With in_force other: the seq of the version in force."
+       },
+       {
+        "name": "in_force_revision",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 4294967295,
+        "optional": true,
+        "description": "With in_force other: the revision of the document in force, where its type carries one."
+       },
+       {
+        "name": "code",
+        "type": "enum",
+        "values": [
+         "undecodable",
+         "reach",
+         "sensitive",
+         "invalid",
+         "apply"
+        ],
+        "escape": true,
+        "optional": true,
+        "description": "With refused or failed: why. The escape is a code of the document type's own."
+       },
+       {
+        "name": "pointer",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 254,
+        "reserved": [
+         "out_of_range"
+        ],
+        "optional": true,
+        "description": "Where in the document: an index into the report resource's desired.pointers. 0 is the document itself."
+       },
+       {
+        "name": "detail",
+        "type": "int",
+        "minimum": 0,
+        "maximum": 254,
+        "reserved": [
+         "out_of_range"
+        ],
+        "optional": true,
+        "description": "A line for a person: an index into the report resource's desired.details."
+       },
+       "..."
+      ]
+     }
+    }
+   },
+   "expect": {
+    "id": "sha256:478fd41a45e2f37490a3837fd2bfb9e46d4301737dc5cae8e63b87c30c02fa26",
+    "published": false
+   }
+  }
+ ]
+}
