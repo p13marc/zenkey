@@ -1198,6 +1198,71 @@ pub fn stray_reply_del(contract: &Contract, key: &str) -> bool {
     of.peek().is_some() && of.all(|r| !per_key(contract, r))
 }
 
+/// A state GET, as its owner answers it (core §4.2, "Answering a state
+/// GET"), for the conditional read's rule ([`answers_held`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StateRead {
+    /// A member read of one concrete key, on a collection the owner
+    /// answers by snapshot: the one GET that can be a conditional read.
+    Member,
+    /// A member read whose selector is not one concrete key: it holds a
+    /// `*`, a `**` or a `$*` chunk.
+    Wildcard,
+    /// A collection read: a selector that includes the snapshot key
+    /// followed by `/**`.
+    Collection,
+    /// A read of a per-key resource ([`per_key`]), answered with a reply
+    /// per key.
+    PerKey,
+}
+
+impl StateRead {
+    /// `member`, `wildcard`, `collection` or `per_key`, as
+    /// `spec/conformance/envelope/held.json`'s `answers` spell it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            StateRead::Member => "member",
+            StateRead::Wildcard => "wildcard",
+            StateRead::Collection => "collection",
+            StateRead::PerKey => "per_key",
+        }
+    }
+}
+
+/// An owner's answer to a conditional read (core 0.110 §4.2, "A
+/// conditional read"): the held stamp it answers alone, or `None` where it
+/// answers whole, as it answers a GET with no payload.
+///
+/// `Some` exactly when the GET is a member read of one concrete key
+/// ([`StateRead::Member`]), its payload carries a held stamp that §7.5's
+/// parse accepts ([`wire::read_get`], `encoding` the payload's), and the
+/// member's last mutation, `last`, carries exactly that stamp: the same
+/// run, in width and value, and the same seq. `last` is the stamp a
+/// snapshot would list for the member: its last put's, or its delete's
+/// within the window, `None` where the owner holds no member there. The
+/// reply's payload is then the held stamp the GET carried
+/// ([`wire::HeldStamp::write`]), on the member's key.
+///
+/// An owner MUST NOT answer a held stamp in any other case: another seq,
+/// another run or the same run's value at the other width, no member held,
+/// a payload §7.5 refuses (never refused, never left unanswered), and
+/// every other kind of GET, whose held stamp is ignored. The run the owner
+/// writes under now is not read.
+#[must_use]
+pub fn answers_held(
+    read: StateRead,
+    encoding: &str,
+    payload: Option<&[u8]>,
+    last: Option<wire::Stamp>,
+) -> Option<wire::HeldStamp> {
+    if read != StateRead::Member {
+        return None;
+    }
+    let held = wire::read_get(encoding, payload).ok().flatten()?;
+    (last == Some(held.stamp)).then_some(held)
+}
+
 /// The collection read of a GET on `selector`, a key expression over one
 /// resource's members (core §4.2, "A collection read"): its snapshot key
 /// followed by `/**`, where every parameter from its template's first on

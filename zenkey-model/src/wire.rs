@@ -10,6 +10,8 @@
 //! owner heartbeat, a put's payload CH · run · seq · body        (core 0.108, #1110's H1)
 //! frame, a put's payload           CH · run · seq · body        (core 0.83, #981's K1)
 //! snapshot, a GET reply's payload  CH · run · asof · body       (core 0.97, #977's E1)
+//! held stamp, a state GET's payload and its reply's
+//!                                  CH · run · seq               (core 0.110, #986's J1)
 //! request, a query's payload       CH · record                  (core 0.92, C4a)
 //! value, a reply's payload         CH · run · seq · record      (core 0.92, C4a)
 //! error, a reply error's payload   CH · run · seq · error       (core 0.92, C4a)
@@ -62,6 +64,17 @@
 //! The first refusal that applies is reported, in §7.5's order, with the
 //! token `spec/conformance/envelope/` pins ([`Refusal::token`]). Every
 //! envelope and form accepted writes back to its bytes.
+//!
+//! **A held stamp** (core 0.110 §7.5, #986's J1; adopted by no profile
+//! until `desired.v2`): a snapshot's header with no body, form 7 with tag
+//! 0, which names one mutation of one state member. A reader sends it on a
+//! state GET ([`read_get`], a fourth sample, [`SampleKind::Get`]) and an
+//! owner whose member is unchanged sends it back as that GET's reply
+//! ([`read_get_reply`], which tells it from a page by its length alone).
+//! [`Envelope::parse`] and [`read_put`] are unchanged: they cannot tell how
+//! a put came, and read the same bytes as a snapshot's envelope with no
+//! body. Who sends one and what each concludes is core §4.2's
+//! ([`crate::seed::Asked`]).
 //!
 //! Not the error envelope of an earlier core's call (§5.2 before 0.99),
 //! which travelled with no form and which nothing here reads.
@@ -197,20 +210,29 @@ pub enum SampleKind {
     Reply,
     /// A call's `reply_err`, its payload: an error.
     ReplyErr,
+    /// A state GET's query, its payload (core 0.110): a held stamp, form
+    /// 7 with no body ([`HeldStamp::parse`]). Never a call's query, which
+    /// is a [`SampleKind::Query`].
+    Get,
 }
 
 impl SampleKind {
-    /// Every sample, in §7.5's order.
-    pub const ALL: [SampleKind; 5] = [
+    /// Every sample, in §7.5's order: a put, a delete and a call's three,
+    /// then a state GET's payload, which core 0.110 added. A loop over it
+    /// meets [`SampleKind::Get`], which carries a snapshot's form alone, as
+    /// a held stamp, and is parsed by [`HeldStamp::parse`], never by
+    /// [`Envelope::parse`] or a call's readers.
+    pub const ALL: [SampleKind; 6] = [
         SampleKind::Put,
         SampleKind::Delete,
         SampleKind::Query,
         SampleKind::Reply,
         SampleKind::ReplyErr,
+        SampleKind::Get,
     ];
 
     /// `put`, `delete`, `query`, `reply` or `reply_err`, as the fixtures
-    /// spell it.
+    /// spell it, and `get` for a state GET's payload.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -219,13 +241,15 @@ impl SampleKind {
             SampleKind::Query => "query",
             SampleKind::Reply => "reply",
             SampleKind::ReplyErr => "reply_err",
+            SampleKind::Get => "get",
         }
     }
 
     /// Whether the sample carries the form: a put a mutation, an event, a
     /// heartbeat, a frame or a snapshot, a delete's attachment a delete, a
-    /// query and a reply a value, and a `reply_err` an error. No sample
-    /// carries a reserved one.
+    /// query and a reply a value, a `reply_err` an error, and a state GET
+    /// a snapshot's form, as a held stamp. No sample carries a reserved
+    /// one.
     #[must_use]
     pub const fn carries(self, form: Form) -> bool {
         match self {
@@ -236,6 +260,7 @@ impl SampleKind {
             SampleKind::Delete => matches!(form, Form::Delete),
             SampleKind::Query | SampleKind::Reply => matches!(form, Form::Value),
             SampleKind::ReplyErr => matches!(form, Form::Error),
+            SampleKind::Get => matches!(form, Form::Snapshot),
         }
     }
 }
@@ -444,6 +469,11 @@ pub enum Refusal {
     /// A delete whose tag is not 0.
     #[error("a delete's tag is {}, not 0", .0.get())]
     DeleteTag(Tag),
+    /// A held stamp whose tag is not 0 (core 0.110): on a state GET, or on
+    /// a GET's reply that is a snapshot's envelope with no byte after its
+    /// seq.
+    #[error("a held stamp's tag is {}, not 0", .0.get())]
+    HeldTag(Tag),
     /// A request whose width bit is 1: a request carries no run (core
     /// 0.92).
     #[error("a request's width bit is 1, and a request carries no run")]
@@ -482,6 +512,19 @@ pub enum Refusal {
     /// 999, or any but 0 under a t32 of all ones.
     #[error("the event's time is an unused code")]
     Time,
+    /// A held stamp that is no owner's answer to its reader (core 0.110
+    /// §4.2, "A held stamp in answer"): one that differs from the stamp
+    /// its GET carried, one in reply to a GET that carried none, one on
+    /// another key, or one heard on a subscription. Its bytes parse (§7.5);
+    /// it establishes nothing, merges nothing, and is counted undecodable.
+    /// Not a refusal of §7.5's parse: the reader's, which knows what it
+    /// asked ([`crate::seed::Asked::read`]).
+    #[error(
+        "a held stamp (run {}, seq {}), not in answer to a GET of this reader's that carried it",
+        .0.run,
+        .0.seq.get()
+    )]
+    Held(Stamp),
 }
 
 fn cause_text(code: Code, cause: Option<Cause>) -> String {
@@ -496,7 +539,8 @@ impl Refusal {
     /// `carries.json` and `spec/conformance/errors/forms.json` pin:
     /// `short`, `form`, `sample_kind`, `key_kind`, `tag`, `request_run`,
     /// `key_stamp`, `trailing`, `time`, `cause`, `detail`, `extension` or
-    /// `utf8`.
+    /// `utf8`; and `held`, `seed/held.json`'s, for a held stamp that is no
+    /// answer.
     #[must_use]
     pub const fn token(&self) -> &'static str {
         match self {
@@ -504,7 +548,8 @@ impl Refusal {
             Refusal::Reserved(_) => "form",
             Refusal::WrongSample { .. } => "sample_kind",
             Refusal::KeyKind { .. } => "key_kind",
-            Refusal::DeleteTag(_) => "tag",
+            Refusal::DeleteTag(_) | Refusal::HeldTag(_) => "tag",
+            Refusal::Held(_) => "held",
             Refusal::RequestRun => "request_run",
             Refusal::KeyStamp { .. } => "key_stamp",
             Refusal::Time => "time",
@@ -518,8 +563,9 @@ impl Refusal {
 }
 
 /// §7.5's checks on CH, in its order: CH itself, its form, the sample, a
-/// frame's or a snapshot's key kind (when `kind` is known), a delete's tag
-/// and a request's width bit. Returns CH and every byte after it.
+/// frame's or a snapshot's key kind (when `kind` is known), a delete's tag,
+/// a held stamp's on a state GET, and a request's width bit. Returns CH and
+/// every byte after it.
 fn read_header(
     bytes: &[u8],
     sample: SampleKind,
@@ -546,6 +592,9 @@ fn read_header(
     }
     if header.form == Form::Delete && header.tag != Tag::NONE {
         return Err(Refusal::DeleteTag(header.tag));
+    }
+    if sample == SampleKind::Get && header.tag != Tag::NONE {
+        return Err(Refusal::HeldTag(header.tag));
     }
     if sample == SampleKind::Query && header.wide {
         return Err(Refusal::RequestRun);
@@ -800,6 +849,160 @@ impl DeleteStamp {
         self.stamp.write_to(&mut out);
         out
     }
+}
+
+/// A held stamp (core 0.110 §7.5; #986's J1): `CH · run · seq`, a
+/// snapshot's header with no body. CH is form 7, the run's width bit and
+/// tag 0: `0xe0` with a 16-bit run, `0xf0` with a 32-bit one. It names one
+/// mutation of one state member by its in-band stamp; the seq's place holds
+/// the mutation's seq, never an asof. The same bytes ride a state GET, "I
+/// hold this member at (run, seq)", and that GET's reply, "its last
+/// mutation is (run, seq)", each under `zenoh/bytes` ([`ENCODING`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HeldStamp {
+    /// The in-band stamp of the mutation it names: its owner's run, in
+    /// width and value, and the mutation's seq. On a GET, the mutation its
+    /// reader holds for the member; on a reply, the member's last.
+    pub stamp: Stamp,
+}
+
+impl HeldStamp {
+    /// The held stamp of the mutation `stamp` names.
+    #[must_use]
+    pub const fn new(stamp: Stamp) -> HeldStamp {
+        HeldStamp { stamp }
+    }
+
+    /// A state GET's payload read as a held stamp (§7.5, "A held stamp on
+    /// a state GET", step 3), without the contract and without the GET's
+    /// key, or the first refusal that applies. The `Encoding` is not read,
+    /// nor is a payload of no byte told apart: [`read_get`] reads both
+    /// first.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::WrongSample`] for a form other than 7 (`sample_kind`),
+    /// [`Refusal::HeldTag`] (`tag`), [`Refusal::Short`] or
+    /// [`Refusal::Trailing`], in that order; [`Refusal::Empty`] for no
+    /// byte.
+    pub fn parse(bytes: &[u8]) -> Result<HeldStamp, Refusal> {
+        let (_, stamp, rest) = read(bytes, SampleKind::Get, None)?;
+        if !rest.is_empty() {
+            return Err(Refusal::Trailing(rest.len()));
+        }
+        Ok(HeldStamp { stamp })
+    }
+
+    /// Its CH: a snapshot's form, the width the run takes, and tag 0.
+    #[must_use]
+    pub const fn header(&self) -> Header {
+        Header {
+            form: Form::Snapshot,
+            wide: self.stamp.run.is_wide(),
+            tag: Tag::NONE,
+        }
+    }
+
+    /// Its bytes: 6, or 8 with a 32-bit run, and no byte after.
+    #[must_use]
+    pub fn write(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.stamp.envelope_bytes());
+        out.push(self.header().byte());
+        self.stamp.write_to(&mut out);
+        out
+    }
+}
+
+/// Why a state GET's payload carries no held stamp (core 0.110 §7.5): its
+/// `Encoding` (step 2), or the parse's first refusal (step 3). Either way
+/// its owner answers the GET as it answers one with no payload (§4.2): a
+/// state GET has no error form.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum GetRefusal {
+    /// Any `Encoding` but exactly `zenoh/bytes`, a schema suffix on it
+    /// included: no held stamp, whatever the bytes.
+    #[error("under {0:?}, which carries no held stamp")]
+    Encoding(String),
+    /// §7.5's first refusal of the payload: `sample_kind`, `tag`, `short`
+    /// or `trailing`.
+    #[error(transparent)]
+    Form(Refusal),
+}
+
+impl GetRefusal {
+    /// `encoding`, or the parse's token ([`Refusal::token`]), as
+    /// `spec/conformance/envelope/held.json`'s `gets` spell it.
+    #[must_use]
+    pub const fn token(&self) -> &'static str {
+        match self {
+            GetRefusal::Encoding(_) => "encoding",
+            GetRefusal::Form(r) => r.token(),
+        }
+    }
+}
+
+/// A state GET's payload read (core 0.110 §7.5, "A held stamp on a state
+/// GET"), in the text's three steps: no payload, or one of no byte, carries
+/// no held stamp, `Ok(None)`, whatever its `Encoding`; a payload under any
+/// `Encoding` but exactly `zenoh/bytes` is refused `encoding`, whatever its
+/// bytes; any other is parsed ([`HeldStamp::parse`]). `encoding` is the
+/// payload's, as zenoh writes it.
+///
+/// # Errors
+///
+/// [`GetRefusal::Encoding`], else [`GetRefusal::Form`] with
+/// [`HeldStamp::parse`]'s refusal. A GET refused carries no held stamp:
+/// its owner answers it whole.
+pub fn read_get(encoding: &str, payload: Option<&[u8]>) -> Result<Option<HeldStamp>, GetRefusal> {
+    let Some(bytes) = payload.filter(|b| !b.is_empty()) else {
+        return Ok(None);
+    };
+    if encoding != ENCODING {
+        return Err(GetRefusal::Encoding(encoding.to_owned()));
+    }
+    HeldStamp::parse(bytes).map(Some).map_err(GetRefusal::Form)
+}
+
+/// What a state GET's reply carries ([`read_get_reply`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetReply<'a> {
+    /// A held stamp: a snapshot's envelope with no byte after its seq, and
+    /// tag 0. Whether it answers the GET that drew it is §4.2's: its reader
+    /// compares it with the one that GET carried
+    /// ([`crate::seed::Asked::read`]).
+    Held(HeldStamp),
+    /// A snapshot's page: form 7 with a byte or more after its seq, its
+    /// tag its collection's type's and its body
+    /// [`crate::collection::Page::read`]'s, unread here.
+    Page(Envelope<'a>),
+    /// Another form a put carries: a per-key resource's reply, the bytes
+    /// its mutation put, whatever its length.
+    Other(Envelope<'a>),
+}
+
+/// A state GET's reply payload read (core 0.110 §7.5, "A held stamp on a
+/// reply"): parsed as a put's payload is, with no key in hand
+/// ([`Envelope::parse`]); a snapshot's envelope with no byte after its seq
+/// is a held stamp, never a page, and its body is not read. The bytes
+/// decide which: a page's body is 10 bytes or more. The `Encoding` is not
+/// read: a reply under another carries no envelope ([`carries`]).
+///
+/// # Errors
+///
+/// [`Envelope::parse`]'s refusal, then [`Refusal::HeldTag`] for a held
+/// stamp whose tag is not 0.
+pub fn read_get_reply(payload: &[u8]) -> Result<GetReply<'_>, Refusal> {
+    let e = Envelope::parse(payload)?;
+    if !e.is_snapshot() {
+        return Ok(GetReply::Other(e));
+    }
+    if !e.record.is_empty() {
+        return Ok(GetReply::Page(e));
+    }
+    if e.tag != Tag::NONE {
+        return Err(Refusal::HeldTag(e.tag));
+    }
+    Ok(GetReply::Held(HeldStamp { stamp: e.stamp }))
 }
 
 /// A call's request, a query's payload: `CH · record` (core 0.92 §7.5).
@@ -1139,10 +1342,20 @@ pub fn read_delete(key: &str, attachment: Option<&[u8]>) -> Option<Stamp> {
 impl Refusal {
     /// Why a refused envelope's sample is undecodable, for a person and a
     /// script alike: the refusal's token after a fixed prefix,
-    /// `zk2c envelope refused: short`.
+    /// `zk2c envelope refused: short`. A held stamp that is no answer
+    /// ([`Refusal::Held`]) is named as what it is, with its stamp, before
+    /// its token, `held`: its bytes parse, and it is no page cut short.
     #[must_use]
     pub fn reason(&self) -> String {
-        format!("zk2c envelope refused: {}", self.token())
+        match self {
+            Refusal::Held(s) => format!(
+                "zk2c held stamp (run {}, seq {}), unchanged only to the GET that carried it, \
+                 and no answer here: held",
+                s.run,
+                s.seq.get()
+            ),
+            _ => format!("zk2c envelope refused: {}", self.token()),
+        }
     }
 }
 
@@ -1236,6 +1449,63 @@ mod tests {
             "g000",
         ] {
             assert_eq!(Run::from_hex(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Every sample of [`SampleKind::ALL`] against every form: each
+    /// carries the forms §7.5 gives it and no other, a state GET's payload
+    /// (core 0.110) a snapshot's form alone; each has a name of its own;
+    /// and a state GET's parse refuses every form but 7 as `sample_kind`,
+    /// before a tag or a length is read.
+    #[test]
+    fn every_sample_carries_its_forms_and_a_state_get_form_7_alone() {
+        use std::collections::BTreeSet;
+        let names: BTreeSet<&str> = SampleKind::ALL.iter().map(|s| s.as_str()).collect();
+        assert_eq!(
+            names.into_iter().collect::<Vec<_>>(),
+            ["delete", "get", "put", "query", "reply", "reply_err"]
+        );
+        for sample in SampleKind::ALL {
+            let carried: Vec<Form> = Form::ALL
+                .into_iter()
+                .filter(|f| sample.carries(*f))
+                .collect();
+            let want: &[Form] = match sample {
+                SampleKind::Put => &[
+                    Form::Mutation,
+                    Form::Event,
+                    Form::Frame,
+                    Form::Heartbeat,
+                    Form::Snapshot,
+                ],
+                SampleKind::Delete => &[Form::Delete],
+                SampleKind::Query | SampleKind::Reply => &[Form::Value],
+                SampleKind::ReplyErr => &[Form::Error],
+                SampleKind::Get => &[Form::Snapshot],
+            };
+            assert_eq!(carried, want, "{sample}");
+        }
+        for form in Form::ALL {
+            // CH alone, with tag 5: the form is judged first.
+            let ch = Header {
+                form,
+                wide: false,
+                tag: Tag::new(5).unwrap(),
+            }
+            .byte();
+            let got = HeldStamp::parse(&[ch]);
+            if form == Form::Snapshot {
+                assert_eq!(got, Err(Refusal::HeldTag(Tag::new(5).unwrap())));
+            } else {
+                assert_eq!(
+                    got,
+                    Err(Refusal::WrongSample {
+                        form,
+                        sample: SampleKind::Get
+                    }),
+                    "{form}"
+                );
+            }
         }
     }
 

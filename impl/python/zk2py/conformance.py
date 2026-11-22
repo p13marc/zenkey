@@ -5049,14 +5049,15 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("core 0.97's entry: vectors.json 22 headers and 159 cases; carries.json 28 reads; snapshot/bodies.json "
                 "39 writes, 12 refused, 109 reads, 79 refused, and 13 snapshots paged, 2 refused; of vectors.json's "
                 "cases, 18 are a snapshot's CH, 11 on a put, of which 7 parse; since core 0.101 and 0.103, 174 cases "
-                "and 37 reads (round 107)",
+                "and 37 reads (round 107); 46 reads since core 0.110's nine, a held stamp on a put's key "
+                "(round 116)",
                 missing(log, "22 headers and 159 cases, 12 of them new", "28 reads, 12 new",
                         "39 writes, 12 of them refused, 109 reads, 79 refused, and 13 snapshots paged, 2 refused")
                 + [len(vec["headers"]), len(vec["cases"]), len(car["reads"]), len(bod["writes"]),
                    refused(bod["writes"]), len(bod["reads"]), refused(bod["reads"]), len(bod["pages"]),
                    refused(bod["pages"]), len(form7), sum(1 for c in form7 if c["sample"] == "put"),
                    sum(1 for c in form7 if c["sample"] == "put" and "refused" not in c["expect"])],
-                [22, 174, 37, 39, 12, 109, 79, 13, 2, 18, 11, 7]))
+                [22, 174, 46, 39, 12, 109, 79, 13, 2, 18, 11, 7]))
     # core 0.100 (round 105) adopts the snapshot: §4.2 has an owner write one
     # and a reader read one, and §7.5's "No rule at this version" is gone.
     out.append(("core 0.97 §7.5: the snapshot's four static rules as the text states them, §12's static acts; "
@@ -5083,11 +5084,12 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "owner 85 since core 0.103's five (round 107); 274 since core 0.104's one, the consumer's (round "
                 "108); 277 and the owner 88 since core 0.107's three owner rules (round 111); 283 and the static rules 73 "
                 "since core 0.108's six, the owner heartbeat's (round 112); 284 since observer 0.34's one (round 113); 286 "
-                "and the static rules 75 since core 0.109's two, the owner still 88 (round 114)",
+                "and the static rules 75 since core 0.109's two, the owner still 88 (round 114); 295, the static rules "
+                "79 and the owner 90 since core 0.110's nine, the conditional read's (round 116)",
                 missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
                         "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [286, 75, 88]))
+                   counted.get("Owner")], [295, 79, 90]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -5299,6 +5301,7 @@ def _round104_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out += _round113_readings(root)
     out += _round114_readings(root)
     out += _round115_readings(root)
+    out += _round116_readings(root)
     return out
 
 
@@ -5890,10 +5893,11 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
     every = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.105's figures: RULES.md lists 274 rules, as 0.104 did, the consumer's MUST NOT widened in "
                 "place (consumer 32); the row names a delete; 277 since core 0.107 (round 111); 283 since core 0.108 "
-                "(round 112); 284 since observer 0.34 (round 113); 286 since core 0.109 (round 114)",
+                "(round 112); 284 since observer 0.34 (round 113); 286 since core 0.109 (round 114); 295 and the consumer "
+                "35 since core 0.110's three reader rules (round 116)",
                 [int(every.group(1)) if every else None, counts.get("Consumer"),
                  "or a delete on an events key, whether a subscription heard it" in rules],
-                [286, "32", True]))
+                [295, "35", True]))
     # Round 109's findings, each text as it quotes it, so an answer moves it
     from .contract import load_contract
     from .owner import keeps_timestamp
@@ -6069,7 +6073,7 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     rules = (spec / "RULES.md").read_text(encoding="utf-8")
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.107's figures: RULES.md listed 277 rules, 274 in 0.106 (283 since core 0.108, round 112; 284 "
-                "since observer 0.34, round 113; 286 since core 0.109, round 114), "
+                "since observer 0.34, round 113; 286 since core 0.109, round 114; 295 since core 0.110, round 116), "
                 "the owner's the MUST NOT on `minor` and the two SHOULDs of a descriptor over 1 KB, of which core "
                 "0.109 rewords the first and folds the second into the 1 KB SHOULD's MAY; the 1 KB "
                 "SHOULD's row shows the MAY that excepts it, as 0.109 words it",
@@ -6081,7 +6085,7 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    sum(1 for t in owner33 if "That owner SHOULD also keep every member but" in t),
                    sum(1 for t in owner33 if "SHOULD stay within 1 KB" in t
                        and "So an owner MAY exceed 1 KB while the rest of its descriptor is within 512 B" in t)],
-                [286, 1, 1, 0, 1]))
+                [295, 1, 1, 0, 1]))
     # The checker, by §3.3's sentences and the schema: `minor` optional, an
     # integer of the record's uint64 where stated.
     nav = load_contract(dd / "contracts" / "nav.v2.toml", spec_dir=spec)
@@ -6298,6 +6302,217 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     return out
 
 
+def _round116_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.110, a conditional read, read cold (#609, round 116): the
+    version and its entry's claims, the three answers zk2py gave from the
+    text before a case was seen, each as its code reads it, what a reader
+    built before this version reads, Appendix B's "A conditional read's
+    bytes" recomputed from §7.5's layouts, and round 116's findings, each
+    text as it quotes it, so an answer moves it."""
+    import re
+
+    from . import held, seed_held, snapshot, zk2c
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    core, log = flat("core.md"), flat("CHANGELOG.md")
+
+    def missing(text: str, *quotes: str) -> list[str]:
+        return [q for q in quotes if q not in text]
+
+    rules = (spec / "RULES.md").read_text(encoding="utf-8")
+    once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
+    counted = {n: int(c) for n, c in re.findall(r"^\| \[([^\]]+)\]\(#[^)]*\) \| (\d+)", rules, re.M)}
+    m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
+    env = _load_json(root / "envelope" / "held.json")
+    sfx = _load_json(root / "seed" / "held.json")
+    car = _load_json(root / "envelope" / "carries.json")
+    snaps = _load_json(root / "seed" / "snapshot.json")
+    obs = flat("observer.md")
+    out: list[tuple[str, Any, Any]] = [
+        ("core 0.110 or later, with its entry; observer.md 0.34 or later; RULES.md lists 295 rules, the owner 90, the "
+         "consumer 35 and the static rules 79; envelope/held.json holds 9 writes, 34 gets, 22 replies and 23 answers, "
+         "88 cases; seed/held.json 12 asks and 29 cases, 41; carries.json 46 reads, the last nine a held stamp's "
+         "bytes on a put's key; seed/snapshot.json 45 cases, of which 42 state `collections` and 41 give one (the "
+         "entry counts \"the 41 cases … that give `collections`\")",
+         [m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.110"),
+          bool(re.search(r"\| \*\*Text version\*\* \| 0\.(3[4-9]|[4-9]\d) ", obs)),
+          int(once.group(1)) if once else None, counted.get("Owner"), counted.get("Consumer"),
+          counted.get("Implementation: the static rules"),
+          [len(env[k]) for k in ("writes", "gets", "replies", "answers")], [len(sfx["asks"]), len(sfx["cases"])],
+          len(car["reads"]), sum(1 for c in car["reads"][-9:] if "held stamp" in c["note"]),
+          [len(snaps["cases"]), sum(1 for c in snaps["cases"] if "collections" in c),
+           sum(1 for c in snaps["cases"] if c.get("collections"))]]
+         + missing(log, "## 0.110 — 2026-11-21: a conditional read: §7.5's held stamp, and §4.2's owner and reader",
+                   "`conformance/envelope/held.json` is new: 9 writes, 34 GET payloads, 22 replies and 23 answers of "
+                   "an owner.",
+                   "`conformance/seed/held.json` is new: 12 stamps a reader sends or does not, and 29 merges.",
+                   "`conformance/envelope/carries.json` gains 9 reads",
+                   "- **Four rules**, all static: the writer's, the GET's parse, the reply's tag, and the round "
+                   "trip.", "`observer.md` stays 0.34."),
+         [True, True, 295, 90, 35, 79, [9, 34, 22, 23], [12, 29], 46, 9, [45, 42, 41]]),
+        ("core 0.110, §7.5 and §4.2: the nine rules as the texts state them, and S2's and the member read's one "
+         "exception",
+         missing(core,
+                 "An implementation that writes a held stamp MUST write it so: CH with form 7 and tag 0, the run and "
+                 "the seq, and no byte after.",
+                 "An implementation MUST refuse a state GET's payload at step 3 for the first of these that applies, "
+                 "in this order, naming the refusal:",
+                 "An implementation MUST refuse a held stamp on a reply whose tag is not 0 (`tag`).",
+                 "Every held stamp an implementation accepts MUST write back to the same bytes.",
+                 "An owner SHOULD answer a conditional read with the held stamp alone when the member's last mutation "
+                 "carries exactly that stamp: the same run, in width and value, and the same seq.",
+                 "An owner MUST NOT answer a GET with a held stamp in any other case.",
+                 "A consumer or a tool MUST NOT send a held stamp other than the in-band stamp of the mutation it "
+                 "holds for that member, as the owner wrote it.",
+                 "A consumer or a tool MUST NOT read any other held stamp as unchanged.",
+                 "A consumer or a tool that sent a held stamp MUST accept a snapshot in answer, and merge it as any "
+                 "member read's (above).",
+                 "A conditional read's answer is the one exception (below).",
+                 "- **A conditional read** is the one exception to these two answers."),
+         []),
+    ]
+    # -- the three answers given from the text, before a case was seen -----------
+    b16 = held.write(zk2c.InBand(16, 5, 7))
+
+    def reply_of(raw: bytes) -> Any:
+        r = held.read_reply(raw)
+        return r.refusal or r.reads
+
+    out.append(("answer 1 (§7.5), from the text: (a) a lone CH byte of form 7 with a tag is `tag` on a state GET, the "
+                "tag read before the length, and `short` on a reply, whose parse is a put's and checks no snapshot's "
+                "tag; a lone CH of another form with a tag is `sample_kind` on a GET; a whole held stamp with a tag "
+                "is `tag` on both; (b) a payload of no byte is none, refused for nothing, under any Encoding, step 1 "
+                "first; a byte or more under another Encoding, a schema suffix among them, is `encoding`",
+                [held.get_token(zk2c.ENCODING, b"\xe5"), reply_of(b"\xe5"), held.get_token(zk2c.ENCODING, b"\x25"),
+                 held.get_token(zk2c.ENCODING, bytes([b16[0] | 5]) + b16[1:]), reply_of(bytes([b16[0] | 5]) + b16[1:]),
+                 [held.read_get(e, x) for e in (zk2c.ENCODING, "application/json", None) for x in (None, b"")],
+                 [held.get_token(e, b16) for e in ("application/json", "zenoh/bytes;zk2c", zk2c.ENCODING)]],
+                ["tag", "short", "sample_kind", "tag", "tag", [None] * 6, ["encoding", "encoding", None]]))
+    old, now = zk2c.InBand(16, 5, 7), zk2c.InBand(16, 6, 2)
+    out.append(("answer 2 (§4.2), from the text: the owner compares the GET's stamp with the member's stored stamp, "
+                "\"the one a snapshot would list for the member: its live entry's, or its tombstone's\", never with "
+                "the run it writes under now or its newest seq: a member last put under run 5 at seq 7 answers (5, 7) "
+                "held whatever the owner writes under, and answers the run it writes under, its newest seq and the "
+                "other width whole",
+                [held.answer("member", zk2c.ENCODING, held.write(old), old) == held.write(old),
+                 held.answer("member", zk2c.ENCODING, held.write(now), old),
+                 held.answer("member", zk2c.ENCODING, held.write(zk2c.InBand(16, 6, 7)), old),
+                 held.answer("member", zk2c.ENCODING, held.write(zk2c.InBand(32, 5, 7)), old),
+                 [held.answer(r, zk2c.ENCODING, held.write(old), old) is None for r in held.READS]]
+                + missing(core, "Its stamp is the one a snapshot would list for the member: its live entry's, or its "
+                                "tombstone's."),
+                [True, None, None, None, [False, True, True, True]]))
+    key = "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+    cols = [{"coll": 0, "template": "plans/{vehicle}", "snapshot_key": key.rsplit("/", 1)[0]}]
+    view = [{"key": key, "sample": "put", "stamp": {"width": 16, "run": 5, "seq": 7}, "record": "7631"}]
+    none6 = snapshot.write_page({"tag": 0, "run_width": 16, "run": 6, "asof": 0, "time": None, "index": 0,
+                                 "more": False, "coll": 0, "live": [], "tombs": []}).hex()
+    answer = {"via": "get", "key": key, "hex": held.write(old).hex()}
+    absent = {"via": "get", "key": key, "hex": none6, "page": snapshot.read_page(bytes.fromhex(none6), "state")}
+    later = {"via": "sub", "key": key, "sample": "put", "stamp": {"width": 16, "run": 6, "seq": 1}, "record": "7632"}
+
+    def after(*arrivals: dict[str, Any]) -> list[Any]:
+        seed = seed_held.HeldSeed(cols, view, key, old)
+        for a in arrivals:
+            seed.arrive(dict(a))
+        return [sorted(seed.view), seed.again, [x["reads"] for x in seed.readings]]
+
+    # what separates the two readings of "by then" for read_again: a value
+    # that arrives after an answer that found nothing held
+    cases_after = [c for c in sfx["cases"]
+                   if c["expect"]["read_again"] and any("held" in a for a in c["arrivals"][:-1])]
+    out.append(("answer 3 (§4.2), \"by then\": the text names no instant, and zk2py decides at the answer's arrival: "
+                "the answer first, then another run's snapshot of no entry, spares the value, heard again by the GET; "
+                "the snapshot first drops it, the answer finds nothing held and the reader reads again; a put heard "
+                "after that answer leaves `again` set, where the GET's end would find a value held; held.json's "
+                "description says \"when the answer arrives\" of the mark alone, and no case of its 29 has an arrival "
+                "after an answer that reads again (F-569)",
+                [after(answer, absent), after(absent, answer), after(absent, answer, later), len(cases_after)]
+                + missing(core, "Where the reader holds another value by then, heard while its GET was out, it keeps "
+                                "that value.",
+                          "Where the reader holds nothing for the member by then, its GET gave it no value.")
+                + missing(" ".join(sfx["description"].split()),
+                          "Where the reader holds the mutation the stamp names when the answer arrives",
+                          "Where it holds another value by then", "Where it holds nothing for the member by then"),
+                [[[key], False, ["unchanged"]], [[], True, ["unchanged"]], [[key], True, ["unchanged"]], 0]))
+    # -- a reader built before this version, and the lengths that tell the two -------
+    def as_page(raw: bytes) -> str:
+        try:
+            snapshot.read_page(raw, "state")
+        except (snapshot.Refused, zk2c.Refused) as e:
+            return e.token
+        return "page"
+
+    empty = {"tag": 0, "asof": 0, "time": None, "index": 0, "more": False, "coll": 0, "live": [], "tombs": []}
+    out.append(("§7.5: read as a page, a held stamp is a body cut `short`, 16-bit and 32-bit; a page with no entry is "
+                "16 bytes, or 18, so its body is 10 and no page is a header alone; a held stamp is 6 or 8, a delete's "
+                "attachment's size; on a put's key it reads as a snapshot's envelope (carries.json), on a stream's "
+                "`key_kind`",
+                [as_page(b16), as_page(held.write(zk2c.InBand(32, 5, 7))),
+                 [len(snapshot.write_page({**empty, "run_width": w, "run": 1})) for w in (16, 32)],
+                 [held.size(w) for w in (16, 32)], [len(zk2c.deletion(zk2c.InBand(w, 1, 1))) for w in (16, 32)],
+                 zk2c.reads(key, b16), zk2c.reads("zk2/rf0/modem/modem.v3/stream/frames/link", b16)],
+                ["short", "short", [16, 18], [6, 8], [6, 8], {"reads": "snapshot"}, {"refused": "key_kind"}]))
+    # every `answers` case that answers held, read by the reader that asked
+    back = [seed_held.reading("k", held.read_get(c["encoding"], bytes.fromhex(c["hex"])), "k", "get",
+                              held.read_reply(bytes.fromhex(c["expect"]["hex"])).stamp)
+            for c in env["answers"] if c["expect"]["answer"] == "held"]
+    out.append(("envelope/held.json's answers and seed_held's reading, end to end: each of the four held answers is "
+                "the GET's own bytes, and reads `unchanged` to the reader that sent them; the same bytes on a "
+                "subscription, on another key, or to a GET that carried none read `held`",
+                [back, [c["expect"]["hex"] == c["hex"] for c in env["answers"] if c["expect"]["answer"] == "held"],
+                 seed_held.reading("k", old, "k", "sub", old), seed_held.reading("k", old, "j", "get", old),
+                 seed_held.reading("k", None, "k", "get", old),
+                 seed_held.reading("k/*", old, "k/a", "get", old)],
+                [["unchanged"] * 4, [True] * 4, "held", "held", "held", "held"]))
+    # -- Appendix B, "A conditional read's bytes", from the layouts ---------------------
+    record = 44
+    page = snapshot.write_page({**empty, "run_width": 16, "run": 1,
+                                "live": [{"id": "", "run_width": None, "run": None, "seq": 1,
+                                          "confirmation": "none", "record": "00" * record}]})
+    stamp, over, request, unchanged, final, key_b, lean, frame = len(b16), 3, 12, 94, 6, 59, 16, 3
+    changed = unchanged - stamp + len(page)
+    sdu = lean + frame
+    out.append(("core Appendix B, \"A conditional read's bytes\", recomputed: from §7.5's layouts a held stamp is 6 B "
+                "and a 44-byte record's page 66 B; with the text's 3 B over a query's payload, its 12-byte request, "
+                "its 94-byte unchanged reply and 6-byte final, link.v2's lean stack of 16 B and frame of 3 B: the "
+                "request 21 B, the key 61 B of a 59-byte key, the changed reply 154 B, the SDUs 40 B, 119 B (the reply "
+                "and its final in one SDU; in two, 138) and 179 B, and the entry's 159 B for a re-read; a payload of "
+                "126 B is the longest whose extension's length is one byte; an unchanged reply is 60 B under a changed "
+                "one, the record's 44 and the page's 16 over it, where the request grew by 9 (F-570); the text leaves "
+                "7 B of the 94 unnamed, and its 12, 94, 20, 6 and the entry's 222 are the model's (F-571)",
+                [stamp, len(page), request + over + stamp, key_b + 2, changed, request + over + stamp + sdu,
+                 unchanged + final + sdu, unchanged + final + 2 * sdu, changed + final + sdu,
+                 (request + over + stamp + sdu) + (unchanged + final + sdu), 127 - 1, changed - unchanged,
+                 len(page) - record - stamp, over + stamp, unchanged - (key_b + 2) - 20 - stamp]
+                + missing(core, "So a 6-byte held stamp makes a 12-byte request 21 bytes.",
+                          "**An unchanged reply** on a 59-byte key is 94 bytes. Of them 61 are its key (fact 5 of "
+                          "\"Keys across a face\") and 20 its replier's id. A 6-byte final follows it.",
+                          "For a 44-byte record it is a 66-byte page, in a 154-byte reply.",
+                          "the request is a 40-byte SDU. The unchanged reply and its final are 119 bytes, and the "
+                          "changed ones 179.")
+                + missing(log, "On the simulated radio a re-read is 159 bytes in SDUs, where `desired.v1`'s is 222 "
+                               "today."),
+                [6, 66, 21, 61, 154, 40, 119, 138, 179, 159, 126, 60, 16, 9, 7]))
+    # -- round 116's findings, each text as it quotes it, so an answer moves it ----------
+    out.append(("round 116's findings, the texts they quote: F-569, §4.2's two \"by then\"; F-570, §4.2's \"saves the "
+                "value's bytes and no others\" and \"pays for a value larger than what the request grows by\", beside "
+                "Appendix B's 94 and 154; F-571, Appendix B's figures \"through the wire baseline's model\", a file "
+                "under docs/; F-572, §4.2 names \"the GET that carried the same one\" and observer.md says nothing of "
+                "a held stamp; state.md §16 has no step for a tool",
+                missing(core, "Where the reader holds another value by then", "Where the reader holds nothing for the "
+                              "member by then",
+                        "a conditional read saves the value's bytes and no others.",
+                        "So it pays for a value larger than what the request grows by.",
+                        "Computed from zenoh 1.10.1's layouts through the wire baseline's model",
+                        "A held stamp is the owner's answer only as a reply to the GET that carried the same one, on "
+                        "that GET's one concrete key.")
+                + ["held stamp" in obs, "zenctl" in flat("scenarios/state.md").split("## §16", 1)[1]],
+                [False, False]))
+    return out
+
+
 def _round115_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """``freshness.v2`` 0.10 and ``link.v2`` 0.21, read cold (#609, round
     115): each version and its entry, F-547's and F-549's answers as the
@@ -6326,13 +6541,13 @@ def _round115_readings(root: Path) -> list[tuple[str, Any, Any]]:
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out: list[tuple[str, Any, Any]] = [
         ("freshness.v2 0.10 or later and link.v2 0.21 or later, both still written against core 0.108, each with its "
-         "entry, both editorial; RULES.md lists 286 rules, as round 114 left it",
+         "entry, both editorial; RULES.md listed 286 rules, as round 114 left it (295 since core 0.110, round 116)",
          [_at_least(header("profiles/freshness/v2.md")[0], "0.10"), header("profiles/freshness/v2.md")[1],
           _at_least(header("profiles/link/v2.md")[0], "0.21"), header("profiles/link/v2.md")[1],
           int(once.group(1)) if once else None]
          + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.10", "no rule changed")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.21", "what a horizon costs a medium, no rule changed"),
-         [True, "0.108", True, "0.108", 286]),
+         [True, "0.108", True, "0.108", 295]),
     ]
     out += _s8_readings(spec)
     out += _appendix_b_cost_readings(spec)
@@ -6603,8 +6818,8 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
     m = re.search(r"\*\*Version (\d+)\.(\d+)\*\*", core)
     out: list[tuple[str, Any, Any]] = [
         ("core 0.109 or later, desired.v1 0.14 or later and redundancy.v1 0.11 or later, both still written against "
-         "core 0.73, and link.v2 0.20 or later, against 0.108, each with its entry; RULES.md lists 286 rules, the "
-         "static rules 75 and the owner 88",
+         "core 0.73, and link.v2 0.20 or later, against 0.108, each with its entry; RULES.md listed 286 rules, the "
+         "static rules 75 and the owner 88 (295, 79 and 90 since core 0.110, round 116)",
          [m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.109"),
           _at_least(header("profiles/desired/v1.md")[0], "0.14"), header("profiles/desired/v1.md")[1],
           _at_least(header("profiles/redundancy/v1.md")[0], "0.11"), header("profiles/redundancy/v1.md")[1],
@@ -6614,7 +6829,7 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + entry("profiles/desired/CHANGELOG.md", "0.14", "two reports on one key are merged")
          + entry("profiles/redundancy/CHANGELOG.md", "0.11", "a split's seed under consolidation `None`")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.20", "a file zenoh refuses"),
-         [True, True, "0.73", True, "0.73", True, "0.108", 286, 75, 88]),
+         [True, True, "0.73", True, "0.73", True, "0.108", 295, 79, 90]),
     ]
     # -- core 0.109 §3.3: F-535 to F-538 answered ----------------------------------------
     out.append(("core 0.109 §3.3, F-535 to F-538 answered, each as the text states it: what is counted and 1 KB's "
@@ -6998,8 +7213,8 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 [[False], [True, False, False, False], [True, False], ["form 6", "form", "form"]]))
     # -- round 114's findings, each text as it quotes it, so an answer moves it ----------
     out.append(("round 114's findings, the texts they quote: F-560, core 0.109's entry says RULES.md lists 285 rules, "
-                "283 in 0.108, and that observer.md stays 0.33, on a tree whose RULES.md lists 286 and whose "
-                "observer is 0.34 or later; F-561, desired.v1 and redundancy.v1 cite consolidation `None` as core "
+                "283 in 0.108, and that observer.md stays 0.33, on a tree whose RULES.md listed 286 (295 since "
+                "core 0.110, round 116) and whose observer is 0.34 or later; F-561, desired.v1 and redundancy.v1 cite consolidation `None` as core "
                 "S4's under a header written against core 0.73, whose S4 is 0.100's only since 0.100; F-562, §2.19 "
                 "reads `timestamping/enabled` at the mode the router runs, and names the seven keys alone as "
                 "holding no value zenoh runs; F-563, §7.5's put with no envelope and its group of a revision not "
@@ -7026,7 +7241,7 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + ["heartbeat" in core[core.find("## Appendix C. Evidence index"):], "conformance/packed" in core,
                    "| [`heartbeat/`](heartbeat/) |" in flat("conformance/README.md"),
                    "| [`packed/`](packed/) |" in flat("conformance/README.md")],
-                [286, True, True, False, False, True, True]))
+                [295, True, True, False, False, True, True]))
     return out
 
 
@@ -7074,7 +7289,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("freshness.v2 0.9 or later, written against core 0.108, link.v2 0.19 or later, against 0.108, and link.v1 "
          "0.20 or later, still against 0.32, each with its entry; RULES.md listed 283 rules as before, core's three "
          "adopted places being no keyword rule, 284 since observer 0.34's one, and 286 since core 0.109's two "
-         "(round 114)",
+         "(round 114), 295 since core 0.110's nine (round 116)",
          [_at_least(header("profiles/freshness/v2.md")[0], "0.9"), header("profiles/freshness/v2.md")[1],
           _at_least(header("profiles/link/v2.md")[0], "0.19"), header("profiles/link/v2.md")[1],
           _at_least(header("profiles/link/v1.md")[0], "0.20"), header("profiles/link/v1.md")[1],
@@ -7084,7 +7299,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + entry("profiles/link/CHANGELOG.md", "0.20", "no owner heartbeat crosses a face")
          + missing(flat("CHANGELOG.md"), "**Adopted, with `freshness.v2` 0.9: three places that name a heartbeat.** "
                                          "None is a keyword rule."),
-         [True, "0.108", True, "0.108", True, "0.32", 286]),
+         [True, "0.108", True, "0.108", True, "0.32", 295]),
     ]
 
     # -- the fixtures the entries name ---------------------------------------------------
@@ -7459,7 +7674,7 @@ def _observer034_readings(root: Path, layouts_contracts: dict[str, Any]) -> list
     stated = [i for i, c in enumerate(faces) if "catalog" in c]
     out: list[tuple[str, Any, Any]] = [
         ("observer 0.34 or later, written against core 0.108, with its entry; RULES.md listed 284 rules (286 since "
-         "core 0.109, round 114), its one new "
+         "core 0.109, round 114; 295 since core 0.110, round 116), its one new "
          "row §7.5's, citing heartbeat/owner.json; scope/faces.json holds 29 cases, the last ten stating `catalog`, "
          "two of them false, none under a link.v1 policy and none a GET",
          [_at_least(v.group(1) if v else None, "0.34"), w.group(1) if w else None,
@@ -7472,7 +7687,7 @@ def _observer034_readings(root: Path, layouts_contracts: dict[str, Any]) -> list
          + missing(olog, "## 0.34 — 2026-11-21: an owner heartbeat's scope across a face, and its groups' revisions",
                    "`conformance/scope/faces.json` gains ten cases, each stating whether the tool was given a "
                    "catalog. Its 19 cases state none and stand as they were."),
-         [True, "0.108", 286, 1, 29, list(range(19, 29)), [23, 25], ["rf.face.toml", "zenohd-rf0.face.toml"], []]),
+         [True, "0.108", 295, 1, 29, list(range(19, 29)), [23, 25], ["rf.face.toml", "zenohd-rf0.face.toml"], []]),
     ]
     # zk2py's scope where no case of faces.json goes.
     probe = load_contract(spec / "profiles" / "link" / "conformance" / "contracts" / "probe.v1.toml", spec_dir=spec)
@@ -7643,7 +7858,8 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "catalogs and one body read both ways, 90 cases; layouts.json holds six revisions, alert.v1, knob.v1, "
                 "vital.v1 and mixed.v1 beside hb.v1 and bare.v1; RULES.md listed 283 rules, the static rules 73, six "
                 "of them citing owner.json; 284 since observer 0.34, whose one rule cites owner.json too, seven rows; "
-                "286 and 75 since core 0.109's two static rules, both citing owner.json, nine rows (round 114); the "
+                "286 and 75 since core 0.109's two static rules, both citing owner.json, nine rows (round 114); 295 and "
+                "79 since core 0.110's four static rules, none citing owner.json (round 116); the "
                 "three lists and `either` hold what they held",
                 [len(own["writes"]), len(own["reads"]), len(own["groups"]), len(own["either"]),
                  sorted(own["catalogs"]), sorted(c["contract"] for c in lay["layouts"]),
@@ -7653,7 +7869,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                "three catalogs, and one body that reads both ways.",
                           "- **Six rules**, all static"),
                 [12, 45, 32, 1, ["first", "other", "second"],
-                 ["alert.v1", "bare.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1"], 286, 75, 9]))
+                 ["alert.v1", "bare.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1"], 295, 79, 9]))
     # A file with no write holds nothing here: the row then disagrees, and
     # the family goes on (review-bot on #1138; the mend, round 113).
     w2 = own["writes"][0] if own["writes"] else {"value": {"groups": []}}
@@ -9123,12 +9339,12 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "0.100's 13 (round 105); 267 since observer 0.29 (round 106); 273 since core 0.102's one and 0.103's "
                 "five (round 107); 274 since core 0.104's one (round 108); 277 since core 0.107's three (round 111); 283 "
                 "since core 0.108's six (round 112); 284 since observer 0.34's one (round 113); 286 since core 0.109's two "
-                "(round 114)",
+                "(round 114); 295 since core 0.110's nine (round 116)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
                         "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
                         "lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more than 0.99's")
                 + missing(flat("observer-CHANGELOG.md"), "**`RULES.md`** counts 267 rules, 82 of them the observer's.")
-                + [int(once.group(1)) if once else None], [286]))
+                + [int(once.group(1)) if once else None], [295]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "
@@ -9150,10 +9366,11 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("F-492 answered (core 0.98): RULES.md lists core §8.4's \"A deployment with such an owner SHOULD\" "
                 "under the deployment alone, and observer §3.11's \"A tool that knows an owner … MUST NOT\" under the "
                 "observer alone; the owner class counts 76, no text changed (83 since core 0.100's seven owner rules, "
-                "round 105; 85 since core 0.103's two, round 107; 88 since core 0.107's three, round 111)",
+                "round 105; 85 since core 0.103's two, round 107; 88 since core 0.107's three, round 111; 90 since core "
+                "0.110's two, round 116)",
                 missing(flat("CHANGELOG.md"), "It now reads the role a subject opens with, and each role joined to it",
                         "The owner class counts 76 where it counted 78", "§4.2 adds seven owner rules")
-                + [dep, tool, counted.get("Owner")], [["deployment"], ["observer"], 88]))
+                + [dep, tool, counted.get("Owner")], [["deployment"], ["observer"], 90]))
     out.append(("config.v1 0.10 §2.1: the SHOULD NOT on the tokenless set excepts a first hop; since 0.11 §2.12 names "
                 "the reference's restart of the configuration (F-480)",
                 ["The reference refuses the re-mint (`zenkey::config_v1`)" in cv1, "first hop" in cv1,
@@ -13718,6 +13935,9 @@ def family_seed(root: Path) -> list[Result]:
         if path.name == "snapshot.json":
             out += _seed_snapshots(_load_json(path))
             continue
+        if path.name == "held.json":
+            out += _seed_held(_load_json(path))
+            continue
         if path.name != "merge.json":
             out.append((f"seed/{path.name}", False, "an unknown fixture file: the runner does not read it"))
             continue
@@ -13756,6 +13976,87 @@ def _seed_snapshots(data: dict[str, Any]) -> list[Result]:
         except (snapshot.Refused, zk2c.Refused, ValueError) as e:
             got = {"raised": f"{type(e).__name__}: {e}"}
         out.append(_check(f"seed: snapshot: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _seed_held(data: dict[str, Any]) -> list[Result]:
+    """``seed/held.json`` (core §4.2, 0.110, #986; round 116): what a reader
+    holds for one member -> the held stamp it may send (``asks``), and
+    ``snapshot.json``'s cases with the GET asked and arrivals that may be a
+    held stamp -> what it holds, each held stamp's reading and whether it
+    reads again (``cases``). :mod:`zk2py.seed_held` was written from §4.2
+    before the file was opened."""
+    from . import seed_held, snapshot, zk2c
+
+    unknown = set(data) - {"description", "asks", "cases"}
+    out: list[Result] = [("seed: held.json holds a description, asks and cases", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    for kind, run in (("asks", seed_held.run_ask), ("cases", seed_held.run_case)):
+        for c in data[kind]:
+            try:
+                got: Any = run(c)
+            except (snapshot.Refused, zk2c.Refused, ValueError) as e:
+                got = {"raised": f"{type(e).__name__}: {e}"}
+            out.append(_check(f"seed: held {kind}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _envelope_held(data: dict[str, Any]) -> list[Result]:
+    """``envelope/held.json`` (core §7.5 and §4.2, 0.110, #986; round 116):
+    a stamp -> a held stamp's bytes (``writes``); a state GET's Encoding and
+    payload -> the held stamp it carries, none, or the refusal (``gets``); a
+    GET reply's payload -> a held stamp, a page, another form or the refusal
+    (``replies``); a state GET and its owner's member -> ``held`` with the
+    reply's bytes, or ``whole`` (``answers``). "Every held stamp an
+    implementation accepts MUST write back to the same bytes": each one a
+    ``gets`` or a ``replies`` case accepts. :mod:`zk2py.held` was written
+    from the text before each list was opened."""
+    from . import held, zk2c
+
+    def stamp(x: Any) -> Any:
+        return None if x is None else zk2c.InBand(int(x["width"]), int(x["run"]), int(x["seq"]))
+
+    def js(s: Any) -> Any:
+        return None if s is None else {"width": s.width, "run": s.run, "seq": s.seq}
+
+    unknown = set(data) - {"description", "writes", "gets", "replies", "answers"}
+    out: list[Result] = [("envelope: held.json holds a description, writes, gets, replies and answers", not unknown,
+                          f"members the runner does not read: {sorted(unknown)}" if unknown else "")]
+    for c in data["writes"]:
+        try:
+            got: Any = {"hex": held.write(stamp(c["stamp"])).hex()}
+        except ValueError as e:
+            got = {"raised": str(e)}
+        out.append(_check(f"envelope: held writes: {c['note']}", got, c["expect"]))
+    for c in data["gets"]:
+        raw = None if c["hex"] is None else bytes.fromhex(c["hex"])
+        try:
+            s = held.read_get(c["encoding"], raw)
+        except zk2c.Refused as r:
+            got = {"refused": r.token}
+        else:
+            got = {"held": js(s)}
+            if s is not None:
+                out.append(_check(f"envelope: held gets {c['hex']} writes back", held.write_back(s).hex(), c["hex"]))
+        out.append(_check(f"envelope: held gets {c['encoding']} {c['hex'] or '(none)'}: {c['note']}", got,
+                          c["expect"]))
+    for c in data["replies"]:
+        r = held.read_reply(bytes.fromhex(c["hex"]))
+        if r.refusal is not None:
+            got = {"refused": r.refusal}
+        elif r.held:
+            got = {"held": js(r.stamp)}
+            out.append(_check(f"envelope: held replies {c['hex']} writes back", held.write_back(r.stamp).hex(),
+                              c["hex"]))
+        else:
+            got = {"reads": r.reads}
+        out.append(_check(f"envelope: held replies {c['hex'][:48] or '(empty)'}: {c['note']}", got, c["expect"]))
+    for c in data["answers"]:
+        m = c["member"]
+        raw = None if c["hex"] is None else bytes.fromhex(c["hex"])
+        reply = held.answer(c["read"], c["encoding"], raw, None if m is None else stamp(m["stamp"]))
+        got = {"answer": "whole"} if reply is None else {"answer": "held", "hex": reply.hex()}
+        out.append(_check(f"envelope: held answers {c['read']}: {c['note']}", got, c["expect"]))
     return out
 
 
@@ -13814,6 +14115,8 @@ def family_envelope(root: Path) -> list[Result]:
             out += _envelope_calls(root, data)
         elif path.name == "tags.json":
             out += _envelope_tags(root, data)
+        elif path.name == "held.json":
+            out += _envelope_held(data)
         else:
             out.append((f"envelope/{path.name}", False, "an unknown fixture file: the runner does not read it"))
     return out

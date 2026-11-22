@@ -594,3 +594,39 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   they did, before a tag or a body is read and before the owner's
   catalog is asked for (`tests/owner_heartbeat.rs`'
   `another_form_on_a_heartbeats_key_is_refused_and_never_read`).
+  The conditional read (#986's J1, core 0.110 §4.2, §7.5; no profile's
+  runtime uses it yet). **Owner:** `Store::answer` reads the query's
+  payload and Encoding (`Store::held_answer`, over the model's
+  `collection::answers_held`) and answers the held stamp alone, one reply
+  on the member's key under `zenoh/bytes`, exactly where the SHOULD
+  applies: a selector with no wildcard, at a member of a collection
+  answered by snapshot, whose last mutation (its put, or its delete
+  within the window) carries the stamp the GET names. Everything else is
+  answered as before: a wildcard or a collection read, a per-key
+  resource, no member held, another stamp, a refused payload, another
+  Encoding, no byte. The reference withholds the held answer nowhere the
+  SHOULD allows it. **Consumer:** `Consumer::get_conditional(resource,
+  values, held: &BTreeMap<String, wire::Stamp>, timeout)` →
+  `state::ConditionalAnswer { answer: StateAnswer, unchanged, read_again
+  }`; `held` is a previous answer's `StateAnswer::inband` (key → the
+  stamp of the mutation held), and only a GET on one concrete key that it
+  names carries a held stamp, so a collection read never does.
+  `get_answer` is the same read with none. A held stamp that answers its
+  GET puts the key in `unchanged` and merges nothing; any other is
+  `answer.undecodable`, `Undecodable::Envelope(Refusal::Held)`, token
+  `held`; a snapshot in answer merges as any member read's. The omission
+  rule reads the mutation a GET named as held from before the GET, heard
+  again once its answer came: another instance's complete snapshot of no
+  entry before the answer drops it (`answer.omitted`) and the key is in
+  `read_again`. `ConditionalAnswer` is no `StateGet`: unchanged is
+  neither silence nor an empty answer. `inband::read` refuses a held
+  stamp as `held` (`tag` where its tag is not 0) for every other reader,
+  a subscription, the archive, desired and the freshness re-read among
+  them, and `inband::held(&Sample)` is what the conditional read takes
+  first. `tests/state.rs`: `s16_a_conditional_read_is_answered_by_the_held_stamp_alone`
+  (§16 steps 1 to 8, the runtime's owner on a 16-bit run, W 2 s, two
+  restarts), `s16_a_consumer_reads_a_held_stamp_as_unchanged_only_in_answer`
+  (steps 9 and 10, a played owner, `Played`), `a_conditional_read_beside_another_instances_snapshot_of_no_entry`,
+  and, `#[ignore]`d, `an_owner_built_before_core_0_110_answers_a_conditional_read_whole`,
+  which drives an owner black box named by `ZK2_OWNER_BEFORE_0_110`
+  (passed against `bin/547d202a/owner`).

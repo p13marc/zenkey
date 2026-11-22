@@ -516,3 +516,13 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   heartbeat's key or an owner heartbeat's that is no heartbeat is shown
   undecodable, `form`, never sniffed (core 0.109 §7.5,
   `zenkey_fleet::model::inband::no_heartbeat`).
+  Core 0.110's conditional read (#986's J1): no flag was added. `get
+  <key> --body @FILE` already makes one, since zenoh sends a query's
+  payload under `zenoh/bytes` unless told otherwise (`GetOpts::payload`
+  sets no Encoding), and an owner whose member is unchanged answers the
+  bytes sent. The lens does not know what the GET carried, so the reply
+  is shown as a held stamp with its run and seq, undecodable as `held`,
+  never as a page cut short (`live_zk2.rs`'s
+  `get_with_a_held_stamp_as_its_body_is_answered_by_the_held_stamp`).
+  A `get --held RUN:SEQ` that writes the stamp and reads the answer as
+  unchanged is not built.

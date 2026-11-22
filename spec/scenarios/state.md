@@ -577,3 +577,85 @@ For step 1, a session of the test's own plays the owner, as in §14.
 `a_reply_del_on_a_collections_member_is_undecodable` in
 `zenkey/tests/snapshot.rs`, on a snapshot of three plans. Step 2 is
 written ahead of the reference.*
+
+## §16 A conditional read (§4.2, §7.5)
+
+**Setup.** As above, with W 2 s. The owner writes under a 16-bit run R.
+It holds `plans/vehicle-01` alone, put as v1 at seq s1. It also serves
+`status`, as §1's setup has it: a per-key resource. A reader P is a
+session of the test's own, with no subscription. P makes each GET of
+steps 1 to 8 on the plan's key, `…/state/plans/vehicle-01`, unless the
+step names another selector. A GET "with (R, s)" carries the held stamp
+of run R and seq s as its payload, under `zenoh/bytes`. For steps 9 and
+10, a session of the test's own plays the owner, as §10's does, and the
+consumer reads its plan.
+
+**Steps.**
+1. **Plain.** P GETs the plan with no payload.
+2. **Unchanged.** P GETs it with (R, s1).
+3. **Changed.** The owner puts v2, at seq s2. P GETs with (R, s1), then
+   with (R, s2).
+4. **Another stamp.** P GETs with a run other than R at seq s2. It GETs
+   with R's value as a 32-bit run at seq s2. It GETs with (R, s2 + 1).
+5. **No held stamp.** P GETs with each of these payloads:
+   - the held stamp (R, s2), and one byte after it;
+   - the held stamp (R, s2), with tag 5 in its CH;
+   - a mutation's envelope under (R, s2), with no record;
+   - the first 5 bytes of the held stamp (R, s2);
+   - the held stamp (R, s2), under `application/json`;
+   - a payload of no byte.
+6. **Other GETs.** P GETs `plans/*` with (R, s2), then `plans/**` with
+   (R, s2). It GETs `status` with the held stamp of `status`'s last put.
+7. **A delete.** The owner deletes the plan, at seq s3. Within W, P GETs
+   with (R, s2), then with (R, s3). After W, P GETs with (R, s3).
+8. **A restart.** The owner puts the plan again, v3 at seq s4, and P
+   GETs it plain. The owner restarts: a new instance, under a new run R2,
+   which puts the plan again, v3 at seq t1. P GETs with (R, s4). The
+   owner restarts again: a third instance, under R3, which puts nothing.
+   P GETs with (R2, t1).
+9. **The consumer's merge.** The consumer holds its plan as v1 at
+   (R, 7), from a seed. It reads the plan three times, each with (R, 7).
+   The played owner answers the first with the held stamp (R, 7). It
+   answers the second with the plan's snapshot, v1 at seq 7, as an owner
+   that reads no payload does. It answers the third with the plan's
+   snapshot, v2 at seq 9.
+10. **No answer.** The consumer holds v2 at (R, 9). It reads its plan with
+    (R, 9), and the played owner answers with the held stamp (R, 8). It
+    reads its plan with no payload, and the played owner answers with the
+    held stamp (R, 9).
+
+**Expected.**
+1. One snapshot on the plan's key: one page, whose one entry has the
+   empty id, seq s1 and v1's record.
+2. One reply on the plan's key, under `zenoh/bytes`. Its payload is the 6
+   bytes P sent: `0xe0`, R and s1. No snapshot is sent.
+3. With (R, s1): the plan's snapshot, as a plain GET draws it, its entry
+   at s2 with v2's record. With (R, s2): the held stamp (R, s2).
+4. Each GET draws the plan's snapshot, its entry at s2. Another run,
+   another width and another seq each name another mutation.
+5. Each GET draws the plan's snapshot, its entry at s2. None is refused,
+   and none is left unanswered.
+6. `plans/*` draws a snapshot of the plan on its own key, and `plans/**`
+   the collection's snapshot on `…/state/plans`. `status` draws its
+   per-key reply: the put's bytes, with their Zenoh timestamp. No held
+   stamp answers any of the three.
+7. With (R, s2): a snapshot whose one entry is a tombstone at s3. With
+   (R, s3), within W: the held stamp (R, s3). After W: a snapshot of no
+   entry.
+8. The plain GET draws v3 at s4. With (R, s4), the second instance
+   answers a snapshot under R2, whose entry is v3 at t1: the stamp P sent
+   names another run. With (R2, t1), the third instance answers a
+   snapshot of no entry under R3.
+9. After the first read, the consumer holds v1 at (R, 7), and counts
+   nothing undecodable. After the second, it holds v1 at (R, 7) once: the
+   entry is the mutation it held. After the third, it holds v2 at (R, 9).
+10. The consumer counts each held stamp undecodable, refused as `held`.
+    It merges nothing for either, and holds v2 at (R, 9).
+
+*The reference runs steps 1 to 8 as
+`s16_a_conditional_read_is_answered_by_the_held_stamp_alone`, against its
+own owner, and steps 9 and 10 as
+`s16_a_consumer_reads_a_held_stamp_as_unchanged_only_in_answer`, both in
+`zenkey/tests/state.rs`. `conformance/envelope/held.json` states the held
+stamp's bytes and the owner's answer as a pure fixture, and
+`conformance/seed/held.json` the reader's merge.*

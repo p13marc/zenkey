@@ -13146,3 +13146,128 @@ async fn watch_reads_a_real_owners_owner_heartbeats() {
         .expect("a summary");
     assert_eq!(summary["heartbeats"], 0, "{summary}");
 }
+
+/// Core 0.110 §4.2 and §7.5 through the raw `get` (#986's J1): `--body
+/// @FILE` holding a member's held stamp is a conditional read, since zenoh
+/// sends a query's payload under `zenoh/bytes` unless told otherwise, the
+/// one Encoding a held stamp rides. A real owner whose member is unchanged
+/// answers with the 6 bytes sent, and the lens shows the reply as a held
+/// stamp, its run and seq named, undecodable as `held` since the lens does
+/// not know what the GET carried: never as a snapshot whose body is cut
+/// short, and never as a record of the member's type. With another seq in
+/// the body, the same owner answers the member's snapshot.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn get_with_a_held_stamp_as_its_body_is_answered_by_the_held_stamp() {
+    use zenkey::model::wire::{HeldStamp, Seq, Stamp};
+    const HELD_V1: &str = "[interface]\nname = \"held\"\nmajor = 1\nminor = 0\n\
+         [resources.mode]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n";
+    let mut bus = Bus::bare(None).await;
+    let id = iface("held.v1");
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("g/svc".parse().expect("an address")),
+    );
+    b.implement(Implementation::new(contract_text("held.v1", HELD_V1)))
+        .expect("implement held.v1");
+    let mode = b
+        .declare_state_writer(&id, "state/mode", &Bindings::new())
+        .await
+        .expect("a mode writer");
+    b.serve_state(&id).expect("serve state");
+    bus.services.push(b.start().await.expect("g/svc"));
+    let put = mode.put(b"auto".to_vec()).await.expect("a put");
+    wait_for(&bus, &["g/svc"]).await;
+
+    let key = "zk2/g/svc/held.v1/state/mode";
+    let held = HeldStamp::new(put.stamp).write();
+    let file = bus.home.join("held.bin");
+    std::fs::write(&file, &held).expect("the held stamp's file");
+    let body = format!("@{}", file.display());
+    let args = [
+        "get",
+        key,
+        "--body",
+        &body,
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            r.json()["rows"].as_array().is_some_and(|a| !a.is_empty())
+        })
+        .await;
+    exits(&run, 0);
+    let doc = run.json();
+    let rows = doc["rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("rows: {run}"));
+    assert_eq!(rows.len(), 1, "one reply: {run}");
+    assert_eq!(rows[0]["key"], key, "{run}");
+    assert_eq!(rows[0]["encoding"], "zenoh/bytes", "{run}");
+    assert_eq!(
+        rows[0]["payload_bytes"],
+        held.len(),
+        "the stamp alone: {run}"
+    );
+    assert_eq!(rows[0]["verdict"], "undecodable", "{run}");
+    assert_eq!(
+        rows[0]["decode_error"],
+        format!(
+            "zk2c held stamp (run {}, seq {}), unchanged only to the GET that carried it, and \
+             no answer here: held",
+            put.stamp.run.hex(),
+            put.stamp.seq.get()
+        ),
+        "a held stamp, named: {run}"
+    );
+    let text = rows[0].to_string();
+    assert!(
+        !text.contains("snapshot") && !text.contains("short"),
+        "never a page cut short: {run}"
+    );
+    // The bytes the owner sent: the ones the GET carried.
+    let raw = bus
+        .zenctl(&[
+            "get",
+            key,
+            "--body",
+            &body,
+            "--timeout",
+            "1",
+            "--raw",
+            "--format",
+            "json",
+        ])
+        .await;
+    assert_eq!(
+        raw.json()["rows"][0]["hex"],
+        held.iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        "{raw}"
+    );
+
+    // Another seq: answered whole, the member's snapshot.
+    let other = HeldStamp::new(Stamp {
+        run: put.stamp.run,
+        seq: Seq::new(put.stamp.seq.get() + 1).expect("a seq"),
+    })
+    .write();
+    std::fs::write(&file, &other).expect("the other stamp's file");
+    let whole = bus.zenctl(&args).await;
+    exits(&whole, 0);
+    let row = &whole.json()["rows"][0];
+    assert_eq!(
+        row["type"], "zk2c snapshot (held.v1 state/mode)",
+        "the member's snapshot: {whole}"
+    );
+    assert_eq!(
+        row["value"]["live"][0]["seq"],
+        put.stamp.seq.get(),
+        "its entry at the member's seq: {whole}"
+    );
+    assert!(!row.to_string().contains("held stamp"), "{whole}");
+}

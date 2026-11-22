@@ -431,3 +431,42 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `silence` = `SILENT_HORIZONS` × horizon; `FarSideRefusal::{NotV2,
   NoFace}`), and `redeclare_horizon(c, r)` / `redeclare_heartbeat_horizon(c)`
   (a `freshness.v2` state has none of its own) for core §8.5.
+  The conditional read (#986's J1, core 0.110 §7.5 and §4.2, adopted by
+  no profile until `desired.v2`). In `wire`: `HeldStamp { stamp }`
+  (`new`, `parse`, `header`, `write`: `CH · run · seq`, form 7, tag 0),
+  `SampleKind::Get` (a state GET's payload, the sixth sample, `get`),
+  `read_get(encoding, payload)` → `Result<Option<HeldStamp>, GetRefusal>`
+  in the text's three steps (none or no byte `Ok(None)` whatever the
+  Encoding; `GetRefusal::Encoding`, `encoding`; then the parse,
+  `sample_kind`, `tag`, `short`, `trailing`), `read_get_reply(payload)` →
+  `GetReply::{Held, Page, Other}` over `Envelope::parse` (a snapshot's
+  envelope with no byte after its seq is a held stamp, `Refusal::HeldTag`
+  where its tag is not 0), and `Refusal::Held(Stamp)`, token `held`, what
+  a reader refuses a held stamp that is no answer as (§4.2's, not the
+  parse's; its `reason()` names the stamp). `Envelope::parse` and
+  `read_put` are unchanged: a held stamp's bytes on a put read as a
+  snapshot's envelope with no body (`carries.json`'s 9 new reads). In
+  `collection`: `StateRead::{Member, Wildcard, Collection, PerKey}` and
+  `answers_held(read, encoding, payload, last)`, the owner's rule as a
+  pure function, `Some(held stamp)` exactly for a member read whose
+  payload carries the stamp of the member's last mutation. In `seed`:
+  `held_stamp(Option<Mark>)` (what a reader may send: an in-band mark's,
+  never a Zenoh timestamp's), `selector_key(selector)` (everything
+  before the first `?`) and `is_concrete(selector)`, read from it, so a
+  selector's parameters neither make a GET wild nor change the key its
+  answer comes on (review-bot on #1148; no fixture case has parameters,
+  and the text counts chunks), `Asked { key,
+  held }` with `is_conditional()` and `read(by_get, key, stamp)` →
+  `HeldRead::{Unchanged, Refused}` (`unchanged`, `held`), and
+  `unchanged(Held, stamp)` → `Unchanged::{HeardAgain, Stands, ReadAgain}`,
+  read as the answer arrives: `HeardAgain` sets `HeldMember::heard_after`
+  for `apply_snapshot`'s guard. `SampleKind::ALL` has six since 0.110, a breaking
+  change of the published 0.22.0 for 0.23.0's notes, with
+  `Refusal::{Held, HeldTag}`; nothing in the tree loops over it but
+  `wire`'s own `every_sample_carries_its_forms_and_a_state_get_form_7_alone`
+  and `envelope_vectors`, which names `get` as the one sample with no
+  case in `vectors.json` (its cases are `held.json`'s `gets`).
+  `tests/conformance.rs`: `envelope_held`
+  (`envelope/held.json`, 88 cases), `seed_held` (`seed/held.json`'s 12
+  asks, and its 29 cases through `seed_cases`, which `seed_snapshot`
+  shares), `envelope_carries` (46 reads), all as written, none blessed.

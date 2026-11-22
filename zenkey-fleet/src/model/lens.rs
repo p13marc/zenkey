@@ -2019,6 +2019,50 @@ mod tests {
         );
     }
 
+    /// Core 0.110 §7.5 and §4.2 (#986's J1): a held stamp in reply to a
+    /// tool's GET, or heard on its subscription, renders as a held stamp
+    /// refused `held`, its run and seq named, on the member's resolved
+    /// resource: never as a snapshot whose body is cut short, and never as
+    /// a record of the member's type.
+    #[test]
+    fn a_held_stamp_renders_as_a_held_stamp_refused_held() {
+        let rev = status();
+        let fp = rev.fingerprint().to_string();
+        let mut set = ContractSet::new();
+        set.insert(rev);
+        let cat = catalog(&fp, Some("0a1b"));
+        let lens = Lens::new("prod", Some(&cat), &set);
+        let wire = "prod/zk2/lab/m/m.v1/state/status/eth0";
+        let held = zenkey_model::wire::HeldStamp::new(zenkey_model::wire::Stamp {
+            run: zenkey_model::wire::Run::U16(5),
+            seq: zenkey_model::wire::Seq::new(7).expect("a seq"),
+        })
+        .write();
+        let c = lens.check(wire, Member::Type, Some("zenoh/bytes"), &held);
+        assert_eq!(c.identity.unresolved, None, "the member's key resolves");
+        let want = "zk2c held stamp (run 0005, seq 7), unchanged only to the GET that carried it, \
+                    and no answer here: held";
+        let Rendered::Undecodable { reason, .. } = &c.rendering.rendered else {
+            panic!("undecodable, not {:?}", c.rendering.rendered);
+        };
+        assert_eq!(reason, want);
+        assert!(
+            matches!(&c.conformance, Conformance::Undecodable { reason, .. } if reason == want),
+            "{:?}",
+            c.conformance
+        );
+        // One byte more is a page, and its own reading refuses its body.
+        let mut page = held.clone();
+        page.push(0);
+        let p = lens.check(wire, Member::Type, Some("zenoh/bytes"), &page);
+        assert!(
+            matches!(&p.rendering.rendered,
+                Rendered::Undecodable { reason, .. } if reason.contains("snapshot's body refused")),
+            "{:?}",
+            p.rendering.rendered
+        );
+    }
+
     /// The envelope first (core §7.5, observer §7.3; #976's A2): a state
     /// sample under `zenoh/bytes` carries a zk2c envelope, told by its key
     /// and Encoding alone. Its record renders as the resource's type and

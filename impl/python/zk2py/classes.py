@@ -1109,6 +1109,55 @@ WALK: list[tuple[str, str, str, str, str]] = [
      "replayed as a reply_del, never delivered either (events_live §8 step 4's third sample) (round 109, core "
      "0.105); one with no attachment counted form and one with an empty attachment short, as core 0.106 states the "
      "count (round 110)"),
+    # core 0.110 (#986): a conditional read, §7.5's held stamp and §4.2's
+    # owner and reader, each half written from the text before its fixture
+    # list was opened (round 116).
+    ("owner", "core §4.2", "An owner SHOULD answer a conditional read with the held stamp alone", MET,
+     "owner.Owner.state_answer through held.answer: one reply on the member's key, the held stamp the GET carried, "
+     "where the member's stored stamp is exactly it (envelope family: held.json's 23 answers; conditional_live §16 "
+     "steps 2, 3 and 7, read by zk2py's reader and by zenctl get --body) (round 116, core 0.110)"),
+    ("owner", "core §4.2", "An owner MUST NOT answer a GET with a held stamp in any other case", MET,
+     "held.answer: another seq, run or width, no member held, a payload §7.5 refuses (named in Owner.held_refused) "
+     "and every other kind of GET answered as one with no payload (envelope family: held.json's 19 answers that "
+     "are whole; conditional_live §16 steps 3 to 8, py-py and py-rust) (round 116, core 0.110)"),
+    ("consumer", "core §4.2", "A consumer or a tool MUST NOT send a held stamp other than the in-band stamp", MET,
+     "seed_held.ask through seed.LateJoiner.get(conditional=True) and live.get_state(held=): the held value's own "
+     "in-band stamp, a snapshot entry's as it merged, on one concrete key; none where it holds nothing or a value "
+     "with no envelope (seed family: held.json's 12 asks; conditional_live, the reader's merge against each owner) "
+     "(round 116, core 0.110)"),
+    ("consumer", "core §4.2", "A consumer or a tool MUST NOT read any other held stamp as unchanged", MET,
+     "seed_held.reading, by seed.LateJoiner._held_locked and live.get_state: unchanged only by the GET that carried "
+     "the same one on its key, every other counted undecodable, held, and merged for nothing (seed family: "
+     "held.json's 29 cases; conditional_live §16 steps 9 and 10, and one heard on the subscription) (round 116, "
+     "core 0.110)"),
+    ("consumer", "core §4.2", "A consumer or a tool that sent a held stamp MUST accept a snapshot in answer", MET,
+     "the late joiner's merge, unchanged: a page in answer is read and merged as any member read's (seed family: "
+     "held.json; conditional_live §16 step 9, the reader's merge, and every answer of the owner built before core "
+     "0.110, old-py) (round 116, core 0.110)"),
+    ("observer", "core §4.2", "A consumer or a tool MUST NOT send a held stamp other than the in-band stamp", MET,
+     "seed.LateJoiner, a tool's (consumer=False), and live.get_state(held=), through seed_held.ask; zk2py's echo "
+     "tool makes no GET (conditional_live §16 steps 9 and 10, a tool: the GET carried (R, 7), then (R, 9)) (round "
+     "116, core 0.110)"),
+    ("observer", "core §4.2", "A consumer or a tool MUST NOT read any other held stamp as unchanged", MET,
+     "seed.LateJoiner, a tool's: (R, 8) in answer to (R, 9), (R, 9) in answer to no payload and one heard on its "
+     "subscription each undecodable, held (conditional_live §16 step 10, a tool) (round 116, core 0.110)"),
+    ("observer", "core §4.2", "A consumer or a tool that sent a held stamp MUST accept a snapshot in answer", MET,
+     "seed.LateJoiner, a tool's: the snapshot in answer merged, the same mutation kept once and the later value "
+     "kept (conditional_live §16 step 9, a tool) (round 116, core 0.110)"),
+    ("static", "core §7.5", "An implementation that writes a held stamp MUST write it so", MET,
+     "held.write: CH of form 7 with tag 0, the run and the seq, no byte after (envelope family: held.json's 9 "
+     "writes) (round 116, core 0.110)"),
+    ("static", "core §7.5", "An implementation MUST refuse a state GET's payload at step 3 for the first of these",
+     MET, "held.read_get: no payload or no byte first, then encoding, then sample_kind, tag, short, trailing in the "
+     "text's order (envelope family: held.json's 34 gets, written before the list was opened, none missed) (round "
+     "116, core 0.110)"),
+    ("static", "core §7.5", "An implementation MUST refuse a held stamp on a reply whose tag is not 0", MET,
+     "held.read_reply: a put's parse, then a snapshot's envelope with no byte after its seq a held stamp, refused "
+     "tag where its tag is not 0; a lone CH byte with a tag is short (envelope family: held.json's 22 replies) "
+     "(round 116, core 0.110)"),
+    ("static", "core §7.5", "Every held stamp an implementation accepts MUST write back to the same bytes", MET,
+     "held.write_back (envelope family: each held stamp a gets or a replies case accepts, written back) (round 116, "
+     "core 0.110)"),
 ]
 
 

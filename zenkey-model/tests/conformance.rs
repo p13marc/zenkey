@@ -1226,7 +1226,10 @@ fn envelope_carries() {
     // A key and a put's payload under `zenoh/bytes` → how the put reads
     // (core §7.5): plain, its form, or the refusal, `key_kind` among them.
     let reads = doc["reads"].as_array().expect("reads");
-    assert!(!reads.is_empty());
+    // 46 since core 0.110: nine held stamps' bytes, which this parse reads
+    // as a snapshot's envelope with no body on a state key (`held.json`
+    // reads a GET's reply).
+    assert!(reads.len() >= 46, "the fixture's reads");
     let mut seen = std::collections::BTreeSet::new();
     for case in reads {
         use zenkey_model::wire::{ENCODING, Reading, read_put};
@@ -1419,11 +1422,24 @@ fn envelope_vectors() {
         };
         assert_eq!(case["expect"], got, "{note}");
     }
+    // Every sample the model names has cases here, but a state GET's
+    // payload (`SampleKind::Get`, core 0.110): core 0.110 left this file
+    // as it was, and that sample's cases are `held.json`'s `gets`, which
+    // `envelope_held` runs. A sample added to `SampleKind::ALL` with cases
+    // in neither file fails here.
+    let named: Vec<&str> = zenkey_model::wire::SampleKind::ALL
+        .iter()
+        .filter(|s| **s != zenkey_model::wire::SampleKind::Get)
+        .map(|s| s.as_str())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     assert_eq!(
         samples.into_iter().collect::<Vec<_>>(),
-        ["delete", "put", "query", "reply", "reply_err"],
-        "every sample has cases"
+        named,
+        "every sample but a state GET's has cases here"
     );
+    assert_eq!(named, ["delete", "put", "query", "reply", "reply_err"]);
 }
 
 /// `spec/conformance/errors/forms.json` (core 0.92 §7.5, §5.2 "The error
@@ -3251,9 +3267,27 @@ fn snapshot_bodies() {
 /// independent reading of the text, checked by a second, never blessed.
 #[test]
 fn seed_snapshot() {
+    let [omitted_some, incomplete_some, paged] = seed_cases("snapshot.json", 40);
+    assert!(
+        omitted_some && incomplete_some && paged,
+        "the cases cover omissions, losses and pages"
+    );
+}
+
+/// `spec/conformance/seed/snapshot.json`'s `cases`, and `held.json`'s
+/// (core 0.110 §4.2, a conditional read's reader), which are the same
+/// cases with `asked`, the GET, and arrivals that may be a held stamp:
+/// what the reader holds after the last arrival, each snapshot, and for
+/// `held.json` each held stamp's reading and whether the reader reads
+/// again. Returns whether a case omitted a member, held a snapshot
+/// incomplete, and heard one in several pages.
+fn seed_cases(file: &str, at_least: usize) -> [bool; 3] {
     use zenkey_model::collection::{Heard, Page, Snapshot, hear, snapshot_prefix};
-    use zenkey_model::seed::{HeldMember, Mark, Versus, apply_snapshot, versus};
-    use zenkey_model::wire::{self, Run, Seq};
+    use zenkey_model::seed::{
+        Asked, Held, HeldMember, HeldRead, Mark, Unchanged, Versus, apply_snapshot, unchanged,
+        versus,
+    };
+    use zenkey_model::wire::{self, GetReply, Run, Seq, read_get_reply};
 
     /// One key's held sample: a put's record or a delete, its stamp, and
     /// whether it was heard after the GET was asked.
@@ -3264,7 +3298,7 @@ fn seed_snapshot() {
         heard_after: bool,
     }
 
-    let doc = read_json(&spec().join("conformance/seed/snapshot.json"));
+    let doc = read_json(&spec().join("conformance/seed").join(file));
     let stamp = |v: &Value| -> wire::Stamp {
         let run = v["run"].as_u64().expect("run");
         let run = match v["width"].as_u64() {
@@ -3278,7 +3312,7 @@ fn seed_snapshot() {
             seq: Seq::new(seq).expect("a seq"),
         }
     };
-    let stamp_json = |s: wire::Stamp| json!({"width": if s.run.is_wide() { 32 } else { 16 }, "run": s.run.value(), "seq": s.seq.get()});
+    let stamp_json = held_stamp_json;
     let sample = |v: &Value| -> HeldSample {
         let record = match v["sample"].as_str() {
             Some("put") => Some(unhex(v["record"].as_str().expect("record"))),
@@ -3292,10 +3326,21 @@ fn seed_snapshot() {
         }
     };
     let cases = doc["cases"].as_array().expect("cases");
-    assert!(cases.len() >= 40, "the fixture's cases");
+    assert!(cases.len() >= at_least, "the fixture's cases");
     let (mut omitted_some, mut incomplete_some, mut paged) = (false, false, false);
     for case in cases {
         let note = &case["note"];
+        // The GET, where the case gives it (`held.json`): its selector and
+        // the held stamp it carried.
+        let asked_key = case.get("asked").map(|a| a["key"].as_str().expect("key"));
+        let asked = asked_key.map(|key| Asked {
+            key,
+            held: Some(&case["asked"]["held"])
+                .filter(|h| !h.is_null())
+                .map(&stamp),
+        });
+        let mut held_reads: Vec<&str> = Vec::new();
+        let mut read_again = false;
         // Each collection the reader's contract gives it: its index, its
         // snapshot key, the key its template's chunks start under, and the
         // template. Where the case gives revisions, the reader maps coll by
@@ -3350,6 +3395,34 @@ fn seed_snapshot() {
             let key = a["key"].as_str().expect("key");
             let via = a["via"].as_str().expect("via");
             assert!(matches!(via, "get" | "subscription"), "{note}: via {via}");
+            // A held stamp (core §7.5): the owner's answer only as
+            // `Asked::read` says. It merges nothing either way.
+            if let Some(h) = a.get("held") {
+                let asked = asked
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{note}: a held stamp, and no `asked`"));
+                let bytes = unhex(a["hex"].as_str().expect("hex"));
+                let Ok(GetReply::Held(got)) = read_get_reply(&bytes) else {
+                    panic!("{note}: {} reads as no held stamp", a["hex"]);
+                };
+                assert_eq!(got.stamp, stamp(h), "{note}: the held stamp's bytes");
+                assert_eq!(got.write(), bytes, "{note}: writes back");
+                let reading = asked.read(via == "get", key, got.stamp);
+                held_reads.push(reading.token());
+                if reading == HeldRead::Unchanged {
+                    let held = view
+                        .get(key)
+                        .map_or(Held::Nothing, |h| Held::InBand(h.stamp));
+                    match unchanged(held, got.stamp) {
+                        Unchanged::HeardAgain => {
+                            view.get_mut(key).expect("held").heard_after = true;
+                        }
+                        Unchanged::Stands => {}
+                        Unchanged::ReadAgain => read_again = true,
+                    }
+                }
+                continue;
+            }
             if a.get("page").is_none() {
                 merge(&mut view, key, sample(a));
                 continue;
@@ -3443,14 +3516,233 @@ fn seed_snapshot() {
         omitted_some |= omitted.iter().any(|o| !o.is_empty());
         incomplete_some |= heard.iter().any(|h| !h.complete());
         paged |= heard.iter().any(|h| h.pages.len() > 1);
-        assert_eq!(
-            json!({"view": got_view, "snapshots": got_snapshots}),
-            case["expect"],
-            "{note}"
-        );
+        let mut got = json!({"view": got_view, "snapshots": got_snapshots});
+        if asked.is_some() {
+            got["held"] = json!(held_reads);
+            got["read_again"] = json!(read_again);
+        }
+        assert_eq!(got, case["expect"], "{note}");
     }
-    assert!(
-        omitted_some && incomplete_some && paged,
-        "the cases cover omissions, losses and pages"
+    [omitted_some, incomplete_some, paged]
+}
+
+/// A stamp as `seed/inband.json` and the held-stamp fixtures write one:
+/// `{width, run, seq}`.
+fn held_stamp_json(s: zenkey_model::wire::Stamp) -> Value {
+    json!({"width": if s.run.is_wide() { 32 } else { 16 }, "run": s.run.value(), "seq": s.seq.get()})
+}
+
+/// A stamp read from `{width, run, seq}`.
+fn held_stamp_of(v: &Value) -> zenkey_model::wire::Stamp {
+    use zenkey_model::wire::{Run, Seq, Stamp};
+    let run = v["run"].as_u64().expect("run");
+    let run = match v["width"].as_u64() {
+        Some(16) => Run::U16(u16::try_from(run).expect("a 16-bit run")),
+        Some(32) => Run::U32(u32::try_from(run).expect("a 32-bit run")),
+        w => panic!("width {w:?}"),
+    };
+    let seq = u32::try_from(v["seq"].as_u64().expect("seq")).expect("a seq");
+    Stamp {
+        run,
+        seq: Seq::new(seq).expect("a seq"),
+    }
+}
+
+/// `spec/conformance/seed/held.json` (core 0.110 §4.2, a conditional
+/// read's reader; #986's J1). `asks`: what a reader holds for one member →
+/// the held stamp it may send, or none, by `seed::held_stamp`; a case that
+/// gives a page and a member's id holds that id's entry, live or tombstone,
+/// as `Page::members` reads it. `cases`: `seed_cases`, each held stamp
+/// among the arrivals read by `Asked::read`, an answer by
+/// `seed::unchanged`. Run as written, never blessed.
+#[test]
+fn seed_held() {
+    use zenkey_model::collection::Page;
+    use zenkey_model::seed::{Mark, Stamp, held_stamp};
+    let doc = read_json(&spec().join("conformance/seed/held.json"));
+    let asks = doc["asks"].as_array().expect("asks");
+    assert_eq!(asks.len(), 12, "the fixture's asks");
+    let (mut sent, mut none) = (0, 0);
+    for case in asks {
+        let note = &case["note"];
+        // What the reader holds for the member: its mark, or nothing.
+        let holds: Option<Mark> = if let Some(page) = case.get("page") {
+            let key = case["key"].as_str().expect("key");
+            let id = case["member"].as_str().expect("member");
+            let bytes = unhex(case["hex"].as_str().expect("hex"));
+            let read = Page::parse(&bytes).unwrap_or_else(|r| panic!("{note}: {r}"));
+            assert_eq!(snapshot_page_json(&read), *page, "{note}: the page");
+            let at = zenkey_model::collection::member_key(key, id);
+            read.members(key)
+                .into_iter()
+                .find(|m| m.key == at)
+                .map(|m| Mark::InBand(m.stamp))
+        } else {
+            let h = &case["holds"];
+            if h.is_null() {
+                None
+            } else {
+                assert!(
+                    matches!(h["sample"].as_str(), Some("put" | "delete")),
+                    "{note}"
+                );
+                let inband = Some(&h["stamp"])
+                    .filter(|s| !s.is_null())
+                    .map(held_stamp_of);
+                let zenoh = h.get("zenoh").map(|z| {
+                    Stamp::parse(
+                        z["time"].as_u64().expect("time"),
+                        z["id"].as_str().expect("id"),
+                    )
+                    .expect("a Zenoh timestamp")
+                });
+                Mark::of(inband, zenoh)
+            }
+        };
+        let got = match held_stamp(holds) {
+            Some(h) => {
+                sent += 1;
+                json!({"held": held_stamp_json(h.stamp), "hex": hex(&h.write())})
+            }
+            None => {
+                none += 1;
+                json!({"held": null})
+            }
+        };
+        assert_eq!(got, case["expect"], "{note}");
+    }
+    assert!(sent > 0 && none > 0, "asks on both sides");
+    seed_cases("held.json", 29);
+    assert_eq!(doc["cases"].as_array().expect("cases").len(), 29);
+}
+
+/// `spec/conformance/envelope/held.json` (core 0.110 §7.5, the held stamp,
+/// and §4.2, an owner's answer to a conditional read; #986's J1). `writes`:
+/// a stamp → its bytes. `gets`: a state GET's Encoding and payload → the
+/// held stamp it carries, none, or the refusal's token, by `read_get`.
+/// `replies`: a GET reply's payload → a held stamp, a page, another form or
+/// the refusal's token, by `read_get_reply`. `answers`: a GET and its
+/// member's last mutation → `held` with the reply's bytes, or `whole`, by
+/// `collection::answers_held`. Every held stamp accepted writes back to its
+/// bytes. Run as written, never blessed.
+#[test]
+fn envelope_held() {
+    use zenkey_model::collection::{StateRead, answers_held};
+    use zenkey_model::wire::{GetReply, HeldStamp, read_get, read_get_reply};
+    let doc = read_json(&spec().join("conformance/envelope/held.json"));
+    let payload = |case: &Value| -> Option<Vec<u8>> { case["hex"].as_str().map(unhex) };
+
+    let writes = doc["writes"].as_array().expect("writes");
+    assert_eq!(writes.len(), 9, "the fixture's writes");
+    for case in writes {
+        let note = &case["note"];
+        let held = HeldStamp::new(held_stamp_of(&case["stamp"]));
+        let bytes = held.write();
+        assert_eq!(json!({"hex": hex(&bytes)}), case["expect"], "{note}");
+        assert_eq!(HeldStamp::parse(&bytes), Ok(held), "{note}: reads back");
+    }
+
+    // A state GET's payload, `SampleKind::Get`: the one sample
+    // `vectors.json` has no case of (`envelope_vectors` says so).
+    let gets = doc["gets"].as_array().expect("gets");
+    assert_eq!(gets.len(), 34, "the fixture's gets");
+    let mut seen = std::collections::BTreeSet::new();
+    for case in gets {
+        let note = &case["note"];
+        let encoding = case["encoding"].as_str().expect("encoding");
+        let bytes = payload(case);
+        let got = match read_get(encoding, bytes.as_deref()) {
+            Ok(None) => json!({"held": null}),
+            Ok(Some(h)) => {
+                assert_eq!(Some(h.write()), bytes, "{note}: writes back");
+                json!({"held": held_stamp_json(h.stamp)})
+            }
+            Err(r) => {
+                seen.insert(r.token());
+                json!({"refused": r.token()})
+            }
+        };
+        assert_eq!(got, case["expect"], "{note}");
+    }
+    assert_eq!(
+        seen.into_iter().collect::<Vec<_>>(),
+        ["encoding", "sample_kind", "short", "tag", "trailing"],
+        "every refusal of a GET's payload has a case"
     );
+
+    let replies = doc["replies"].as_array().expect("replies");
+    assert_eq!(replies.len(), 22, "the fixture's replies");
+    let mut seen = std::collections::BTreeSet::new();
+    for case in replies {
+        let note = &case["note"];
+        let bytes = payload(case).expect("a reply's payload");
+        let got = match read_get_reply(&bytes) {
+            Ok(GetReply::Held(h)) => {
+                assert_eq!(h.write(), bytes, "{note}: writes back");
+                seen.insert("held");
+                json!({"held": held_stamp_json(h.stamp)})
+            }
+            Ok(GetReply::Page(e)) => {
+                assert!(e.is_snapshot() && !e.record.is_empty(), "{note}");
+                seen.insert("page");
+                json!({"reads": "page"})
+            }
+            Ok(GetReply::Other(e)) => {
+                seen.insert("other");
+                json!({"reads": e.form.as_str()})
+            }
+            Err(r) => {
+                seen.insert(r.token());
+                json!({"refused": r.token()})
+            }
+        };
+        assert_eq!(got, case["expect"], "{note}");
+    }
+    for want in ["held", "page", "other", "tag", "short", "sample_kind"] {
+        assert!(seen.contains(want), "the replies cover {want}");
+    }
+
+    let answers = doc["answers"].as_array().expect("answers");
+    assert_eq!(answers.len(), 23, "the fixture's answers");
+    let (mut held_some, mut whole_some) = (false, false);
+    for case in answers {
+        let note = &case["note"];
+        let read = match case["read"].as_str() {
+            Some("member") => StateRead::Member,
+            Some("wildcard") => StateRead::Wildcard,
+            Some("collection") => StateRead::Collection,
+            Some("per_key") => StateRead::PerKey,
+            other => panic!("{note}: read {other:?}"),
+        };
+        assert_eq!(Some(read.as_str()), case["read"].as_str());
+        let encoding = case["encoding"].as_str().expect("encoding");
+        let bytes = payload(case);
+        // The member's last mutation: a put, or a delete within the
+        // window; `null` where the owner holds no member there.
+        let member = &case["member"];
+        let last = if member.is_null() {
+            None
+        } else {
+            assert!(
+                matches!(member["sample"].as_str(), Some("put" | "delete")),
+                "{note}"
+            );
+            Some(held_stamp_of(&member["stamp"]))
+        };
+        // The run the owner writes under now is given, and not read.
+        assert!(case["writes_under"]["run"].is_u64(), "{note}");
+        let got = match answers_held(read, encoding, bytes.as_deref(), last) {
+            Some(h) => {
+                held_some = true;
+                assert_eq!(Some(h.write()), bytes, "{note}: the stamp the GET carried");
+                json!({"answer": "held", "hex": hex(&h.write())})
+            }
+            None => {
+                whole_some = true;
+                json!({"answer": "whole"})
+            }
+        };
+        assert_eq!(got, case["expect"], "{note}");
+    }
+    assert!(held_some && whole_some, "answers on both sides");
 }

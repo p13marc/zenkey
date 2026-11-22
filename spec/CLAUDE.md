@@ -658,6 +658,36 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   resource is absent here), and that an owner whose owner heartbeats
   cover an interface exposes it. No rule, fixture or keyword moved: 286
   rules.
+  Core 0.110 (#986's J1) adds the conditional read, adopted by no profile
+  until `desired.v2`. §7.5's held stamp is a snapshot's header with no
+  body (`CH · run · seq`, form 7, tag 0; 6 or 8 bytes), the same on a
+  state GET and on its reply under `zenoh/bytes`. A GET's payload is read
+  in three steps: none or no byte (no held stamp), another Encoding
+  (`encoding`), then the parse (`sample_kind`, `tag`, `short`,
+  `trailing`); on a reply, a snapshot's envelope with no byte after its
+  seq is a held stamp, never a page (`tag` where its tag is not 0), and
+  the envelope's own parse is unchanged (`vectors.json` as it was). §4.2,
+  "A conditional read": an owner SHOULD answer a member read of one
+  concrete key with the held stamp alone when the member's last mutation
+  carries exactly that stamp (run in width and value, seq), MUST NOT
+  otherwise, and answers a refused payload and every other GET whole; a
+  consumer or a tool MUST NOT send any stamp but that of the mutation it
+  holds, MUST NOT read a held stamp as unchanged unless it answers the
+  GET that carried the same one on its one concrete key (else undecodable,
+  `held`), and MUST accept a snapshot in answer. An answer merges nothing,
+  counts as its mutation heard again for the omission rule's guard, and
+  never steps a member back. Evidence: `envelope/held.json` (`writes`,
+  `gets`, `replies`, `answers`; 88 cases), `seed/held.json` (`asks`,
+  `cases`; 41), 9 reads more in `carries.json` (46), `scenarios/state.md`
+  §16, Appendix B's "A conditional read's bytes" (computed, none
+  measured). The fixtures were computed twice by two scripts of the
+  text's drafter, kept out of the repo, and never blessed; the reference
+  then ran every case as written (`envelope_held`, `seed_held`,
+  `envelope_carries` in `zenkey-model/tests/conformance.rs`) and all
+  pass, and runs §16 on real sessions (`zenkey/tests/state.rs`' `s16_*`:
+  steps 1 to 8 against the runtime's owner, 9 and 10 against a played
+  one). 295 rules (owner 90, consumer 35, observer 87, implementation
+  79). Observer stays 0.34.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

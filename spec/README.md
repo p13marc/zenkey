@@ -195,6 +195,12 @@ section number alone is the core's.
   stamp and, under a horizon, its confirmation. An owner answers a
   collection read with one, and a member read with one per member
   ([§4.2](core.md#42-rules-for-owners-and-consumers)).
+- **Held stamp**: a snapshot's header with no body, 6 or 8 bytes: one
+  member's in-band stamp ([§7.5](core.md#75-the-zk2c-envelope)).
+- **Conditional read**: a member read of one concrete key whose GET
+  carries a held stamp. An owner whose member is unchanged answers with
+  the held stamp alone
+  ([§4.2](core.md#42-rules-for-owners-and-consumers)).
 - **Holder**: any participant that holds a bundle and serves it on its key
   ([§8.4](core.md#84-contract-retrieval)).
 - **Address**: a service's `<system>/<service>`, as a binding names it

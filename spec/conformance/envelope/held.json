@@ -1,0 +1,1053 @@
+{
+  "description": "core §7.5, the held stamp, and core §4.2, an owner's answer to a conditional read. Computed twice, by two readings of the text that shared no code, never blessed. A stamp is `{width, run, seq}`, as `seed/inband.json` writes one: `width` the run's width in bits, 16 or 32. `writes`: a stamp → `expect.hex`, the held stamp's bytes, the same on a state GET and on its reply: CH with form 7, the run's width bit and tag 0, then the run and the seq, big-endian, and no byte after. `gets`: a state GET's payload, its `encoding` as zenoh writes it and its bytes in `hex` (`null` for a GET with no payload, an empty string for a payload of no byte) → `expect`: `{\"held\": stamp}`, the held stamp it carries; `{\"held\": null}` for no payload or one of no byte, where nothing is parsed; or `{\"refused\": token}`. The steps come in order: no payload or no byte; then `encoding` for a payload under any Encoding but exactly `zenoh/bytes`, whatever its bytes; then the parse, which refuses the first of `sample_kind` (a form other than 7), `tag` (a tag other than 0), `short` (fewer bytes than CH, the run and the seq need) and `trailing` (a byte after the seq). It reads no contract and no key. `replies`: a GET reply's payload under `zenoh/bytes`, in `hex` → `expect`. The reply is parsed as a put's payload is, with no key in hand (`vectors.json`'s `put`), and a refusal of that parse is `{\"refused\": token}`. A snapshot's envelope with no byte after its seq is a held stamp, `{\"held\": stamp}`, or `{\"refused\": \"tag\"}` where its tag is not 0. One with a byte after its seq is `{\"reads\": \"page\"}`: a page, whose tag is its collection's type's and whose body `snapshot/bodies.json` reads. Another form the parse accepts is `{\"reads\": form}`. Every held stamp a `gets` or a `replies` case accepts writes back to its bytes. `answers`: one state GET and what its owner holds → what it answers. `read` is the GET: `member`, a member read of one concrete key on a collection the owner answers by snapshot; `wildcard`, a member read whose selector is not one concrete key; `collection`, a collection read; `per_key`, a read of one concrete key of a per-key resource. `encoding` and `hex` are its payload, as in `gets`. `member` is what the owner holds at the GET's key, for the member the read reaches: `{sample, stamp}`, its last mutation, `put` or a `delete` within the window, or `null` where it holds no member there. `writes_under` is the run the owner writes under now, which the answer does not read. `expect.answer` is `held`, with `hex` the reply's payload, the held stamp the GET carried, when the GET is a member read whose payload carries a held stamp and the member's last mutation carries exactly that stamp: the same width, run and seq. It is `whole` in every other case: the owner answers as it answers a GET with no payload.",
+  "writes": [
+    {
+      "note": "a 16-bit run: `111 0 0000`, the run in 2 bytes, the seq in 3. 6 bytes",
+      "stamp": {
+        "width": 16,
+        "run": 1,
+        "seq": 7
+      },
+      "expect": {
+        "hex": "e00001000007"
+      }
+    },
+    {
+      "note": "a 32-bit run: `111 1 0000`, the run in 4 bytes. 8 bytes",
+      "stamp": {
+        "width": 32,
+        "run": 74565,
+        "seq": 7
+      },
+      "expect": {
+        "hex": "f000012345000007"
+      }
+    },
+    {
+      "note": "big-endian: run 0x0102, seq 0x030405",
+      "stamp": {
+        "width": 16,
+        "run": 258,
+        "seq": 197637
+      },
+      "expect": {
+        "hex": "e00102030405"
+      }
+    },
+    {
+      "note": "big-endian with a 32-bit run: run 0x01020304, seq 0x050607",
+      "stamp": {
+        "width": 32,
+        "run": 16909060,
+        "seq": 329223
+      },
+      "expect": {
+        "hex": "f001020304050607"
+      }
+    },
+    {
+      "note": "run 0 and seq 0: an owner's first mutation under its first run",
+      "stamp": {
+        "width": 16,
+        "run": 0,
+        "seq": 0
+      },
+      "expect": {
+        "hex": "e00000000000"
+      }
+    },
+    {
+      "note": "a 16-bit run and a seq at their maxima",
+      "stamp": {
+        "width": 16,
+        "run": 65535,
+        "seq": 16777215
+      },
+      "expect": {
+        "hex": "e0ffffffffff"
+      }
+    },
+    {
+      "note": "a 32-bit run and a seq at their maxima",
+      "stamp": {
+        "width": 32,
+        "run": 4294967295,
+        "seq": 16777215
+      },
+      "expect": {
+        "hex": "f0ffffffffffffff"
+      }
+    },
+    {
+      "note": "run 5 at 16 bits",
+      "stamp": {
+        "width": 16,
+        "run": 5,
+        "seq": 7
+      },
+      "expect": {
+        "hex": "e00005000007"
+      }
+    },
+    {
+      "note": "run 5 at 32 bits: another run, and other bytes",
+      "stamp": {
+        "width": 32,
+        "run": 5,
+        "seq": 7
+      },
+      "expect": {
+        "hex": "f000000005000007"
+      }
+    }
+  ],
+  "gets": [
+    {
+      "note": "a GET with no payload carries no held stamp: nothing is parsed",
+      "encoding": "zenoh/bytes",
+      "hex": null,
+      "expect": {
+        "held": null
+      }
+    },
+    {
+      "note": "a payload of no byte carries none either, and is not `short`",
+      "encoding": "zenoh/bytes",
+      "hex": "",
+      "expect": {
+        "held": null
+      }
+    },
+    {
+      "note": "a payload of no byte under another Encoding: step 1 comes before step 2",
+      "encoding": "application/json",
+      "hex": "",
+      "expect": {
+        "held": null
+      }
+    },
+    {
+      "note": "a held stamp with a 16-bit run",
+      "encoding": "zenoh/bytes",
+      "hex": "e00001000007",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 1,
+          "seq": 7
+        }
+      }
+    },
+    {
+      "note": "a held stamp with a 32-bit run",
+      "encoding": "zenoh/bytes",
+      "hex": "f000012345000007",
+      "expect": {
+        "held": {
+          "width": 32,
+          "run": 74565,
+          "seq": 7
+        }
+      }
+    },
+    {
+      "note": "big-endian: run 0x0102, seq 0x030405",
+      "encoding": "zenoh/bytes",
+      "hex": "e00102030405",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 258,
+          "seq": 197637
+        }
+      }
+    },
+    {
+      "note": "run 0 and seq 0",
+      "encoding": "zenoh/bytes",
+      "hex": "e00000000000",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 0,
+          "seq": 0
+        }
+      }
+    },
+    {
+      "note": "a 16-bit run and a seq at their maxima",
+      "encoding": "zenoh/bytes",
+      "hex": "e0ffffffffff",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 65535,
+          "seq": 16777215
+        }
+      }
+    },
+    {
+      "note": "a 32-bit run and a seq at their maxima",
+      "encoding": "zenoh/bytes",
+      "hex": "f0ffffffffffffff",
+      "expect": {
+        "held": {
+          "width": 32,
+          "run": 4294967295,
+          "seq": 16777215
+        }
+      }
+    },
+    {
+      "note": "a held stamp's bytes under `application/json`: no held stamp, whatever its bytes",
+      "encoding": "application/json",
+      "hex": "e00001000007",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "under `zenoh/bytes` with a schema suffix: another Encoding",
+      "encoding": "zenoh/bytes;held",
+      "hex": "e00001000007",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "under `application/octet-stream`",
+      "encoding": "application/octet-stream",
+      "hex": "e00001000007",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "under another Encoding the bytes are not read: a mutation's would be `sample_kind`",
+      "encoding": "text/plain",
+      "hex": "0000010000077b7d",
+      "expect": {
+        "refused": "encoding"
+      }
+    },
+    {
+      "note": "form 0, a mutation's envelope with no record",
+      "encoding": "zenoh/bytes",
+      "hex": "000001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "form 1, a delete's attachment: the same stamp under another form",
+      "encoding": "zenoh/bytes",
+      "hex": "200001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "form 2, a call's request",
+      "encoding": "zenoh/bytes",
+      "hex": "407b7d",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "form 3, an error",
+      "encoding": "zenoh/bytes",
+      "hex": "600001000007a0",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "form 4, an event",
+      "encoding": "zenoh/bytes",
+      "hex": "8000000e1000fa7b7d",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "form 5, a frame",
+      "encoding": "zenoh/bytes",
+      "hex": "a00001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "form 6, a heartbeat",
+      "encoding": "zenoh/bytes",
+      "hex": "c00001000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a delete's CH alone, with tag 5: the form before the tag and before the length",
+      "encoding": "zenoh/bytes",
+      "hex": "25",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "tag 5 on a whole held stamp",
+      "encoding": "zenoh/bytes",
+      "hex": "e50001000007",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "tag 13, a packed collection's on a page: a held stamp's is 0",
+      "encoding": "zenoh/bytes",
+      "hex": "ed0001000007",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "tag 15 with a 32-bit run",
+      "encoding": "zenoh/bytes",
+      "hex": "ffffffffffffffff",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "CH alone with tag 15: the tag before the length",
+      "encoding": "zenoh/bytes",
+      "hex": "ef",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "tag 1 and a byte after the seq: the tag before the trailing byte",
+      "encoding": "zenoh/bytes",
+      "hex": "e1000100000700",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "CH alone",
+      "encoding": "zenoh/bytes",
+      "hex": "e0",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "one byte short of a 16-bit run's seq",
+      "encoding": "zenoh/bytes",
+      "hex": "e000010000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "the width bit decides: 6 bytes are short of a 32-bit run's seq",
+      "encoding": "zenoh/bytes",
+      "hex": "f00001000009",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "one byte short of a 32-bit run's seq",
+      "encoding": "zenoh/bytes",
+      "hex": "f0000123450000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "one byte after the seq",
+      "encoding": "zenoh/bytes",
+      "hex": "e0000100000700",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "one byte after a 32-bit run's seq",
+      "encoding": "zenoh/bytes",
+      "hex": "f000012345000007ff",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a 32-bit run's 8 bytes under a 16-bit run's CH: 2 bytes after the seq",
+      "encoding": "zenoh/bytes",
+      "hex": "e000012345000007",
+      "expect": {
+        "refused": "trailing"
+      }
+    },
+    {
+      "note": "a whole page with no entry, 16 bytes: a page is no held stamp",
+      "encoding": "zenoh/bytes",
+      "hex": "e0000100000900000e1000fa00000000",
+      "expect": {
+        "refused": "trailing"
+      }
+    }
+  ],
+  "replies": [
+    {
+      "note": "a held stamp with a 16-bit run: a snapshot's envelope with no byte after its seq",
+      "hex": "e00001000007",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 1,
+          "seq": 7
+        }
+      }
+    },
+    {
+      "note": "a held stamp with a 32-bit run",
+      "hex": "f000012345000007",
+      "expect": {
+        "held": {
+          "width": 32,
+          "run": 74565,
+          "seq": 7
+        }
+      }
+    },
+    {
+      "note": "run 0 and seq 0",
+      "hex": "e00000000000",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 0,
+          "seq": 0
+        }
+      }
+    },
+    {
+      "note": "a 16-bit run and a seq at their maxima",
+      "hex": "e0ffffffffff",
+      "expect": {
+        "held": {
+          "width": 16,
+          "run": 65535,
+          "seq": 16777215
+        }
+      }
+    },
+    {
+      "note": "a 32-bit run and a seq at their maxima",
+      "hex": "f0ffffffffffffff",
+      "expect": {
+        "held": {
+          "width": 32,
+          "run": 4294967295,
+          "seq": 16777215
+        }
+      }
+    },
+    {
+      "note": "tag 5 on a held stamp",
+      "hex": "e50001000007",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "tag 13 with no body: a held stamp refused, not a packed collection's page cut short",
+      "hex": "ed0001000009",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "every bit set: 8 bytes, a 32-bit run and tag 15",
+      "hex": "ffffffffffffffff",
+      "expect": {
+        "refused": "tag"
+      }
+    },
+    {
+      "note": "one byte after the seq: a page, whose body its own reading refuses `short` (snapshot/bodies.json)",
+      "hex": "e0000100000900",
+      "expect": {
+        "reads": "page"
+      }
+    },
+    {
+      "note": "a page with no entry: 16 bytes",
+      "hex": "e0000100000900000e1000fa00000000",
+      "expect": {
+        "reads": "page"
+      }
+    },
+    {
+      "note": "the same with a 32-bit run: 18 bytes",
+      "hex": "f0deadbeef00000900000e1000fa00000000",
+      "expect": {
+        "reads": "page"
+      }
+    },
+    {
+      "note": "a page with tag 13, a packed collection's: a page's tag is not read here",
+      "hex": "ed000100000900000e1000fa00040106706565722d622000002a04a5c00f8000",
+      "expect": {
+        "reads": "page"
+      }
+    },
+    {
+      "note": "tag 5 and one byte after the seq: a page, and its tag is its collection's type's",
+      "hex": "e5000100000700",
+      "expect": {
+        "reads": "page"
+      }
+    },
+    {
+      "note": "no byte: the envelope's parse refuses it first",
+      "hex": "",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "CH alone",
+      "hex": "e0",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "one byte short of a 16-bit run's seq",
+      "hex": "e000010000",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "the width bit decides: 6 bytes are short of a 32-bit run's seq",
+      "hex": "f00001000009",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "CH alone with tag 5: short, since no held stamp is read yet",
+      "hex": "e5",
+      "expect": {
+        "refused": "short"
+      }
+    },
+    {
+      "note": "a mutation: a per-key resource's reply, the bytes its put carried",
+      "hex": "0000050000077b7d",
+      "expect": {
+        "reads": "mutation"
+      }
+    },
+    {
+      "note": "a mutation with no record: no held stamp, whatever its length",
+      "hex": "000005000007",
+      "expect": {
+        "reads": "mutation"
+      }
+    },
+    {
+      "note": "a delete's form on a reply's payload",
+      "hex": "200005000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    },
+    {
+      "note": "a call's value form",
+      "hex": "400005000007",
+      "expect": {
+        "refused": "sample_kind"
+      }
+    }
+  ],
+  "answers": [
+    {
+      "note": "unchanged: the member's last put carries the stamp the GET names",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "held",
+        "hex": "e00005000007"
+      }
+    },
+    {
+      "note": "unchanged, a 32-bit run",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "f000000005000007",
+      "writes_under": {
+        "width": 32,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 32,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "held",
+        "hex": "f000000005000007"
+      }
+    },
+    {
+      "note": "unchanged, a member deleted within the window: its last mutation is the delete",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000009",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "delete",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        }
+      },
+      "expect": {
+        "answer": "held",
+        "hex": "e00005000009"
+      }
+    },
+    {
+      "note": "unchanged, a member last put under a run its instance wrote under before: the stamp is the mutation's, whatever run the owner writes under now",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 6
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "held",
+        "hex": "e00005000007"
+      }
+    },
+    {
+      "note": "changed: the member was put again, at seq 9",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "a seq the member has not reached",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000009",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "another run at the same seq",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 6
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 6,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the same run's value at the other width: the member's run is 32 bits wide",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 32,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 32,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the same run's value at the other width: the member's run is 16 bits wide",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "f000000005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the put the GET names was deleted since, within the window",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "delete",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "no member held, live or deleted within the window: a snapshot of no entry",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": null,
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "a delete beyond the window is no member held",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000009",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": null,
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "a GET with no payload",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": null,
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "a payload of no byte",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the member's stamp and one byte after it: refused `trailing`, answered whole",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e0000500000700",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the member's stamp with tag 5: refused `tag`, answered whole",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e50005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the member's stamp one byte short: refused `short`, answered whole",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "e000050000",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the member's stamp in a mutation's envelope: refused `sample_kind`, answered whole",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "000005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the member's stamp in a delete's envelope, for a member deleted at it: refused `sample_kind`, answered whole",
+      "read": "member",
+      "encoding": "zenoh/bytes",
+      "hex": "200005000009",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "delete",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 9
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "the member's stamp under `application/json`: refused `encoding`, answered whole",
+      "read": "member",
+      "encoding": "application/json",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "a member read with a wildcard reaches the member: its held stamp is ignored",
+      "read": "wildcard",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "a collection read: its held stamp is ignored",
+      "read": "collection",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    },
+    {
+      "note": "a per-key resource's member, read by its one concrete key: its held stamp is ignored",
+      "read": "per_key",
+      "encoding": "zenoh/bytes",
+      "hex": "e00005000007",
+      "writes_under": {
+        "width": 16,
+        "run": 5
+      },
+      "member": {
+        "sample": "put",
+        "stamp": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "expect": {
+        "answer": "whole"
+      }
+    }
+  ]
+}
