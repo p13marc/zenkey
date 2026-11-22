@@ -522,13 +522,15 @@ def _per_key(r: dict[str, Any], uses: list[str]) -> bool:
     """link.v2 0.9 §2.11's per-key resources (core §4.2): "a state that
     declares ``freshness.ttl_s`` above 0, of a contract that does not use
     ``freshness.v2``; one whose resolved annotations hold
-    ``desired.target_param``; a metric resource of ``telemetry.v1`` or
+    ``desired.target_param``, "of a contract that does not use
+    ``desired.v2``" (link.v2 0.23: "A desired.v2 desired resource has no
+    floor, unless its template's first chunk is a parameter"); a metric resource of ``telemetry.v1`` or
     ``telemetry.v2``, of a contract that uses one; or any state of a
     contract that uses ``redundancy.v1``"."""
     ann = r.get("annotations") or {}
     if freshness.horizon("state", ann).horizon == "within" and HEARTBEAT_IFACE not in uses:
         return True
-    if "desired.target_param" in ann:
+    if "desired.target_param" in ann and "desired.v2" not in uses:
         return True
     if "telemetry.kind" in ann and {"telemetry.v1", "telemetry.v2"} & set(uses):
         return True

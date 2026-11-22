@@ -103,7 +103,11 @@ VOCABULARY = {**INTERIM_VOCABULARY, **PUBLISHED_VOCABULARY}
 #: ``telemetry.v2`` §4 (text 0.1, #983), "v1 §4's four keys, and this one",
 #: ``series``; "W105 reads this table for a contract that uses
 #: telemetry.v2" (its §1).
-VOCABULARY_BY_MAJOR = {"telemetry.v2": {"kind", "unit", "buckets", "semantic", "series"}}
+#: ``desired.v2`` §4 (text 0.1, core 0.112's Appendix D row): "W105 reads
+#: this table for a contract that lists desired.v2 (core §10). Any other key
+#: desired.<key>, desired.target included, is outside it."
+VOCABULARY_BY_MAJOR = {"telemetry.v2": {"kind", "unit", "buckets", "semantic", "series"},
+                       "desired.v2": {"target_param", "report", "pointers", "details"}}
 
 # -- §2.4 / §9.3: built-in defaults -----------------------------------------
 

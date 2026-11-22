@@ -29586,3 +29586,88 @@ heartbeats** (`owner_heartbeat_live --reference`, zk2py's owner;
   this branch; F-573 to F-575.
 
   F-365 stays open as #965's.
+
+## At desired.v2 0.1, core 0.112 and link.v2 0.23
+
+Round 118 read the branch `chunk-986-j2` at a6aab761: a new profile
+major, `desired.v2` (text 0.1), with core 0.112 and `link.v2` 0.23. It
+read cold:
+- the three changelog entries;
+- `v2.md` whole, with `v1.md` whole beside it;
+- core §4.2 and §4.3 where 0.112 touched them, and `link.v2` §2.11;
+- `scenarios-v2.md`, and `conformance/v2/README.md`.
+
+zk2py diffed `spec/`, `examples/zk2/` and `zenkey/tests/contracts/`
+between round 117's tree and this one. `spec/CLAUDE.md` moved too, and
+the barrier keeps it unread. `RULES.md` and `observer.md` did not move:
+295 rules, and the walk's 308 rows keep their verdicts.
+
+### Four answers, given from the text before any case
+
+These were written and committed before a file of `conformance/v2/` was
+opened, and before a line of `desired.v2`'s code.
+
+**1. A version at exactly a remembered asof: older.**
+- **The sentence that decides** is §2.8's: "**What it records.** The
+  target remembers the asof as the seq it acted on under that run. So a
+  version of that run at or below the asof is older (§2.6)." §2.8 says
+  it once more of a snapshot that waits: "of its run, at or below the
+  asof, it is older."
+- **The sentence it cites says otherwise.** §2.6 step 4 orders a
+  version of a remembered run "by seq against the highest the target
+  acted on or adopted under that run", and "Equal is **the same
+  version**." Read through "the seq it acted on", a version at the asof
+  is the same version, `same_version`. zk2py takes §2.8's "at or below",
+  the more specific of the two.
+
+**2. A revert on a snapshot with no entry that then fails: the text
+gives the report no observed version, and its own check then refuses
+that report.**
+- §2.10: "A revert on a snapshot with no entry has no observed version
+  (§2.8)." It names no outcome. `failed`'s line gives the rest: "`source`
+  is `desired` for a put and `baseline` for a revert, and `in_force`
+  `none`", with the code `apply`.
+- `observed_outcome` then reads that report malformed: "`converged`,
+  `refused` or `failed` with none stated." And "A target's report MUST
+  be consistent."
+- **No sentence settles it.** §2.8's "Its report is `reverted`, with no
+  observed version" speaks of the revert that ends. zk2py writes what
+  §2.10 says, no observed version, and expects its own reader to find
+  `observed_outcome`.
+
+**3. The stamp of a conditional re-read around a snapshot with no
+entry: none, in both cases, by zk2py's reading. The text names neither
+case.**
+- §2.5: "**The stamp it sends** is that of the latest version it
+  admitted (§2.6): the one it holds waiting, else the running act's,
+  else the last it acted on or adopted. A target that holds no version
+  sends none. Core §4.2 forbids any other stamp."
+- **While the snapshot is acted on,** the running act has no version:
+  "A snapshot with no entry names no version" (§2.6). The list's "else"
+  then reaches "the last it acted on or adopted", the version of the
+  document being reverted. Or the latest thing admitted is the
+  snapshot, which has no stamp. The text does not choose. zk2py sends
+  none: core §4.2 allows only "the in-band stamp of the mutation it
+  holds for that member", and "Never a snapshot's asof".
+- **After it,** "the target holds no document" (§2.8), and its report
+  has no observed version. zk2py sends none. The sentence that would
+  say so, that such a target holds no *version*, is not there: §2.5
+  says "holds no version", and §2.8 "holds no document".
+
+**4. A version of run A held, and the author's heartbeat heard under
+run B: it reads, once.**
+- The rule compares the heartbeat's run with the last read
+  heartbeat's, never with the held version's. §2.5 step 3: "One of
+  another run than the last read one's, or whose seq is not that one's
+  plus 1 modulo 2^24, follows a change the target did not see. The
+  target expects none, and goes on to step 4." Step 6: "The section
+  differs, or the target expects none. It makes one conditional read of
+  its slice (`read`)." And: "It MUST read when its section moves, after
+  a heartbeat lost and after a heartbeat of another run".
+- **So the first heartbeat of run B makes it read,** unless that
+  heartbeat has no section for the collection (`no_section`) or a read
+  is outstanding (`outstanding`). A first heartbeat ever does too: the
+  target "starts with none".
+- **After that it waits,** by the section alone. A target that still
+  holds run A's version, answered unchanged, expects run B's section
+  and reads nothing while it is unmoved.
