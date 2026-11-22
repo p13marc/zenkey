@@ -40,7 +40,7 @@ uses it yet.
   holds, else the lowest that does not fire. The alert key stays the
   identity, by v1's recipe.
 - **§2.4 and §3, the document.** A packed `Alarm`: its state, its
-  severity, an optional `at`, its rule's index, its label codes, an
+  severity, its rule's index, an optional `at`, its label codes, an
   argument, and its alert key where no table names it. The usual one
   is 67 bits, 9 bytes.
 - **§4, the words.** One annotation, `alarms.rules`: the service's own
@@ -157,8 +157,14 @@ the design, which the maintainer saw and did not overrule.
   again.
 - **A table grows** as `same`, `kept` or `moved`. A summary, a category
   and an argument may change in place.
-- **The record's tag is 0,** as its layout hashes. It refuses no
-  untagged payload: the length and the pad do.
+- **`rule` comes before `at`,** where the design had `at` first. With
+  `at` first the layout's tag hashed to 0, the tag a JSON payload
+  carries, and the bytes of a JSON document read as a record. A tool
+  with no contract in hand would have sniffed every alarm (observer
+  §7.3). The two fields changed places, at no bit: the tag is 11, and
+  the record opens with what fires before when.
+  - Revision 2.0 is `sha256:2292477c…2cb7`, its heartbeat's tag 7. The
+    draft's first layout was `sha256:eb4dc4f7…44b9`, never published.
 - **A slot's words stay** until other words are put there.
 
 **What deliberately did not change.**
@@ -171,7 +177,7 @@ the design, which the maintainer saw and did not overrule.
 - **Observer** is unchanged.
 
 **Evidence.** [`conformance/v2/`](conformance/v2/) holds ten files,
-473 cases, and its `README.md` says what each pins.
+475 cases, and its `README.md` says what each pins.
 - **Computed twice.** One script read the text into code and wrote the
   files. A second, written from the finished text, computed each
   expectation again from the files' inputs: it parses each heartbeat
@@ -184,8 +190,9 @@ the design, which the maintainer saw and did not overrule.
   pages, heartbeat bodies and digests agree with the core's own
   vectors, and its alert keys with `alarms.v1`'s `keys.json`.
 - **What the first computation found in the text.** A JSON document's
-  bytes read as a record under tag 0, so §3 no longer says the length
-  refuses one. A writer's refusal of `labels` under `not_available`,
+  bytes read as a record under the first layout's tag, 0. §3 no longer
+  says the length refuses one, and the layout moved (above). A writer's
+  refusal of `labels` under `not_available`,
   the order of a reader's reasons for taking no words, and a reader
   with no slot under the present run were each stated after it.
 

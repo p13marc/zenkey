@@ -18,18 +18,18 @@
           "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
         },
         {
-          "name": "at",
-          "type": "time",
-          "optional": true,
-          "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
-        },
-        {
           "name": "rule",
           "type": "int",
           "minimum": 0,
           "maximum": 254,
           "reserved": ["not_available"],
           "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+        },
+        {
+          "name": "at",
+          "type": "time",
+          "optional": true,
+          "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
         },
         {
           "name": "labels",
