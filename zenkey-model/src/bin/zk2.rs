@@ -119,17 +119,9 @@ fn lint(files: &[&str]) -> ExitCode {
                 findings.extend(
                     zenkey_model::desired::v2::lint_contract(&c)
                         .iter()
-                        .map(|x| format!("error[desired.v2 {}] {}: {}", x.token, x.at, x.says)),
+                        .chain(&zenkey_model::health::v2::lint_contract(&c))
+                        .map(ToString::to_string),
                 );
-                findings.extend(zenkey_model::health::v2::lint_contract(&c).iter().map(|x| {
-                    format!(
-                        "error[health.v2 {}] {}: {}: {}",
-                        x.reason,
-                        x.at,
-                        x.key,
-                        x.reason.says()
-                    )
-                }));
                 if findings.is_empty() {
                     println!("{f}: {} {}", c.iface, Fingerprint::of(&c));
                 } else {
