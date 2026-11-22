@@ -321,6 +321,19 @@ impl Config {
                             report: findings.join("\n"),
                         });
                     }
+                    // desired.v2 §2.2, §2.10: an invalid declaration of a
+                    // desired resource or of a report resource, in a
+                    // contract that lists desired.v2, is an error too.
+                    Some(c) if !zenkey_model::desired::v2::lint_contract(&c).is_empty() => {
+                        let findings = zenkey_model::desired::v2::lint_contract(&c)
+                            .iter()
+                            .map(|x| format!("error[desired.v2 {}] {}: {}", x.token, x.at, x.says))
+                            .collect::<Vec<_>>();
+                        return Err(Error::Lint {
+                            file: shown,
+                            report: findings.join("\n"),
+                        });
+                    }
                     Some(c) => out.push((f, c)),
                     None => {
                         let errors: Vec<String> =
