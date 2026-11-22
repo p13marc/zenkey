@@ -165,9 +165,16 @@ async fn every_vector_through_the_runtime() {
         };
         let note = case["note"].as_str().unwrap();
         let record = unhex(hex);
+        let n = heard.lock().unwrap().len();
         writers[ty].put(record.clone()).await.unwrap();
         written += 1;
-        eventually(note, || async { got.lock().unwrap().len() == written }).await;
+        // Both subscribers, each on a session of its own: the raw one can
+        // hear a put after the tool's has delivered it, and its last sample
+        // was then the write before (#1151).
+        eventually(note, || async {
+            got.lock().unwrap().len() == written && heard.lock().unwrap().len() > n
+        })
+        .await;
         let d = got.lock().unwrap().last().cloned().unwrap();
         assert_eq!(&*d.sample.payload().to_bytes(), &record[..], "{note}");
         assert_eq!(d.tag.map(Tag::get), Some(layout.tag()), "{note}: CH's tag");

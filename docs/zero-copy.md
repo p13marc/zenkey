@@ -205,4 +205,6 @@ beats a harness that implies both.
 
 The O6 counter ledger (`zenkey-fleet/tests/ledger.rs`) is the other half of
 this discipline: zero-copy is about not *spending*, the ledger is about not
-*losing*. Both run from `just ci`.
+*losing*. The ledger runs in `just ci`, which also compiles the benches
+(`cargo build --all-targets`). Their release-profile build is `just
+bench-build`, and CI's nightly run.

@@ -31,10 +31,142 @@ slow-timeout = { period = "60s", terminate-after = 10 }
 # passes on its retry is reported FLAKY in the log, never hidden: collect
 # those and fix them, as #1008 did. A test that fails twice fails the run.
 retries = 1
-# One test per CPU, nextest's default, left as it is. On vm-dev (6 CPUs, as
-# vm-runner-01) the suite took 5 min at 6 and 3.5 min at 12. The first run
-# at 12 failed link_face's s10, 7 downsampled samples where 4 to 6 fit,
-# because its owner's traffic was paced by sleeps the load stretched; paced
-# by deadline, the next run at 12 passed. One run is not enough to raise
-# this on a runner shared with another lane: most tests sleep, so the CPUs
-# are not the limit, the timing windows are.
+# Twelve tests at once, on any number of CPUs (#1151, 2026-11-22). The
+# suite's time is mostly waiting: 3,759 s of tests summed, 66 % of it in 77
+# tests that sleep on real clocks, against 700 to 850 s of CPU in all
+# (sampled from /proc). At one test per CPU the wall time was that sum over
+# the CPUs: 943 s in a lane's gate (4 cores), 619 s in CI's `test` job (6).
+#
+# Measured in a lane (cores 0-3) with the groups below, one run each, then
+# six more at 16:
+#
+#    8 threads   501 s            no retry
+#   12 threads   324 s            one retry
+#   16 threads   249 to 316 s     two retries in seven runs
+#
+# 16 is the fastest and is past what four cores carry: the tests then keep
+# them 70 % busy over the whole run (a load of 4.5, against 3.1 at 12), and
+# a run takes no less than the CPU it needs, about 200 s here. 12 leaves the
+# cores room, and stays the figure once the long waits are shorter, when the
+# CPU is all that is left.
+#
+# Four tests that no lane gate at 4 threads had seen retried needed their
+# retry in those runs and the next at 12, each once. None leaned on a timing
+# window. Three read through a second session before the router had heard
+# what the first had just done (`profile_freshness_v2`'s
+# `the_owner_heartbeat_is_off…`, tokens read after a close; `packed`'s
+# `every_vector_through_the_runtime`, a raw subscriber read once the tool's
+# had delivered; `mock_owner`'s `gen_of_zenoh_modems_node…`, a descriptor
+# asked as its owner came up), and each now waits for what it reads. The
+# fourth hung until `slow-timeout`: `profile_config_v2`'s
+# `s10_an_idempotent_retry` sent a GET with a rendezvous channel, and zenoh
+# 1.10.1 handed it the reply on its own calling thread. Its channel is now
+# unbounded.
+#
+# With those four mended, five runs in a row at 12: 326, 324, 324, 325 and
+# 325 s, 2,615 passed in each, none retried. A lane's gate spent 943 s on
+# its tests and now spends 325 s. The whole gate took about 26 min; without
+# the release-profile bench build (`just bench-build`) and with these
+# threads it took 8 min 36 s, its test build already warm, which is 3.5 min
+# more from cold.
+#
+# On the runner it ships on (vm-runner-01, 6 CPUs, shared with another
+# job): CI's `test` job ran 2,637 tests in 364 s at these settings (run
+# 2563, #1155, 2026-11-22), none retried, where 2,529 took 619 s. The job
+# took 14 min 15 s in all; the rest is its build. The override `priority`
+# is read by the nextest CI pins, 0.9.143, the lanes' own.
+#
+# Until then this was nextest's default, one test per CPU. On vm-dev (6
+# CPUs, as vm-runner-01) the suite took 5 min at 6 and 3.5 min at 12
+# (2026-10-20). The first run at 12 failed link_face's s10, 7 downsampled
+# samples where 4 to 6 fit, because its owner's traffic was paced by sleeps
+# the load stretched; paced by deadline, the next run at 12 passed. One run
+# was not enough to raise it then. What it showed still holds: most tests
+# sleep, so the CPUs are not the first limit, the timing windows are. The
+# groups below hold the tests that have such a window, and the ones that
+# load the CPUs the others wait on.
+test-threads = 12
+
+# Each group runs two of its tests at once, beside the ten other slots.
+#
+# `timing`: tests that count what arrives in a window of wall time.
+#   - `zenkey-fleet::link_face`, all 18: an owner's traffic at 20 Hz for 5 s
+#     and a far reader's count of what a 1 Hz downsampling let across (4 to
+#     6), or keep-alives counted beside paced data. Ungrouped, twelve of
+#     them would start together, as a binary's tests do.
+#   - `zenkey::budget`: a slow reader, a failed path and an owner's rate,
+#     each measured.
+#   - the tests #1028 lists as passing only on a retry under load, and
+#     `zenkey::archive_example`, which polls a black box every 200 ms.
+#
+# `heavy`: tests that compute where the rest wait. Two at once leaves two
+# of a lane's four cores to the tests that are waiting on a clock.
+#   - beside a crowd of tokens, 300 to 10,000 of them:
+#     `zenkey::presence_scale`, `zenkey-fleet::watch_scale` and
+#     `watch_reopen`, and three of `zenkey::presence` (`s10_…`,
+#     `a_round_trip_under_load…`, `a_watch_session_in_a_namespace_waits…`).
+#     The two with 10,000 ran side by side in the one run at 16 where every
+#     CPU-bound test ran slow: 137 s and 61 s where they take 57 s and 28 s,
+#     and both passed.
+#   - `zenctl::render` (160 s of CPU, 53 s of it in one test), `zenctl::cli`
+#     (the trycmd corpus, 43 s), `zengui::shots` (25 s), and
+#     `profile_redundancy`'s `a_write_in_flight…` (18 s of CPU in 8 s).
+#
+# A test that newly needs a retry joins a group only when it measures a
+# window or loads the CPUs. Otherwise its wait is what gets fixed: a
+# condition waited for, a pace kept by deadline, as #1008 did and the three
+# above.
+#
+# Both groups start first (`priority`): a group two wide lasts as long as
+# its tests summed over two (`timing`, 480 s, so 240 s), whenever it starts.
+# The binaries whose scenarios wait a minute or more start next, so that the
+# longest test (201 s) runs beside the rest and not after it.
+#
+# No `threads-required` on a test in a group. With `threads-required = 2` on
+# the five largest crowd tests, in one group of two with the `timing` tests,
+# a full run at 12 threads ended with that group's 29 remaining tests never
+# started (nextest 0.9.143: "29/2615 tests were not run", exit 100). Three
+# smaller runs of the same shape did not reproduce it, and the next full
+# run, without it, ran every test.
+[test-groups]
+timing = { max-threads = 2 }
+heavy = { max-threads = 2 }
+
+[[profile.ci.overrides]]
+filter = """
+binary_id(zenkey-fleet::link_face)
+| binary_id(zenkey::budget)
+| binary_id(zenkey::archive_example)
+| (binary_id(zenkey::state) & test(/^(s1_in_band_stamps|s7_late_joiners_across_runs)/))
+| (binary_id(zenkey::operations) & test(=s9_a_calls_forms))
+| (binary_id(zenkey::bindings) & test(=r5_a_wait_cut_short_keeps_what_it_found))
+| (binary_id(zenkey::frames) & test(=s6_a_late_joiner))
+| (binary_id(zenkey::profile_arbitration) & test(=s11_a_governed_commanders_standby))
+| (binary_id(zenkey::profile_telemetry_v2) & test(=a_config_v2_owners_device_reset_is_a_new_instance))
+"""
+test-group = "timing"
+priority = 60
+
+[[profile.ci.overrides]]
+filter = """
+binary_id(zenkey::presence_scale)
+| binary_id(zenkey-fleet::watch_scale)
+| binary_id(zenkey-fleet::watch_reopen)
+| (binary_id(zenkey::presence) & test(/^(s10_a_round_trip_at_a_population|a_round_trip_under_load|a_watch_session_in_a_namespace_waits)/))
+| binary_id(zenctl::render)
+| binary_id(zenctl::cli)
+| binary_id(zengui::shots)
+| (binary_id(zenkey::profile_redundancy) & test(=a_write_in_flight_during_a_step_down_lands_before_its_token_goes))
+"""
+test-group = "heavy"
+priority = 60
+
+[[profile.ci.overrides]]
+filter = """
+binary_id(zenctl::live_zk2)
+| binary_id(zenkey::profile_health)
+| binary_id(zenkey::profile_config)
+| binary_id(zenkey::profile_config_v2)
+| binary_id(zenkey::profile_alarms)
+"""
+priority = 40

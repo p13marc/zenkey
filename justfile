@@ -3,7 +3,7 @@
 # traffic to look at.
 #
 #   just gui-demo     # the GUI, against the zk2 demo traffic. Start here.
-#   just ci           # everything CI runs, in the same order
+#   just ci           # what CI runs on a pull request, in the same order
 #
 # ── The demo traffic ─────────────────────────────────────────────────────
 #
@@ -159,7 +159,13 @@ test-live port=port namespace="spray":
 test:
     cargo test --workspace --locked
 
-# Everything CI runs (.forgejo/workflows/ci.yml), in the same order.
+# No more than a pull request's run since #1151: CI builds the benches
+# in the release profile on its nightly run, on `v1` pushes and by dispatch
+# (#1140), and here that build is `just bench-build`, 4 min 48 s of a lane's
+# gate when it ran at every one. `cargo build --all-targets` below still
+# compiles and links every bench, so one that stops compiling fails here.
+# CI's `msrv` and `deny` jobs were never in this recipe.
+# What CI runs on a pull request (.forgejo/workflows/ci.yml), in the same order.
 ci:
     cargo fmt --all --check
     # The gutter gate (#195): a dropped `\` in a multi-line string prints the
@@ -209,9 +215,16 @@ ci:
     # suite's waits overlap across binaries (.config/nextest.toml).
     cargo nextest run --workspace --locked --profile ci
     cargo test --workspace --doc --locked
-    cargo bench --workspace --no-run --locked
     just features
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+
+# A second full tree, in the release profile. CI's `test` job runs it on its
+# nightly schedule, on `v1` pushes and by dispatch, never on a pull request
+# (#1140), and `just ci` left it to that run (#1151). Run it after a change
+# to a bench or to the release profile.
+# The benches built as `cargo bench` builds them, and not run.
+bench-build:
+    cargo bench --workspace --no-run --locked
 
 # The criterion baselines behind docs/bench-baseline.md. Slow: tree/build_50k
 # is tens of milliseconds an iteration.

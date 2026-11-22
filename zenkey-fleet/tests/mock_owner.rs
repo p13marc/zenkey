@@ -31,6 +31,35 @@ fn revision(path: &str) -> Arc<Revision> {
     Arc::new(Revision::from_contract(example(path), ContractSource::File))
 }
 
+/// The descriptor bytes a near-side reader GETs from `instance`. `run_gen`
+/// names the instance once its service has started, on the owner's session,
+/// and the router may not have heard that session's queryable yet: a GET
+/// sent at once found no descriptor in a suite running beside this one
+/// (#1151).
+async fn descriptor_bytes(
+    tool: &zenoh::Session,
+    address: &zenkey_model::grammar::Addr,
+    instance: &str,
+) -> Vec<u8> {
+    let instance = instance.parse().unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        // A read that fails is "not yet" too, until the deadline: a GET
+        // sent before the router has heard the queryable may come back as
+        // an error as well as with no descriptor.
+        let why = match zenkey::presence::descriptor(tool, address, &instance, T).await {
+            Ok(zenkey::presence::Found::Descriptor(_, bytes)) => return bytes,
+            Ok(_) => "no descriptor answered".to_owned(),
+            Err(e) => format!("the read failed: {e:?}"),
+        };
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no descriptor in 20 s: {why}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// The descriptor `address` serves, once presence lists it served.
 async fn descriptor(tool: &zenoh::Session, address: &str) -> zenkey_model::descriptor::Descriptor {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
@@ -241,13 +270,7 @@ async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
     let instance = came_up.await.expect("the mock came up");
 
     // The bytes a near-side reader GETs.
-    let zenkey::presence::Found::Descriptor(_, bytes) =
-        zenkey::presence::descriptor(&tool, &address, &instance.parse().unwrap(), T)
-            .await
-            .unwrap()
-    else {
-        panic!("no descriptor")
-    };
+    let bytes = descriptor_bytes(&tool, &address, &instance).await;
     let text = std::str::from_utf8(&bytes).unwrap();
     let contracts = [modem.contract(), config.contract(), health.contract()];
     let (d, report) = zenkey_model::descriptor::check(text, &contracts);
@@ -392,13 +415,7 @@ async fn gen_of_zenoh_modems_node_meets_the_size_rule_and_states_true_minors() {
         .await
     });
     let instance = came_up.await.expect("the mock came up");
-    let zenkey::presence::Found::Descriptor(_, bytes) =
-        zenkey::presence::descriptor(&tool, &address, &instance.parse().unwrap(), T)
-            .await
-            .unwrap()
-    else {
-        panic!("no descriptor")
-    };
+    let bytes = descriptor_bytes(&tool, &address, &instance).await;
     let text = std::str::from_utf8(&bytes).unwrap();
     let (d, report) = zenkey_model::descriptor::check(text, &contracts);
     assert!(!report.has_errors(), "{report}");
