@@ -15,9 +15,9 @@ name = "lgr-minimal"
 path = "../src/minimal.rs"
 
 [dependencies]
-zenoh = { git = "https://github.com/eclipse-zenoh/zenoh", rev = "766b4558337018e05c2db655254b8fd35ab22ab1", features = ["unstable"] }
+zenoh = { git = "https://github.com/eclipse-zenoh/zenoh", rev = "327affb55d84eaefd41e5bf1ece4c4057734087d", features = ["unstable"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "io-util", "io-std", "fs", "sync"] }
-flume = "0.11"
+flume = "0.12"
 
 [profile.release]
 debug = 1

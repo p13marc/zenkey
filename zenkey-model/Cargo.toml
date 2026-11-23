@@ -33,14 +33,14 @@ ciborium = { workspace = true }
 ciborium-ll = { workspace = true }
 prost-reflect = { workspace = true }
 prost-types = "0.14"
-protox = "0.9"
+protox = "0.10"
 # RFC 8785 (JCS): validated nightly against cyberphone's 100M-number corpus
 # (#608, the 2026-10-07 library survey). Canonical contracts are restricted
 # to ASCII identifiers and integers within ±(2^53−1), so every JCS
 # implementation — this one and Python's `rfc8785` — agrees on them.
-serde_json_canonicalizer = "0.3"
+serde_json_canonicalizer = "0.4"
 # Packed records' fixed point (core §7.6): exact decimal arithmetic with no
 # bound on a declaration's digits. Already in the tree through der-parser.
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-integer = "0.1"
 num-traits = "0.2"
