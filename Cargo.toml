@@ -154,7 +154,7 @@ serde_yaml = "0.9"
 # zenoh did (link.v2 §2.19, #988 L2), so a file zenoh accepts is read
 # alike: the workspace's `json5` 1.x and `toml` 1.x are other parsers.
 json5-zenoh = { package = "json5", version = "=0.4.1" }
-toml-zenoh = { package = "toml", version = "=0.9.12" }
+toml-zenoh = { package = "toml", version = "=1.2.2" }
 # `link.v1`'s live scenarios (§11, #769 LE): a session presenting a
 # certificate CN beside its user name, to a router running mTLS. The tests
 # mint a CA and each certificate per run, so no key is kept in the tree.
