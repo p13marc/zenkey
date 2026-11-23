@@ -22,7 +22,7 @@ prost = { workspace = true }
 prost-types = "0.14"
 prost-build = "0.14.4"
 typify = { version = "0.8", default-features = false }
-schemars08 = { package = "schemars", version = "0.8.22" }
+schemars08 = { package = "schemars", version = "1.0.0" }
 schemars = { workspace = true }
 
 [dev-dependencies]
