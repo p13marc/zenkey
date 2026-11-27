@@ -4332,7 +4332,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
         + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
         + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
-        + _round123_readings(root)
+        + _round123_readings(root) + _round124_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -5202,6 +5202,103 @@ def _round123_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "- **The epoch.** No owner is given a catalog, so the deployment epoch is 0")
                 + missing(log, "- **No scenario runs under a catalog.**")
                 + [q for q in ("No implementation runs them yet.",) if q in sc], []))
+    return out
+
+
+def _round124_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.115 and alarms.v2 0.1 (#609, round 124; #984): the walk
+    re-keyed. Each text at its version; core 0.115's two places, Appendix
+    D's row and §8.1's tokenless list; the index's row and its layout's
+    history line; the published revision 2.0, its fingerprint computed by
+    zk2py's own linter from the standard contract and its bundle verified
+    by zk2py's §9.6 steps; and W105's three cases as the entry names them.
+    No session is opened."""
+    import re
+
+    from . import bundle
+    from .contract import load_contract
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    core, log, obs, v1t, v2t, f2, idx, alog = (
+        flat("core.md"), flat("CHANGELOG.md"), flat("observer.md"), flat("profiles/alarms/v1.md"),
+        flat("profiles/alarms/v2.md"), flat("profiles/freshness/v2.md"), flat("profiles/README.md"),
+        flat("profiles/alarms/CHANGELOG.md"))
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    out: list[tuple[str, Any, Any]] = []
+    at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
+    v2_at = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", v2t)
+    out.append(("core 0.115 or later, observer still 0.35, alarms.v1 still 0.14, freshness.v2 0.12, and alarms.v2 "
+                "at text 0.1 or later, experimental, written against core 0.115, using freshness.v2 0.12 and "
+                "restating alarms.v1 0.14: each header says so, and each changelog has its entry",
+                [at is not None and _at_least(at.group(1), "0.115"),
+                 v2_at is not None and _at_least(v2_at.group(1), "0.1")]
+                + missing(obs, "| **Text version** | 0.35 (") + missing(v1t, "| **Text version** | 0.14 (")
+                + missing(f2, "| **Text version** | 0.12 (")
+                + missing(v2t, "| **Status** | experimental |",
+                          "| **Written against** | core 0.115 ([`../../core.md`](../../core.md)) |",
+                          "[`freshness.v2`](../freshness/v2.md), text 0.12",
+                          "It restates [`alarms.v1`](v1.md)'s rules by reference, text 0.14")
+                + missing(log, "## 0.115 — 2026-11-27: Appendix D and §8.1 name `alarms.v2` (#984)",
+                          "- **No rule, and no lint's rule.** The SHOULD of §8.1 is the same SHOULD, with one more "
+                          "name. 297 rules.", "- **Observer** stays 0.35.")
+                + missing(alog, "## alarms.v2 0.1 — 2026-11-27: a new major: an alarm in a slot, a transition in "
+                                "one packed record, words by table, a resolve with no delete, and \"nothing fires\" "
+                                "from one snapshot (#984)"),
+                [True, True]))
+    out.append(("core 0.115's two places: Appendix D's alarms row adds alarms.v2's rules beside v1's empty table, "
+                "and its paragraph says what W105 reads by major; §8.1's tokenless list reads alarms.v1 or alarms.v2",
+                missing(core, "| `alarms` | none; `alarms.v2` §4 adds `rules` |",
+                        "A contract that lists `alarms.v1` and writes `alarms.<key>` draws W105.",
+                        "`alarms.v2` publishes one key, `rules`: a service's own table of its alarm rules, which a "
+                        "contract writes once on `[defaults]` (`alarms.v2` §4). W105 reads it for a contract that "
+                        "lists `alarms.v2`, and any other `alarms.<key>` there draws W105. A contract that lists "
+                        "`alarms.v1` and writes `alarms.rules` draws W105 as well.",
+                        "`alarms.v1` ([`profiles/alarms/v1.md`](profiles/alarms/v1.md) §2.13) or `alarms.v2` "
+                        "([`profiles/alarms/v2.md`](profiles/alarms/v2.md) §2.13),"), []))
+    # The index: its row, and what its layout says .history holds.
+    held = sorted(p_.name for p_ in (spec / "profiles" / ".history").iterdir() if p_.is_dir())
+    layout_line = re.search(r"\.history/ published revisions of the profiles' standard contracts \(([^)]*)\)", idx)
+    out.append(("profiles/README.md at alarms.v2 0.1: its row says 0.1, experimental, used by none, core 0.115; "
+                "spec/profiles/.history holds alarms.v2 beside five others, and the layout's .history line names "
+                "every one but alarms.v2 (F-612)",
+                [missing(idx, "| [`alarms.v2`](alarms/v2.md) | 0.1 | experimental | none | 0.115 |"), held,
+                 None if layout_line is None else sorted(x.strip() for x in layout_line.group(1).split(","))],
+                [[], ["alarms.v1", "alarms.v2", "config.v1", "freshness.v2", "health.v1", "health.v2"],
+                 ["alarms.v1", "config.v1", "freshness.v2", "health.v1", "health.v2"]]))
+    # The history: revision 2.0, computed zk2py's own way.
+    k = load_contract(spec / "profiles" / "alarms" / "alarms.v2.toml", check_file_name=True)
+    fp = "sha256:2292477cadf555dd09b07499ca048add4e48c63d60a209c13eaf543988c32cb7"
+    hist = sorted((spec / "profiles" / ".history" / "alarms.v2").glob("*.bundle.json"))
+    data = hist[0].read_bytes() if len(hist) == 1 else b""
+    try:
+        v = bundle.verify(data, fp)
+        verified = [v.fingerprint, sorted(v.schemas)]
+    except bundle.BundleError as e:
+        verified = [f"refused: {e.tag}", []]
+    out.append(("alarms.v2 §3's revision 2.0: zk2py's linter loads alarms.v2.toml with no finding, at the "
+                "fingerprint §3 states; .history/alarms.v2/ holds that one bundle, which zk2py's §9.6 steps "
+                "verify under it, carrying the two schemas §3 names, and its bytes are zk2py's own build",
+                [k.codes, k.fingerprint, [p_.name for p_ in hist], verified, data == bundle.build(k)]
+                + missing(v2t, f"Revision 2.0 is `{fp}`, published in `../.history/alarms.v2/` (core §9.7)."),
+                [[], fp, [f"{fp.removeprefix('sha256:')}.bundle.json"],
+                 [fp, ["sha256:a3515ad47772ac778ccfbad3850a086ac18c28a9975eb7c8288c3437db9b99de",
+                       "sha256:fe59e748fc957322428ac633a0908d09aa8b6c66952f7a9cdd8608db715a2b2a"]], True]))
+    # W105's three cases, as core 0.115's entry names them.
+    expect = _load_json(root / "contracts" / "expect.json")["cases"]
+    names = ("ok-alarms-v2-rules", "w105-alarms-rules", "w105-alarms-v2-vocabulary")
+    lints = {n: load_contract(root / "contracts" / f"{n}.toml").codes for n in names}
+    out.append(("core 0.115's evidence: ok-alarms-v2-rules (the table under alarms.v2) draws no finding, "
+                "w105-alarms-rules (the same table under alarms.v1) W105, and w105-alarms-v2-vocabulary "
+                "(alarms.severity_default under alarms.v2) W105, as expect.json and zk2py's linter say alike",
+                [{n: expect[n]["codes"] for n in names}, lints]
+                + missing(log, "- `ok-alarms-v2-rules`: the table under `alarms.v2`, no finding;",
+                          "- `w105-alarms-rules`: the same table under `alarms.v1`, W105;",
+                          "- `w105-alarms-v2-vocabulary`: `alarms.severity_default` under `alarms.v2`, W105."),
+                [{"ok-alarms-v2-rules": [], "w105-alarms-rules": ["W105"], "w105-alarms-v2-vocabulary": ["W105"]}] * 2))
     return out
 
 

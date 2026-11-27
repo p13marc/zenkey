@@ -111,9 +111,15 @@ VOCABULARY = {**INTERIM_VOCABULARY, **PUBLISHED_VOCABULARY}
 #: health.<key> is outside it." "health.v1 publishes no table and had no
 #: interim one, so a key health.<key> in a contract that lists health.v1
 #: draws no W105, as before": ``health`` has no row in the tables above.
+#: ``alarms.v2`` §4 (text 0.1, core 0.115's Appendix D row, "none;
+#: ``alarms.v2`` §4 adds ``rules``"): "W105 reads it for a contract that
+#: lists ``alarms.v2``, and any other ``alarms.<key>`` there draws W105. A
+#: contract that lists ``alarms.v1`` and writes ``alarms.rules`` draws W105
+#: as well": ``alarms.v1``'s published table above stays empty.
 VOCABULARY_BY_MAJOR = {"telemetry.v2": {"kind", "unit", "buckets", "semantic", "series"},
                        "desired.v2": {"target_param", "report", "pointers", "details"},
-                       "health.v2": {"reasons", "details", "codes"}}
+                       "health.v2": {"reasons", "details", "codes"},
+                       "alarms.v2": {"rules"}}
 
 # -- §2.4 / §9.3: built-in defaults -----------------------------------------
 
