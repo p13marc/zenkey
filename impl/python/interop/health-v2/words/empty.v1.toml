@@ -1,0 +1,16 @@
+# Round 123 (F-599): beside `full.v1`, the instance's other contract, whose
+# table of reasons is empty. health.v2 §2.10: "Where two hold two different
+# lists, it has none (`differ`)", so `tc_a` is written out_of_range.
+[interface]
+name    = "empty"
+major   = 1
+minor   = 0
+summary = "an empty table of reasons"
+uses    = ["health.v2"]
+
+[defaults]
+annotations = { "health.reasons" = [] }
+
+[resources.rates]
+kind = "stream"
+type = { raw = "application/octet-stream" }

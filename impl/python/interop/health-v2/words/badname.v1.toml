@@ -1,0 +1,15 @@
+# Round 123 (F-594): an invalid declaration, `value`: a name that is not
+# `[a-z][a-z0-9_]*`. health.v2 §2.10: the contract holds no table.
+[interface]
+name    = "badname"
+major   = 1
+minor   = 0
+summary = "a table of reasons whose name is not a name"
+uses    = ["health.v2"]
+
+[defaults]
+annotations = { "health.reasons" = ["Tc-Gone"] }
+
+[resources.rates]
+kind = "stream"
+type = { raw = "application/octet-stream" }

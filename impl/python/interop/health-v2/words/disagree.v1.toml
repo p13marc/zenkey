@@ -1,0 +1,18 @@
+# Round 123 (F-594): an invalid declaration, `disagrees`: two resources carry
+# two different lists. health.v2 §2.10: the contract holds no table.
+[interface]
+name    = "disagree"
+major   = 1
+minor   = 0
+summary = "two resources carrying two different tables of reasons"
+uses    = ["health.v2"]
+
+[resources.rates]
+kind = "stream"
+type = { raw = "application/octet-stream" }
+annotations = { "health.reasons" = ["tc_a"] }
+
+[resources.drops]
+kind = "stream"
+type = { raw = "application/octet-stream" }
+annotations = { "health.reasons" = ["tc_b"] }

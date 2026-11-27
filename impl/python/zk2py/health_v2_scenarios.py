@@ -1,12 +1,15 @@
 """The ``health.v2`` scenarios (``spec/profiles/health/scenarios-v2.md``, text
-0.1) between two zk2py processes: ``python -m zk2py.health_v2_scenarios
-[--only 1|2|3|4|5|6|7|8|8w|9|epoch]...`` (#609, round 120).
+0.2) with zk2py's reader: ``python -m zk2py.health_v2_scenarios [--owner
+zk2py|rust] [--archive stand-in|rust] [--only 1|2|3|4|5|6|7|8|8w|9|epoch|epoch-oh]...``
+(#609, rounds 120 and 123).
 
-**Both parties are zk2py's.** The reference's runtime does not serve
-``health.v2`` at 08f3600a, so this shows which sections can be run as
-written, and no interop. Each owner is a process of its own
-(``zk2py.health_v2_owner``); the router R1, the subscriber S, the GET reader
-G and the tool T are this process's.
+**The owner** is a process of its own: zk2py's (``zk2py.health_v2_owner``)
+by default, or with ``--owner rust`` the reference's owner example, a black
+box (:class:`zk2py.health_v2_pairings.RustProc`; round 123, the reference's
+owner with zk2py's reader). The router R1, the subscriber S, the GET reader
+G and the tool T are this process's, zk2py's in every pairing. A part the
+owner example's usage has no word for is zk2py's, and its check says so:
+§7's ``lab/liar`` and ``lab/two``.
 
 - **The bus** is the text's: R1 with timestamping on, every other session
   its client. Timeouts are 1 s.
@@ -16,14 +19,20 @@ G and the tool T are this process's.
 - **§4's clock** is offset in the owner's runtime, the text's "Without
   root"; its reference is a key this runner puts, which R1 stamps.
 - **§5** starts its 100 owners in one process.
-- **§6's archive** is ``zk2py.health_scenarios``'s stand-in.
-- **§7's ``lab/two``** is not run: zk2py's owner builds both snapshots of a
-  GET at one asof, and has no word to do otherwise.
-- **§8's face** is a router V with access control under ``allow``, the
-  ground session its client, as ``health.v1``'s scenario §8 is run. Its
-  denies are read two ways (:data:`FACES`): ``--only 8`` lets cross what
-  each run says crosses, and ``--only 8w`` denies what the text words. The
-  Expected hold on the first alone (F-596).
+- **§6's archive** is ``zk2py.health_scenarios``'s stand-in, or with
+  ``--archive rust`` (the default under ``--owner rust``) the reference's
+  ``archive`` black box.
+- **§7's ``lab/two``** is zk2py's owner with ``--two-asofs``: it answers the
+  status's snapshot at one asof and the checks' at a later one (round 123).
+- **§8's face** is a router V with access control under ``allow``, whose
+  one subject is selected by its link protocol: the owner is V's client over
+  TCP, the ground session G over ``unixsock-stream`` (round 123: the owner
+  example takes no credentials). ``--only 8`` denies what text 0.2 words;
+  ``--only 8w`` what text 0.1 worded, on which its Expected did not hold
+  (F-596).
+- **``epoch``** runs an owner under a catalog's later epoch, and
+  **``epoch-oh``** the same owner confirming its status by owner heartbeat
+  (``freshness.v2`` §2.4), read by a reader that holds the catalog.
 
 Exit 0 when every check passes, 1 when any fails.
 """
@@ -57,6 +66,19 @@ JITTER_S = 0.5
 #: deployment epoch is 0: a record's since and at are Unix seconds".
 #: Every reader of §1 to §9 holds it; :func:`under_a_catalog` holds another.
 EPOCH = 0
+#: The owner of every section: ``zk2py`` or ``rust`` (``--owner``).
+OWNER = "zk2py"
+#: §6's archive: ``stand-in`` or ``rust`` (``--archive``).
+ARCHIVE = "stand-in"
+
+
+def make_owner(endpoint: str, address: str, *flags: str, impl: str | None = None) -> Any:
+    """One owner process: zk2py's, or the reference's owner example."""
+    if (impl or OWNER) == "rust":
+        from .health_v2_pairings import RustProc
+
+        return RustProc(endpoint, address, *flags)
+    return Proc(endpoint, address, *flags)
 
 
 class Report:
@@ -129,8 +151,8 @@ class Bus:
         self.extra: list[Any] = []
         self.tmp = tempfile.mkdtemp(prefix="zk2py-health-v2-", dir=os.environ.get("ZK2PY_SCRATCH"))
 
-    def owner(self, address: str, *flags: str) -> Proc:
-        p = Proc(self.endpoint, address, *flags)
+    def owner(self, address: str, *flags: str, impl: str | None = None) -> Any:
+        p = make_owner(self.endpoint, address, *flags, impl=impl)
         self.procs.append(p)
         return p
 
@@ -227,15 +249,21 @@ def section1(report: Report) -> None:
             return out
 
         got = [entries(st) for k in ("lab/svc instance", "lab/svc alive") for st, _ in answers.get(k, [])]
+        # "under the run the owner's descriptor states (core §3.3)"
+        d0 = answers.get("lab/svc instance", [(None, None)])[0][1]
+        desc = json.loads(d0[0].payload) if d0 and d0[0].ok else {}
+        if o.run is None:
+            o.run = desc.get("run")
         first = [x for x in s.of("state/status") if x["kind"] == "put"]
         r0 = s.record(first[0]) if first else None
         report.check(sec, "step 1: both of T's GETs, at the instance token and at the alive/health.v2 token, answer "
                           "the status's snapshot: one entry, unknown with the reason 1, under the run the owner's "
                           "descriptor states, with its confirmation",
-                     len(got) == 2 and all(len(x) == 1 and x[0][0].get("level") == "unknown"
+                     len(got) == 2 and desc.get("run") == o.run
+                     and all(len(x) == 1 and x[0][0].get("level") == "unknown"
                                            and x[0][0].get("reason") == 1 and x[0][1] == o.run
                                            and x[0][2] in ("time", "conf") for x in got),
-                     f"{got}; the owner's run {o.run}")
+                     f"{got}; the owner's run {o.run}, its descriptor's {desc.get('run')}")
         report.check(sec, "step 1: its put, as S heard it, is 12 bytes under a 16-bit run: CH 0x03, the run, the "
                           "seq, and a record of 6 bytes",
                      len(first) == 1 and len(first[0]["wire"]) == 12 and first[0]["wire"][0] == 0x03
@@ -286,10 +314,14 @@ def section1(report: Report) -> None:
                      f"{len(puts)} puts, {len(beats)} heartbeats, gaps {[round(x, 2) for x in gaps]} s; {_ans(a4)}")
         report.check(sec, "step 4: the heartbeat's payload is 16 bytes under a 16-bit run, CH 0xc1",
                      bool(raw) and all(len(w) == 16 and w[0] == 0xC1 for w in raw), f"{[w.hex() for w in raw[:2]]}")
-        # Step 5: lab/old, health.v1's revision 1.1, in this process.
-        old = v1.HealthOwner("lab", "old", level=v1.OK, reason="serving", connect=bus.endpoint)
-        old.start()
-        bus.extra.append(old)
+        # Step 5: lab/old, health.v1's revision 1.1: zk2py's in this process,
+        # or the owner example with --health
+        if OWNER == "rust":
+            bus.owner("lab/old", "--v1", "--level", "ok", "--reason", "serving")
+        else:
+            old = v1.HealthOwner("lab", "old", level=v1.OK, reason="serving", connect=bus.endpoint)
+            old.start()
+            bus.extra.append(old)
         time.sleep(1.0)
         st2 = live.get_state(bus.t, "zk2/lab/*/health.v2/state/**")
         st1 = live.get_state(bus.t, "zk2/lab/*/health.v1/state/**")
@@ -620,20 +652,66 @@ def section5(report: Report, n: int = 100) -> None:
 
 # -- §6 ------------------------------------------------------------------------------------
 
+class ReferenceArchive:
+    """The reference's ``archive`` black box (its usage): ``archive
+    --connect <R1> --system <s> --service <a> --record <owner> <selector>
+    health.v2.toml``, up once it says ``aligned``. Its archive form is core
+    §4.4's, as the stand-in's."""
+
+    def __init__(self, endpoint: str, address: str, owner: str, selector: str):
+        from .blackbox import BLACKBOX
+
+        system, service = address.split("/")
+        self.address = address
+        self.p = subprocess.Popen([str(BLACKBOX / "archive"), "--connect", endpoint, "--system", system,
+                                   "--service", service, "--record", owner, selector, str(h2.CONTRACT)],
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.lines: list[str] = []
+        self.stderr: list[str] = []
+        threading.Thread(target=lambda: [self.lines.append(x.rstrip("\n")) for x in self.p.stdout],
+                         daemon=True).start()
+        threading.Thread(target=lambda: [self.stderr.append(x) for x in self.p.stderr], daemon=True).start()
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not any(x.startswith("aligned") for x in self.lines):
+            if self.p.poll() is not None:
+                raise RuntimeError(f"the archive did not start: {self.stderr[-3:]}")
+            time.sleep(0.1)
+
+    def form(self, key: str) -> str:
+        from .slug import slug
+
+        return f"zk2/{self.address}/archive.v1/@state/" + "/".join(slug(c) for c in key.split("/")[1:])
+
+    def close(self) -> None:
+        try:
+            self.p.stdin.write("quit\n")
+            self.p.stdin.close()
+        except (OSError, ValueError):
+            pass
+        try:
+            self.p.wait(15)
+        except subprocess.TimeoutExpired:
+            self.p.kill()
+            self.p.wait()
+
+
 def section6(report: Report) -> None:
     import zenoh
 
     from . import zk2c
     from .health_scenarios import StandInArchive
 
-    sec = "§6 an absent owner"
+    sec = f"§6 an absent owner ({'the reference archive' if ARCHIVE == 'rust' else 'the stand-in archive'})"
     bus = Bus()
     try:
         o = bus.owner("lab/svc", "--level", "degraded", "--reason", "upstream_lost")
         c = hl.standard()
         status_r = next(r for r in c.canonical["resources"] if r["template"] == "status")
-        archive = StandInArchive(bus.endpoint, "lab/archive", "zk2/lab/svc/health.v2/state/**",
-                                 {"iface": "health.v2", "contract": c.fingerprint, "type": status_r["type"]})
+        if ARCHIVE == "rust":
+            archive: Any = ReferenceArchive(bus.endpoint, "lab/archive", "lab/svc", "zk2/lab/svc/health.v2/state/**")
+        else:
+            archive = StandInArchive(bus.endpoint, "lab/archive", "zk2/lab/svc/health.v2/state/**",
+                                     {"iface": "health.v2", "contract": c.fingerprint, "type": status_r["type"]})
         bus.extra.append(archive)
         time.sleep(0.5)
         r1, info1 = hl.read_near(bus.t, "lab/svc")
@@ -642,7 +720,7 @@ def section6(report: Report) -> None:
                      and hl.shown(r1.status, info1["tables"]) == "degraded, upstream_lost",
                      f"{_ans(h2.judge(r1))}; shown {hl.shown(r1.status, info1['tables'])!r}")
         o.end()
-        time.sleep(1.5)
+        time.sleep(1.5 if ARCHIVE != "rust" else 3.0)
         r3, info3 = hl.read_near(bus.t, "lab/svc")
         form = archive.form("zk2/lab/svc/health.v2/state/status")
         got: list[Any] = []
@@ -666,7 +744,7 @@ def section6(report: Report) -> None:
                      r3.presence == "absent" and st is not None and not st.replies
                      and a3.expect() == {"verdict": "not_asked", "reason": "absent", "level": None}
                      and len(shown) == 1 and shown[0]["last_known"] == "degraded, upstream_lost",
-                     f"{_ans(a3)}; {len(st.replies) if st else None} replies; last-known {shown}")
+                     f"{_ans(a3)}; {len(st.replies) if st else None} replies; last-known {shown}; asked {form}")
     finally:
         bus.close()
 
@@ -677,7 +755,10 @@ def section7(report: Report) -> None:
     sec = "§7 an inconsistent status, from one reading"
     bus = Bus()
     try:
-        bus.owner("lab/liar", "--level", "ok", "--reason", "serving", "--liar", "--check", "disk=failed:timeout")
+        # a test owner that breaks §2.2: zk2py's in every pairing (the owner
+        # example's usage has none)
+        bus.owner("lab/liar", "--level", "ok", "--reason", "serving", "--liar", "--check", "disk=failed:timeout",
+                  impl="zk2py")
         bus.owner("lab/frank", "--level", "failed", "--reason", "misconfigured", "--check", "disk=ok:ok")
         flip = bus.owner("lab/flip", "--level", "ok", "--reason", "serving", "--check", "disk=ok:ok")
         time.sleep(0.5)
@@ -687,8 +768,8 @@ def section7(report: Report) -> None:
         report.check(sec, "step 1: each reading's two snapshots are under one run and one asof, with no entry above "
                           "it: one instant",
                      jl.instant and jf.instant, f"liar {jl.instant} ({jl.why_not}), frank {jf.instant} ({jf.why_not})")
-        report.check(sec, "step 1: lab/liar: unhealthy, inconsistent, at failed, never healthy; T reports the break "
-                          "of §2.2 as a finding about the owner, from this one reading",
+        report.check(sec, "step 1: lab/liar (zk2py's): unhealthy, inconsistent, at failed, never healthy; T reports "
+                          "the break of §2.2 as a finding about the owner, from this one reading",
                      h2.judge(rl).expect() == {"verdict": "unhealthy", "reason": "inconsistent", "level": "failed"}
                      and jl.breaks and jl.report == "finding", f"{_ans(h2.judge(rl))}; report {jl.report}")
         report.check(sec, "step 1: lab/frank: unhealthy, failed, and no break",
@@ -710,35 +791,85 @@ def section7(report: Report) -> None:
                      all(r[0] for r in rows) and not any(r[1] for r in rows) and len(seen) > 1,
                      f"{sum(r[0] for r in rows)} of {len(rows)} one instant ({sorted({str(r[4]) for r in rows})}), "
                      f"{sum(r[1] for r in rows)} breaks; (status, disk) seen {seen}; {done}")
+        # Step 3: lab/two, zk2py's test owner in every pairing (round 123).
+        bus.owner("lab/two", "--level", "ok", "--reason", "serving", "--liar", "--two-asofs",
+                  "--check", "disk=failed:timeout", impl="zk2py")
+        time.sleep(0.5)
+        r1_, i1 = hl.read_near(bus.t, "lab/two")
+        j1 = i1["joined"]
+        a1 = h2.judge(r1_)
+        report.check(sec, "step 3: lab/two (zk2py's): T's first reading is not one instant; T judges it unhealthy, "
+                          "inconsistent, at failed, and reports no break from it alone",
+                     not j1.instant and a1.expect() == {"verdict": "unhealthy", "reason": "inconsistent",
+                                                        "level": "failed"}
+                     and j1.breaks and j1.report == "two_readings",
+                     f"instant {j1.instant} ({j1.why_not}); snapshots' asofs "
+                     f"{[None if x is None else x.get('asof') for x in i1['snapshots']]}; {_ans(a1)}; "
+                     f"report {j1.report}")
+        time.sleep(2.0)
+        r2_, i2 = hl.read_near(bus.t, "lab/two")
+        j2 = i2["joined"]
+        both = j1.breaks and j2.breaks
+        report.check(sec, "step 3: T reports the break after the second reading, a grace apart (§2.2)",
+                     not j2.instant and both and h2.judge(r2_).expect() == a1.expect(),
+                     f"second reading: instant {j2.instant}, breaks {j2.breaks}; the break seen in both: {both}")
     finally:
         bus.close()
 
 
 # -- §8 ------------------------------------------------------------------------------------
 
-#: §8's face, read two ways. ``worded``: the denies the text words, under
-#: ``allow``, as health.v1's scenario §8 is run: ``zk2/**/@zk/**``, and in
-#: runs B and C ``zk2/vehicle-01/*/*/state/**``. ``listed``: a face that lets
-#: cross what each run says crosses and nothing else of the owner's: in run
-#: A the status and its heartbeat, in run B nothing, in run C the faults.
-#: The Expected hold under ``listed`` alone (F-596).
+#: §8's face, beside the setup's ``zk2/**/@zk/**``, read two ways.
+#: ``listed``: the denies text 0.2 words (F-596 answered): run A the faults'
+#: key, run B the state, the heartbeats and the faults' key, run C the state
+#: and the heartbeats. ``worded``: what text 0.1 worded, on which its
+#: Expected did not hold (F-596): runs B and C deny the state alone.
+FAULTS_KEY = "zk2/vehicle-01/nav/health.v2/stream/faults"
 FACES = {
     "worded": {"A": [], "B": ["zk2/vehicle-01/*/*/state/**"], "C": ["zk2/vehicle-01/*/*/state/**"]},
-    "listed": {"A": ["zk2/vehicle-01/*/*/stream/faults"],
-               "B": ["zk2/vehicle-01/*/*/state/**", "zk2/vehicle-01/*/*/stream/**"],
+    "listed": {"A": [FAULTS_KEY],
+               "B": ["zk2/vehicle-01/*/*/state/**", "zk2/vehicle-01/*/freshness.v2/stream/**", FAULTS_KEY],
                "C": ["zk2/vehicle-01/*/*/state/**", "zk2/vehicle-01/*/freshness.v2/stream/**"]},
 }
 
 
+def face_router(workdir: str, denied: list[str]) -> tuple[Any, str, str]:
+    """V: a router with access control under ``allow``, denying ``denied``
+    both ways, every message, to its one subject, selected by its link
+    protocol: what comes over ``unixsock-stream`` is the ground's. The owner
+    is its client over TCP, as the owner example takes no credentials:
+    (router, the TCP endpoint, the face's endpoint)."""
+    import zenoh
+
+    from .owner import free_loopback_port
+
+    port = free_loopback_port()
+    sock = os.path.join(workdir, f"v{len(denied)}.sock")
+    conf = zenoh.Config()
+    conf.insert_json5("mode", json.dumps("router"))
+    conf.insert_json5("listen/endpoints", json.dumps([f"tcp/127.0.0.1:{port}", f"unixsock-stream/{sock}"]))
+    conf.insert_json5("scouting/multicast/enabled", "false")
+    conf.insert_json5("timestamping/enabled", "true")
+    messages = ["put", "delete", "declare_subscriber", "query", "declare_queryable", "reply",
+                "liveliness_token", "declare_liveliness_subscriber", "liveliness_query"]
+    conf.insert_json5("access_control", json.dumps({
+        "enabled": True, "default_permission": "allow",
+        "rules": [{"id": "face", "messages": messages, "flows": ["ingress", "egress"], "permission": "deny",
+                   "key_exprs": denied}],
+        "subjects": [{"id": "ground", "link_protocols": ["unixsock-stream"]}],
+        "policies": [{"id": "the-face", "rules": ["face"], "subjects": ["ground"]}],
+    }))
+    return zenoh.open(conf), f"tcp/127.0.0.1:{port}", f"unixsock-stream/{sock}"
+
+
 def _face_run(report: Report, workdir: str, run: str, wait_s: float, face: str = "listed") -> None:
     from . import live
-    from .health_scenarios import _face_router
 
     sec = f"§8 across a constrained face ({face}), run {run}"
     crosses = run == "A"
     denied = ["zk2/**/@zk/**"] + FACES[face][run]
-    v, ep = _face_router(os.path.join(workdir, run), denied)
-    ground = live.open_client(ep, ("ground", "ground-pw"))
+    v, ep, face_ep = face_router(os.path.join(workdir, run), denied)
+    ground = live.open_client(face_ep)
     addr = "vehicle-01/nav"
     ref = "zk2py/health-v2/reference"
     stop = threading.Event()
@@ -755,8 +886,8 @@ def _face_run(report: Report, workdir: str, run: str, wait_s: float, face: str =
         report.check(sec, f"step 1: before the owner starts, G receives nothing, and judges unobservable, {want}",
                      not s.all() and not s.beats() and a1.expect() == {"verdict": "unobservable", "reason": want,
                                                                        "level": None}, _ans(a1))
-        o = Proc(ep, addr, "--level", "ok", "--reason", "serving", "--auth", "vehicle:vehicle-pw",
-                 "--reference", ref, "--run-record", os.path.join(workdir, f"{run}.run"))
+        o = make_owner(ep, addr, "--level", "ok", "--reason", "serving", "--reference", ref,
+                       "--run-record", os.path.join(workdir, f"{run}.run"))
         t1 = time.monotonic_ns()
         _sleep_until(t1 + int(wait_s * NS))
         a2 = h2.judge(hl.read_across(s, addr, crosses))
@@ -764,8 +895,8 @@ def _face_run(report: Report, workdir: str, run: str, wait_s: float, face: str =
         beats = s.beats(t1)
         tokens = live.list_presence(ground, "zk2/vehicle-01/*/@zk/**")
         if crosses:
-            report.check(sec, "step 2: G receives the status, 12 bytes, and the heartbeats that vouch for it; G "
-                              "judges healthy, ok",
+            report.check(sec, "step 2: G receives the status and the heartbeats that vouch for it, under a 16-bit "
+                              "run 12 bytes and 16 bytes each; G judges healthy, ok",
                          len(st) == 1 and len(st[0]["wire"]) == 12 and bool(beats)
                          and all(_vouches(a) for _, a in beats) and tokens.count == 0 and a2.expect() == HEALTHY,
                          f"{[_wire(s, x) for x in st]}; {len(beats)} heartbeats; {tokens.count} tokens; {_ans(a2)}")
@@ -778,7 +909,7 @@ def _face_run(report: Report, workdir: str, run: str, wait_s: float, face: str =
                          f"{len(s.all())} deliveries, {len(beats)} heartbeats read; {_ans(a2)}; "
                          f"{s.clock('across_face', None)}")
         # Step 3: the owner's clock 2 s ahead, its guard holding.
-        vehicle = live.open_client(ep, ("vehicle", "vehicle-pw"))
+        vehicle = live.open_client(ep)
 
         def reference() -> None:
             while not stop.wait(0.3):
@@ -806,9 +937,9 @@ def _face_run(report: Report, workdir: str, run: str, wait_s: float, face: str =
                          not faults and not b3 and clock == ("unobservable", "nothing_heard"),
                          f"{len(faults)} faults, {len(b3)} heartbeats read; {clock}")
         else:
-            report.check(sec, "step 3: G receives one clock_ahead fault, 14 bytes, and shows it as an occurrence; it "
-                              "answers the clock question unobservable, nothing_heard: no heartbeat crosses; G "
-                              "judges health unobservable, face_closed",
+            report.check(sec, "step 3: G receives one clock_ahead fault, 14 bytes under a 16-bit run, and shows it as "
+                              "an occurrence; it answers the clock question unobservable, nothing_heard: no heartbeat "
+                              "crosses; G judges health unobservable, face_closed",
                          len(faults) == 1 and len(faults[0][0]["wire"]) == 14 and faults[0][1].word == 1
                          and not b3 and clock == ("unobservable", "nothing_heard")
                          and h2.judge(hl.read_across(s, addr, False)).reason == "face_closed",
@@ -921,44 +1052,93 @@ def section9(report: Report) -> None:
         bus.close()
 
 
-def under_a_catalog(report: Report) -> None:
-    """zk2py's own, beside the scenarios (review-bot on round 120): an owner
-    given a catalog writes every record's time from the catalog's epoch, the
-    checks it holds before its tokens too, and a word of its own table there
-    as later; a reader that holds the catalog's epoch reads them back, and
-    one that holds 0 reads another instant."""
+def make_catalog(path: str, epoch: int, files: list[Path]) -> Any:
+    """A catalog made by the reference's ``zk2 catalog new --epoch``, as a
+    deployment provisions one, and read by zk2py."""
+    from . import catalog as cat
+    from .blackbox import BLACKBOX
+
+    made = subprocess.run([str(BLACKBOX / "zk2"), "catalog", "new", "--epoch", str(epoch), *map(str, files)],
+                          capture_output=True, text=True, timeout=30)
+    if made.returncode != 0:
+        raise RuntimeError(f"zk2 catalog new: exit {made.returncode}; {made.stderr.strip()[-300:]}")
+    Path(path).write_text(made.stdout, encoding="utf-8")
+    return cat.read(made.stdout.encode())
+
+
+def under_a_catalog(report: Report, owner_heartbeat: bool = False) -> None:
+    """Beside the scenarios (review-bot on round 120; round 123 with the
+    reference): an owner given a catalog writes every time from the
+    catalog's epoch: its status's ``since``, its checks' ``at``, those it
+    holds before its tokens too, a fault's ``at``, its snapshots' ``time``,
+    an entry's ``conf``, and its heartbeat's time. A reader that holds the
+    catalog reads each so, and one that holds 0 reads another instant.
+    ``owner_heartbeat``: the owner confirms by owner heartbeat
+    (``freshness.v2`` §2.4), and the reader follows it, its clock question
+    answered from it, the ahead time included."""
     from .contract import load_contract
 
-    sec = "under a catalog's epoch (zk2py's own)"
+    sec = (f"under a catalog's epoch{', by owner heartbeat' if owner_heartbeat else ''} "
+           f"({'the reference' if OWNER == 'rust' else 'zk2py'}'s owner)")
     epoch = 1767225600
     bus = Bus()
+    stop = threading.Event()
+    ref = "zk2py/health-v2/reference"
     try:
         std, tc = hl.standard(), load_contract(INTEROP / "tcd.v1.toml")
         path = os.path.join(bus.tmp, "catalog.json")
-        Path(path).write_text(json.dumps({"format": "zk2-catalog/1", "epoch": epoch, "entries": [
-            {"index": 0, "iface": std.interface, "contract": std.fingerprint}]}), encoding="utf-8")
-        s = bus.listener("lab/cat", epoch=epoch)
-        o = bus.owner("lab/cat", "--level", "degraded", "--reason", "serving", "--liar", "--catalog", path,
-                      "--contract", str(INTEROP / "tcd.v1.toml"), "--check", "disk=degraded:tcd_slow")
+        catalog = make_catalog(path, epoch, [h2.CONTRACT])
+        s = bus.listener("lab/cat", epoch=epoch) if not owner_heartbeat else \
+            hl.Listener(bus.s, "lab/cat", None, epoch=epoch, catalogs=[catalog], named=catalog.id)
+        s0 = None
+        if owner_heartbeat:
+            bus.extra.append(s)
+            # F-598's first case: a reader with no catalog reads every group
+            # unknown_catalog, "and the put is still a read one"
+            s0 = hl.Listener(bus.s, "lab/cat", None, epoch=epoch, catalogs=[], named=catalog.id)
+            bus.extra.append(s0)
+        flags = ["--level", "degraded", "--reason", "serving", "--catalog", path,
+                 "--contract", str(INTEROP / "tcd.v1.toml"), "--check", "disk=degraded:tcd_slow",
+                 "--run-record", os.path.join(bus.tmp, "cat.run")]
+        if owner_heartbeat:
+            flags += ["--owner-heartbeat", "--reference", ref]
+        o = bus.owner("lab/cat", *flags)
         time.sleep(0.5)
         now_ms = time.time_ns() // 1_000_000
         o.cmd("check net degraded tcd_slow")
+        o.cmd("fault tcd_gone degraded 7")       # a code no table names: out_of_range, in either owner's log
         time.sleep(0.5)
         held = {std.fingerprint: std.canonical, tc.fingerprint: tc.canonical}
         r, info = hl.read_near(bus.t, "lab/cat", listener=s, held=held)
-        r0, _ = hl.read_near(bus.g, "lab/cat", held=held, epoch=0)
+        r0, info0 = hl.read_near(bus.g, "lab/cat", held=held, epoch=0)
+        # a reader that holds no catalog: core §8.6 "Never a guess" (F-610)
+        rn, infon = hl.read_near(bus.g, "lab/cat", held=held, catalogs=[])
+        rc, infoc = hl.read_near(bus.g, "lab/cat", held=held, catalogs=[catalog])
         j = info["joined"]
         doc = info.get("descriptor", {})
         first = [s.record(x) for x in s.of("state/checks/disk") if x["kind"] == "put"]
         later = [s.record(x) for x in s.of("state/checks/net") if x["kind"] == "put"]
+        faults = [s.record(x) for x in s.of("stream/faults")]
         near = lambda ms: ms is not None and abs(ms - now_ms) <= 5000  # noqa: E731
-        report.check(sec, "the owner's descriptor states the catalog, and its status's since, read under the "
+        report.check(sec, "the owner's descriptor states the catalog's id, and its status's since, read under the "
                           "catalog's epoch, is this instant; read under 0 it is an instant in 1970",
-                     doc.get("catalog") is not None and r.status is not None and near(r.status.at_ms)
+                     doc.get("catalog") == catalog.id and r.status is not None and near(r.status.at_ms)
                      and r0.status is not None and r0.status.at_ms is not None
                      and r.status.at_ms - r0.status.at_ms == epoch * 1000,
-                     f"catalog {doc.get('catalog')}; since {r.status and r.status.at_ms} under {epoch}, "
-                     f"{r0.status and r0.status.at_ms} under 0; now {now_ms}")
+                     f"catalog {doc.get('catalog')} (zk2's {catalog.id}); since {r.status and r.status.at_ms} under "
+                     f"{epoch}, {r0.status and r0.status.at_ms} under 0; now {now_ms}")
+        jn = infon["joined"]
+        an = h2.judge(rn)
+        report.check(sec, "a reader that holds no catalog refuses every timed record, unknown_catalog, and dates no "
+                          "confirmation: unobservable, never a level read from the bits (core §8.6, v2 §2.6); one "
+                          "that holds it reads the epoch from it",
+                     infon["catalog"] == "unknown_catalog" and jn.status is not None and jn.status.refusal ==
+                     "unknown_catalog" and all(c.refusal == "unknown_catalog" for c in jn.checks.values())
+                     and an.verdict == "unobservable" and infoc["catalog"] is None
+                     and rc.status is not None and near(rc.status.at_ms),
+                     f"no catalog: {infon['catalog']}, status {jn.status and jn.status.expect()}, checks "
+                     f"{[(k, c.expect()) for k, c in jn.checks.items()]}, {_ans(an)}; with it: "
+                     f"{rc.status and rc.status.at_ms}")
         report.check(sec, "the check held before the tokens and the one put later count their at from the one "
                           "epoch, and each carries the detail 32, its instance's own word, never out_of_range",
                      len(first) == 1 and len(later) == 1 and near(first[0].at_ms) and near(later[0].at_ms)
@@ -968,8 +1148,95 @@ def under_a_catalog(report: Report) -> None:
                      and hl.shown(j.checks["disk"], info["tables"]) == "degraded, tcd_slow",
                      f"before the tokens {[c.expect() for c in first]}; later {[c.expect() for c in later]}; "
                      f"the GET's {[(k, c.expect()) for k, c in j.checks.items()]}; log {o.state()['log']}")
+        report.check(sec, "a fault's at counts from the catalog's epoch",
+                     len(faults) == 1 and near(faults[0].at_ms), f"{[f.expect() for f in faults]}")
+        snaps = info["snapshots"]
+        times = [None if x is None or x.get("time") is None else x["time"]["s"] * 1000 + x["time"]["ms"]
+                 for x in snaps]
+        report.check(sec, "each snapshot's time counts from the catalog's epoch: read under it, this instant",
+                     all(t is not None and near(t + epoch * 1000) for t in times),
+                     f"the two snapshots' times {times} ms after {epoch}; now {now_ms}")
+        # an entry's conf: the status no longer vouched for, its last confirmation
+        o.cmd("unvouch")
+        time.sleep(0.5)
+        r2, info2 = hl.read_near(bus.t, "lab/cat", listener=s, held=held)
+        snap2 = info2["snapshots"][0] or {}
+        entry = next(iter(snap2.get("live") or []), {})
+        conf = entry.get("conf")
+        conf_ms = None if not conf else conf["s"] * 1000 + conf["ms"]
+        report.check(sec, "an entry's conf, its last confirmation once not vouched for, counts from the catalog's "
+                          "epoch",
+                     entry.get("confirmation") == "conf" and conf_ms is not None and near(conf_ms + epoch * 1000),
+                     f"{entry.get('confirmation')} {conf}; now {now_ms}")
+        o.cmd("vouch")
+        if not owner_heartbeat:
+            beats = s.beats()
+            hb = [a.get("time") for _, a in beats if isinstance(a.get("time"), dict)]
+            report.check(sec, "its heartbeat's time counts from the catalog's epoch: read under it, an instant of "
+                              "this minute",
+                         bool(hb) and all(abs(t["s"] * 1000 + t["ms"] + epoch * 1000 - now_ms) <= 60_000 for t in hb),
+                         f"{len(beats)} heartbeats, times {hb[:3]}")
+            return
+        # owner heartbeats: wait for one, then hold the guard
+        deadline = time.monotonic() + 35
+        while time.monotonic() < deadline and not s.sub.owner_beats.get("lab/cat"):
+            time.sleep(0.2)
+        heard = s.sub.owner_beats.get("lab/cat", [])
+        own_hb = [a for _, a in s.beats() if "owner_heartbeat" not in a]
+        host = [(t, a, tm) for t, cls, a, tm in heard if cls == "host"]
+        groups = [[g.get("iface") for g in a.get("read", {}).get("groups", [])] for _, a, _ in host]
+        rows = [a for _, a in s.beats() if a.get("owner_heartbeat") == "host"]
+        report.check(sec, "the owner heartbeat of the host class holds a group for health.v2, by its index in the "
+                          "catalog; its time, read under the catalog's epoch, is an instant of this minute; it "
+                          "vouches for the status, and the reader answers the clock question no, confirmed, from it",
+                     bool(host) and all(g == ["health.v2"] for g in groups)
+                     and all(isinstance(tm, dict) and abs(tm["s"] * 1000 + tm["ms"] + epoch * 1000 - now_ms) <= 60_000
+                             for _, _, tm in host)
+                     and any(_vouches(a) for a in rows) and s.clock() == ("no", "confirmed"),
+                     f"{len(host)} host owner heartbeats, groups {groups}, times {[tm for _, _, tm in host]}; "
+                     f"{len([x for x in heard if x[1] == 'link'])} link; clock {s.clock()}; "
+                     f"heartbeats heard on health.v2's own key {len(own_hb)}")
+
+        def reference() -> None:
+            while not stop.wait(0.3):
+                bus.g.put(ref, b"beat")
+
+        threading.Thread(target=reference, daemon=True).start()
+        time.sleep(1.0)
+        o.cmd("clock 2000")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not o.state()["ahead"]:
+            time.sleep(0.05)
+        t_det = time.monotonic_ns()
+        time.sleep(32.0)
+        held_host = [(t, a, tm) for t, cls, a, tm in s.sub.owner_beats.get("lab/cat", [])
+                     if cls == "host" and t > t_det + 300_000_000]
+        ahead_faults = [f for f in (s.record(x) for x in s.of("stream/faults")) if f.word == 1]
+        report.check(sec, "its guard holding: every host owner heartbeat carries the ahead time, the reader "
+                          "answers yes, ahead, from it, and one clock_ahead fault is heard, its at from the "
+                          "catalog's epoch",
+                     bool(held_host) and all(tm == heartbeat.AHEAD for _, _, tm in held_host)
+                     and s.clock() == ("yes", "ahead") and len(ahead_faults) == 1
+                     and ahead_faults[0].at_ms is not None
+                     and abs(ahead_faults[0].at_ms - time.time_ns() // 1_000_000) <= 45_000,
+                     f"{len(held_host)} owner heartbeats, times {[tm for _, _, tm in held_host]}; clock {s.clock()}; "
+                     f"{[f.expect() for f in ahead_faults]}")
+        assert s0 is not None
+        groups0 = [[g.get("refused") or g.get("iface") for g in a.get("read", {}).get("groups", [])]
+                   for t, cls, a, _ in s0.sub.owner_beats.get("lab/cat", [])
+                   if cls == "host" and t > t_det + 300_000_000]
+        report.check(sec, "F-598's first case: a reader that holds no catalog reads the owner heartbeat's group "
+                          "unknown_catalog, counts the put whatever became of its groups, and answers yes, ahead",
+                     bool(groups0) and all(g == ["unknown_catalog"] for g in groups0)
+                     and s0.clock() == ("yes", "ahead"),
+                     f"groups {groups0}; clock {s0.clock()}")
     finally:
+        stop.set()
         bus.close()
+
+
+def under_a_catalog_oh(report: Report) -> None:
+    under_a_catalog(report, owner_heartbeat=True)
 
 
 def section8_worded(report: Report) -> None:
@@ -979,13 +1246,20 @@ def section8_worded(report: Report) -> None:
 #: ``8w`` is §8 on the face as the text words it, which its Expected do not
 #: hold on (F-596): opt-in, never part of a whole run.
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
-            "7": section7, "8": section8, "9": section9, "8w": section8_worded, "epoch": under_a_catalog}
+            "7": section7, "8": section8, "9": section9, "8w": section8_worded, "epoch": under_a_catalog,
+            "epoch-oh": under_a_catalog_oh}
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="zk2py.health_v2_scenarios")
     p.add_argument("--only", action="append", choices=sorted(SECTIONS))
+    p.add_argument("--owner", choices=("zk2py", "rust"), default="zk2py")
+    p.add_argument("--archive", choices=("stand-in", "rust"))
     args = p.parse_args(argv)
+    global OWNER, ARCHIVE
+    OWNER = args.owner
+    ARCHIVE = args.archive or ("rust" if OWNER == "rust" else "stand-in")
+    print(f"NOTE the owner {OWNER}'s, the archive {ARCHIVE}, the readers zk2py's", flush=True)
     report = Report()
     for name in args.only or [n for n in sorted(SECTIONS) if n != "8w"]:
         try:

@@ -1,0 +1,14 @@
+# Round 123 (F-599): beside `empty.v1`: a table of one reason, `tc_a`.
+[interface]
+name    = "full"
+major   = 1
+minor   = 0
+summary = "a table of one reason"
+uses    = ["health.v2"]
+
+[defaults]
+annotations = { "health.reasons" = ["tc_a"] }
+
+[resources.rates]
+kind = "stream"
+type = { raw = "application/octet-stream" }
