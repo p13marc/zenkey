@@ -32780,6 +32780,11 @@ deployments, each an enrollment whose `[[service]]` says
 - **Changes:** whether 1 device declaration in 16 learns why its
   contract cannot load, and what it may change without moving its
   device's wire.
+- **Status: resolved by the mend after round 126** (46977583, no version
+  moved): core 0.117 §7.6's "A derived type may be 0", cascade 7's "but a
+  type a profile derives (§7.6)", and `config.v2` 0.6 §3's "One in 16 has
+  the layout tag 0, and E051 does not read it". Case 2's contract loads
+  in zk2py.
 
 ### F-620 · index · `link.v2`'s header: it restates `link.v1` text 0.20
 
@@ -32816,5 +32821,47 @@ deployments, each an enrollment whose `[[service]]` says
   first: a device's declaration can derive a contract that cannot load.
 - **Resolved:** none.
 - **Open:** F-437 to F-441; F-573; F-612 to F-614; F-618 to F-620.
+
+  F-365 stays open as #965's.
+
+### The mend: F-619 answered
+
+The mend read 46977583: one spec commit on round 126's, with F-620's
+fix before it. Core 0.117, observer 0.37 and `config.v2` 0.6 set a type
+a profile derives aside from E051. No keyword moved: 298 rules.
+
+| Finding | Holds | The answer, quoted |
+|---|---|---|
+| F-619 | yes | Core §7.6: "A type a profile derives from the contract's declaration, as `config.v2`'s `Record` and each `Set<T>` (`config.v2` §3), has no form its author writes: the derivation fixes it, and one in 16 has the tag 0. E051 does not read it." Cascade 7: "but a type a profile derives (§7.6)". The row: "a type a profile derives aside". `config.v2` §3: "One in 16 has the layout tag 0, and E051 does not read it: its author writes no field of it". The odds: "A derived type's is from 0 to 15, so it matches 1 time in 16." **Resolved.** |
+| F-620 | yes | Resolved in its PR: `link.v2`'s header restates `link.v1` text 0.21. |
+
+**How zk2py tells a derived type from a written one** (c1273945): as
+§3's lint does, "The lint compares each with its derivation, field by
+field".
+- **A candidate:** each clean type at 0 of a packed file with no E028,
+  kept by the schemas.
+- **Derived:** a §3 resource names it in a derived role, and its fields
+  equal that role's derivation. The roles are `config`'s type; each
+  `set/<group>`'s request, response and error; `confirm`, `cancel`,
+  `extend` and `persist`'s. The contract lists `config.v2`, and its
+  declaration reads valid. Such a type draws no E051.
+- **Every other candidate draws E051.** That includes a copy of the
+  derived `Record` that no resource names, and a type at 0 named where
+  `Record` belongs that is no derivation.
+
+**Run** (`packed_tag_live`, 319 of 319):
+- **Case 2's contract** loads in zk2py with no code. `zk2 contract lint`
+  at a5055e41 still gives E051 on it: the reference's half is to follow.
+  That is a note, not a finding.
+- **Its three variants** draw E051 in zk2py: the `Record` under a name
+  no resource gives; `config`'s type `tag.json`'s `Zero`; the contract
+  without `config.v2` (E020 and E051).
+
+**The walk:** the readings the new sentences touch quote them, and
+F-619's reading pins the answer and zk2py's loads. `just
+py-conformance` **8680 of 8680**.
+
+**Open after the mend:** F-437 to F-441; F-573; F-612 to F-614; F-618.
+F-619 and F-620 are resolved.
 
   F-365 stays open as #965's.

@@ -9624,6 +9624,20 @@ error). None is a blocker; F-619 is the one to settle first. See "At
 core 0.117, observer 0.37, link.v1 0.21 and link.v2 0.27" in
 `SPEC-FINDINGS.md`.
 
+### The mend
+
+The mend read 46977583. Core 0.117, observer 0.37 and `config.v2` 0.6
+set a type a profile derives aside from E051 (F-619). `link.v2`'s
+header restates `link.v1` 0.21 (F-620). Both are resolved.
+- **zk2py tells a derived type as §3's lint does:** a §3 resource names
+  it in a derived role, and its fields equal that role's derivation.
+  The schemas keep E051's candidates, and the contract's loader reports
+  every one that is not derived (`config_v2.derived_types`).
+- **`derive.json` case 2's contract** loads in zk2py. `zk2 contract lint`
+  at a5055e41 still gives E051 on it, its half to follow.
+- **`packed_tag_live`** 319 of 319. **`just py-conformance`** 8680 of
+  8680.
+
 ## What it does not cover
 
 - **The rest of the live half:**
