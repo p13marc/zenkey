@@ -140,6 +140,8 @@ mod descriptor;
 pub mod desired;
 pub mod error;
 #[cfg(feature = "zenoh")]
+pub mod follow;
+#[cfg(feature = "zenoh")]
 pub mod frame;
 #[cfg(feature = "zenoh")]
 mod gate;

@@ -314,6 +314,36 @@ pub struct Refused {
 /// What [`Consumer::with_refused`] hands each refused sample to.
 type OnRefused = Arc<dyn Fn(Refused) + Send + Sync>;
 
+/// What a gated read hands each GET's replies to, once the GET ended,
+/// before it merges any (`redundancy.v2` §2.10: a follower's fence over its
+/// seed, [`crate::follow`]). It returns those it admits, in their order.
+pub(crate) trait ReplyGate: Send + Sync {
+    fn admit<'a>(&'a self, replies: Vec<Sample>) -> crate::call::BoxFuture<'a, Vec<Sample>>;
+}
+
+/// One GET's replies, as a state read takes them: as they arrive, or once
+/// a gate admitted them.
+enum Replies {
+    Stream(flume::Receiver<zenoh::query::Reply>),
+    Held(std::vec::IntoIter<Sample>),
+}
+
+impl Replies {
+    /// The next reply's sample; an error reply makes the read incomplete.
+    async fn next(&mut self, complete: &mut bool) -> Option<Sample> {
+        match self {
+            Replies::Stream(rx) => loop {
+                let reply = rx.recv_async().await.ok()?;
+                match reply.into_result() {
+                    Ok(sample) => return Some(sample),
+                    Err(_) => *complete = false,
+                }
+            },
+            Replies::Held(it) => it.next(),
+        }
+    }
+}
+
 /// A role's consumer, compiled against the required interface's contract
 /// (R4: any revision of the major is fine).
 #[derive(Clone)]
@@ -940,6 +970,38 @@ impl Consumer {
     #[must_use]
     pub fn params(&self) -> &BTreeMap<String, String> {
         &self.params
+    }
+
+    /// The revision of the required interface it is compiled against (R4).
+    #[must_use]
+    pub fn contract(&self) -> &Contract {
+        &self.contract
+    }
+
+    /// Its watch session, if it holds one ([`Consumer::with_watch`]).
+    pub(crate) fn watch_session(&self) -> Option<&zenoh::Session> {
+        self.watch.as_ref()
+    }
+
+    /// The same consumer, bound to `addr` alone: a follower's seed of one
+    /// provider (`redundancy.v2` §2.10).
+    pub(crate) fn bound_to(&self, addr: &Addr) -> Self {
+        let mut c = self.clone();
+        c.providers = vec![Provider::exact(addr)];
+        c
+    }
+
+    /// The lifespan a delivery not judged by a timed subscription carries:
+    /// a seed's value (`timing.v1` §2.6's premise for `r`).
+    pub(crate) fn premise(&self, r: &Resource) -> LifespanSample {
+        timing::Plan::new(
+            r,
+            &self.contract.iface,
+            &self.providers,
+            &self.params,
+            self.epsilon,
+        )
+        .premise()
     }
 
     pub(crate) fn resource(&self, name: &str) -> Result<&Resource> {
@@ -1887,7 +1949,22 @@ impl Consumer {
         values: Option<&Bindings>,
         timeout: Duration,
     ) -> Result<StateAnswer> {
-        self.read_state(resource, values, &BTreeMap::new(), timeout)
+        self.read_state(resource, values, &BTreeMap::new(), None, timeout)
+            .await
+            .map(|c| c.answer)
+    }
+
+    /// [`Consumer::get_answer`] of every member, its replies handed to
+    /// `gate` per GET, once each GET ended, and only those it admits merged
+    /// (`redundancy.v2` §2.10: a follower's seed merges its incumbent's
+    /// snapshots alone, [`crate::follow`]).
+    pub(crate) async fn get_gated(
+        &self,
+        resource: &str,
+        gate: &dyn ReplyGate,
+        timeout: Duration,
+    ) -> Result<StateAnswer> {
+        self.read_state(resource, None, &BTreeMap::new(), Some(gate), timeout)
             .await
             .map(|c| c.answer)
     }
@@ -1940,17 +2017,19 @@ impl Consumer {
         held: &BTreeMap<String, zenkey_model::wire::Stamp>,
         timeout: Duration,
     ) -> Result<ConditionalAnswer> {
-        self.read_state(resource, values, held, timeout).await
+        self.read_state(resource, values, held, None, timeout).await
     }
 
     /// [`Consumer::get_answer`] and [`Consumer::get_conditional`]: S4's
     /// GETs, each carrying the held stamp `held` names for its one concrete
-    /// key, and their replies merged.
+    /// key, and their replies merged; with a `gate`, each GET's replies
+    /// handed to it once the GET ended, and those it admits merged.
     async fn read_state(
         &self,
         resource: &str,
         values: Option<&Bindings>,
         held: &BTreeMap<String, zenkey_model::wire::Stamp>,
+        gate: Option<&dyn ReplyGate>,
         timeout: Duration,
     ) -> Result<ConditionalAnswer> {
         use zenkey_model::collection::{self, Heard, Page};
@@ -2016,11 +2095,20 @@ impl Consumer {
                 .with(flume::unbounded::<zenoh::query::Reply>())
                 .await
                 .map_err(zenoh)?;
-            while let Ok(reply) = rx.recv_async().await {
-                let Ok(sample) = reply.into_result() else {
-                    complete = false;
-                    continue;
-                };
+            let mut replies = match gate {
+                None => Replies::Stream(rx),
+                Some(g) => {
+                    let mut all = Vec::new();
+                    while let Ok(reply) = rx.recv_async().await {
+                        match reply.into_result() {
+                            Ok(sample) => all.push(sample),
+                            Err(_) => complete = false,
+                        }
+                    }
+                    Replies::Held(g.admit(all).await.into_iter())
+                }
+            };
+            while let Some(sample) = replies.next(&mut complete).await {
                 let key = sample.key_expr().as_str().to_owned();
                 if key.contains('*') {
                     continue;
