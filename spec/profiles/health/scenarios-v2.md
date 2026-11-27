@@ -8,7 +8,8 @@ changes, and §9 is new. §1 to §5 and §9 are the runtime's. §6 to §8 are
 a tool's.
 
 The reference runs §1 to §5 and §9
-(`zenkey/tests/profile_health_v2.rs`). It runs none of §6 to §8 yet.
+(`zenkey/tests/profile_health_v2.rs`), and §6 to §8
+(`zenctl/tests/live_zk2.rs`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.3) are v2.md's rules. Core

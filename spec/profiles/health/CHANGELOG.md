@@ -7,6 +7,48 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `health.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## health.v2 0.2 — 2026-11-27: editorial: three scenario texts zk2py's round 120 found wrong, and who runs the scenarios, no rule changed (#986)
+
+0.1's `scenarios-v2.md` had three steps no implementation could meet as
+written. zk2py's round 120 ran them first (F-595, F-596, F-602), and the
+reference's Q2 corrected them, with no entry at the time. This is that
+entry.
+
+**What changed, in `scenarios-v2.md` alone.**
+- **§8's runs name what they deny of the streams (F-596).** The setup's
+  face denies presence alone, and run B added a deny of the state. A
+  heartbeat and a fault are stream samples, so on those denies both
+  crossed: run B's "nothing crosses", run C's "no heartbeat crosses" and
+  run A's "no fault crosses" could not hold. Run A now denies the faults'
+  key, run B the heartbeats (`zk2/vehicle-01/*/freshness.v2/stream/**`)
+  and the faults' key, and run C the heartbeats.
+- **§9's tools subscribe before step 1 (F-602).** T and T2 read at step 4,
+  after step 2 replaced step 1's status, and no read answers a fault, yet
+  Expected 4 had them show both. They now subscribe to both owners'
+  `health.v2/**` before step 1, and each shows what it heard and what it
+  read.
+- **§1's and §8's byte figures state their run (F-595).** "12 bytes: CH
+  `0x03` or `0x13`" is a 16-bit run's figure alone. A 32-bit run's put is
+  14 bytes, as `v2/records.json` has it. Each figure now says which run it
+  is under.
+- **The intro says who runs them.** The reference runs §1 to §5 and §9 in
+  `zenkey/tests/profile_health_v2.rs`, and §6 to §8 in
+  `zenctl/tests/live_zk2.rs`, every step and Expected.
+
+**Deliberately not changed.**
+- **No rule** of `v2.md`, and no fixture of `conformance/v2/`. The
+  scenarios now say what the rules already did: a deny of the state
+  leaves the heartbeats and the faults crossing (core §8.5), and a later
+  read answers no status since replaced and no fault (§2.4).
+- **No scenario runs under a catalog.** The conventions still give the
+  owners none, so every time counts from 0. The reference also checks an
+  owner under a catalog's later epoch, outside the scenarios: its records'
+  times and its snapshots' time count from it, and a reader given the
+  catalog reads them so. `v2/records.json` already holds writes and reads
+  under such an epoch.
+- **The header** is still written against core 0.113 and `freshness.v2`
+  0.12.
+
 ## health.v2 0.1 — 2026-11-22: a new major: packed records sent on change only, words by table, and a clock question a heartbeat answers alone (#986)
 
 **What it saves is small, and that is said first.** `health.v1`'s

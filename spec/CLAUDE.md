@@ -900,10 +900,12 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   compatible) but moves the fingerprint, since the packed file's id
   hashes it (§2.2). Core Appendix D lists no `config` vocabulary, so W105
   reads none.
-- **`health.v2`** (#986 Q1, text 0.1, `experimental`, written against
+- **`health.v2`** (#986 Q1, text 0.2, `experimental`, written against
   core 0.113) sits beside `health.v1` in `spec/profiles/health/`:
-  `v2.md`, `scenarios-v2.md` (9 sections, no implementation has run
-  them: the owner and the readers are #986's Q2), `health.v2.toml`
+  `v2.md`, `scenarios-v2.md` (9 sections; the reference runs §1–§5 and §9
+  in `zenkey/tests/profile_health_v2.rs` and §6–§8 in
+  `zenctl/tests/live_zk2.rs`, #986's Q2; 0.2 is editorial, the three
+  scenario texts round 120 found, F-595, F-596, F-602), `health.v2.toml`
   (revision 2.0, `sha256:b447f613…05b1`, heartbeat tag 1, published in
   `.history/health.v2/` by the code half with the fingerprint the
   drafter computed), `health.v2.json` (artifact `sha256:d270e148…a983`;
