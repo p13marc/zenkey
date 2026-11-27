@@ -8,7 +8,8 @@ wait, so each verb takes the deployment's word, most specific first:
 1. `--lease` and `--wait-before-close`, each where given;
 2. `--face-policy`'s `[transport]`, which the routers run (`link.v2` §2.16);
 3. the defaults of the zenoh `--binding` names (`link.v2` §2.19):
-   `zm-1.10.2-r1` waits 10 s before it closes a transport, `zenoh-1.10.1` 5 s;
+   `zm-1.10.2-r1` waits 10 s before it closes a transport, `zenoh-1.10.1`
+   and `zenoh-1.10.2` 5 s;
 4. zenoh 1.10.1's.
 
 One rule resolves them for every verb (`cmd::zk2::routers`), before any
@@ -106,15 +107,15 @@ A binding is one of `link.v2` §2.4's names. Any other is refused, exit 2,
 with the names it could have been.
 
 ```console
-$ zenctl timing --binding zenoh-1.10.2
+$ zenctl timing --binding zenoh-1.10.0
 ? 2
-error: invalid value 'zenoh-1.10.2' for '--binding <NAME>': not a binding; one of: zenoh-1.10.1, zm-1.10.2-r1
+error: invalid value 'zenoh-1.10.0' for '--binding <NAME>': not a binding; one of: zenoh-1.10.1, zenoh-1.10.2, zm-1.10.2-r1
 
 For more information, try '--help'.
 
-$ zenctl watchdog --rule dropped --binding zenoh-1.10.2
+$ zenctl watchdog --rule dropped --binding zenoh-1.10.0
 ? 2
-error: invalid value 'zenoh-1.10.2' for '--binding <NAME>': not a binding; one of: zenoh-1.10.1, zm-1.10.2-r1
+error: invalid value 'zenoh-1.10.0' for '--binding <NAME>': not a binding; one of: zenoh-1.10.1, zenoh-1.10.2, zm-1.10.2-r1
 
 For more information, try '--help'.
 

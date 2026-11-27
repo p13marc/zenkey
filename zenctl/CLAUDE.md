@@ -476,7 +476,8 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `budget::stall_bound` (`--wait-before-close`, 5 s, or `--lease` less a
   keep-alive) reads `reader_stalled`. Every `--wait-before-close` says
   its default: `--face-policy`'s, else `--binding`'s (`zm-1.10.2-r1`'s is
-  10 s), else zenoh 1.10.1's 5 s (#1011). The runtime
+  10 s; `zenoh-1.10.2`'s, #1165, 1.10.1's 5 s), else zenoh 1.10.1's 5 s
+  (#1011). The runtime
   keeps §2.7 (#741): `zenkey::budget` refuses a new member at the bound,
   an occurrence beyond the rate and a lowering below the live members
   (`Error::Budget`), so a test that needs an owner over its bound uses

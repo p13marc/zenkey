@@ -266,6 +266,46 @@ the catalog not asked: pass --catalog <FILE>, the catalog the far side holds (li
 
 ```
 
+A policy on a stock zenoh 1.10.2 router names `binding = "zenoh-1.10.2"`
+(link.v2 0.25 §2.4, #1165). Its file is read through zenoh's own loader,
+as 1.10.1's is, and a key it omits runs 1.10.2's default, which is
+1.10.1's. The RF router with `wait_before_close` left out runs 5 s, not
+the policy's 240 s and not the fork's 10 s: `transport_differs` and
+`wait_under_lease`. Exit 1.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-rf-1102-nowbc.json5 --face-policy tests/cmd/fixtures/link/rf-1102.face.toml --enrollment ../examples/zk2/link/radio.enrollment.toml --contracts ../examples/zk2/link/radio.v1.toml --format table
+? 1
+radio: no_arq at arq: the medium repairs no lost frame, and zenoh repairs no lost declaration: a lost subscriber or queryable stays lost while the transport stays up (link.v2 §2.1) (link.v2 §2.1, §2.10, §2.16)
+face radio: not_packed radio.v1/@stream/frames: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/events/fault: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: not_packed radio.v1/state/oper: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+face radio: interval_over_horizon radio.v1/stream/air/dropped_total: a crossing stream whose horizon is below twice the interval: the far side can judge it stale between two samples (§2.12)
+face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
+tests/cmd/fixtures/link/router-rf-1102-nowbc.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
+  ✗ transport_differs  face -  transport.wait_before_close_ms
+  ✗ wait_under_lease   face -  transport.wait_before_close_ms
+transport (link.v2 §2.19), an omitted key read at zenoh-1.10.2's default:
+    transport.lease_ms              planned 240000     runs 240000
+    transport.keep_alive            planned 4          runs 4
+  ✗ transport.wait_before_close_ms  planned 240000000  runs 5000000 (the default)
+    transport.sequence              planned "16bit"    runs "16bit"
+    transport.batch_bytes           planned 222        runs 222
+    transport.open_timeout_ms       planned 10000      runs 10000
+    transport.accept_timeout_ms     planned 10000      runs 10000
+    transport.interests_timeout_ms  planned 10000      runs 10000
+against the plan: 1 difference(s)
+  ✗ transport_differs  transport/link/tx/queue/congestion_control/block/wait_before_close  planned 240000000; configured 5000000, zenoh-1.10.2's default: the file states none
+FAIL
+transport_differs transport.wait_before_close_ms: the router's configuration runs this transport key at another value than the policy's, read at the binding's default where it states none (link.v2 §2.19)
+wait_under_lease transport.wait_before_close_ms: wait_before_close below the lease: a blocked push closes the transport on one end while the other keeps it for up to a lease (link.v2 §2.16)
+judged against the config file tests/cmd/fixtures/link/router-rf-1102-nowbc.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+the far end not asked: pass --peer-config <FAR-CONFIG>, the far router's or the gateway client's config, to compare its lease and keep_alive, which are not negotiated (link.v2 §2.16, §2.19)
+the catalog not asked: pass --catalog <FILE>, the catalog the far side holds (link.v2 §2.19)
+
+```
+
 A `null` is read as zenoh 1.10.1 reads it (link.v2 0.18 §2.19). The same
 router with `routing/interests/timeout` written `null`: zenoh loads it and
 fills it with its default, 10,000 ms, so the key reads as left out, at the

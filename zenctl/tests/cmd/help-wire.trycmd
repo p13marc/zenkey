@@ -882,7 +882,7 @@ Options:
           With --on: this host's clock and the owners' agree within the HLC delta (500 ms), for a `doctor health-*` rule, as `watchdog --clocks-synced`. Without it, those rules read unobservable
 
       --binding <NAME>
-          With --on: the zenoh the deployment's routers run, by its `link.v2` name (§2.4), zenoh-1.10.1 or zm-1.10.2-r1, for an `alert-firing` rule's reader, as `watchdog --binding`. Omitted, zenoh 1.10.1's (#1011)
+          With --on: the zenoh the deployment's routers run, by its `link.v2` name (§2.4), zenoh-1.10.1, zenoh-1.10.2 or zm-1.10.2-r1, for an `alert-firing` rule's reader, as `watchdog --binding`. Omitted, zenoh 1.10.1's (#1011)
 
       --no-bundles
           Leave the revisions' bundles out of the header (`.zrec` version 4): a reader of the file then needs --contracts to decode it
@@ -1624,7 +1624,7 @@ Options:
           This host's clock and the owners' agree within the HLC delta (500 ms), as the deployment keeps them: a `doctor health-*` rule's doctor then ages a health.v1 status reply's stamp against this clock (freshness.v1 §2.6), as `doctor --clocks-synced` does. The doctor listens to no status, so without it those rules read unobservable
 
       --binding <NAME>
-          The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. An `alert-firing` rule's reader reads its window and its own stall by that zenoh's lease, keep-alives and wait_before_close (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, zenoh 1.10.1 5 s. No other rule reads them. Omitted, zenoh 1.10.1's (#1011)
+          The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1, zenoh-1.10.2 or zm-1.10.2-r1. An `alert-firing` rule's reader reads its window and its own stall by that zenoh's lease, keep-alives and wait_before_close (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, stock zenoh, 1.10.1 and 1.10.2, 5 s. No other rule reads them. Omitted, zenoh 1.10.1's (#1011)
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.

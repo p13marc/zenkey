@@ -44,7 +44,7 @@ Options:
           The routers' face policy (TOML, `link.v2` §2.1): its `[transport]` is what they run, so its lease and wait_before_close are the defaults of --lease and --wait-before-close, and its keep_alive the stall bound's (#1011). A `link.v1` policy states no transport and is refused, exit 2
 
       --binding <NAME>
-          The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. Its defaults are those of --lease and --wait-before-close, and its keep-alives the stall bound's, where no flag and no --face-policy states them (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, zenoh 1.10.1 5 s. Omitted, zenoh 1.10.1's
+          The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1, zenoh-1.10.2 or zm-1.10.2-r1. Its defaults are those of --lease and --wait-before-close, and its keep-alives the stall bound's, where no flag and no --face-policy states them (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, stock zenoh, 1.10.1 and 1.10.2, 5 s. Omitted, zenoh 1.10.1's
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
