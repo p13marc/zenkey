@@ -3,6 +3,89 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.116 — 2026-11-28: zk2py's rounds 116 to 123: a run's record that is gone, "by then" as the answer's arrival, a tool's raw body, a conditional read's bytes itemized, a 1.10.1 router's QUIC batch, and which mentions of 1.10.1 reach 1.10.2 (#609, #986, #1165)
+
+zk2py's rounds 116 to 123 filed ten findings against the core: F-569 to
+F-572, F-578, F-587, F-597 and F-607, F-608 and F-610. Each is answered
+here. `observer.md` 0.36 holds F-572's and F-607's reader halves
+([`observer-CHANGELOG.md`](observer-CHANGELOG.md)).
+
+**One rule added: §4.3, a run's record that is gone (F-578, a gap).**
+- **What was measured.** An author lost the file of its run's record and
+  started again on its path. zk2py's and the reference's both read a
+  first start, took run `0000` again, and wrote under it. The other
+  implementation's target then missed two documents.
+- **Why the owner cannot meet the MUST NOT alone.** A lost record and a
+  first start both find no record. No sentence said how to tell them
+  apart, and nothing on the owner's side can.
+- **Now.** A deployment MUST NOT start an owner on a record's path where
+  that owner's record was lost, nor on a record restored from an
+  earlier state. It starts it with none, and the owner draws 32-bit
+  runs. `[Sc: profiles/desired/scenarios-v2.md §6]` §2.6 already named
+  a restored record as a reused run's cause.
+- **Not taken:** a record made only by provisioning, read as spent when
+  absent. It would change every owner's first start, and both runtimes.
+  The deployment knows what it lost.
+- 298 rules: deployment 19, where it was 18.
+
+**Answered with no rule changed.**
+- **"By then" (F-569, §4.2)** is when the answer arrives, twice. A value
+  heard after it, before the GET ends, changes nothing.
+  `seed/held.json`'s case 29, by hand: case 24 with a put heard after
+  the answer, which still reads again. 30 cases. The reference's merge
+  decides as each answer arrives, and so does zk2py's.
+- **What a conditional read saves (F-570, §4.2).** It said "the value's
+  bytes and no others". With a 16-bit run, an unchanged answer saves
+  the member's page less its 6-byte held stamp: the record and 16 bytes.
+  The request grows by 9. So it pays where the member is unchanged in
+  more than 9 reads of every 16 + n, n the record's bytes.
+- **A conditional read's bytes (F-571, Appendix B)** are itemized: the
+  request's 12, the unchanged reply's 94, of which 7 were unnamed, and
+  the final's 4 by its layout, 6 as the zk2c W2 run measured it. 119
+  bytes is one SDU's, and two are 138.
+  - 0.110's entry said `desired.v1`'s re-read is 222 bytes. That is a
+    31-byte request SDU and a 191-byte reply SDU, Appendix B now says.
+    0.110's entry stands as a record.
+- **A tool's raw body (F-572, §4.2).** The rule on the held stamp a
+  reader sends binds the one it sends of its own. A tool's raw GET
+  carries its user's payload, holds nothing and merges nothing.
+  Observer §4.1 says what it shows.
+- **A `desired.v2` resource of a contract that uses `redundancy.v1`
+  (F-587, §4.3)** carries a Zenoh timestamp, as §4.2's list and §4.3's
+  table say of every state of such a contract. The line under the table
+  now says so. `link.v2` 0.26 says the same of its floor.
+- **An event's time (F-597, §2.6)** is unknown while the guard holds.
+  It said "as a heartbeat's is", which 0.113 made untrue: a heartbeat's
+  is then the ahead time, which an event's has no code for.
+- **Which mentions of 1.10.1 reach 1.10.2 (F-607, §0, Appendix B).**
+  §0's rule is of zenoh's own crates. A binding's release names that
+  binding's facts in that release alone. "One binding's facts" says
+  which were read in 1.10.2: zk2py's three of zenoh-python, and neither
+  of zenoh-pico's.
+- **A 1.10.1 router's QUIC batch (F-608, §8.5).** The bullet "a link's
+  batch is the minimum of …" now names its one exception, Appendix B's.
+  On 1.10.1 a QUIC link's best-effort companion runs this end's size.
+  `link.v1` §2.1's `batch_bytes` reads §8.5, so it says so by reference.
+- **A time counted from a catalog not held (F-610, §8.6).** Refusing the
+  id refuses a time counted from its epoch. What a reader does with a
+  record that holds one is its profile's. `health.v2` 0.3 refuses it
+  whole.
+
+**0.113's "Not verified" (F-601).** It said the reference still wrote
+all ones while its guard held, and refused `ffffffffff80`. At 08f3600a
+its owner wrote the ahead time, as a heartbeat's and an owner
+heartbeat's, and `zenctl echo` read zk2py's as ahead (zk2py's round
+120). 0.113's entry stands as a record.
+
+**What deliberately did not change.**
+- **The reference's run store** reads a missing record as a first
+  start. The new rule binds the deployment, and the code half asks the
+  owner example's `--run-file` help to say so.
+- **No fixture's reading.** Case 29 is new, and no case moved.
+
+**Not verified.** No cargo was run. Case 29 was read against the
+reference's runner and `seed::unchanged`.
+
 ## 0.115 — 2026-11-27: Appendix D and §8.1 name `alarms.v2` (#984)
 
 `alarms.v2` text 0.1 is a new major of the alarms profile, on a

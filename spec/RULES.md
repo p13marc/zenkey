@@ -54,10 +54,10 @@ The owner, consumer and caller sections each point to them.
 | [Owner](#owner) | 90 |
 | [Consumer](#consumer) | 35 |
 | [Caller](#caller) | 17 |
-| [Deployment](#deployment) | 18 |
+| [Deployment](#deployment) | 19 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 87, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 81 |
-| Every rule, once | 297 |
+| Every rule, once | 298 |
 | [Rule ids](#rule-ids) | 85 |
 
 ## Owner
@@ -425,6 +425,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 |---|---|---|
 | [S3](core.md#42-rules-for-owners-and-consumers) | A deployment MUST configure it to at least the longest outage it expects between an archive and the owner, for each resource the archive records whose deletes only a tombstone proves (§4.4). | `[Sc: state.md §2, §6, §14]` |
 | [S4](core.md#42-rules-for-owners-and-consumers) | **Deployment:** MUST NOT run a storage that answers on an owner's `state/**` or `@state/**` keys. | `[Sc: state.md §3, §14]` |
+
+### [core §4.3 Runs and sequence numbers (S7)](core.md#43-runs-and-sequence-numbers-s7)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [S7](core.md#43-runs-and-sequence-numbers-s7) | **A record that is gone.** … A deployment MUST NOT start an owner on a record's path where that owner's record was lost, nor on a record restored from an earlier state. | `[Sc: profiles/desired/scenarios-v2.md §6]` |
 
 ### [core §6 Ownership and serving](core.md#6-ownership-and-serving)
 
@@ -962,7 +968,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [S4](core.md#42-rules-for-owners-and-consumers) | consumer, deployment | core §4.2 Rules for owners and consumers | **Consumer:** a state GET MUST be addressed to the owner's keys, with target `All` … |
 | [S5](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** last-known state MUST be read from an archive (§4.4), explicitly. **Owner of an archive:** … |
 | [S6](core.md#42-rules-for-owners-and-consumers) | consumer | core §4.2 Rules for owners and consumers | **Consumer:** current state is the owner's answer. A consumer turns to an archive only … |
-| [S7](core.md#42-rules-for-owners-and-consumers) | owner, consumer | core §4.2 Rules for owners and consumers | **Owner:** a run is never reused, and its seq for state and events never … |
+| [S7](core.md#42-rules-for-owners-and-consumers) | owner, consumer, deployment | core §4.2 Rules for owners and consumers | **Owner:** a run is never reused, and its seq for state and events never … |
 | [O1](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** an operation's queryable MUST be declared on its concrete key (or its template) … |
 | [O2](core.md#51-rules) | owner, caller | core §5.1 Rules | **Owner:** a call whose key expression is not concrete MUST be refused with `fanout_forbidden` … |
 | [O3](core.md#51-rules) | owner | core §5.1 Rules | **Owner:** a reply MUST go on the operation's own concrete key, a member's for … |

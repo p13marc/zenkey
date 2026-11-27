@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.115** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.116** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -64,8 +64,10 @@ and §8.
 **Zenoh.** zk2 is specified against Zenoh **1.10.2**. Facts about Zenoh that
 the rules depend on are listed in Appendix B. Each was read in 1.10.2 and in
 1.10.1, whose routers stay in the field, and says where the two differ.
-Where a text names 1.10.1, it says what was read or measured there, and
-1.10.2 does the same unless Appendix B says otherwise. A participant uses
+Where a text names zenoh 1.10.1, it says what was read or measured in
+zenoh's own crates there, and 1.10.2 does the same unless Appendix B says
+otherwise. A binding's release, zenoh-pico's or zenoh-python's, names
+that binding's facts in that release alone. A participant uses
 only stable Zenoh API in the core; unstable features are opt-in and never
 change a key's shape.
 
@@ -432,8 +434,9 @@ not, is §2.7's.
     - **A replay** delivers by time first (below). So it delivers such
       an occurrence before the earlier seq's.
   - **The time** is the owner's clock's, from the deployment epoch
-    (§7.6). It is unknown while §4.3's clock guard holds, as a
-    heartbeat's is, and where the owner does not trust its clock.
+    (§7.6). It is unknown while §4.3's clock guard holds, and where the
+    owner does not trust its clock. A heartbeat's carries the ahead time
+    under the guard (§7.5). An event's has no such code.
   - **A reused run** mints the same keys: a 16-bit run's record restored
     from an earlier state, or two 32-bit draws that collide. A union
     storage then keeps the later occurrence under the earlier one's key,
@@ -1339,6 +1342,11 @@ that held stamp alone.
   - **Never** a snapshot's asof, a Zenoh timestamp, nor another key's
     stamp. A reader that holds nothing for the member sends none, and
     neither does one that holds a value with no envelope.
+  - **A body its user gave it.** A tool's raw GET carries the payload
+    its user gave it, as given. The rule binds the held stamp a reader
+    sends of its own. The user's is no reader's: the tool holds nothing
+    for the member, and merges nothing. What it shows of the answer is
+    [`observer.md`](observer.md) §4.1's.
   - **Why.** A run is never reused, and its seq never wraps (S7). So one
     stamp names one mutation. "Unchanged" names the value a reader holds
     only when the reader holds that mutation.
@@ -1361,11 +1369,13 @@ that held stamp alone.
     again, by the GET. The omission rule's guard reads it so (above): a
     value under another run, heard again after the GET was asked, is
     kept.
-  - **A later value stands.** Where the reader holds another value by
-    then, heard while its GET was out, it keeps that value. An answer
-    never steps a member back.
-  - **Nothing held.** Where the reader holds nothing for the member by
-    then, its GET gave it no value. It reads again, with no held stamp.
+  - **A later value stands.** Where the reader holds another value when
+    the answer arrives, heard while its GET was out, it keeps that
+    value. An answer never steps a member back.
+  - **Nothing held.** Where the reader holds nothing for the member when
+    the answer arrives, its GET gave it no value. It reads again, with
+    no held stamp. A value heard after the answer, before the GET ends,
+    changes nothing of that. `[F: seed/held.json]`
 - **What unchanged does not say.**
   - **A read is one instant.** A mutation the owner makes after it
     answers reaches the reader by its subscription, or at its next read.
@@ -1380,12 +1390,17 @@ that held stamp alone.
   (above). `[F: seed/held.json]` `[Sc: state.md §16]`
   - An owner sends one when the member changed. An owner built before
     this version sends one always.
-- **Across a constrained face** (§8.5), a conditional read saves the
-  value's bytes and no others. The held stamp rides the GET as a payload,
-  which costs its own bytes and 3 more. The reply still carries its key
-  as text, and its replier's id (Appendix B, "A conditional read's
-  bytes"). So it pays for a value larger than what the request grows by.
-  A reader that asks less often saves more.
+- **Across a constrained face** (§8.5), with a 16-bit run, an unchanged
+  answer saves the member's page but for the held stamp. That is its
+  record and 16 bytes more: a page with one entry is 22 bytes over its
+  record, and a held stamp 6 (§7.5).
+  - **What it costs.** The held stamp rides the GET as a payload, which
+    costs its own bytes and 3 more: 9. A changed member's answer saves
+    nothing. The reply still carries its key as text, and its replier's
+    id (Appendix B, "A conditional read's bytes").
+  - **So it pays** where the member is unchanged in more than 9 reads of
+    every 16 + n, n its record's bytes. A reader that asks less often
+    saves more.
 
 A **tool** checks S4 against the routers' storage admin space: [`observer.md`](observer.md) §4.2.
 - **The admin space is off by default** in zenoh 1.10.1 (Appendix B). A
@@ -1436,6 +1451,12 @@ time a profile reads (the table below).
     is durable before the first sample written under each run it issues. It
     moves with the service, since a move changes no key (§1.5). An owner
     that cannot keep such a record draws 32-bit runs.
+  - **A record that is gone.** An owner cannot tell a record it lost
+    from a first start: neither finds one. So the rule above rests on
+    the deployment. A deployment MUST NOT start an owner on a record's
+    path where that owner's record was lost, nor on a record restored
+    from an earlier state. `[Sc: profiles/desired/scenarios-v2.md §6]`
+    It starts such an owner with none, and the owner draws 32-bit runs.
   - **A 32-bit run** is drawn at random. An owner draws one when it keeps
     no record, when its counter is spent at 0xFFFF, and when it is a
     candidate of a governed interface
@@ -1516,9 +1537,10 @@ time a profile reads (the table below).
   | A `health.v1` fault | nothing a reader concludes ([`health.v1`](profiles/health/v1.md) §2.5) | where the owner sets one, as that section allows |
   | Every put of a `redundancy.v1` candidate | which instance is the incumbent ([`redundancy.v1`](profiles/redundancy/v1.md) §2.10) | by the candidate session's HLC, as that section says |
 
-  - **A `desired.v2` desired resource** carries none. Its version is
-    its in-band stamp, and a GET of it is answered by snapshot
-    ([`desired.v2`](profiles/desired/v2.md) §2.4).
+  - **A `desired.v2` desired resource** carries none, unless its
+    contract uses `redundancy.v1`, whose every state the table lists.
+    Its version is its in-band stamp, and a GET of it is answered by
+    snapshot ([`desired.v2`](profiles/desired/v2.md) §2.4).
   - **Minting.** zenoh 1.10.1 keeps `Session::hlc()` internal. So an
     owner mints each such timestamp as the greater of
     `Session::new_timestamp()` and the last it issued plus one tick. Its
@@ -3812,6 +3834,10 @@ facts.
   - A link's batch is the minimum of the configured size, the link's MTU and
     the other end's. Over TCP, the face therefore needs a router configured
     for it.
+  - **One exception** is a 1.10.1 router's QUIC link of mixed
+    reliability. Its best-effort companion runs this end's configured
+    size, whatever the other end's (Appendix B). On 1.10.2 it runs the
+    least of the negotiated batch and a 1,150-byte datagram MTU.
 
   `[Sc: constrained.md §4]`
 - **A deployment SHOULD deny `@stream` keys across the face** unless `link.v1`
@@ -4025,11 +4051,13 @@ epoch, through the catalog the owner names.
   reader counts its times from 0.
 - **Never a guess.** A reader MUST refuse each of these:
   - an id, when it holds neither that catalog nor one whose `lineage`
-    holds it (`unknown_catalog`);
+    holds it (`unknown_catalog`), and so a time counted from its epoch;
   - an index from an owner that names no catalog (`unknown_catalog`);
   - an index at or above the count it reads through (`unknown_index`).
 
-  `[F: catalog/succession.json]`
+  `[F: catalog/succession.json]` What a reader does with a packed record
+  that holds such a time is its profile's to say. `health.v2` §2.6
+  refuses the record whole.
 
 ---
 
@@ -5750,20 +5778,40 @@ Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §7
 **A conditional read's bytes** (§4.2). Computed from zenoh's layouts,
 which zenoh-codec 1.10.2 keeps as 1.10.1's, through the wire baseline's model
 ([`wire-baseline`](../docs/zk2/measurements/wire-baseline/README.md)).
-None was measured:
+No conditional read was measured:
 1. **A query's payload rides an extension:** a byte of header, its
    length, its Encoding, then the payload (zenoh-codec's
    `zenoh/mod.rs:255–328`). Under `zenoh/bytes` that is 3 bytes over a
    payload of up to 126 bytes. So a 6-byte held stamp makes a 12-byte
    request 21 bytes.
-2. **An unchanged reply** on a 59-byte key is 94 bytes. Of them 61 are
-   its key (fact 5 of "Keys across a face") and 20 its replier's id. A
-   6-byte final follows it.
+   - **The 12 bytes** are the request's header and its id (2), the key's
+     scope (1), a QoS extension (2), a target (2), a timeout (3: its
+     header and a 2-byte varint), and the query's header and its
+     consolidation (2). That is the model's `request`, which the bare W2
+     run measured exactly.
+2. **An unchanged reply** on a 59-byte key is 94 bytes:
+   - the response's header and its request id: 2;
+   - its key: 61, a scope, a length and the 59 bytes of text (fact 5 of
+     "Keys across a face");
+   - a QoS extension: 2;
+   - its replier's id: 20, an extension's header and length and 18
+     bytes;
+   - the reply's and the put's headers: 2;
+   - the payload's length and the 6 bytes: 7.
+
+   A final follows it: its header, the request id and a QoS extension.
+   That is 4 bytes with a 1-byte id. The figures below take 6, the final
+   the zk2c W2 run measured.
 3. **A changed reply** is the member's snapshot. For a 44-byte record it
    is a 66-byte page, in a 154-byte reply.
 4. **On zenoh-modem's simulated radio**, under the lean stack, with the
    face's 3-byte frame: the request is a 40-byte SDU. The unchanged
-   reply and its final are 119 bytes, and the changed ones 179.
+   reply and its final are 119 bytes in one SDU, 138 in two, and the
+   changed ones 179 in one.
+   - **`desired.v1`'s re-read** on the same model is 222 bytes: a
+     31-byte request SDU, and a 191-byte SDU holding a 166-byte reply
+     and the final. That reply carries a 44-byte document, an 8-byte
+     envelope and a Zenoh timestamp.
 
 **Measured for the rules above**, each with the rule it serves:
 - **State's and events' QoS** (§2.4): spike S5 lost 10,917 of 100,000
@@ -5855,21 +5903,23 @@ None was measured:
   `a_peers_read_through_a_router_misses_an_unlinked_peers_token`).
 
 **One binding's facts**, which a rule's wording allows for:
-- zenoh-pico 1.10.1 has no session namespaces (§1.6).
+- zenoh-pico 1.10.1 has no session namespaces (§1.6). zenoh-pico 1.10.2
+  was not read.
 - One fragment is 4 KB with zenoh-pico's default `Z_FRAG_MAX_SIZE` (§12,
   the descriptor).
 - A zenoh-pico 1.10.1 owner sent 100 KB replies, so its limit on bundles
-  is on receiving (§12).
+  is on receiving (§12). zenoh-pico 1.10.2 was not measured.
 - zenoh-python builds an NTP64 from seconds and nanoseconds, so its
   smallest step above a timestamp is 1 ns (§4.3, a tick).
-- zenoh-python 1.10.1 has no unbounded handler, so a callback is its way
-  to meet observer §3.1.
-- zenoh-python 1.10.1 marks `Reliability` unstable too, and `Session.put`
-  takes none. Measured by zk2py, a publisher declared without one reads
-  back reliable, with congestion `drop` and priority `data` (§2.4).
+- zenoh-python 1.10.1 and 1.10.2 have no unbounded handler, so a
+  callback is their way to meet observer §3.1.
+- zenoh-python 1.10.1 and 1.10.2 mark `Reliability` unstable too, and
+  `Session.put` takes none. Measured by zk2py, a publisher declared
+  without one reads back reliable, with congestion `drop` and priority
+  `data` (§2.4).
 - In Rust, `Session::config()` reads an open session's interests timeout;
-  zenoh-python 1.10.1 gives an open session no accessor for it (observer
-  §3.3).
+  zenoh-python 1.10.1 and 1.10.2 give an open session no accessor for it
+  (observer §3.3). zk2py read each of these three in both releases.
 
 **What a path drops, and what a reader sees** (§2.7). Measured on
 2026-10-10 by [`scenarios/budget.md`](scenarios/budget.md) §1–§3
