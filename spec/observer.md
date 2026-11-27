@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.36 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.37 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.108 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -1214,8 +1214,9 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
       is not 0 MUST NOT sniff it. It shows it as a packed record, by its
       tag and the record's size in bytes. `[F: envelope/tags.json]`
     - **Tag 0** is sniffed, as any payload whose type the tool does not
-      hold is. A record of any other kind carries 0, and so does one
-      packed type in 16.
+      hold is. A record of any other kind carries 0, and no packed
+      type's does: a contract that declares a packed type at the tag 0
+      is invalid (core §9.2, E051).
   - **A frame** (core §7.7) is read with its frame resource's
     declaration, never as one record of its type: §7.6.
   - **A packed record's `time` fields** are read under the deployment
@@ -1421,7 +1422,7 @@ with the revision chosen in this order. `[F: envelope/tags.json]`
 - **Why the tag.** It is what the sample's own bytes say of its
   revision. A packed type's tag and a frame's check their form, and a
   heartbeat's its revision. Another form or revision still matches it 1
-  time in 16 (core §7.5, §7.6).
+  time in 16, and another packed type 1 time in 15 (core §7.5, §7.6).
 - **A delete** carries no record, so no step reads a tag for it. Its key
   is read with any of the revisions step 1 leaves.
 
