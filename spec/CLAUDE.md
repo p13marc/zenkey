@@ -1057,6 +1057,38 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   after one was acted on (the model sends none). `watch.json` gives its
   one `no_entry` answer no run, which is no verdict only because that
   target holds nothing.
+- **`redundancy.v2`** (#987's N1, text 0.1, `experimental`, written
+  against core 0.118) sits beside `redundancy.v1` in
+  `spec/profiles/redundancy/`: `v2.md`, `scenarios-v2.md`,
+  `conformance/v2/{declarations,descriptors,fences}.json` with a
+  `README.md`, and the one `CHANGELOG.md`, its entries headed
+  `redundancy.v2 0.N`. It restates `redundancy.v1` 0.11 by reference and
+  replaces its stamps: a candidate's session runs without timestamping, a
+  follower accepts a sample only under one of its incumbent's runs (by
+  form: a put's envelope, a delete's attachment, a snapshot's header for
+  every entry, an event's chunk, a reply's as-of mark), holds one it
+  cannot attribute until one read of the descriptors asked after it has
+  ended, and seeds again when its incumbent changes; a governed state is
+  answered by snapshot; §2.2 adds `majors` before v1's reasons and
+  `explicit_stream` after them; no candidate on a first hop (§2.13); a
+  follower of a v1 incumbent reads its `meta.zid` (§2.17). Core 0.118:
+  §4.3's draw and §8.2's step 2 read either major, the posture's
+  exception and §4.3's table row stay v1's, no keyword (298 rules).
+  `freshness.v2` 0.14 and `link.v2` 0.28 cite either major, and
+  `v2/plan.json`'s case 54 (case 25's device on a `redundancy.v2`
+  revision, `presence_required`; 55 cases) was written by reading the
+  text. The fixtures (152 cases: 38 contracts and 16 addresses, 29
+  descriptors, 48 samples, 13 sequences, 8 draws) were computed twice by
+  two scripts of the drafter's (`/srv/dev/scratch/zenkey/py/987-n1/`),
+  never blessed. The model ran every case as written
+  (`zenkey-model/tests/profiles/redundancy_v2.rs`, a runner per file, none
+  able to bless) and all pass, case 54 too, no case, sentence or count
+  moved. What the text leaves to an implementer: the fixture orders a v1
+  incumbent's `no_stamp` before its `meta.zid` not held, and no case has
+  both; a held member's newer value within one run is a strictly higher
+  seq; a presence event decides no held sample (`fences.json`'s
+  sequences say so, §2.10 does not); and a linter's `value` and
+  `disagrees`, v1 §2.2's SHOULD, were warned of by no linter before N1.
 
 **zk2py rounds 116 to 123, answered (#609, #986, #1165).** Core 0.116
 (298 rules: §4.3's new deployment MUST NOT, a run's record that was lost
