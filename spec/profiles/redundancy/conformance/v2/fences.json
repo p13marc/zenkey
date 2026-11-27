@@ -1,0 +1,2623 @@
+{
+  "description": "redundancy.v2 §2.10, §2.17. `samples`: a follower's state and one sample -> what the rule decides. follower.holders are the instances it holds as holding the interface's token, its incumbent the lowest by v1 §2.3's order, none when empty; follower.instances gives, for each instance whose descriptor it read, the major of redundancy its revision uses, every run its descriptors stated (`runs`, as core §3.3 spells a run: 4 or 8 lowercase hexadecimal digits, two spellings two runs), and for a redundancy.v1 revision its meta.zid where read. sample.form is one of core §7.5's: mutation, delete (the attachment), value, error, event, frame, heartbeat, owner_heartbeat, snapshot, held_stamp, with its bytes in hex; an event gives its key's occurrence chunk (`chunk`, core §1.2); none is a sample with no envelope; `stamp` is its Zenoh timestamp's id where it carries one. read_ended says whether a read of the address's descriptors, asked after the sample arrived, has ended, follower.instances being what the follower holds then. expect.run is the sample's run by v2.md §2.10's table (an envelope's, an attachment's, a snapshot's header's, an event's chunk's), null for none. expect.decision is accept, discard or pending, with reason: incumbent (accepted), no_incumbent, no_run, not_incumbent, unattributed (discarded, or pending while no such read has ended), and for a redundancy.v1 incumbent (§2.17, v1 §2.10, by meta.zid compared by value) no_stamp, unattributed where its meta.zid is not held, not_incumbent. The steps, first that holds: no holder; a v1 incumbent; no run; the incumbent's run; another instance's run; unattributed. `sequences`: a follower of redundancy.v2 incumbents, its start (holders, and each instance's runs), and steps in arrival order: a sample ({id, key, kind: state, stream, event or heartbeat, run, seq}, its run null for no envelope), a token held or withdrawn, a descriptor's put heard (or one descriptor read), or the outstanding read's end with the descriptors it read. expect gives for each step, in arrival order: accepted, discarded ({id, reason}), held, superseded (a state member's held value replaced, or a new one not kept: within one run the higher seq is kept, across two the later arrival), and asks_read. The follower asks a read when it holds a sample and none is outstanding, decides each held sample when a descriptor states its run, and at a read's end decides every held one, discarding as unattributed only those that arrived before that read was asked; it then asks the next read if any is still held. It holds a stream's samples, which a follower MAY drop instead. `draws`: a candidate's own run and the runs it read in other instances' descriptors of its address -> whether it draws again (§2.10, a SHOULD): its run, by width and value, among them. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed.",
+  "draws": [
+    {
+      "expect": {
+        "draw_again": false
+      },
+      "note": "another run: no draw",
+      "own": "fabc5f2c",
+      "read": [
+        "8b035ad7"
+      ]
+    },
+    {
+      "expect": {
+        "draw_again": true
+      },
+      "note": "its own run in another instance's descriptor: it draws again before it serves",
+      "own": "fabc5f2c",
+      "read": [
+        "fabc5f2c"
+      ]
+    },
+    {
+      "expect": {
+        "draw_again": false
+      },
+      "note": "0000fabc and fabc are two runs: no draw",
+      "own": "0000fabc",
+      "read": [
+        "fabc"
+      ]
+    },
+    {
+      "expect": {
+        "draw_again": false
+      },
+      "note": "no other descriptor read: no draw",
+      "own": "fabc5f2c",
+      "read": []
+    },
+    {
+      "expect": {
+        "draw_again": true
+      },
+      "note": "its run among several: it draws again",
+      "own": "fabc5f2c",
+      "read": [
+        "8b035ad7",
+        "fabc5f2c"
+      ]
+    },
+    {
+      "expect": {
+        "draw_again": true
+      },
+      "note": "a 32-bit run with leading zeros, stated by another: it draws again",
+      "own": "00005f2c",
+      "read": [
+        "5f2c",
+        "00005f2c"
+      ]
+    },
+    {
+      "expect": {
+        "draw_again": false
+      },
+      "note": "one bit apart: two runs",
+      "own": "fabc5f2c",
+      "read": [
+        "fabc5f2d"
+      ]
+    },
+    {
+      "expect": {
+        "draw_again": false
+      },
+      "note": "three others, none its own",
+      "own": "fabc5f2c",
+      "read": [
+        "8b035ad7",
+        "6a0eddcc",
+        "3edc315e"
+      ]
+    }
+  ],
+  "samples": [
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a mutation under the incumbent's run: accepted",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a mutation under another instance's run, B a standby whose descriptor stated it: discarded",
+      "read_ended": false,
+      "sample": {
+        "bytes": "108b035ad70000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000b",
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a split: the follower follows the lowest holder, A, so B's mutation is discarded (v1 §2.10)",
+      "read_ended": false,
+      "sample": {
+        "bytes": "108b035ad70000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000b",
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a split: A's mutation accepted",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "pending",
+        "reason": "unattributed",
+        "run": "5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a 16-bit run no descriptor states: unattributed, held until a read of the descriptors ends",
+      "read_ended": false,
+      "sample": {
+        "bytes": "005f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "unattributed",
+        "run": "5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "the same once a read asked after it ended: discarded, unattributed",
+      "read_ended": true,
+      "sample": {
+        "bytes": "005f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "pending",
+        "reason": "unattributed",
+        "run": "5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "00005f2c"
+            ]
+          }
+        }
+      },
+      "note": "00005f2c and 5f2c are two runs: runs compare by width and value, so the sample is unattributed",
+      "read_ended": false,
+      "sample": {
+        "bytes": "005f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "5f2c"
+            ]
+          }
+        }
+      },
+      "note": "a 16-bit run the incumbent states: accepted",
+      "read_ended": false,
+      "sample": {
+        "bytes": "005f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a delete's attachment under the incumbent's run: accepted",
+      "read_ended": false,
+      "sample": {
+        "bytes": "30fabc5f2c000007",
+        "form": "delete"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a delete of B's: discarded",
+      "read_ended": false,
+      "sample": {
+        "bytes": "308b035ad7000007",
+        "form": "delete"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a frame under the incumbent's run: accepted",
+      "read_ended": false,
+      "sample": {
+        "bytes": "b2fabc5f2c00002800112233",
+        "form": "frame"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a heartbeat under the incumbent's run: accepted (freshness.v2 §2.5 reads it)",
+      "read_ended": false,
+      "sample": {
+        "bytes": "d3fabc5f2c00000c0301000000000000010000000000000000",
+        "form": "heartbeat"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000b",
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a split: B's heartbeat is no heartbeat of the follower's incumbent, neither a lost delivery nor a divergence",
+      "read_ended": false,
+      "sample": {
+        "bytes": "d38b035ad700000c0301000000000000010000000000000000",
+        "form": "heartbeat"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "an owner heartbeat under the incumbent's run: accepted",
+      "read_ended": false,
+      "sample": {
+        "bytes": "d0fabc5f2c00000d0102030405",
+        "form": "owner_heartbeat"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a snapshot, a GET's reply, by its header's run: accepted with every entry it lists",
+      "read_ended": false,
+      "sample": {
+        "bytes": "f0fabc5f2c000009000000000000000001000000000902613100",
+        "form": "snapshot"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000b",
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a seed during a split: B's snapshot, under B's run, is discarded, every entry with it",
+      "read_ended": false,
+      "sample": {
+        "bytes": "f08b035ad7000004000000000000000001000000000902613100",
+        "form": "snapshot"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a held stamp, a conditional read's answer, under the incumbent's run: accepted",
+      "read_ended": false,
+      "sample": {
+        "bytes": "f0fabc5f2c000009",
+        "form": "held_stamp"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a call's value: the replying instance's as-of mark names the incumbent (§2.10, callers)",
+      "read_ended": false,
+      "sample": {
+        "bytes": "50fabc5f2c0000096f6b",
+        "form": "value"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000b",
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a split: B's error (fanout_forbidden) names B, not the incumbent the caller follows",
+      "read_ended": false,
+      "sample": {
+        "bytes": "708b035ad700000480",
+        "form": "error"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "an event: its run is its key's occurrence chunk's, A's (core §1.2)",
+      "read_ended": false,
+      "sample": {
+        "bytes": "900001e240000778",
+        "chunk": "1ynwbwp00004",
+        "form": "event"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "an event under B's run: discarded",
+      "read_ended": false,
+      "sample": {
+        "bytes": "900001e240000778",
+        "chunk": "12r3bbbg0004",
+        "form": "event"
+      }
+    },
+    {
+      "expect": {
+        "decision": "pending",
+        "reason": "unattributed",
+        "run": "5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "an event whose 16-bit chunk names a run no descriptor states: unattributed",
+      "read_ended": false,
+      "sample": {
+        "bytes": "800001e240000778",
+        "chunk": "bwp00004",
+        "form": "event"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a packed record's mutation, tag 11: the tag takes no part",
+      "read_ended": false,
+      "sample": {
+        "bytes": "1bfabc5f2c0000038040",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "no_run",
+        "run": null
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a sample with no envelope: no run, discarded (it broke core S1, or is an @stream sample)",
+      "read_ended": false,
+      "sample": {
+        "form": "none"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "no_incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "no incumbent seen: nothing new is accepted, the last incumbent's last word held (v1 §2.10)",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "no_incumbent",
+        "run": null
+      },
+      "follower": {
+        "holders": [],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "no incumbent seen comes first",
+      "read_ended": false,
+      "sample": {
+        "form": "none"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "no_incumbent",
+        "run": "5f2c"
+      },
+      "follower": {
+        "holders": [],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "no incumbent seen: an unknown run is not held either",
+      "read_ended": false,
+      "sample": {
+        "bytes": "005f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c",
+              "3edc315e"
+            ]
+          }
+        }
+      },
+      "note": "the incumbent's earlier run, still held: accepted (a follower keeps each run it read)",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "3edc315e"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c",
+              "3edc315e"
+            ]
+          }
+        }
+      },
+      "note": "the incumbent's new run: accepted",
+      "read_ended": false,
+      "sample": {
+        "bytes": "103edc315e0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "pending",
+        "reason": "unattributed",
+        "run": "5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "the incumbent's descriptor not held yet: an unknown run is unattributed",
+      "read_ended": false,
+      "sample": {
+        "bytes": "005f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "the incumbent's descriptor not held, the run another instance's: discarded",
+      "read_ended": false,
+      "sample": {
+        "bytes": "108b035ad70000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "unattributed",
+        "run": "5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "the incumbent's descriptor not held after the read ended: discarded, unattributed",
+      "read_ended": true,
+      "sample": {
+        "bytes": "005f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a",
+          "000000000000000b"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          }
+        }
+      },
+      "note": "two instances state one run, 1 time in 2^32: the incumbent's, by step 3",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000b"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          }
+        }
+      },
+      "note": "the same run, B the incumbent: accepted as B's",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "6a0eddcc"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000c": {
+            "major": 2,
+            "runs": [
+              "6a0eddcc"
+            ]
+          }
+        }
+      },
+      "note": "a run of an instance listing other interfaces only: another instance's, discarded",
+      "read_ended": false,
+      "sample": {
+        "bytes": "106a0eddcc0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000b"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "after a takeover: a write of A's in flight, under A's run, discarded",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000b"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "after a takeover: B's put accepted, its run stated from its claim on",
+      "read_ended": false,
+      "sample": {
+        "bytes": "108b035ad70000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "pending",
+        "reason": "unattributed",
+        "run": "3edc315e"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "the incumbent's new run, its descriptor not heard yet: held",
+      "read_ended": false,
+      "sample": {
+        "bytes": "103edc315e0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "3edc315e"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c",
+              "3edc315e"
+            ]
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "the same once the read ended, the new run read: accepted",
+      "read_ended": true,
+      "sample": {
+        "bytes": "103edc315e0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ],
+            "zid": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a redundancy.v1 incumbent: followed by meta.zid, its sample's stamp its zid (v1 §2.10, §2.17)",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation",
+        "stamp": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ],
+            "zid": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a redundancy.v1 incumbent: a stamp of another session's id, discarded whatever the run",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation",
+        "stamp": "da2b07b8cc340f61cc31dbc32892752b"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "no_stamp",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ],
+            "zid": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a redundancy.v1 incumbent: an unstamped sample, discarded",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "unattributed",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ]
+          }
+        }
+      },
+      "note": "a redundancy.v1 incumbent whose meta.zid is not held: the sample cannot be attributed, discarded, and v1 holds none",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation",
+        "stamp": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ],
+            "zid": "a1b2c3"
+          }
+        }
+      },
+      "note": "zids compare by value: 00a1b2c3 is a1b2c3 (observer §4.4)",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation",
+        "stamp": "00a1b2c3"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ],
+            "zid": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a redundancy.v1 incumbent, a v2 standby's run and a router's stamp: the run is not read, the stamp is no incumbent's",
+      "read_ended": false,
+      "sample": {
+        "bytes": "108b035ad70000036131",
+        "form": "mutation",
+        "stamp": "7f00000000000000000000000000aa01"
+      }
+    },
+    {
+      "expect": {
+        "decision": "accept",
+        "reason": "incumbent",
+        "run": null
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ],
+            "zid": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+          },
+          "000000000000000b": {
+            "major": 2,
+            "runs": [
+              "8b035ad7"
+            ]
+          }
+        }
+      },
+      "note": "a redundancy.v1 incumbent: a sample with no envelope is still read by its stamp",
+      "read_ended": false,
+      "sample": {
+        "form": "none",
+        "stamp": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "not_incumbent",
+        "run": "8b035ad7"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 2,
+            "runs": [
+              "fabc5f2c"
+            ]
+          },
+          "000000000000000b": {
+            "major": 1,
+            "runs": [
+              "8b035ad7"
+            ],
+            "zid": "da2b07b8cc340f61cc31dbc32892752b"
+          }
+        }
+      },
+      "note": "a redundancy.v2 incumbent, a v1 standby's sample: by run, discarded",
+      "read_ended": false,
+      "sample": {
+        "bytes": "108b035ad70000036131",
+        "form": "mutation",
+        "stamp": "da2b07b8cc340f61cc31dbc32892752b"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "no_incumbent",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ],
+            "zid": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+          }
+        }
+      },
+      "note": "no incumbent seen, whatever the majors",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation",
+        "stamp": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+      }
+    }
+  ],
+  "sequences": [
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [
+            "s1"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "an incumbent's new run, its descriptor's put not heard yet: the sample is held, one read asked, and accepted when the read ends (§2.10, scenarios §14)",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "3edc315e",
+            "seq": 0
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "3edc315e"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [
+            {
+              "id": "s1",
+              "reason": "unattributed"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a run no descriptor states, a forged put: held, then discarded when the read ends",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 0
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "fabc5f2c"
+              },
+              {
+                "instance": "000000000000000b",
+                "run": "8b035ad7"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [
+            "s1"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "the descriptor's put heard before the read ends decides the sample at once; the read's end decides nothing more",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "3edc315e",
+            "seq": 0
+          }
+        },
+        {
+          "descriptor": {
+            "instance": "000000000000000a",
+            "run": "3edc315e"
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "3edc315e"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [
+            "s2"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [
+            {
+              "id": "s1",
+              "reason": "unattributed"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [
+            "s2"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "one read at a time: a sample that arrives while a read runs waits for the next one, asked as the first ends",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 0
+          }
+        },
+        {
+          "sample": {
+            "id": "s2",
+            "key": "limit",
+            "kind": "state",
+            "run": "0e44b1f8",
+            "seq": 0
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "fabc5f2c"
+              }
+            ]
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "0e44b1f8"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": [
+            "s2"
+          ]
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [
+            "s3"
+          ],
+          "superseded": [
+            "s1"
+          ]
+        },
+        {
+          "accepted": [
+            "s3"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a member's one held value, within one run: the higher seq",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 5
+          }
+        },
+        {
+          "sample": {
+            "id": "s2",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 3
+          }
+        },
+        {
+          "sample": {
+            "id": "s3",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 7
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "71c9e0a4"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [
+            "s2"
+          ],
+          "superseded": [
+            "s1"
+          ]
+        },
+        {
+          "accepted": [
+            "s2"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a member's one held value, across two runs: the later arrival",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 9
+          }
+        },
+        {
+          "sample": {
+            "id": "s2",
+            "key": "balance",
+            "kind": "state",
+            "run": "0e44b1f8",
+            "seq": 1
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "0e44b1f8"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [
+            "s2"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [
+            "s3"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [
+            "s1",
+            "s2",
+            "s3"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a stream's samples are each held (a follower MAY drop them instead), and two members' values apart",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "entries",
+            "kind": "stream",
+            "run": "71c9e0a4",
+            "seq": 0
+          }
+        },
+        {
+          "sample": {
+            "id": "s2",
+            "key": "entries",
+            "kind": "stream",
+            "run": "71c9e0a4",
+            "seq": 1
+          }
+        },
+        {
+          "sample": {
+            "id": "s3",
+            "key": "limit",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 4
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "71c9e0a4"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "e1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [
+            "h1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [
+            {
+              "id": "e1",
+              "reason": "not_incumbent"
+            },
+            {
+              "id": "h1",
+              "reason": "not_incumbent"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "an event and a heartbeat held, then found another instance's when the read ends",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "e1",
+            "key": "events/tick",
+            "kind": "event",
+            "run": "71c9e0a4",
+            "seq": 2
+          }
+        },
+        {
+          "sample": {
+            "id": "h1",
+            "key": "freshness.v2/stream/heartbeat/ledger.v1",
+            "kind": "heartbeat",
+            "run": "71c9e0a4",
+            "seq": 3
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "fabc5f2c"
+              },
+              {
+                "instance": "000000000000000b",
+                "run": "71c9e0a4"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [
+            {
+              "id": "s1",
+              "reason": "no_incumbent"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [
+            "s2"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [
+            {
+              "id": "s3",
+              "reason": "not_incumbent"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a takeover seen by a follower: the new incumbent's put before its token is discarded, after it accepted; the last incumbent's late write discarded",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ],
+          "000000000000000b": [
+            "8b035ad7"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "token": {
+            "held": false,
+            "instance": "000000000000000a"
+          }
+        },
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "8b035ad7",
+            "seq": 0
+          }
+        },
+        {
+          "token": {
+            "held": true,
+            "instance": "000000000000000b"
+          }
+        },
+        {
+          "sample": {
+            "id": "s2",
+            "key": "balance",
+            "kind": "state",
+            "run": "8b035ad7",
+            "seq": 1
+          }
+        },
+        {
+          "sample": {
+            "id": "s3",
+            "key": "balance",
+            "kind": "state",
+            "run": "fabc5f2c",
+            "seq": 8
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [
+            {
+              "id": "s2",
+              "reason": "no_incumbent"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [
+            {
+              "id": "s1",
+              "reason": "no_incumbent"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a held sample whose incumbent goes before the read ends: decided then, with no incumbent seen",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 0
+          }
+        },
+        {
+          "token": {
+            "held": false,
+            "instance": "000000000000000a"
+          }
+        },
+        {
+          "sample": {
+            "id": "s2",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 1
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "71c9e0a4"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [
+            {
+              "id": "s1",
+              "reason": "not_incumbent"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a held sample attributed by another instance's descriptor put: discarded at once",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 0
+          }
+        },
+        {
+          "descriptor": {
+            "instance": "000000000000000b",
+            "run": "71c9e0a4"
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000b",
+                "run": "71c9e0a4"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s1"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [
+            "s1"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a held sample whose run turns out the new incumbent's: the incumbent changed while the read ran",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": "8b035ad7",
+            "seq": 0
+          }
+        },
+        {
+          "token": {
+            "held": false,
+            "instance": "000000000000000a"
+          }
+        },
+        {
+          "token": {
+            "held": true,
+            "instance": "000000000000000b"
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000b",
+                "run": "8b035ad7"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "expect": [
+        {
+          "accepted": [],
+          "asks_read": false,
+          "discarded": [
+            {
+              "id": "s1",
+              "reason": "no_run"
+            }
+          ],
+          "held": [],
+          "superseded": []
+        },
+        {
+          "accepted": [],
+          "asks_read": true,
+          "discarded": [],
+          "held": [
+            "s2"
+          ],
+          "superseded": []
+        },
+        {
+          "accepted": [
+            "s2"
+          ],
+          "asks_read": false,
+          "discarded": [],
+          "held": [],
+          "superseded": []
+        }
+      ],
+      "note": "a sample with no envelope is never held",
+      "start": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "runs": {
+          "000000000000000a": [
+            "fabc5f2c"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "sample": {
+            "id": "s1",
+            "key": "balance",
+            "kind": "state",
+            "run": null,
+            "seq": 0
+          }
+        },
+        {
+          "sample": {
+            "id": "s2",
+            "key": "balance",
+            "kind": "state",
+            "run": "71c9e0a4",
+            "seq": 0
+          }
+        },
+        {
+          "read_ends": {
+            "descriptors": [
+              {
+                "instance": "000000000000000a",
+                "run": "71c9e0a4"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
