@@ -621,6 +621,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   each service's `owner_heartbeat` (`ServiceSpec`, false when absent, no
   grant moved), so a link.v1 face's plan warns `owner_heartbeat_denied`
   (`model::acl`'s `an_owner_heartbeat_behind_a_link_v1_face_is_warned_of`).
+  `check_face` copies the plan's words into `FaceCheck::{warnings,
+  face_warnings, refusals}` (#1173): the plan's own, each face plan's
+  `findings` in the plan's order, and its refusals; no judgement reads
+  them, and the same test passes the plan's own block beside the warning.
   And
   `far_json5` names the far principal's user inside `transport`
   (`auth.usrpwd.user`, its `password` and `dictionary_file` placeholders,
