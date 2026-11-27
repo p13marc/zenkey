@@ -6,7 +6,7 @@ A contract's ``[schemas]`` lists JSON Schema, protobuf and, since core 0.75
 Schema or packed document, the FileDescriptorSet bytes of a protobuf file.
 This module loads them, reports the per-file lints (E024 stems and ids, E028
 at load, E029, E032, E037, and a packed file's E038 to E043 and E045,
-:mod:`zk2py.packed`), and resolves type references (E023, E024).
+and E051 in a file without E028, :mod:`zk2py.packed`), and resolves type references (E023, E024).
 """
 
 from __future__ import annotations
@@ -242,6 +242,11 @@ class SchemaSet:
         linted = packed.lint(doc, listed)
         for code, where in linted.findings:
             self._err(code, where)
+        # §9.2 E051 (core 0.117), cascade 7: "E051 reads a type with none of
+        # E038 to E045, in a file without E028."
+        if not big:
+            for code, where in packed.tag_zero(linted, listed):
+                self._err(code, where)
         self.packed_read[listed] = linted
         self.packed_files.append(Artifact(PACKED, stem(listed), art_id, doc, listed))
 
