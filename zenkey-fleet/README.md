@@ -215,11 +215,11 @@ does (its README lists what the runtime opts into, and why). A tool
 reads more of a session than an owner does, and the fleet's library
 code opts into these, each where `spec/observer.md` names it:
 
-| Unstable in zenoh 1.10.1 | Where | Why |
+| Unstable in zenoh 1.10.1 and 1.10.2 | Where | Why |
 |---|---|---|
 | `Reply::replier_id` | `bus::admin`, `tape::snapshot` | Which node sent an admin-space answer, whatever key it is on: S4's check against the admin space verifies an answer by it (observer §4.2). |
 | `SessionInfo::transport_events_listener`, `TransportEventsListener` | `bus::stall` | A window's reader watching its own receive path: a router that gave up on it closes its transport (core §2.7, observer §5.2). |
-| `Sample::source_info`, `SourceInfo::source_id`, `SourceInfo::source_sn` | `bus::monitor` | The publishing entity and its sample number, where a sample carries them, for the monitor's gap count and a recording's source (zenoh 1.10.1 delivers none to a subscriber, and the tools say so). |
+| `Sample::source_info`, `SourceInfo::source_id`, `SourceInfo::source_sn` | `bus::monitor` | The publishing entity and its sample number, where a sample carries them, for the monitor's gap count and a recording's source (zenoh 1.10.1 and 1.10.2 deliver none to a subscriber, and the tools say so). |
 | `Sample::reliability`, `PublicationBuilder::reliability` | `bus::monitor`, `bus::write` | A sample's QoS axes, as a `.zrec` row records them, and a foreign key written on the axes it is asked for. |
 | `Config::from_file` of a `.toml` file | `bus::session` | zenoh reads a TOML config file only under `unstable`, and a tool's `--zenoh-config` may be one. |
 

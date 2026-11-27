@@ -5489,7 +5489,7 @@ fn admin_unreachable(obs: &DoctorObservation) -> CheckReport {
 }
 
 /// Every router's version, as its admin document states it: the core
-/// relies on zenoh 1.10.1's behaviour (Appendix B).
+/// relies on zenoh 1.10.2's behaviour, read beside 1.10.1's (Appendix B).
 fn router_version_skew(obs: &DoctorObservation) -> CheckReport {
     const C: CheckId = CheckId::RouterVersionSkew;
     let a = match admin_of(obs, C) {
@@ -5517,8 +5517,8 @@ fn router_version_skew(obs: &DoctorObservation) -> CheckReport {
             DoctorSeverity::Warning,
             "mesh",
             format!(
-                "the routers run {}: the core relies on zenoh 1.10.1's behaviour (Appendix B), \
-                 which a mixed mesh may not hold",
+                "the routers run {}: the core relies on zenoh 1.10.2's behaviour, read beside \
+                 1.10.1's (Appendix B), which a mixed mesh may not hold",
                 versions
                     .iter()
                     .map(|(v, zids)| format!("{v} ({})", zids.join(", ")))
