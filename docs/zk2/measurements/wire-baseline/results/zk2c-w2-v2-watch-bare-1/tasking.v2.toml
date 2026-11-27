@@ -1,0 +1,21 @@
+# desired.v2's scenarios (#986), as `spec/profiles/desired/scenarios-v2.md`
+# states the contract: a task per worker, state of its author, keyed by the
+# worker's system and service. Its version is its put's in-band stamp, so it
+# carries no Zenoh timestamp and a GET of it is answered by snapshot
+# (desired.v2 §2.4). "tasking.v2, watched" is this file with
+# `"freshness.ttl_s" = 4` (§14).
+[interface]
+name  = "tasking"
+major = 2
+minor = 0
+uses  = ["desired.v2", "freshness.v2"]
+
+[schemas]
+jsonschema = ["tasking.json"]
+
+[resources."tasks/{system}/{service}"]
+kind        = "state"
+type        = "json:Task"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 600 }

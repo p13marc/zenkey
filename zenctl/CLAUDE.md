@@ -416,7 +416,19 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   snapshot, since no trycmd case reaches a bus. With its author absent
   and no revision of the author's interface in hand, a `desired.v2` role
   has no slice, so no archive's last-known is shown: `--contracts` gives
-  the revision (§9 step 4 runs both ways). #841's RC added `redundancy [SYSTEM/SERVICE] [--iface]
+  the revision (§9 step 4 runs both ways). #986's J5 added `desired
+  --across-face --role R --author A | --unbound [--param N=self.*]
+  [--face-policy F --face N]` (desired.v1 §2.14, §2.17 step 2; observer
+  §7.5): the engine's `DesiredSpec::face`, a `DesiredFaceWord` built by
+  `of_contracts` (the parameters in the author's declaration's order,
+  one target parameter never guessed), no presence read, the target's nor
+  its author's, the revisions `--contracts` holds, and with a face
+  policy every read floored at its `reply_timeout_ms`
+  (`FarSide::at_least`, as `call` floors its contract's timeout).
+  `desired_across_a_face_takes_the_deployments_word` runs it live (the
+  floor by a report put back 2 s late), the refusals are
+  `across-face.trycmd`'s, and #989's W2 harness reads its device's
+  target with it (`measure-w2.sh` `V2=1`). #841's RC added `redundancy [SYSTEM/SERVICE] [--iface]
   [--grace] [--across-face] [--contracts]`, a root judgement beside
   `health`: exit 1 on a split, a twin or a lasting vacancy; 0 when each
   governed interface has one incumbent and every instance is accounted

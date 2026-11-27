@@ -42,6 +42,24 @@ interface's heartbeat. The catalog lists the device's revisions that have a
 collection; gen, whose gendev.v1 has none, runs as before. The host's probes
 inside the cut read through the same catalog.
 
+With --v2 (#986's J5 and #984's S4, with --zk2c) the device's desired target and
+its alarms are on their v2 profiles, and nothing else changes:
+- the device is `owner --alarms-v2 --desired-v2 --desired-timeout-ms 15000 …
+  w2rules.v1.toml` (--rules): its alarms are packed records written by
+  w2rules.v1's table (alarms.v2 §4), and each of its re-reads is a conditional
+  read (desired.v2 §2.5) that waits rf0's 15-s reply timeout, where the 1-s
+  default lost some (README, "W2 zk2c");
+- the author is `owner --desired-author --desired-v2`, a 16-bit run with
+  --run-files;
+- with --desired-ttl S both take "tasking.v2, watched" at that horizon: the
+  author sends a heartbeat, and the target reads when its section moves, in
+  place of its 300-s period (desired.v2 §2.5);
+- the acts are W2's, and around them: a refresh of `hot`, a change of the
+  device's document, the host's `zenctl desired --across-face` of it, and a
+  late joiner's `zenctl alarms --across-face granted` with three alarms firing,
+  then with none after the three are resolved ("nothing fires", alarms.v2
+  §2.15). Each probe's JSON is LOGS/<act>-<i>.json.
+
 With --watch (the honesty run of the same; it needs --health-contract) the
 host also reads health.v1's status as a consumer does, from the device's
 ready line to the end: `zenctl watch … state/status --across-face`, once
@@ -81,6 +99,18 @@ ALARMS = [
     {"rule": "link_degraded", "severity": "info", "summary": "Link margin low"},
 ]
 TRANSIENT = {"rule": "door_open", "severity": "critical", "summary": "Enclosure door open"}
+# --v2: the same alarms, by w2rules.v1's table (alarms.v2 §4). A table's rule writes its own
+# summary, and `hot` carries its reading as its argument, so a new reading at one severity is
+# a refresh (§2.5). No label: W2's usual record is a table's rule with none.
+ALARMS_V2 = [
+    {"rule": "hot", "severity": "warning", "summary": "Temperature high", "reading": "45.0"},
+    {"rule": "battery_low", "severity": "warning", "summary": "Battery low"},
+    {"rule": "link_degraded", "severity": "info", "summary": "Link margin low"},
+]
+REFRESH_V2 = {"rule": "hot", "severity": "warning", "summary": "Temperature high",
+              "reading": "46.5"}
+DOCUMENT = {"revision": 1, "mode": "run", "rate_hz": 5}
+CHANGED = {"revision": 2, "mode": "run", "rate_hz": 2}
 
 
 class Owner:
@@ -157,7 +187,19 @@ def main():
     ap.add_argument("--watch", action="store_true",
                     help="with --zk2c: the host watches health.v1's status and reads health (above)")
     ap.add_argument("--health-contract", help="with --watch: health.v1's contract")
+    ap.add_argument("--v2", action="store_true",
+                    help="with --zk2c: desired.v2 and alarms.v2 (above)")
+    ap.add_argument("--rules", help="with --v2: the device's alarms.rules contract")
+    ap.add_argument("--desired-ttl", type=int, default=0,
+                    help="with --v2: tasking.v2's horizon, seconds; above 0 the target watches")
+    ap.add_argument("--desired-timeout-ms", type=int, default=15_000,
+                    help="with --v2: each of the target's reads waits this (rf0's reply timeout)")
+    ap.add_argument("--tasking", help="with --v2: tasking.v2's contract, for the host's probe")
+    ap.add_argument("--worker", help="with --v2: worker.v2's contract, for the host's probe")
+    ap.add_argument("--alarms-contract", help="with --v2: alarms.v2's standard contract")
     a = ap.parse_args()
+    if a.v2 and not (a.zk2c and a.rules and a.tasking and a.worker and a.alarms_contract):
+        ap.error("--v2 needs --zk2c, --rules, --tasking, --worker and --alarms-contract")
     if a.owner_heartbeat and not (a.zk2c and a.catalog):
         ap.error("--owner-heartbeat needs --zk2c and --catalog")
     if a.watch and not (a.zk2c and a.health_contract):
@@ -171,10 +213,15 @@ def main():
         acts.write(json.dumps({"t": marks[name], "mark": name, **kw}) + "\n")
         print(f"mark {name} {time.strftime('%H:%M:%S')}", flush=True)
 
-    author = Owner("author", [a.owner, "--connect", a.host_connect, "--desired-author",
-                              "--desired-record", f"{a.logs}/author-record.json", AUTHOR], a.logs)
+    v2 = []
+    if a.v2:
+        v2 = ["--desired-v2", *(["--desired-ttl", str(a.desired_ttl)] if a.desired_ttl else [])]
+    author_runs = ["--run-file", f"{a.logs}/author.run"] if a.v2 and a.run_files else []
+    author = Owner("author", [a.owner, "--connect", a.host_connect, "--desired-author", *v2,
+                              *author_runs, "--desired-record", f"{a.logs}/author-record.json",
+                              AUTHOR], a.logs)
     author.wait("ready", 60)
-    author.send(f'desired put {DEVICE} {{"revision": 1, "mode": "run", "rate_hz": 5}}')
+    author.send(f"desired put {DEVICE} {json.dumps(DOCUMENT)}")
     author.wait("desired put", 30)
     runs = []
     if a.zk2c and a.run_files:
@@ -184,7 +231,12 @@ def main():
     catalog = ["--catalog", a.catalog] if a.zk2c and a.catalog else []
     if a.owner_heartbeat:
         runs += [*catalog, "--owner-heartbeat"]
-    if a.zk2c:
+    if a.v2:
+        device = Owner("device", [a.owner, "--connect", a.device_connect, "--health", "--alarms-v2",
+                                  "--config-v2", "--desired-target", AUTHOR, *v2, "--desired-watch",
+                                  "--desired-reread-ms", "300000", "--desired-timeout-ms",
+                                  str(a.desired_timeout_ms), *runs, DEVICE, a.rules], a.logs)
+    elif a.zk2c:
         device = Owner("device", [a.owner, "--connect", a.device_connect, "--health", "--alarms",
                                   "--config-v2", "--desired-target", AUTHOR, "--desired-watch",
                                   "--desired-reread-ms", "300000", *runs, DEVICE], a.logs)
@@ -238,7 +290,7 @@ def main():
                                stdin=subprocess.DEVNULL, stdout=open(f"{a.logs}/gen.out", "w"),
                                stderr=open(f"{a.logs}/gen.err", "w"))
         mark("gen_start")
-    for alarm in ALARMS:
+    for alarm in ALARMS_V2 if a.v2 else ALARMS:
         device.send("alarm raise " + json.dumps(alarm))
 
     values = {k: v[0] for k, v in GAUGES.items()}
@@ -307,12 +359,55 @@ def main():
         ("config", lambda: config_set(5000)),
         ("config", lambda: config_set(10000)),
     ]
+    if a.v2:
+        plan = [
+            ("health", lambda: device.send("status DEGRADED battery low")),
+            ("health", lambda: device.send("status OK")),
+            ("alarm_raise", lambda: device.send("alarm raise " + json.dumps(TRANSIENT))),
+            ("alarm_refresh", lambda: device.send("alarm raise " + json.dumps(REFRESH_V2))),
+            ("alarm_resolve", lambda: device.send("alarm resolve " + raised(3))),
+            ("desired_change", lambda: author.send(f"desired put {DEVICE} {json.dumps(CHANGED)}")),
+            ("probe_desired", lambda: host_probe("probe_desired", desired_probe)),
+            ("probe_alarms", lambda: host_probe("probe_alarms", alarms_probe)),
+            *[("alarm_resolve", lambda i=i: device.send("alarm resolve " + raised(i)))
+              for i in range(3)],
+            ("probe_alarms", lambda: host_probe("probe_alarms", alarms_probe)),
+            ("config", lambda: config_set(5000)),
+            ("config", lambda: config_set(10000)),
+        ]
 
     def transient_key():
         for line in device.lines:
             if line.startswith("alarm raised") and "door_open" in line:
                 return line.split()[2]
         return "unknown"
+
+    def raised(i):
+        """The alert key of the i-th alarm raised, in the order raised: each command is
+        answered by one line, in order, and a table's rule's answer names no rule."""
+        keys = [line.split()[2] for line in device.lines if line.startswith("alarm raised")]
+        return keys[i] if i < len(keys) else "unknown"
+
+    # The host's tools as a ground operator reads the device across the link (core §8.5):
+    # the deployment's word for presence, the revisions in hand.
+    desired_probe = [a.zenctl, "desired", DEVICE, "--across-face", "--role", "task",
+                     "--author", AUTHOR, "--contracts", a.worker, "--contracts", a.tasking or ""]
+    # One host's clocks: the deployment's word that they agree, so a firing entry is aged by
+    # its confirmation (freshness.v2 §2.6), as the zk2c probes take it.
+    alarms_probe = [a.zenctl, "alarms", f"zk2/{DEVICE}/alarms.v2/state/alarms/*",
+                    "--across-face", "granted", "--clocks-synced", "--contracts",
+                    a.alarms_contract or "", "--contracts", a.rules or ""]
+    probes = {"n": 0}
+
+    def host_probe(name, argv):
+        probes["n"] += 1
+        out = subprocess.run(argv + ["--namespace", "", "-c", a.host_connect, "--timeout",
+                                     str(a.config_timeout_s), "--format", "json"],
+                             capture_output=True, text=True, timeout=120)
+        stem = f"{a.logs}/{name}-{probes['n']}"
+        open(f"{stem}.json", "w").write(out.stdout)
+        open(f"{stem}.err", "w").write(out.stderr)
+        return {"exit": out.returncode, "stderr": out.stderr[-400:]}
 
     def run_acts(acts_plan, first):
         t = next_tick(time.time(), 4)

@@ -17,7 +17,11 @@ end, in both directions, on zenoh-modem's media as a lab simulates them:
   ([below](#w1-73-at-lora-sf9-and-sf12));
 - **W2 with owner heartbeats** (2026-11-21, #1110): W2 zk2c on RF again, its
   owner confirming its three interfaces by one owner heartbeat
-  ([below](#w2-with-owner-heartbeats-1110)).
+  ([below](#w2-with-owner-heartbeats-1110));
+- **W2 with desired.v2 and alarms.v2** (2026-11-27, #986's J5, #984's S4):
+  W2 zk2c on RF again, its desired target on desired.v2, by its period and by
+  the watch, and its alarms on alarms.v2
+  ([below](#w2-with-desiredv2-and-alarmsv2-986s-j5-984s-s4)).
 
 SBD is not measured. Every figure is a day, extrapolated from a window of 10
 to 45 minutes, or of one and two hours at SF9 and SF12 under zk2c, and every
@@ -638,6 +642,9 @@ its section says what differs.
 | `zk2c-w2-bare-2` (2026-11-21, #1110) | RF, no face, no layers; the device sends owner heartbeats | as `zk2c-w2-bare-1` | 32-bit |
 | `zk2c-w2-lean-2` (2026-11-21, #1110) | RF, no face, lean (`w2.zdict`); the device sends owner heartbeats | as `-bare-1` | 16-bit |
 | `zk2c-w2-owner-honesty-1` (2026-11-21, #1110) | RF, no face, no layers; owner heartbeats, and the host's `watch` and `health` | steady 1,200 s, the acts, a 245-s cut | 32-bit |
+| `zk2c-w2-v2-bare-1` (2026-11-27, #986, #984) | RF, no face, no layers; desired.v2 by its 300-s period, alarms.v2 | as `zk2c-w2-bare-1`, the v2 acts and the host's probes among the acts | 16-bit |
+| `zk2c-w2-v2-watch-bare-1` (2026-11-27) | the same, desired.v2 by the watch, tasking.v2 at a 600-s horizon | the same | 16-bit |
+| `zk2c-w2-v2-lean-1` (2026-11-27) | RF, no face, lean (`w2.zdict`); desired.v2 by its period, alarms.v2 | the same | 16-bit |
 
 ### The idle link at link.v2's transport
 
@@ -1172,6 +1179,160 @@ The device put 61 owner heartbeats. The relay dropped 4 at the medium's 5 %
      owner vouched for every 28.5 s read unconfirmed for ten periods. This
      is the reference's reader on this link, not the layout: finding 12.
 
+### W2 with desired.v2 and alarms.v2 (#986's J5, #984's S4)
+
+Run 2026-11-27, from zenkey at 0cd0f6ba (`git describe` 0.14.0-2438-g0cd0f6ba:
+main at a438f8b2 with `zenctl desired --across-face`), release builds,
+zenoh 1.10.1, with the same fork, drivers and path. W2 zk2c again, as
+`zk2c-w2-bare-1` and `zk2c-w2-lean-1` ran it (`rf-zk2c`, no face, the same
+windows and loss), with the device's desired target and its alarms on their
+v2 profiles (`measure-w2.sh`'s `V2=1`), every owner on a 16-bit run:
+
+- **The device** is `owner --health --alarms-v2 --config-v2 --desired-target
+  fleet/desired --desired-v2 --desired-watch --desired-reread-ms 300000
+  --desired-timeout-ms 15000 --run-file … h-3fa9c2d41b7e/rf0
+  contracts/w2rules.v1.toml`.
+  - Its alarms are written by
+    [`contracts/w2rules.v1.toml`](contracts/w2rules.v1.toml)'s table
+    (alarms.v2 §4): W2's four rules, `hot` with its reading as its argument,
+    none with a label, so each record is the profile's usual 9 B.
+  - Each read of its slice waits 15 s, rf0's `reply_timeout_ms`, where the
+    1-s default lost 4 of 12 GETs in `zk2c-w2-bare-1` (desired.v2 §2.5).
+- **The author** is `owner --desired-author --desired-v2 --run-file …`, on
+  router B. In `zk2c-w2-v2-watch-bare-1` both take `--desired-ttl 600`,
+  "tasking.v2, watched": the author sends a heartbeat toward the target, and
+  the target reads when its section moves, in place of its period (§2.5).
+- **The far readers** read alarms.v2's standard contract and worker.v2, each
+  resource by its exact key, as before.
+- **The acts** are W2's two health changes, then `door_open` raised, `hot`
+  refreshed (a new reading at one severity), `door_open` resolved, a change of
+  the device's document, and the host's probes across the link, each a
+  `zenctl` session on router B with the deployment's word for presence:
+  - `zenctl desired h-3fa9c2d41b7e/rf0 --across-face --role task --author
+    fleet/desired --contracts worker.v2.toml --contracts tasking.v2.toml`;
+  - a late joiner, `zenctl alarms 'zk2/h-3fa9c2d41b7e/rf0/alarms.v2/state/alarms/*'
+    --across-face granted --clocks-synced --contracts alarms.v2.toml --contracts
+    w2rules.v1.toml`, with three alarms firing, then again once the three are
+    resolved.
+
+  Then the cut and the two config sets, as before.
+
+Every figure below is the bare runs' decode, message by message, on 16-bit
+runs, with the lean stack's 16 B an SDU added for "lean", the basis the designs
+priced (#986's memo §1.3 and §5, #984's §1.2 and §4, computed through Appendix
+A). Appendix A §10 asserts each.
+
+#### desired.v2
+
+| desired.v2 | Measured, bare | Lean | The design |
+|---|---|---:|---:|
+| a conditional re-read's request, A->B | a 21-B request (the held stamp, 6 B, in its payload), in a 24-B SDU | 40 B | 21 B, 40 B |
+| its answer, unchanged, B->A | a 94-B reply, the held stamp alone, and a 4-B final, in one 101-B SDU | 117 B | 94 + 6 B, 119 B |
+| a re-read | | **157 B** | 159 B |
+| re-reads every 300 s, a day | 7 in the window, 6 answered unchanged; the relay dropped the 7th's answer, and its GET ended at 15 s, no verdict | **45.2 KB** | 45.8 KB |
+| the watch: the author's heartbeat, B->A, a 600-s horizon | a 17-B payload, a 21-B put, a 24-B SDU, every 285 s: 7 in the window | **11.5 KB** a day, 12.1 KB at the rate | 17 B, 40 B, 12.1 KB |
+| the watch's reads | none while the section stayed put; one at the first heartbeat after the target's start, which expects none then; none after the change of document | 157 B a read | at most one a heartbeat |
+| the report, converged | an 18-B payload (a 12-B record), a 24-B put | 43 B alone in its SDU | 18 B, 43 B |
+| the report at the baseline | a 9-B payload (a 3-B record) | | 9 B |
+| a change of document | the author's put, B->A, a 59-B SDU; the target's report and its `running`, A->B, 27 B and 54 B bare | 75 B down; 43 B and 70 B up | the report's 43 B |
+
+- **The design held, to 2 bytes a re-read.** Of the unchanged reply's 94 B,
+  61 are its key and 20 its replier's id, as the design said. Its final is
+  4 B and rides the reply's SDU, where the design took the 6-B final of
+  desired.v1's re-read in `zk2c-w2-bare-1`. So a re-read is 157 B, not 159,
+  and the period 45.2 KB a day, 1.3 % under the design and 29 % under
+  desired.v1's GET, 63.9 KB by Appendix A's measured anatomy.
+- **The watch is its author's heartbeat.** The window held 7 of the 7.4 a
+  285-s period gives, within one put, as for #1110's owner heartbeat. The
+  target read once, at its first heartbeat: it starts expecting no section
+  (§2.5's rule, step 6), and the read was answered unchanged. From then on no
+  heartbeat moved its section, and nothing was read.
+- **A change of document costs the watch nothing.** The target admitted the
+  author's put heard live and moved the digest it expects itself, the MAY of
+  §2.5: the next heartbeat's section was the one it expected, and no read
+  followed.
+- **Not measured: a lost heartbeat.** None of the 7 was lost. Each lost one
+  leaves the next out of sequence, so the target reads once (§2.5, step 3): at
+  RF's 5 %, 15 of 303 heartbeats a day, 2.4 KB more, 14.5 KB with the 12.1.
+  The design priced no loss.
+- **The wait held.** Every read waited 15 s. Each answer that crossed did
+  within the second, and none crossed after its GET had ended: the one GET
+  that ended at its timeout had lost its answer on the air, and the next
+  period's read was answered (core O5).
+
+#### alarms.v2
+
+| alarms.v2 | Measured, bare | Lean | The design |
+|---|---|---:|---:|
+| a raise, a refresh, a resolve | a 15-B payload (a 9-B record), a 24-B put, a 29-B SDU on the 5-byte frame of `interactive_high`, 9 of 9 decoded alike | **45 B** | 15 B, 24 B, 45 B |
+| W2's 5 raised and 5 resolved, a day | | **0.45 KB** | 0.45 KB |
+| the alarms' heartbeat, 3 firing | a 17-B payload in a 24-B SDU, every 427.5 s: 5 in the window | 40 B, **8.2 KB** a day, 8.1 KB at the rate | 17 B, 40 B, 8.1 KB |
+| a late joiner's GET, 3 firing and the transient's resolved record kept | a 20-B request; the alarms' snapshot, a 160-B reply in a 163-B SDU; the words' snapshot, holding none, an 89-B reply and the 4-B final in a 96-B SDU | 36 B up, **179 + 112 B** down | 163 B in one SDU, for 3 firing |
+| the same, all four resolved | the alarms' snapshot a 178-B reply | 197 + 112 B down | |
+
+- **Every transition is the design's, byte for byte.** The 5-byte frame and
+  the 2-byte suffix `/<slot>` it inferred from alarms.v1's totals are what
+  the decode shows. A resolve is one put: no delete followed.
+- **The alarms' snapshot is the design's too.** 138 B for three firing, 22 B
+  for each resolved record kept and 16 B for each firing one: 160 B with the
+  transient's kept, 178 B with all four resolved.
+- **The design did not price the words' snapshot.** A reader GETs
+  `…/alarms.v2/state/**`, as it must to read an alarm by words, and the owner
+  answers each collection by a snapshot (core §4.2). The words' collection,
+  empty since every alarm is a table's, still answers one: 89 B, most of it its
+  key's text and the replier's id, in a second SDU. A late joiner's read is
+  36 B up and 291 B down under the lean stack, where the design said 163 B.
+  Nothing in the profile's rules moves: §2.15's read stands, and a complete
+  snapshot with no entry is the owner's word.
+- **Readers.** The first late joiner was told "established", three firing,
+  exit 1, its owner known whole from one complete snapshot; the second "no
+  alarm at or above the severity fires", exit 0 (alarms.v2 §2.15). Without
+  `--clocks-synced` the firing ones read unobservable, their age untrusted
+  (the smoke run's first probe).
+
+#### What the host's tools read across the link
+
+- **`zenctl desired --across-face`** read the target converged on the
+  changed document's version, `0000/1`, exit 0, in both runs, with no
+  presence read: a 16-B SDU up, the report's snapshot in a 117-B SDU down and
+  its final in a 7-B one, 188 B lean. The author's slice was read on router
+  B, and crossed nothing.
+- **`zenctl alarms --across-face granted`**: above.
+
+#### W2's day
+
+| Run | Steady A->B | Steady B->A | W2's day, lean | Against `zk2c-w2-lean-1` |
+|---|---:|---:|---:|---:|
+| `zk2c-w2-v2-bare-1`, derived (+16 B an SDU) | 647.2 KB | 54.7 KB | **606.3 KB** | |
+| `zk2c-w2-v2-watch-bare-1`, derived | 638.1 KB | 37.3 KB | **579.2 KB** | |
+| `zk2c-w2-v2-lean-1`, the counters | 672.7 KB | 56.3 KB | **633.3 KB**, 2.44 % of RF | 35.5 KB less than its 668.8 KB |
+
+The day is W2's as before: the steady window's counters or decode, gen's
+events cut to W2's 15, the acts at their daily counts (W2 counts no refresh,
+no change of document and no probe), and 4 reconnects.
+
+- **W2 measured 633.3 KB a day under the lean stack with desired.v2's
+  conditional read and alarms.v2**, 2.44 % of RF, 35.5 KB and 5.3 % less
+  than `zk2c-w2-lean-1`'s 668.8 KB. The uplink's steady window fell 16.2 KB
+  (688.9 to 672.7), its downlink's 15.2 KB (71.5 to 56.3): the author's
+  whole replies became unchanged ones, and no reply crossed for a GET that
+  had timed out. Compression stored 210 of the uplink's 236 SDUs in 35
+  minutes and saved nothing.
+- **The designs said 19.5 KB less** (#986's §5: 18 KB for the conditional
+  read; #984's §4: 1.5 KB for alarms.v2). They priced today's re-read by
+  Appendix A's model, 63.9 KB a day. `zk2c-w2-lean-1`'s cost more: the
+  start's GETs, and the replies of the 4 GETs that timed out at 1 s, which
+  crossed for nothing (W2 zk2c, above). Every read here waited 15 s, and no
+  answer crossed after its read had ended, as #986's §5 said.
+- **The watch would take 27 KB more off the day**: the two bare runs,
+  derived, differ by 27.1 KB, the period's 45.2 KB of re-reads against the
+  watch's 11.5 KB of heartbeats and its one read after the start. It was not
+  run under the lean stack.
+- **The heartbeats are the day's second element still**, 222.0 KB placed
+  under the lean stack, where `zk2c-w2-lean-1`'s were 226.8 KB: health.v1's
+  and rfcfg.v1's pair into SDUs differently from run to run, and alarms.v2's
+  is alarms.v1's size. Owner heartbeats (#1110) were not turned on here.
+
 ### The honesty checks, across the face
 
 Each through the tools a ground operator would run across rf0's face (`zenctl
@@ -1339,6 +1500,32 @@ router B opened a new transport 3.9 s after the restore. Its reopen cost
     got every status put and no confirmation in 34 minutes. An owner that
     turns the option on leaves such a reader's members unconfirmed, which
     is why it is opt-in.
+14. **desired.v2 and alarms.v2 cost what their designs computed, but for
+    one snapshot** (#986's J5, #984's S4; "W2 with desired.v2 and
+    alarms.v2").
+    - A conditional re-read is 157 B under the lean stack, 2 B under the
+      design: its final is 4 B in the reply's SDU, where the design took
+      6 B. At a 300-s period, 45.2 KB a day, where desired.v1's GET was
+      63.9 KB; every read waited rf0's 15-s reply timeout, and no answer
+      crossed after its read had ended.
+    - The watch at a 600-s horizon is its author's heartbeat, 11.5 KB a
+      day as the window held it and 12.1 KB at its rate, the design's. The target read once, after its start, and
+      neither an unmoved section nor its own change of document drew a
+      read. A lost heartbeat would draw one, which the design did not
+      price: 2.4 KB a day at 5 %.
+    - An alarm's transition is one 45-B SDU, byte for byte the design's,
+      its 5-byte frame and its 2-byte slot suffix as inferred. W2's ten are
+      0.45 KB a day, where alarms.v1's were 2.0 KB.
+    - A late joiner's read draws the words' snapshot beside the alarms',
+      though it holds nothing: 112 B in a second SDU that the design did
+      not price. The alarms' snapshot itself is the design's to the byte.
+    - W2's day under the lean stack fell to 633.3 KB, 2.44 % of RF, 35.5 KB
+      under `zk2c-w2-lean-1`, where the designs said 19.5 KB: they priced
+      today's re-read by Appendix A's model, and that run's timed-out GETs'
+      replies crossed besides.
+    - Neither moves a rule: the figures are costs of rules as written, and
+      `zenctl desired --across-face` and `zenctl alarms --across-face
+      granted` read the device across the link as their texts say.
 
 ## Reproduce
 
@@ -1437,6 +1624,14 @@ INST=w2b BASE=17700 LOSS_AT_STEADY=0.05 ZK2C=1 OWNER_HEARTBEAT=1 CONTRACTS=$PWD/
 # Its honesty run (about 35 minutes): the host's watch and health beside it
 INST=hb BASE=17600 LOSS_AT_STEADY=0.05 ZK2C=1 OWNER_HEARTBEAT=1 WATCH=1 STEADY_S=1200 \
   CONTRACTS=$PWD/contracts timeout 2h taskset -c 4-5 ./measure-w2.sh rf-zk2c bare zk2c-w2-owner-honesty-1
+# W2 with desired.v2 and alarms.v2 (#986's J5, #984's S4; 2026-11-27, about 55 minutes each, one
+# at a time): V2=1 and nothing else changed; DESIRED_TTL=600 for the watch
+INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 RUN_FILE=1 V2=1 CONTRACTS=$PWD/contracts \
+  timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c bare zk2c-w2-v2-bare-1
+INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 RUN_FILE=1 V2=1 DESIRED_TTL=600 CONTRACTS=$PWD/contracts \
+  timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c bare zk2c-w2-v2-watch-bare-1
+INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 RUN_FILE=1 V2=1 DICT=$PWD/w2.zdict CONTRACTS=$PWD/contracts \
+  timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c lean zk2c-w2-v2-lean-1
 
 # Analysis
 python3 -I analyze.py $WORK/logs/<run> --json results/<run>/analysis.json
@@ -1487,18 +1682,19 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | `render.py` | each medium's numbers (`MEDIA`), the layer stacks, the ports and directories of a path |
 | `wire.sh` | brings a path up (`up <medium> <stack>`), lists it (`status`), stops it (`down`), and tells the relay to `cut`, `restore` or take a `loss` |
 | `measure.sh` | one W1 run: the idle window, W1's setup, the W1 window, `marks.json`; `PERIOD_S` is gen's tick, a face's `every_s` |
-| `measure-w2.sh`, `w2-drive.py` | one W2 run: the device and the author through the owner example, the steady window, the acts, the reconnect, the config changes; `OWNER_HEARTBEAT=1` has the device send owner heartbeats under a catalog the far readers hold, and `WATCH=1` adds the host's `watch` and `health` (#1110) |
+| `measure-w2.sh`, `w2-drive.py` | one W2 run: the device and the author through the owner example, the steady window, the acts, the reconnect, the config changes; `OWNER_HEARTBEAT=1` has the device send owner heartbeats under a catalog the far readers hold, and `WATCH=1` adds the host's `watch` and `health` (#1110); `V2=1` puts the desired target and the alarms on desired.v2 and alarms.v2, with a refresh, a change of document and the host's probes among the acts, and `DESIRED_TTL` the watch (#986's J5, #984's S4) |
+| `contracts/w2rules.v1.toml` | the device's alarms.v2 table, `alarms.rules`, W2's four rules (lint clean; #984's S4) |
 | `contracts/gendev.v1.toml`, `gendev.json`, `gendev-frames.json` | W2's device: 8 gauges, 4 counters, `oper_change` (lint clean); since revision 1.1, `frames/sample`, the twelve readings as one packed record, three a frame, for #989's zk2c run (telemetry.v2, #983 T4) |
 | `relay.py` | the userspace netem between the two drivers, and a JSON line per datagram |
 | `stamp.py` | stamps each `zenctl echo` row with the wall clock |
-| `zdecode.py` | decodes a bare run's SDUs as the fork's codec writes them, and gives each zk2 element its bytes; each put's payload, its own bytes and its SDU's |
-| `analyze.py` | the drivers' counters and the relay's capture, per direction and window; W2's elements, acts and reconnect; zk2c's frame and event sizes, and the transports opened; on LoRa under zk2c, when each keep-alive and each frame left; freshness.v2's heartbeats per key: their puts, sizes, SDUs and the element a day, decoded bare and placed under the lean stack |
+| `zdecode.py` | decodes a bare run's SDUs as the fork's codec writes them, and gives each zk2 element its bytes; each put's payload, its own bytes and its SDU's; each message's own bytes and its SDU's in a listing; desired.v2's and alarms.v2's interfaces among the elements |
+| `analyze.py` | the drivers' counters and the relay's capture, per direction and window; W2's elements, acts and reconnect; zk2c's frame and event sizes, and the transports opened; on LoRa under zk2c, when each keep-alive and each frame left; freshness.v2's heartbeats per key: their puts, sizes, SDUs and the element a day, decoded bare and placed under the lean stack; a bare window's desired, alarms and heartbeat messages one by one, and each act's messages with their sizes |
 | `honesty.sh`, `honesty.py` | #989's honesty checks across rf0's face (zk2c), and what each tool said in them; for #1110's honesty run, each owner heartbeat put, what `watch` printed with the catalog and with none, and the descriptor reads that crossed |
 | `setup-loss.py` | what a declaration lost in the setup cost a bare W2 run |
 | `model.py` | runs the report's Appendix A and states its figures per direction; `--zk2c` its zk2c column, each LoRa face's uplink a range by link.v2 §2.16, asserted against its run, and W2's owner heartbeat by its layout, asserted against `zk2c-w2-lean-2` and `-bare-2` |
-| `summary.py` | the README's W2, LoRa and zk2c tables, from `results/`, and the heartbeat element with three heartbeats and with one owner heartbeat |
+| `summary.py` | the README's W2, LoRa and zk2c tables, from `results/`, and the heartbeat element with three heartbeats and with one owner heartbeat; the v2 runs' messages, elements and acts |
 | `train-dictionary.sh`, `rf.zdict`, `w2.zdict` | the compress layer's dictionaries: `rf.zdict` from `bare-1` (W1), `w2.zdict` from `w2-rf-bare-2` (W2) |
-| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/` (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs; `zk2c-w2-owner-honesty.json` and each owner-heartbeat run's `catalog.json` for #1110's |
+| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/` (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs; `zk2c-w2-owner-honesty.json` and each owner-heartbeat run's `catalog.json` for #1110's; each v2 run's probes, `probe_desired-*.json` and `probe_alarms-*.json`, as `zenctl` printed them, and the watch run's `tasking.v2.toml` (#986's J5, #984's S4) |
 
 Each relay summary's `loss` is the loss it started with. Under `LOSS_START=0`
 that is 0, and the windows' loss was set later on the control port.
@@ -1531,4 +1727,12 @@ Versions:
   60e3de1b, an owner on freshness.v2's first revision) are not in these
   binaries. W2's device has no governed interface and implements
   freshness.v2's revision 1.1 (9e07704d), so neither changes what it puts; that is read from their diffs, not
-  measured.
+  measured;
+- W2 with desired.v2 and alarms.v2 (2026-11-27): `zenctl` and the owner
+  example from zenkey at 0cd0f6ba (`git describe` 0.14.0-2438-g0cd0f6ba),
+  release builds, zenoh 1.10.1; the fork at `zm-1.10.2-r1`, rebuilt the same
+  way (2454b10c), and `modem-driver` at d8c62df, the binary of 2026-10-29.
+  The three runs ran one after the other on cores 4–5, after a 10-minute
+  smoke run of the harness (`zk2c-w2-v2-smoke-1`, not kept), whose first
+  late joiner without `--clocks-synced` read every firing alarm
+  unobservable, its age untrusted.

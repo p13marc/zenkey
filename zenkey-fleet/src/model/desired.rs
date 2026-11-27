@@ -754,6 +754,119 @@ pub struct FaceWord {
     pub author_across: bool,
 }
 
+impl FaceWord {
+    /// A tool's word for `role` across a face (`desired.v1` §2.14, §2.17
+    /// step 2; `desired.v2` §2.14; observer §7.5): listed, bound to
+    /// `author` or, with none, unbound, the kill switch. Neither presence
+    /// is read: the target's does not cross, and its author's is the
+    /// word's too. The parameter bindings are `params` where any is given,
+    /// else as the author's declaration in `offline` orders them (§2.2,
+    /// §2.3): its first target parameter `self.system`, its second
+    /// `self.service`. Where `offline` does not show that declaration (no
+    /// revision declares the role, none of its author's interface is in
+    /// hand, or the requirement names no one valid desired resource), the
+    /// bindings are left empty, and the reading says what it can.
+    ///
+    /// # Errors
+    ///
+    /// A declaration of one target parameter, with no `params`: which of
+    /// the two the parameter binds is the deployment's choice (§2.2), so
+    /// it is never guessed. The text names the parameter.
+    pub fn of_contracts(
+        role: &str,
+        author: Option<Addr>,
+        params: BTreeMap<String, String>,
+        offline: &ContractSet,
+    ) -> Result<FaceWord, String> {
+        let bound = author.is_some();
+        let params = if !bound || !params.is_empty() {
+            params
+        } else {
+            declared_params(role, offline)?
+        };
+        Ok(FaceWord {
+            listing: Listing::Listed { bound },
+            author,
+            params,
+            author_across: true,
+        })
+    }
+}
+
+/// The bindings the author's declaration orders for `role`'s target
+/// parameters (§2.2): empty where `offline` does not show one declaration.
+/// Every revision in `offline` that requires `role` is read, and they must
+/// agree: several that order its parameters differently are refused, never
+/// the set's first taken (review-bot on #1174).
+fn declared_params(role: &str, offline: &ContractSet) -> Result<BTreeMap<String, String>, String> {
+    let mut found: Vec<(String, BTreeMap<String, String>)> = Vec::new();
+    for rev in offline.iter() {
+        let Some(req) = rev.contract().requires.get(role) else {
+            continue;
+        };
+        let got = declared_params_of(req, offline)?;
+        if !got.is_empty() && !found.iter().any(|(_, f)| f == &got) {
+            found.push((rev.contract().iface.to_string(), got));
+        }
+    }
+    match found.len() {
+        0 => Ok(BTreeMap::new()),
+        1 => Ok(found.remove(0).1),
+        _ => Err(format!(
+            "--contracts holds several revisions that require role {role} and order its target \
+             parameters differently ({}): say each with --param NAME=self.system or \
+             NAME=self.service",
+            found
+                .iter()
+                .map(|(i, _)| i.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// [`declared_params`] for one requirement.
+fn declared_params_of(
+    req: &zenkey_model::contract::Requirement,
+    offline: &ContractSet,
+) -> Result<BTreeMap<String, String>, String> {
+    let none = Contracts::new();
+    let Some((author, _)) = author_contract(
+        None,
+        None,
+        &req.interface,
+        req.resources.as_deref(),
+        &none,
+        offline,
+    ) else {
+        return Ok(BTreeMap::new());
+    };
+    let named = desired_resources(author, req.resources.as_deref());
+    let [(r, decl)] = named.as_slice() else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(targets) = decl.targets() else {
+        return Ok(BTreeMap::new());
+    };
+    let mut out = BTreeMap::new();
+    for t in targets {
+        let bound = match t.binds {
+            dm::Binds::System => dm::SELF_SYSTEM,
+            dm::Binds::Service => dm::SELF_SERVICE,
+            dm::Binds::Either => {
+                return Err(format!(
+                    "{}'s `{}/{}` has one target parameter, `{}`, which the deployment binds \
+                     to `self.system` or `self.service` (desired.v1 §2.2): say which with \
+                     --param {}=self.system or --param {}=self.service",
+                    author.iface, r.token, r.template, t.param, t.param, t.param
+                ));
+            }
+        };
+        out.insert(t.param.clone(), bound.to_owned());
+    }
+    Ok(out)
+}
+
 /// One reading of the bus, as values.
 #[derive(Debug, Clone)]
 pub struct DesiredRead {

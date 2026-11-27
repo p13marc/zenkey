@@ -23,6 +23,10 @@ Usage: summary.py [results-dir]
   the run with three heartbeats beside the run with one owner heartbeat, bare
   and lean, against the layout (model-zk2c.json's w2_rf_zk2c_owner_heartbeat);
   then the second pair of runs' tables, as the first pair's.
+- W2 with desired.v2 and alarms.v2 (#986's J5, #984's S4, for #989): per run, each
+  desired, alarms and heartbeat message of the steady window by its own bytes and
+  its SDU's, and a day of each, bare and lean (+16 B an SDU); then each act's
+  messages, bare, with their SDUs lean.
 Standard library only.
 """
 import json
@@ -422,6 +426,59 @@ def w2_day(a, model):
         print(f"| **total** | **{kb(tb)}** | {tn:,.0f} | **{kb(lean)}** | **{kb(tm)}** | {lean / tm:.2f} |")
 
 
+V2_RUNS = ("zk2c-w2-v2-bare-1", "zk2c-w2-v2-watch-bare-1", "zk2c-w2-v2-lean-1")
+
+
+def v2_tables():
+    """#986's J5 and #984's S4: W2 with the v2 profiles, message by message."""
+    runs = [(r, load(r)) for r in V2_RUNS]
+    runs = [(r, a) for r, a in runs if a]
+    if not runs:
+        return
+    print("\n## W2 with desired.v2 and alarms.v2 (#986's J5, #984's S4)")
+    for run, a in runs:
+        steady = win(a, "steady")
+        scale = DAY / steady["seconds"]
+        if "messages" in steady:
+            print(f"\n#### `{run}`: the steady window's messages ({steady['seconds']:,.0f} s)\n")
+            print("| Direction | Element | Kind | Key | Count | Message | SDU | Lean SDU | "
+                  "A day, lean |")
+            print("|---|---|---|---|---:|---:|---:|---:|---:|")
+            for m in steady["messages"]:
+                lean = m["sdu"] + LEAN
+                print(f"| {NAMES[m['dir']]} | {m['element']} | {m['kind']} | `{m['key']}` | "
+                      f"{m['count']} | {m['own']} B | {m['sdu']} B | {lean} B | "
+                      f"{kb(m['count'] * scale * lean)} |")
+            print(f"\n#### `{run}`: the elements, a day\n")
+            print("| Direction | Element | Bare | SDUs | Lean, derived |")
+            print("|---|---|---:|---:|---:|")
+            for d in ("ab", "ba"):
+                for el, v in steady["elements_per_day"][d].items():
+                    if el in ("desired", "alarms", "heartbeat"):
+                        print(f"| {NAMES[d]} | {el} | {kb(v['bytes'])} | {v['sdus']:,.0f} | "
+                              f"{kb(v['bytes'] + LEAN * v['sdus'])} |")
+        else:
+            for d in ("ab", "ba"):
+                pd = steady[d]["per_day"]
+                print(f"\n`{run}`, {NAMES[d]}, the steady window's counters: {pd['sdus']:,} SDUs, "
+                      f"{kb(pd['bytes'])} and {pd['airtime_s']:,.1f} s of air a day.")
+        slots = a.get("w2", {}).get("act_slots")
+        if slots:
+            print(f"\n#### `{run}`: each act's messages, bare (message / SDU), and its SDUs lean\n")
+            print("| Act | A->B | B->A | Lean, A->B + B->A |")
+            print("|---|---|---|---:|")
+            for sl in slots:
+                if sl["act"] == "config":
+                    continue
+                cells, lean = [], 0
+                for d in ("ab", "ba"):
+                    parts = [f"{m.split(':')[1]} {own}/{sdu}"
+                             for m, (own, sdu) in zip(sl[d]["messages"], sl[d]["sizes"])]
+                    cells.append("; ".join(parts) or "none")
+                    lean += sl[d]["bytes"] + LEAN * sl[d]["sdus"]
+                print(f"| {sl['act']} | {cells[0]} | {cells[1]} | {lean:,.0f} B |")
+
+
 def main():
     model = json.load(open(os.path.join(RES, "model.json")))
     bare, lean = load("w2-rf-bare-3"), load("w2-rf-lean-1")
@@ -433,6 +490,7 @@ def main():
     zk2c = os.path.join(RES, "model-zk2c.json")
     if os.path.exists(zk2c):
         zk2c_tables(json.load(open(zk2c)))
+    v2_tables()
 
 
 if __name__ == "__main__":

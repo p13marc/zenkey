@@ -1,0 +1,37 @@
+# W2's alarm rules under alarms.v2 (#984's S4, for #989): the device's own
+# table (alarms.v2 §4), in a contract of its own that lists alarms.v2 in
+# `uses`, as the profile places it. Each rule is W2's: `hot` carries its
+# reading as its argument, so a new reading at one severity is a refresh
+# (§2.5), and none has a label, so each record is the profile's usual 9 B
+# (§3). An index never moves: a deployment appends (core §9.8).
+# measure-w2.sh's V2=1 gives it to the device beside its standard contracts.
+[interface]
+name  = "w2rules"
+major = 1
+minor = 0
+uses  = ["alarms.v2"]
+
+[[defaults.annotations."alarms.rules"]]
+name     = "hot"
+category = "sensor_health"
+summary  = "Temperature {argument} C"
+argument = { minimum = "-40", resolution = "0.1" }
+
+[[defaults.annotations."alarms.rules"]]
+name    = "battery_low"
+summary = "Battery low"
+
+[[defaults.annotations."alarms.rules"]]
+name    = "link_degraded"
+summary = "Link margin low"
+
+[[defaults.annotations."alarms.rules"]]
+name    = "door_open"
+summary = "Enclosure door open"
+
+# The table needs a contract, and a contract a resource: one the device never
+# writes, so the table costs the wire nothing but this interface's
+# declarations at a link's open.
+[resources.notes]
+kind = "stream"
+type = { raw = "text/plain" }

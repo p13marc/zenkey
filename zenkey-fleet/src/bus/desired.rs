@@ -1716,4 +1716,87 @@ mod tests {
             ["zk2/lab/author/tasking.v1/state/tasks/lab/worker"]
         );
     }
+
+    /// `zenctl desired --across-face`'s word (#986 J5): bound to the
+    /// author, each target parameter as the author's declaration in hand
+    /// orders it (§2.2, §2.3), under either major, so the slice resolves
+    /// with no binding problem; both presences the word's; `--param` kept
+    /// as given; the kill switch with no author; and one target parameter,
+    /// which the deployment binds, never guessed.
+    #[test]
+    fn a_tools_word_binds_as_the_authors_declaration_orders() {
+        let author: Addr = "lab/author".parse().unwrap();
+        let ordered = Map::from([
+            ("system".to_owned(), "self.system".to_owned()),
+            ("service".to_owned(), "self.service".to_owned()),
+        ]);
+        for (worker, tasking) in [("worker.v1", "tasking.v1"), ("worker.v2", "tasking.v2")] {
+            let offline = set(vec![file(worker), file(tasking)]);
+            let w =
+                FaceWord::of_contracts("task", Some(author.clone()), Map::new(), &offline).unwrap();
+            assert_eq!(w.listing, Listing::Listed { bound: true });
+            assert_eq!(w.params, ordered, "{tasking}");
+            assert!(w.author_across, "the author's presence is the word's too");
+            let t = read(&w, &offline);
+            let r = &t.roles[0].resolution;
+            assert!(r.binding_problems.is_empty(), "{tasking}: {r:?}");
+            assert_eq!(
+                r.slice,
+                [format!("zk2/lab/author/{tasking}/state/tasks/lab/worker")]
+            );
+            assert_eq!(
+                t.roles[0].author_seen,
+                Some((Seen::AcrossFace, None)),
+                "{tasking}"
+            );
+        }
+        let offline = set(vec![file("worker.v2"), file("tasking.v2")]);
+        let given = Map::from([("system".to_owned(), "self.service".to_owned())]);
+        let w =
+            FaceWord::of_contracts("task", Some(author.clone()), given.clone(), &offline).unwrap();
+        assert_eq!(
+            w.params, given,
+            "--param stands as given, a wrong one the reading's"
+        );
+        let w = FaceWord::of_contracts("task", None, Map::new(), &offline).unwrap();
+        assert_eq!(w.listing, Listing::Listed { bound: false });
+        assert!(w.params.is_empty() && w.author.is_none());
+        // With nothing of the author's in hand, nothing is derived.
+        let alone = set(vec![file("worker.v2")]);
+        let w = FaceWord::of_contracts("task", Some(author.clone()), Map::new(), &alone).unwrap();
+        assert!(w.params.is_empty());
+        // One target parameter: the deployment's choice, never guessed.
+        let one = |text: &str, name: &str| {
+            let l = load_str(
+                &text
+                    .replace("tasks/{system}/{service}", "tasks/{service}")
+                    .replace(
+                        "{ system = \"string\", service = \"string\" }",
+                        "{ service = \"string\" }",
+                    )
+                    .replace("[\"system\", \"service\"]", "\"service\""),
+                &dir(),
+                Some(name),
+            );
+            l.contract.unwrap_or_else(|| panic!("{}", l.report))
+        };
+        let read_file = |n: &str| std::fs::read_to_string(dir().join(n)).unwrap();
+        let single = set(vec![
+            one(&read_file("worker.v1.toml"), "worker.v1.toml"),
+            one(&read_file("tasking.v1.toml"), "tasking.v1.toml"),
+        ]);
+        let why =
+            FaceWord::of_contracts("task", Some(author.clone()), Map::new(), &single).unwrap_err();
+        assert!(
+            why.contains("`service`") && why.contains("--param service=self.system"),
+            "{why}"
+        );
+        let given = Map::from([("service".to_owned(), "self.service".to_owned())]);
+        let w = FaceWord::of_contracts("task", Some(author), given, &single).unwrap();
+        let t = read(&w, &single);
+        assert_eq!(
+            t.roles[0].resolution.slice,
+            ["zk2/lab/author/tasking.v1/state/tasks/worker"]
+        );
+    }
 }

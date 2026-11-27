@@ -119,3 +119,53 @@ Usage: zenctl echo --across-face <SYSTEM/SERVICE> --face-policy <FILE> --face <N
 For more information, try '--help'.
 
 ```
+
+`desired --across-face` (#986's J5; desired.v1 §2.14, §2.17 step 2): the
+deployment's word for the target's presence and its role's binding, the
+revisions from `--contracts`. `tests/live_zk2.rs`'s
+`desired_across_a_face_takes_the_deployments_word` reads it against a
+bus. No descriptor crosses, so the word names the binding: an author, or
+the kill switch.
+
+```console
+$ zenctl desired lab/worker --across-face --role task --contracts ../zenkey/tests/contracts/worker.v2.toml
+? 2
+Error: --across-face: no descriptor crosses a face, so the deployment's word names the role's binding: --author SYSTEM/SERVICE, or --unbound for the kill switch (desired.v1 §2.3, §2.12)
+desired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+And the revisions are the contracts in hand.
+
+```console
+$ zenctl desired lab/worker --across-face --role task --author lab/author
+? 2
+Error: --across-face: no descriptor crosses a face, so --contracts must hold the target's revision that declares role task and its author's (observer §7.5)
+desired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+Each target parameter takes one binding: a `--param` repeated is
+refused, never its last kept (review-bot on #1174).
+
+```console
+$ zenctl desired lab/worker --across-face --role task --author lab/author --param system=self.system --param system=self.service --contracts ../zenkey/tests/contracts/worker.v2.toml
+? 2
+Error: --across-face: --param system given twice: each target parameter takes one binding
+desired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
+The word is about one target and one role.
+
+```console
+$ zenctl desired --across-face --role task --author lab/author
+? 2
+error: the following required arguments were not provided:
+  <SYSTEM/SERVICE>
+
+Usage: zenctl desired --role <ROLE> --across-face --author <SYSTEM/SERVICE> --namespace <NS> <SYSTEM/SERVICE>
+
+For more information, try '--help'.
+
+```

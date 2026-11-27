@@ -54,15 +54,20 @@ DAY = 86_400
 DIRS = (("ab", "a", "b"), ("ba", "b", "a"))
 # Daily counts of W2's rare acts (report §2.2): an alarm raise and its resolve
 # are each a transition.
-W2_DAILY = {"health": 4, "event": 15, "alarm_raise": 5, "alarm_resolve": 5, "config": 5}
+W2_DAILY = {"health": 4, "event": 15, "alarm_raise": 5, "alarm_resolve": 5, "config": 5,
+            # The v2 runs' other acts (#986's J5, #984's S4), each costed per act: W2
+            # counts none of them.
+            "alarm_refresh": 0, "desired_change": 0, "probe_desired": 0, "probe_alarms": 0}
 W2_RECONNECTS = 4
 # What each act moves, and how long it takes: a config change is made from
 # the host by `zenctl config set`, a session that reads presence, the
 # descriptor and the view before its call, and a 1.4 KB view crosses in 5 s.
 ACT_ELEMENTS = {
     "health": ("health",), "event": ("events",), "alarm_raise": ("alarms",),
-    "alarm_resolve": ("alarms",),
+    "alarm_resolve": ("alarms",), "alarm_refresh": ("alarms",), "desired_change": ("desired",),
     "config": ("config", "presence", "declarations", "interests", "admin", "oam", "other"),
+    "probe_desired": ("desired", "presence", "declarations", "interests", "admin", "oam", "other"),
+    "probe_alarms": ("alarms", "presence", "declarations", "interests", "admin", "oam", "other"),
 }
 ACT_SLOT_S = 25.0
 SESSION = ("presence", "declarations", "interests", "admin", "oam", "other")
@@ -77,8 +82,20 @@ def act_messages(a, msgs):
     interests, admin), config's requests and replies, then the first view and
     status put after the call's reply and any config event: the change's own
     re-put, since a change puts both at once.
+
+    The v2 runs': an alarm refreshed is its first put; a change of the device's
+    document is every desired message in the slot, both ways (the author's put, the
+    target's report, any read it made); a host's probe is everything its session made
+    and its element's requests and replies.
     """
-    if a["act"] in ("health", "event", "alarm_raise", "alarm_resolve"):
+    if a["act"] == "desired_change":
+        return [x for x in msgs if x["element"] == "desired"]
+    if a["act"] in ("probe_desired", "probe_alarms"):
+        el = ACT_ELEMENTS[a["act"]][0]
+        done = a.get("done", a["t"]) + 10
+        return [x for x in msgs if x["t"] < done and (x["element"] in SESSION or (
+            x["element"] == el and x["kind"].startswith(("request", "response"))))]
+    if a["act"] in ("health", "event", "alarm_raise", "alarm_resolve", "alarm_refresh"):
         el = {"health": "health", "event": "events"}.get(a["act"], "alarms")
         puts = [x for x in msgs if x["dir"] == "ab" and x["element"] == el]
         first_put = [x for x in puts if x["kind"] == "push-put"][:1]
@@ -489,6 +506,18 @@ def window(run, name, t0, t1):
             d: {el: {"bytes": round(v["bytes"] * scale), "sdus": round(v["sdus"] * scale, 1)}
                 for el, v in got[d].items()} for d in ("ab", "ba")}
         res["decode_errors"] = got["errors"]
+        # The v2 runs' messages, one by one (#986's J5, #984's S4): each desired, alarms or
+        # heartbeat message's own bytes and its SDU's, counted by kind and key's end.
+        msgs = []
+        zdecode.decode(run["air"], t0, t1, listing=msgs)
+        each = Counter()
+        for x in msgs:
+            if x["element"] in ("desired", "alarms", "heartbeat"):
+                tail = "/".join((x["key"] or "").split("/")[-3:])
+                each[(x["dir"], x["element"], x["kind"], tail, x["own"], x["sdu"])] += 1
+        res["messages"] = [{"dir": d, "element": el, "kind": k, "key": tail, "own": own,
+                            "sdu": sdu, "count": n}
+                           for (d, el, k, tail, own, sdu), n in sorted(each.items())]
         # Each transport opened in the window, by its InitSyn, decoded (a
         # face's usrpwd and 16-bit resolution change the InitSyn's size).
         res["opens_at"] = {d: [round(t - t0, 1) for t in got["opens"][d]] for d in ("ab", "ba")}
@@ -540,7 +569,9 @@ def w2(run, steady):
                 ms = [x for x in mine if x["dir"] == d]
                 row[d] = {"bytes": round(sum(x["bytes"] for x in ms), 1),
                           "sdus": round(sum(x["sdus"] for x in ms), 2),
-                          "messages": [f'{x["element"]}:{x["kind"]}:{(x["key"] or "")[-40:]}' for x in ms]}
+                          "messages": [f'{x["element"]}:{x["kind"]}:{(x["key"] or "")[-40:]}' for x in ms],
+                          # Each message's own bytes and its SDU's (the v2 runs' per-message table).
+                          "sizes": [[x["own"], x["sdu"]] for x in ms]}
                 per.setdefault(a["act"], {}).setdefault(d, []).append(row[d])
             slots.append(row)
         out["act_slots"] = slots

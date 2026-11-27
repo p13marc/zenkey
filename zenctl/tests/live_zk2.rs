@@ -13584,6 +13584,203 @@ async fn desired_v2_s9_last_known_and_the_kill_switch_for_a_tool() {
     drop(archive);
 }
 
+/// `desired --across-face` (#986's J5; desired.v1 §2.14, §2.17 step 2,
+/// desired.v2 §2.14, observer §7.5): the deployment's word for presence and
+/// the revisions from --contracts. T reads no presence, no `@zk` key asked,
+/// and reads the target's report and the author's slice: converged on v1,
+/// yes, exit 0, each presence `across_face`, the slice's parameters bound
+/// as tasking.v2 orders them. With worker.v2 alone in hand a desired.v2
+/// role has no slice, so converged is unobservable, author_not_read, and
+/// the report still answers the rest. `--unbound` is the kill switch,
+/// answered before any report. With a face policy whose reply timeout is
+/// 4 s, every read waits that long whatever --timeout says: a report put
+/// back 2 s after its GET is read (here as one that does not decode),
+/// where with --timeout 1 alone the GET ends first and nothing is read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn desired_across_a_face_takes_the_deployments_word() {
+    let mut bus = Bus::bare(None).await;
+    let rec = author_records();
+    let a = desired_author_v2(&bus.endpoint, "lab/author", &rec, None).await;
+    let w = desired_target_v2(&bus.endpoint, "lab/worker", Some("lab/author"), false).await;
+    let s1 = written_v2(a.author.put("lab/worker", task(1, "")).await.expect("v1"));
+    w.converged_on(s1, 1).await;
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts");
+    let tasking = dir.join("tasking.v2.toml").display().to_string();
+    let worker = dir.join("worker.v2.toml").display().to_string();
+    let across = |target: &str, extra: &[&str]| -> Vec<String> {
+        [
+            "desired",
+            target,
+            "--across-face",
+            "--role",
+            "task",
+            "--contracts",
+            worker.as_str(),
+            "--format",
+            "json",
+        ]
+        .iter()
+        .chain(extra)
+        .map(|s| (*s).to_owned())
+        .collect()
+    };
+
+    // 1. Converged, read across the face by the word alone.
+    let v = across(
+        "lab/worker",
+        &[
+            "--author",
+            "lab/author",
+            "--contracts",
+            &tasking,
+            "--timeout",
+            "2",
+        ],
+    );
+    let args: Vec<&str> = v.iter().map(String::as_str).collect();
+    let run = bus.until(&args, |r| r.code == 0).await;
+    exits(&run, 0);
+    assert_eq!(
+        desired_answers(&run),
+        ["yes:converged", "no:converged", "no:current", "yes:desired"],
+        "{run}"
+    );
+    let doc = run.json();
+    let row = &rows_of(&doc, "desired")[0];
+    assert_eq!(row["profile"], "desired.v2", "{run}");
+    assert_eq!(doc["across_face"], true, "{run}");
+    assert!(doc.get("presence").is_none(), "no presence read: {run}");
+    assert_eq!(row["author"]["presence"], "across_face", "{run}");
+    assert_eq!(row["slice"], DESIRED_D2, "{run}");
+    assert_eq!(row["slice_from"], "offline_contract", "{run}");
+    assert_eq!(row["report"]["key"], DESIRED_RP2, "{run}");
+    assert_eq!(row["author"]["stamp"], version_text(s1).as_str(), "{run}");
+    let asked: Vec<&str> = doc["asked"]
+        .as_array()
+        .expect("asked")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        asked,
+        [DESIRED_RP2, DESIRED_D2],
+        "the report's key and the slice, no presence: {run}"
+    );
+
+    // 2. No revision of the author's interface in hand: no slice.
+    let v = across("lab/worker", &["--author", "lab/author", "--timeout", "2"]);
+    let args: Vec<&str> = v.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&args).await;
+    exits(&run, 2);
+    assert_eq!(
+        desired_answers(&run),
+        [
+            "unobservable:author_not_read",
+            "no:converged",
+            "no:current",
+            "yes:desired"
+        ],
+        "{run}"
+    );
+
+    // 3. The kill switch, by the word.
+    let v = across(
+        "lab/worker",
+        &["--unbound", "--contracts", &tasking, "--timeout", "2"],
+    );
+    let args: Vec<&str> = v.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&args).await;
+    exits(&run, 2);
+    assert_eq!(
+        desired_answers(&run),
+        [
+            "not_asked:unbound",
+            "not_asked:unbound",
+            "not_asked:unbound",
+            "no:unbound"
+        ],
+        "{run}"
+    );
+
+    // 4. The face's reply timeout, the reads' floor: a report put back 2 s
+    // after its GET.
+    let slow = bus
+        .owners
+        .declare_queryable("zk2/lab/slow/worker.v2/state/desired/task")
+        .complete(true)
+        .callback(|q| {
+            std::thread::spawn(move || {
+                use zenoh::Wait;
+                std::thread::sleep(Duration::from_secs(2));
+                let _ = q
+                    .reply(q.key_expr().clone(), b"not a record".to_vec())
+                    .wait();
+            });
+        })
+        .await
+        .expect("a slow report");
+    bus.keep(slow);
+    let scratch = tempfile::tempdir().expect("a directory");
+    let policy = scratch.path().join("slow.face.toml");
+    std::fs::write(
+        &policy,
+        "profile = \"link.v2\"\nsystem = \"lab\"\nservices = [\"slow\"]\n\
+         binding = \"zenoh-1.10.1\"\n\
+         [transport]\nlease_ms = 240000\nkeep_alive = 4\n\
+         wait_before_close_ms = 240000\nsequence = \"16bit\"\nbatch_bytes = 222\n\
+         [face.rf]\nfar = \"ground\"\nattach = \"client\"\n\
+         select = { link_protocols = [\"tcp\"] }\nclass = \"constrained\"\n\
+         expose = \"none\"\nmax_outage_s = 3600\nlink_bps = 2400\nloss_ppm = 100\n\
+         arq = true\nreply_timeout_ms = 4000\n",
+    )
+    .expect("the policy");
+    let policy = policy.display().to_string();
+    let slow_args = |extra: &[&str]| {
+        let mut v = vec![
+            "--author",
+            "lab/author",
+            "--contracts",
+            &tasking,
+            "--timeout",
+            "1",
+        ];
+        v.extend_from_slice(extra);
+        across("lab/slow", &v)
+    };
+    let v = slow_args(&[]);
+    let args: Vec<&str> = v.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&args).await;
+    exits(&run, 2);
+    let doc = run.json();
+    let row = &rows_of(&doc, "desired")[0];
+    assert!(
+        row["report"].get("unreadable").is_none(),
+        "--timeout 1 alone: the GET ends before the reply, so nothing is read: {run}"
+    );
+    assert_eq!(
+        desired_answers(&run)[0],
+        "unobservable:nothing_crossed",
+        "{run}"
+    );
+    let v = slow_args(&["--face-policy", &policy, "--face", "rf"]);
+    let args: Vec<&str> = v.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&args).await;
+    exits(&run, 2);
+    let doc = run.json();
+    let row = &rows_of(&doc, "desired")[0];
+    assert!(
+        row["report"].get("unreadable").is_some(),
+        "the face's 4 s floor: the reply 2 s late is read: {run}"
+    );
+    assert_eq!(
+        desired_answers(&run)[0],
+        "unobservable:report_invalid",
+        "{run}"
+    );
+    w.kill().await;
+    a.kill().await;
+}
+
 /// desired.v2 `scenarios-v2.md` §9, step 7 (§2.8, §2.17), after §15's step
 /// 1 as written: the author's window 10 s, the link between the two
 /// routers cut, `D` deleted, and 15 s later, past the window, the author's
