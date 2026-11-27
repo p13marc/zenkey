@@ -147,10 +147,40 @@ def tables(path: Path) -> list[Result]:
     return out
 
 
+# -- keys.json (§2.2, §2.12, §4) -----------------------------------------------------------
+
+def keys(path: Path) -> list[Result]:
+    """``table`` names under ``tables.json``'s T1, read beside this file."""
+    data = _load(path)
+    t1 = a2.Table(tuple(_load(path.parent / "tables.json")["tables"]["T1"]))
+    out: list[Result] = []
+    for i, c in enumerate(data["cases"]):
+        op = c["op"]
+        if op == "derive":
+            from . import alarms as v1
+
+            k = a2.alert_key(c["rule"], c["labels"])
+            got: Any = {"key": k["alert_key"], "integer": k["key"], "input": v1.derive(c["rule"], c["labels"]).input}
+        elif op == "table":
+            got = a2.name_record(t1, {"argument": a2.NOT_AVAILABLE, **c["record"]}).alert_key
+        elif op in ("slot", "words"):
+            got = a2.slot_of(c["key"], prefix=a2.ALARMS if op == "slot" else a2.WORDS_PREFIX)
+        elif op == "collection":
+            sel = a2.collection_of(c["system"], c["service"])
+            # core §4.2: "A collection's snapshot key is its resource's key up
+            # to the" template's first parameter, its last '/' excluded.
+            got = None if sel is None else {"selector": sel, "snapshot_key": sel.removesuffix("/**")}
+        else:
+            got = f"an op the runner does not read: {op}"
+        out.append(_check(f"v2 keys #{i} ({op}): {c['note']}", got, c["expect"]))
+    return out
+
+
 FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": schema,
     "records.json": records,
     "tables.json": tables,
+    "keys.json": keys,
 }
 
 
