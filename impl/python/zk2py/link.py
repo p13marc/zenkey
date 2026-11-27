@@ -751,8 +751,16 @@ def revision_of(contract: Any) -> dict[str, Any]:
             "fingerprint": contract.fingerprint}
 
 
-def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any]) -> dict[str, Any]:
-    """§2.3: ``{faces: [...]}``, or ``{refused: [findings]}``."""
+def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any],
+         owner_heartbeats: Any = None) -> dict[str, Any]:
+    """§2.3: ``{faces: [...]}``, or ``{refused: [findings]}``.
+
+    ``owner_heartbeats`` (0.21): "It may name the listed services whose
+    owner heartbeats it turns on (``freshness.v2`` §2.4). The plan reads that
+    for one warning alone (§2.9). Where the deployment names none, the plan
+    reads every listed service's owner heartbeats as off." None or empty is
+    none; a name the policy does not list is no listed service's word, and
+    warns of nothing."""
     policy, findings = parse_policy(policy_text)
     if policy is None:
         return {"refused": findings}
@@ -768,7 +776,8 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
         # §2.3 (0.16, F-468): "A refused deployment lists its errors alone:
         # neither the policy's warnings nor the plan's come with it."
         return {"refused": sort_findings(errors)}
-    return {"faces": [plan_face(policy, f, implements, interfaces) for f in policy.faces]}
+    return {"faces": [plan_face(policy, f, implements, interfaces, owner_heartbeats=owner_heartbeats)
+                      for f in policy.faces]}
 
 
 def _heartbeat_denies(deny: list[dict[str, Any]], beats: dict[str, bool], listed: list[str],
@@ -843,12 +852,14 @@ def _with_heartbeats(listed: list[str], interfaces: dict[str, Any],
 
 
 def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
-              interfaces: dict[str, Any], v2: Any = None) -> dict[str, Any]:
+              interfaces: dict[str, Any], v2: Any = None, owner_heartbeats: Any = None) -> dict[str, Any]:
     """One face's plan (§2.3). ``v2`` is link.v2's reading of the face
     (:class:`zk2py.link_v2.FaceReading`), None for a link.v1 policy: what it
     denies of what link.v1 lets cross (§2.7's unlisted frames, §2.8's timed
     streams), a listed frame's cadence in place of its interval (§2.8), and
-    its own warnings and members (§2.3)."""
+    its own warnings and members (§2.3). ``owner_heartbeats`` is the
+    deployment's word on its listed services' owner heartbeats (§2.3, 0.21),
+    read for ``owner_heartbeat_denied`` alone, and never under ``v2``."""
     # link.v2 0.7 §2.5: "Every rule of link.v1 that reads the listed services
     # reads each device beside them, by its address ... on every face of the
     # policy. The one exception is downsampling, on the device's own face."
@@ -913,6 +924,15 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
                     for r in res[i])
              for i in listed if i in interfaces and heartbeat_of(interfaces[i], res[i])}
     deny = _heartbeat_denies(deny, beats, listed, res, crosses, expose, by_class=v2 is not None)
+    # §2.9 (0.21): "Where the deployment turns a listed service's owner
+    # heartbeats on (§2.3), and the service implements an interface whose
+    # heartbeat crosses the face, the plan warns, once for the service
+    # (owner_heartbeat_denied)." link.v2 0.27 §2.9: "a link.v2 plan draws no
+    # owner_heartbeat_denied: the link key crosses wherever a heartbeat does."
+    if v2 is None:
+        on = set(owner_heartbeats or ())
+        warnings += [finding("owner_heartbeat_denied", face.name, s, "warning") for s in policy.services
+                     if s in on and any(beats.get(i) for i in implements[s])]
     # link.v2 0.19 §2.9: "A generator MUST let …/freshness.v2/stream/
     # heartbeats/link cross a face exactly when a listed interface's
     # heartbeat crosses it"; under link.v1 (0.20) "No owner heartbeat

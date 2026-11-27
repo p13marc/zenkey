@@ -911,7 +911,11 @@ def _link_plan(path: Path) -> list[Result]:
     the findings that refuse it."""
     from . import link
 
-    return [_check(f"plan: {c['note']}", link.plan(c["policy"], c["implements"], _link_interfaces(c)), c["expect"])
+    # 0.21: "A case may give owner_heartbeats, the listed services whose
+    # owner heartbeats the deployment turns on (§2.3, §2.9; 0.21): absent, it
+    # turns none on."
+    return [_check(f"plan: {c['note']}", link.plan(c["policy"], c["implements"], _link_interfaces(c),
+                                                    owner_heartbeats=c.get("owner_heartbeats")), c["expect"])
             for c in _load_json(path)["cases"]]
 
 
@@ -964,7 +968,7 @@ def _link_v2(path: Path) -> list[Result]:
                 # deployment binds by a user name" (the changelog's words;
                 # the file's description names no `users`; round 110's findings).
                 got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c), c.get("catalog"),
-                                   users=c.get("users"))
+                                   users=c.get("users"), owner_heartbeats=c.get("owner_heartbeats"))
                 if "narrow" in c:
                     pol, _ = link_v2.parse_policy(c["policy"])
                     got["narrowed"] = None if pol is None else {n: link_v2.narrowed(pol, n) for n in c["narrow"]}
