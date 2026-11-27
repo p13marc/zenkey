@@ -809,8 +809,10 @@ impl TargetInner {
             return model2::Beat::Refused;
         };
         // The catalog its owner names: its descriptor stating the run,
-        // read once a run; the deployment's word, the catalog the service
-        // was given, where no descriptor reaches the target (core §8.6).
+        // read once a run within the target's timeout, at least the face's
+        // across one (`TargetStartup::across`; core §8.1, #1146); the
+        // deployment's word, the catalog the service was given, where no
+        // descriptor reaches the target (core §8.6).
         let run = stamp.run.to_string();
         let known = v2.core.lock().await.named.get(&run).copied();
         let named = match known {

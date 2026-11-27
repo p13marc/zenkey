@@ -100,16 +100,29 @@ impl Reader {
         resource: &str,
         catalog: Option<&Catalog>,
     ) -> Reader {
-        let mut c = Consumer::for_tool(
-            session,
-            Arc::new(contract(&trio(name))),
-            &["lab/trio"],
-            &Default::default(),
-        )
-        .unwrap();
-        if let Some(cat) = catalog {
-            c = c.with_catalog(cat);
-        }
+        Reader::with(session, name, resource, |c| match catalog {
+            Some(cat) => c.with_catalog(cat),
+            None => c,
+        })
+        .await
+    }
+
+    /// A reader whose consumer `configure` sets up.
+    async fn with(
+        session: &zenoh::Session,
+        name: &str,
+        resource: &str,
+        configure: impl FnOnce(Consumer) -> Consumer,
+    ) -> Reader {
+        let c = configure(
+            Consumer::for_tool(
+                session,
+                Arc::new(contract(&trio(name))),
+                &["lab/trio"],
+                &Default::default(),
+            )
+            .unwrap(),
+        );
         let delivered: Arc<Mutex<Vec<Stamp>>> = Arc::default();
         let read: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
         let (d, k) = (Arc::clone(&delivered), Arc::clone(&read));
@@ -600,16 +613,33 @@ async fn another_form_on_a_heartbeats_key_is_refused_and_never_read() {
     .await;
 }
 
+/// The descriptor of `lab/trio`'s instance under run 7, naming the
+/// catalog and `alpha.v1`'s revision (core §3.3).
+fn bare_descriptor() -> String {
+    format!(
+        r#"{{"format": "zk2-descriptor/0.1", "service": "lab/trio", "instance": "000000000000000a",
+            "run": "{}", "catalog": "{}",
+            "interfaces": [{{"iface": "alpha.v1", "contract": "{}"}}]}}"#,
+        zenkey::model::wire::Run::U16(7),
+        catalog().id(),
+        Fingerprint::of(&contract(&trio("alpha.v1")))
+    )
+}
+
 /// Behind a descriptor read that is slow to answer, at most `OWNER_QUEUE`
-/// owner heartbeats wait: each one past it is read at once with no
-/// catalog, counted, and confirms nothing.
+/// owner heartbeats wait for it (`freshness.v2` §2.5, "What it holds is
+/// bounded"). One past it waits for no read: it is counted as it is
+/// heard, and read in its turn, after those held, with no catalog
+/// (#1146). Read ahead of them, it would have moved the key's sequence,
+/// and every one held would have read `older`: "it then reads what it
+/// held in the order of arrival, before any later put on that key".
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_queue_behind_a_slow_descriptor_read_is_bounded() {
+async fn past_the_bound_an_owner_heartbeat_keeps_its_place_behind_those_held() {
     use zenkey::consumer::OWNER_QUEUE;
     let (_r1, ep) = router(None).await;
     let os = client(&ep).await;
     let rs = client(&ep).await;
-    // An owner whose descriptor read is held open, never answered.
+    // An owner whose descriptor read is held open until the test answers.
     let held: Arc<Mutex<Vec<zenoh::query::Query>>> = Arc::default();
     let h = Arc::clone(&held);
     let _descriptor = os
@@ -617,9 +647,15 @@ async fn the_queue_behind_a_slow_descriptor_read_is_bounded() {
         .callback(move |q| h.lock().unwrap().push(q))
         .await
         .unwrap();
+    let read: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
+    let seen = Arc::clone(&read);
     let sub = bare_consumer(&rs)
-        .with_reread_timeout(Duration::from_secs(30))
-        .subscribe_heartbeats(STATUS, |_: Delivery| {}, |_: HeartbeatRead| {})
+        .with_owner_catalog_timeout(Duration::from_secs(30))
+        .subscribe_heartbeats(
+            STATUS,
+            |_: Delivery| {},
+            move |h: HeartbeatRead| seen.lock().unwrap().push(h),
+        )
         .await
         .unwrap();
     let host = owner_key("lab", "trio", Class::Host);
@@ -629,21 +665,246 @@ async fn the_queue_behind_a_slow_descriptor_read_is_bounded() {
     })
     .await;
     let past = 6;
-    for seq in 0..(OWNER_QUEUE as u32 + past) {
+    let total = OWNER_QUEUE as u32 + past;
+    for seq in 0..total {
         publisher.put(bare_heartbeat(seq)).await.unwrap();
     }
-    eventually("those past the bound are read with no catalog", || async {
+    eventually("those past the bound are heard", || async {
         sub.owner_heartbeats_unqueued() == u64::from(past)
     })
     .await;
-    assert_eq!(sub.owner_catalog_reads(), 1, "one read, still open");
-    assert_eq!(held.lock().unwrap().len(), 1);
-    assert_eq!(sub.heartbeats(), 0, "none confirmed anything");
     assert_eq!(
         sub.owner_heartbeats(),
-        u64::from(past),
-        "the rest wait, in order"
+        0,
+        "none is read ahead of those held for the read"
     );
+    assert_eq!(sub.owner_catalog_reads(), 1, "one read, still open");
+
+    // The read is answered: its owner names the catalog under run 7.
+    let q = held.lock().unwrap().pop().expect("the read");
+    zenoh::Wait::wait(q.reply(
+        "zk2/lab/trio/@zk/instance/000000000000000a",
+        bare_descriptor(),
+    ))
+    .unwrap();
+    drop(q);
+    eventually("every one is read", || async {
+        sub.owner_heartbeats() == u64::from(total)
+    })
+    .await;
+    let got: Vec<(u32, bool, HeartbeatSection)> = read
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|h| (h.heartbeat.seq.get(), h.lost, h.section.clone()))
+        .collect();
+    let expected: Vec<(u32, bool, HeartbeatSection)> = (0..OWNER_QUEUE as u32)
+        .map(|seq| (seq, false, HeartbeatSection::Confirmed(Vec::new())))
+        .collect();
+    assert_eq!(got, expected, "those held, in order, through the catalog");
+    assert_eq!(
+        (sub.heartbeats(), sub.heartbeats_unread()),
+        (OWNER_QUEUE as u64, u64::from(past)),
+        "those past the bound read after them, every group unknown_catalog"
+    );
+    assert_eq!(sub.owner_catalog_reads(), 1, "and asked for no read");
+
+    // The key's sequence is the last one's: the next is in sequence, and
+    // read through the catalog now known.
+    publisher.put(bare_heartbeat(total)).await.unwrap();
+    eventually("the next is read", || async {
+        read.lock().unwrap().len() == OWNER_QUEUE + 1
+    })
+    .await;
+    let last = read.lock().unwrap().last().cloned().expect("one");
+    assert_eq!(
+        (last.heartbeat.seq.get(), last.lost, last.section),
+        (total, false, HeartbeatSection::Confirmed(Vec::new()))
+    );
+}
+
+/// #1146: told its owner sits across a constrained face (presence
+/// unavailable, R7), where no descriptor crosses (core §8.5), a reader
+/// given a catalog takes it as the deployment's word at once (§8.6;
+/// `freshness.v2` §2.5) and reads no descriptor: the first owner
+/// heartbeat it hears is read through it. Beside it, a reader on the near
+/// side asks, and its read, answered with an error, names none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_reader_told_its_owner_is_across_a_face_reads_no_descriptor() {
+    use zenkey::consumer::Presence;
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    let asked = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let n = Arc::clone(&asked);
+    let _descriptor = os
+        .declare_queryable("zk2/lab/trio/@zk/instance/*")
+        .callback(move |q| {
+            n.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let _ = zenoh::Wait::wait(q.reply_err("no descriptor here"));
+        })
+        .await
+        .unwrap();
+    let read: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
+    let seen = Arc::clone(&read);
+    let across = bare_consumer(&rs)
+        .with_presence(Presence::Unavailable)
+        .subscribe_heartbeats(
+            STATUS,
+            |_: Delivery| {},
+            move |h: HeartbeatRead| seen.lock().unwrap().push(h),
+        )
+        .await
+        .unwrap();
+    let near = bare_consumer(&rs)
+        .subscribe_heartbeats(STATUS, |_: Delivery| {}, |_: HeartbeatRead| {})
+        .await
+        .unwrap();
+    let host = owner_key("lab", "trio", Class::Host);
+    let publisher = os.declare_publisher(host).await.unwrap();
+    eventually("the class key is matched", || async {
+        publisher.matching_status().await.unwrap().matching()
+    })
+    .await;
+    publisher.put(bare_heartbeat(0)).await.unwrap();
+    eventually("both read it", || async {
+        across.owner_heartbeats() == 1 && near.owner_heartbeats() == 1
+    })
+    .await;
+    let got: Vec<(u32, Option<OwnerGroup>, HeartbeatSection)> = read
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|h| (h.heartbeat.seq.get(), h.group, h.section.clone()))
+        .collect();
+    assert_eq!(
+        got,
+        [(
+            0,
+            Some(OwnerGroup {
+                class: Class::Host,
+                index: 0
+            }),
+            HeartbeatSection::Confirmed(Vec::new())
+        )],
+        "read through the catalog given"
+    );
+    assert_eq!(across.owner_catalog_reads(), 0, "no descriptor read");
+    assert_eq!(
+        (
+            near.owner_catalog_reads(),
+            near.heartbeats(),
+            near.heartbeats_unread()
+        ),
+        (1, 0, 1),
+        "the near reader asked, and its read named none"
+    );
+    assert_eq!(
+        asked.load(std::sync::atomic::Ordering::Relaxed),
+        1,
+        "the near reader's alone"
+    );
+}
+
+/// #1146's run: across RF the owner's descriptor took 5.7 s to cross, and
+/// a reader that waited 5 s for it named no catalog and confirmed nothing
+/// for minutes. Here the link between the owner's router and the readers'
+/// is stalled while their descriptor reads cross it, for longer than 5 s
+/// (`STALL`). A reader that waits a longer timeout of its own
+/// ([`Consumer::with_owner_catalog_timeout`]), and one across a face whose
+/// reply timeout is longer ([`Consumer::across`]), each confirm the member
+/// on the first owner heartbeat they hear, held meanwhile and confirmed at
+/// its arrival, never at the read's end (`freshness.v2` §2.5).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_descriptor_slower_than_five_seconds_is_waited_for() {
+    use common::{link_to, router_via};
+    const STALL: Duration = Duration::from_secs(7);
+    const WAIT: Duration = Duration::from_secs(12);
+    let (_r1, ep1) = router(None).await;
+    let link = link_to(&ep1).await;
+    let (_r2, ep2) = router_via(&link).await;
+    let os = client(&ep1).await;
+    let rs = client(&ep2).await;
+    let near = client(&ep2).await;
+    let cat = catalog();
+    let (_svc, statuses, _reach) = owner(&os, Some(cat.clone())).await;
+    let far = zenkey::model::link::FarSide {
+        face: "rf".into(),
+        reply_timeout_ms: u64::try_from(WAIT.as_millis()).unwrap(),
+        arq: true,
+        transport: zenkey::model::link::Binding::Zenoh1_10_1.defaults(),
+    };
+    let readers = [
+        Reader::with(&rs, "alpha.v1", STATUS, |c| {
+            c.with_catalog(&cat).with_owner_catalog_timeout(WAIT)
+        })
+        .await,
+        Reader::with(&rs, "alpha.v1", STATUS, |c| {
+            c.with_catalog(&cat).across(&far)
+        })
+        .await,
+    ];
+    let stamps = put_statuses(&statuses[..1], &readers).await;
+    let key = status_key("alpha.v1");
+    let held = Digest::of([(key.as_str(), stamps[0])]);
+
+    // The owner heartbeat is put on the readers' side of the link, and
+    // their reads of the owner's descriptor wait on the far side of it.
+    let publisher = near
+        .declare_publisher(owner_key("lab", "trio", Class::Host))
+        .await
+        .unwrap();
+    eventually("the class key is matched", || async {
+        publisher.matching_status().await.unwrap().matching()
+    })
+    .await;
+    link.stall();
+    let put = std::time::Instant::now();
+    publisher
+        .put(owner_heartbeat(
+            vec![group(0, "alpha.v1", STATUS, held)],
+            stamps[0],
+            0,
+        ))
+        .await
+        .unwrap();
+    for r in &readers {
+        eventually("its read of the descriptor is asked", || async {
+            r.sub.owner_catalog_reads() == 1
+        })
+        .await;
+    }
+    tokio::time::sleep(STALL.saturating_sub(put.elapsed())).await;
+    for r in &readers {
+        assert!(r.got().is_empty(), "held while the read waits");
+    }
+    link.heal();
+    let at = Some(OwnerGroup {
+        class: Class::Host,
+        index: 0,
+    });
+    for r in &readers {
+        eventually("the first owner heartbeat is read", || async {
+            r.got().len() == 1
+        })
+        .await;
+        assert!(
+            put.elapsed() > Duration::from_secs(5),
+            "the reply was slower than 5 s"
+        );
+        assert_eq!(
+            r.got(),
+            [(0, false, at, HeartbeatSection::Confirmed(vec![key.clone()]))]
+        );
+        let confirmed = r.sub.confirmed(&key).expect("confirmed");
+        let arrival = r.read.lock().unwrap()[0].arrival;
+        assert_eq!(confirmed, arrival, "at the put's arrival");
+        assert!(arrival < put + Duration::from_secs(1), "{arrival:?}");
+        assert_eq!(
+            (r.sub.owner_catalog_reads(), r.sub.heartbeats_unread()),
+            (1, 0)
+        );
+    }
 }
 
 /// The callback runs under no lock of its subscription's: one that calls
