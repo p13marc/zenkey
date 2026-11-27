@@ -130,7 +130,16 @@ zk2/*/*/@zk/alive/config.v1/**                                     "which device
   - The reason and retention for each are on each resource in `modem.v3.toml`.
   - `device_fault` is edge-triggered raised/cleared, which is `alarms.v1`'s shape
     ([`spec/profiles/alarms/v1.md`](../../../spec/profiles/alarms/v1.md), Appendix B): a later
-    option, not taken in a 1:1 mapping.
+    option, not taken in a 1:1 mapping. Under
+    [`alarms.v2`](../../../spec/profiles/alarms/v2.md) (#984) the option is cheaper and still
+    not taken: a fault as an alarm by a table's rule is one 45-B SDU raised and one cleared on
+    RF, as #989's W2 path measured for alarms.v2's transitions
+    ([wire baseline](../../../docs/zk2/measurements/wire-baseline/README.md), "W2 with
+    desired.v2 and alarms.v2"), where `face/device_fault` at its `low` ceiling is 173 KB a day
+    bare. Taking it would expose `alarms/{slot}` on the faces (alarms.v2 §2.11) and pay the
+    alarms' heartbeat there, a 40-B SDU every 427.5 s, 8.2 KB a day measured on RF and more than
+    half of SF12's duty, and the catalog would append `alarms.v2` and the contract holding the
+    rules, its existing indices staying.
   - The v1 ULIDs were already lowercase (`modem-mgmt/src/clock.rs:54-69`), so the keys kept
     their shape until core 0.103 made the last chunk the occurrence's run and seq, which the
     runtime's `EventWriter` writes (#980 C2).
@@ -150,6 +159,13 @@ zk2/*/*/@zk/alive/config.v1/**                                     "which device
   `link.exposure = "link"`. Since 3.2 they are `host` again, written out, and only frame resources
   are `link`: since 3.3, `frames/fast`, `frames/slow` and `frames/paid`, 3.2's nine being deprecated
   and `host` ([link](link.md), the note at its top).
+- **No desired roles, and when there are, `desired.v2`'s.** zenoh-modem decided on 2026-10-05 not to
+  build desired state ([`config.v1-binding.md`](config.v1-binding.md) §9): no node holds a role on a
+  desired resource, and no face plans one. When it builds it, it starts on
+  [`desired.v2`](../../../spec/profiles/desired/v2.md) (#986): a `DesiredConfig` keyed by target
+  through `config.v2` §2.18, the far target waiting the face's reply timeout, re-reading
+  conditionally on RF and watching its author's heartbeat on LoRa
+  ([`config.v2-binding.md`](config.v2-binding.md) §9, with the bytes measured).
 
 ## Every v1 entry, mapped
 

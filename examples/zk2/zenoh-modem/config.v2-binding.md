@@ -222,6 +222,36 @@ As [`config.v1-binding.md`](config.v1-binding.md) §9 says. One thing changes: t
 contract fact now, so a tool can check a desired document before sending it. The owner still
 refuses it whole, and its report is the record's desired fields, the group named by its index.
 
+**Its desired state starts on [`desired.v2`](../../../spec/profiles/desired/v2.md)** (#986).
+zenoh-modem decided on 2026-10-05 not to build desired state, so no node holds a role on a
+desired resource and no face plans one, today or under `desired.v2`. When it builds it:
+- **The document** is a `DesiredConfig` the ground's author keeps as its own state, keyed by
+  target, on an interface whose contract lists `desired.v2` in `uses`, its target parameters
+  `["system", "service"]`: `zk2/ground/fleet-mgr/<iface>/state/configs/h-c2a95e41d7f0/lora0`. Its
+  version is the put's in-band stamp, a run and a seq, so the resource carries no Zenoh timestamp
+  and is answered by snapshot (`desired.v2` §2.4).
+- **The device service** binds it, `{system} = self.system` and `{service} = self.service`, and
+  converges through `config.v2` §2.18. Its report is the record's desired fields (§7): no packed
+  `Report` crosses beside the record (`desired.v2` §2.16).
+- **On RF** it reads its slice by grant and waits rf0's 15-s `reply_timeout_ms` for each read
+  (`desired.v2` §2.5), each re-read conditional. Measured on #989's W2 path with the reference's
+  target ([wire baseline](../../../docs/zk2/measurements/wire-baseline/README.md), "W2 with
+  desired.v2 and alarms.v2"): a 40-B SDU up and a 117-B SDU down under the lean stack, an
+  unchanged slice answered by its held stamp alone. At a 300-s period that is 45.2 KB a day,
+  where `desired.v1`'s GET was 63.9 KB, and no answer crossed after its read had ended.
+- **On LoRa** a 300-s period does not fit SF12's duty at all (#986's memo, §1.3), so a target
+  there watches its author's heartbeat in place of the period and reads only when its section
+  moves. Measured on the same path at a 600-s horizon: the author's heartbeat, one 40-B SDU
+  every 285 s toward the target, 12.1 KB a day, and no read while its section stayed put, nor
+  after a change of document; a lost heartbeat costs one read. At a 3,600-s horizon the same
+  heartbeat is 2.0 KB a day (`desired.v2` Appendix B). The horizon is the author's budget
+  parameter, priced on each face (`link.v2` §2.12).
+- **On SBD** a GET and its reply are two billed messages whatever their size: the conditional
+  read saves bytes there, never a message, and the watch costs one message a heartbeat.
+- **The catalog** would append the author's interface at its revision (`zk2 catalog add`), its
+  existing indices staying, so that a device across a face reads its author's revision by the
+  deployment's word (`desired.v2` §2.18), and with owner heartbeats finds its group.
+
 ## 10. v1 findings, made while mapping
 
 Findings 1 to 5 of [`config.v1-binding.md`](config.v1-binding.md) §10 close:

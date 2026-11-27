@@ -310,6 +310,37 @@ Tests spell many more keys; bmc's e2e alone spells 61.
 - **The catalog's identity-shaped fields are renamed** (`origins` → `systems`, `MemberClaim.sensor` → `service`, AlertRef structured, `AlertSite` gains `service`). The other schemas keep v1's fields and flag the duplicates as debt.
 - **Occurrence retention is set to 7 days**; v1's events storage had no bound.
 
+## desired.v2 and alarms.v2, before #1149
+
+The framework set still implements `alarms.v1`, and `zs.desired.v1` still uses `desired.v1`.
+Moving them is #1149's, with the rest of ZenSight's move onto zk2c, and the profiles index's
+"Used by" column moves with it. What each v2 profile changes here, as #986's and #984's designs
+say, with the bytes #989's W2 path measured for the reference's owners
+([wire baseline](../../../docs/zk2/measurements/wire-baseline/README.md), "W2 with desired.v2 and
+alarms.v2"):
+
+- **desired** ([`desired.v2`](../../../spec/profiles/desired/v2.md)). `zs.desired.v1`'s author
+  moves by a revision that lists `desired.v2` in `uses` (§2.18), its keys unchanged. Its
+  210,000 documents keep `freshness.ttl_s = 0` and the deployment's 300-s period, each re-read
+  conditional: an unchanged slice is answered by its held stamp alone, a 94-B reply where today's
+  carries the whole document. The watch does not pay at that population: a heartbeat's section
+  holds a bit per live document, 26 KB a heartbeat with 210,000 live (§2.2). Each target's report
+  becomes the packed `Report`, an 18-B payload converged, measured, where a `desired.v1.Report`
+  is 294 B, its role named by `desired.report` and a refusal's place and line indices into the
+  target contract's `desired.pointers` and `desired.details` (§2.10).
+- **alarms** ([`alarms.v2`](../../../spec/profiles/alarms/v2.md)). ZenSight's rules are
+  configured at run time, so its alarms go by words until a contract of its own lists them in
+  `alarms.rules` (§2.4, §4): each raise puts an `alarms.v2.Words` document on `words/{slot}`,
+  then a record that carries the alert key, 175 B in two SDUs on RF by alarms.v2's Appendix B,
+  where a table's rule's transition measured one 45-B SDU. The words never cross a face (§2.11).
+  - The identity is unchanged: the alert key, ZenSight's recipe byte for byte, test vector
+    `a659f813308ad1da` (§2.2). The slot, the key's last chunk, is its alias.
+  - Its `kind` rides the words' `category`, or a rule's once a table holds it.
+  - Its acknowledgements keep their references and compare `at`, whole seconds (§2.5).
+  - The consumers' `zk2/*/*/alarms.v1/state/alarms/*` becomes `…/alarms.v2/state/alarms/*`,
+    with `…/state/words/*` beside it; a reader reads both majors of the owners a scope selects
+    (§2.17), so a rule does not go quiet while services move one by one.
+
 ## Gaps found
 
 Each gap: what it is · the evidence · the proposed correction.
