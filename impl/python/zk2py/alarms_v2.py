@@ -1126,3 +1126,153 @@ def one_slot_each(slots: dict[int, tuple[str | None, int]], present_run: int | N
         return "unobservable"
     keys_ = [k for k, run in slots.values() if k is not None and run == present_run]
     return "yes" if len(keys_) == len(set(keys_)) else "no"
+
+
+# -- §2.4 and §5, a slot's words ----------------------------------------------------------------
+
+#: §2.4 "Otherwise it takes none, for the first of these", and §5's third
+#: question's tokens.
+NO_RECORD, UNDECODABLE, TABLE_RULE, NO_WORDS, UNREADABLE, MISMATCH = (
+    "no_record", "undecodable", "table", "no_words", "unreadable", "mismatch")
+STRICT, SANITIZED = "strict", "sanitized"
+
+
+def words_payload(doc: dict[str, Any], run: int, seq: int, width: int = 16) -> bytes:
+    """A words put's payload: "strict JSON, in the envelope a state put
+    carries (core §7.5)", CH's tag 0, "a JSON type has no tag"."""
+    from . import zk2c
+
+    return zk2c.write("mutation", width, run, seq, 0, jcs.dumps(doc))
+
+
+def in_words_schema(value: Any) -> bool:
+    """"inside the ``Words`` schema" (§2.4), by core §7.3's subset."""
+    from . import alarms as v1
+
+    root = words_schema()
+    return v1.validate(value, {"$ref": f"#/$defs/{WORDS}"}, root)
+
+
+def read_words(value: Any) -> dict[str, Any] | None:
+    """A words document's value, or None where it does not read: "strict
+    JSON as v1 §2.4 reads a payload, inside the ``Words`` schema". ``value``
+    is the payload's bytes (its envelope's record, the JSON) or the decoded
+    value."""
+    from . import alarms as v1
+
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = v1.strict_json(bytes(value))
+        except v1.NotStrict:
+            return None
+    if not isinstance(value, dict) or not in_words_schema(value):
+        return None
+    return value
+
+
+def read_words_put(data: bytes) -> dict[str, Any] | None:
+    """A put on ``words/{slot}``: its envelope (CH 0x00), then
+    :func:`read_words` over the record's bytes."""
+    from . import zk2c
+
+    try:
+        env = zk2c.parse(data, "put")
+    except zk2c.Refused:
+        return None
+    if env.form != "mutation" or env.tag != 0:
+        return None
+    return read_words(env.record or b"")
+
+
+@dataclass(frozen=True)
+class Taken:
+    """§2.4 "A reader takes words by the key" and §5's "Do this slot's
+    words derive its record's key?": ``taken`` with how (``strict`` or
+    ``sanitized``), or the first reason it takes none."""
+
+    taken: bool
+    how: str | None = None
+    reason: str | None = None
+
+    def answer(self) -> dict[str, str]:
+        """§5's verdict: yes (strict, sanitized), no (mismatch), not asked
+        (table, no_words, no_record), unobservable (unreadable,
+        undecodable)."""
+        if self.taken:
+            return {"answer": "yes", "reason": self.how or ""}
+        if self.reason == MISMATCH:
+            return {"answer": "no", "reason": MISMATCH}
+        if self.reason in (TABLE_RULE, NO_WORDS, NO_RECORD):
+            return {"answer": "not_asked", "reason": self.reason}
+        return {"answer": "unobservable", "reason": self.reason or ""}
+
+
+def take_words(record: Read | None, words: Any = None, words_heard: bool | None = None) -> Taken:
+    """Whether a reader takes a slot's words as the words of the slot's
+    alarm. ``record`` is the slot's record as read (None where it holds
+    none); ``words`` the words it read: a document, the payload's JSON bytes,
+    or None where it read none. In §2.4's order: ``no_record``,
+    ``undecodable``, ``table``, ``no_words``, ``unreadable``, ``mismatch``.
+    Taken where "v1's recipe over the words, through the sanitizing step,
+    gives the record's ``key``": ``strict`` where the strict recipe does
+    (v1 §2.3's framed input), else ``sanitized``."""
+    from . import alarms as v1
+
+    if record is None:
+        return Taken(False, reason=NO_RECORD)
+    if not record.reads:
+        return Taken(False, reason=UNDECODABLE)
+    assert record.value is not None
+    if not by_words(record.value):
+        return Taken(False, reason=TABLE_RULE)
+    if words is None if words_heard is None else not words_heard:
+        return Taken(False, reason=NO_WORDS)
+    doc = read_words(words)
+    if doc is None:
+        return Taken(False, reason=UNREADABLE)
+    key = key_hex(record.value["key"])
+    if v1.derive(doc["rule"], doc.get("labels")).key != key:
+        return Taken(False, reason=MISMATCH)
+    strict = v1.strict_key(doc["rule"], doc.get("labels"))
+    return Taken(True, STRICT if strict == key else SANITIZED)
+
+
+class SlotView:
+    """What a tool shows of one slot as its puts arrive, in either order
+    (§2.4 "The two puts ride two priorities, so a reader can receive the
+    record first … It then shows the alarm by its alert key until its words
+    arrive"; §5): by its words (a table's or taken), by its alert key, by its
+    numbers where unnamed, or nothing."""
+
+    def __init__(self, table: Table = NO_TABLE) -> None:
+        self.table = table
+        self.record: Read | None = None
+        self.words: Any = None
+
+    def put_record(self, r: Read) -> None:
+        self.record = r if r.reads else None
+
+    def put_words(self, w: Any) -> None:
+        self.words = w
+
+    def shown(self) -> dict[str, Any]:
+        """``{"words": {rule, labels, summary, category?}}``,
+        ``{"alert_key": …}``, ``{"unnamed": reason, "numbers": …}``, or
+        ``{"nothing": …}`` where no record reads."""
+        if self.record is None or self.record.value is None:
+            return {"nothing": NO_RECORD}
+        v = self.record.value
+        if not by_words(v):
+            n = name_record(self.table, v)
+            if n.unnamed is not None:
+                return {"unnamed": n.unnamed, "numbers": numbers_of(v)}
+            out: dict[str, Any] = {"rule": n.rule, "labels": n.labels, "summary": n.summary}
+            if n.category is not None:
+                out["category"] = n.category
+            return {"words": out, "alert_key": n.alert_key}
+        t = take_words(self.record, self.words)
+        if not t.taken:
+            return {"alert_key": key_hex(v["key"])}
+        doc = read_words(self.words)
+        assert doc is not None
+        return {"words": doc, "alert_key": key_hex(v["key"])}
