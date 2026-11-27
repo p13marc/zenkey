@@ -39,6 +39,12 @@ fn a_key() -> String {
     format!("zk2/{OWNER}/alarms.v1/state/alarms/{A_KEY}")
 }
 
+/// A's notice identity: its reference, `<system>/<service>/<alert_key>`
+/// (alarms.v2 §2.16), whichever major its owner implements.
+fn a_ref() -> String {
+    format!("{OWNER}/{A_KEY}")
+}
+
 /// The alarm A of the scenarios' conventions at `severity`, its summary
 /// `summary`.
 fn alarm_a(severity: Severity, summary: &str) -> Condition {
@@ -82,7 +88,7 @@ fn alerts_rule(name: &str, sinks: &[&str]) -> RuleConfig {
 
 /// What a capture holds about A, in order.
 fn of_a(got: &[Outgoing], rule: &str) -> Vec<Notification> {
-    let id = format!("{rule}:{}", a_key());
+    let id = format!("{rule}:{}", a_ref());
     got.iter()
         .map(|o| o.notification.clone())
         .filter(|n| n.id == id)
@@ -356,7 +362,7 @@ async fn a_restart_with_a_state_file_is_no_news_and_the_resolve_after_it_is_one(
     running.stop().await;
     let saved = std::fs::read_to_string(&state).expect("the ledger was saved");
     assert!(
-        saved.contains(&format!("fleet-alerts:{}", a_key())),
+        saved.contains(&format!("fleet-alerts:{}", a_ref())),
         "{saved}"
     );
     assert!(saved.contains("\"version\": 2") || saved.contains("\"version\":2"));
@@ -574,7 +580,7 @@ async fn a_daemon_with_alerts_publishes_the_alarm_and_its_alarms_check() {
         match zw.get_firing_member(&id, zk2::T).await {
             Ok(zenkey::typed::StateGet::Answered(v)) => v.iter().any(|c| {
                 matches!(c, zenkey::typed::Current::Value { value: Ok(doc), .. }
-                    if doc.id == format!("fleet-alerts:{}", a_key())
+                    if doc.id == format!("fleet-alerts:{}", a_ref())
                         && doc.state == "firing"
                         && doc.severity == "warning")
             }),
@@ -613,6 +619,178 @@ async fn a_daemon_with_alerts_publishes_the_alarm_and_its_alarms_check() {
     assert!(
         alarms_check.detail.contains("a complete read"),
         "{alarms_check:?}"
+    );
+    running.stop().await;
+}
+
+// ─── alarms.v2 (#984's S3) ───────────────────────────────────────────────
+
+/// `lab/svc`'s own contract `tc.v1`, whose table T1 names `link_down` at 1
+/// (`zenkey/tests/contracts/alarms/tc.v1.toml`, scenarios-v2.md).
+fn tc() -> zenkey::Implementation {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../zenkey/tests/contracts/alarms/tc.v1.toml");
+    let l = zenkey::model::contract::load_path(&path);
+    zenkey::Implementation::new(l.contract.unwrap_or_else(|| panic!("{}", l.report)))
+}
+
+/// An owner of `alarms.v2` at [`OWNER`] beside `tc.v1`, started.
+async fn owner_v2(session: &zenoh::Session) -> (Service, zenkey::alarms::v2::Alarms) {
+    let mut b = ServiceBuilder::new(session, zk2::config(OWNER));
+    let tc = tc();
+    let iface = tc.iface().clone();
+    b.implement(tc).expect("tc.v1");
+    b.expose(&iface, "state/qdisc").expect("its qdisc");
+    let a = b
+        .alarms_v2(zenkey::alarms::v2::Startup::default())
+        .await
+        .expect("alarms.v2");
+    (b.start().await.expect("start"), a)
+}
+
+fn alarm_a_v2(severity: Severity) -> zenkey::alarms::v2::Condition {
+    zenkey::alarms::v2::Condition::new("link_down", severity, "Link to r2 on eth0 is down")
+        .label("peer", "r2")
+        .label("port", "eth0")
+}
+
+/// A notice's identity is the alarm's reference (alarms.v2 §2.16): stable
+/// across both majors and a restart. Run 1 tells A firing on `alarms.v1`,
+/// and its state file is then written back as a zenwatch before this one
+/// wrote it, by A's `alarms.v1` key. The service moves to `alarms.v2`, A
+/// firing on slot 0 by its table, and run 2 reads the old state file onto
+/// A's reference: no news. A's resolve on its slot is one `resolved`, of
+/// the same identity, its transition saying `alarms.v2` and slot 0, and
+/// the state file holds the reference alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_notice_is_its_alarms_reference_across_both_majors_and_a_restart() {
+    let (_router, ep) = zk2::router().await;
+    let tool = zk2::client_ns(&ep, Some(NS)).await;
+    let v1_owners = zk2::client_ns(&ep, Some(NS)).await;
+    let (v1_svc, v1) = owner(&v1_owners).await;
+    zk2::tokens(&tool, &format!("zk2/{OWNER}/@zk/instance/*"), 1).await;
+    v1.raise(alarm_a(Severity::Warning, "link to r2 down on eth0"))
+        .await
+        .expect("A raised");
+    let dir = tempfile::tempdir().expect("a state dir");
+    let state = dir.path().join("state.json");
+    let opts = || Options {
+        clocks_synced: true,
+        state_file: Some(state.clone()),
+        ..Options::default()
+    };
+    let first = Capture::default();
+    let running = engine::start(
+        zk2::daemon_bus(&ep, NS).await,
+        vec![alerts_rule("fleet-alerts", &["ops"])],
+        first.clone(),
+        opts(),
+    )
+    .await;
+    let got = about_a(&first, "fleet-alerts", 1).await;
+    assert_eq!(got[0].state, CondState::Firing);
+    running.stop().await;
+    let saved = std::fs::read_to_string(&state).expect("the ledger was saved");
+    let by_ref = format!("fleet-alerts:{}", a_ref());
+    assert!(saved.contains(&by_ref), "by reference: {saved}");
+    std::fs::write(
+        &state,
+        saved.replace(&by_ref, &format!("fleet-alerts:{}", a_key())),
+    )
+    .expect("a state file by alarms.v1 key");
+
+    // The service moves to alarms.v2: a new instance, A on slot 0.
+    drop(v1);
+    v1_svc.close().await.expect("the v1 instance closes");
+    let v2_owners = zk2::client_ns(&ep, Some(NS)).await;
+    let (_v2_svc, v2) = owner_v2(&v2_owners).await;
+    v2.raise(alarm_a_v2(Severity::Warning))
+        .await
+        .expect("A raised");
+
+    let second = Capture::default();
+    let running = engine::start(
+        zk2::daemon_bus(&ep, NS).await,
+        vec![alerts_rule("fleet-alerts", &["ops"])],
+        second.clone(),
+        opts(),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(
+        of_a(&second.lock().unwrap(), "fleet-alerts").is_empty(),
+        "the same reference, firing at the same severity: no news: {:?}",
+        second.lock().unwrap()
+    );
+    v2.resolve(A_KEY).await.expect("A resolved");
+    let got = about_a(&second, "fleet-alerts", 1).await;
+    assert_eq!(
+        (got[0].kind, got[0].state, got[0].prior),
+        (NoticeKind::Resolved, CondState::Ok, Some(CondState::Firing))
+    );
+    let t = got[0].alert.as_ref().expect("the alarm's change");
+    assert_eq!(t.profile, Some("alarms.v2"));
+    assert_eq!(t.slot, Some(0));
+    assert_eq!(t.alarm.as_ref().map(|a| a.alert_key.as_str()), Some(A_KEY));
+    running.stop().await;
+    let saved = std::fs::read_to_string(&state).expect("the ledger was saved");
+    assert!(
+        !saved.contains(&a_key()),
+        "no entry by alarms.v1 key is left: {saved}"
+    );
+}
+
+/// `alert-firing` over an `alarms.v2` owner (alarms.v2 §2.15): firing while
+/// A fires on its slot; then ok once A's resolve is read and stays ok: the
+/// owner's snapshot holds A's resolved record, a complete snapshot that
+/// establishes its alarms, where an `alarms.v1` owner's empty GET was no
+/// verdict.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alert_firing_reads_an_alarms_v2_owner_by_its_snapshot() {
+    let (_router, ep) = zk2::router().await;
+    let owners = zk2::client_ns(&ep, Some(NS)).await;
+    let tool = zk2::client_ns(&ep, Some(NS)).await;
+    let (_svc, alarms) = owner_v2(&owners).await;
+    zk2::tokens(&tool, &format!("zk2/{OWNER}/@zk/instance/*"), 1).await;
+    alarms
+        .raise(alarm_a_v2(Severity::Warning))
+        .await
+        .expect("A raised");
+    let ops = Capture::default();
+    let running = engine::start(
+        zk2::daemon_bus(&ep, NS).await,
+        vec![engine::rule(
+            "lab-warning",
+            "alert-firing zk2/lab/** warning",
+            "error",
+        )],
+        ops.clone(),
+        Options {
+            clocks_synced: true,
+            ..Options::default()
+        },
+    )
+    .await;
+    let firing = |s: &[Outgoing]| s.iter().any(|o| o.notification.state == CondState::Firing);
+    engine::until(&ops, "alert-firing fires", firing).await;
+    alarms.resolve(A_KEY).await.expect("A resolved");
+    engine::until(&ops, "alert-firing goes ok", |s| {
+        s.last()
+            .is_some_and(|o| o.notification.state == CondState::Ok)
+    })
+    .await;
+    // Ticks later it is still ok: the resolved record is the owner's word.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let seen: Vec<CondState> = ops
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|o| o.notification.state)
+        .collect();
+    assert_eq!(
+        seen,
+        [CondState::Firing, CondState::Ok],
+        "firing, then ok, and no verdict lost: {seen:?}"
     );
     running.stop().await;
 }

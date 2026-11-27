@@ -2,15 +2,25 @@
 //! fleet's live `alarms.v1` reader ([`AlarmFeed`], in the deployment's
 //! namespace), one notice per alarm key as §5's first question moves.
 //!
-//! **One state per alarm key**, as `instance-gone` is one per address: the
-//! notice's identity is `<rule_id>:<key>`, the key base-relative, the
-//! alarm's identity from its raise to its resolve (§2.1). Its state is "is
-//! this alarm firing?" (§2.14), read off the fleet's book, never the
-//! sample's kind (§2.6):
+//! **One state per alarm**, as `instance-gone` is one per address: the
+//! notice's identity is `<rule_id>:<system>/<service>/<alert_key>`, the
+//! alarm's reference (alarms.v1 §2.12, alarms.v2 §2.16), never its key and
+//! never its slot. So a service that moves from `alarms.v1` to `alarms.v2`
+//! keeps its notices, and an alarm back on another slot is the one told
+//! before. An unnamed `alarms.v2` alarm matches no reference: its identity
+//! is its slot's key, and a restart may tell it again (§2.16). The fleet's
+//! reader reads both majors of the owners the selector selects (§2.17), and
+//! each owner is judged by the major its descriptor lists: the other
+//! major's keys of it say nothing. A state file written before this
+//! (`<rule_id>:<alarms.v1 key>`) is read onto references, so an upgrade
+//! tells nothing twice. Its state is "is this alarm firing?" (§2.14), read
+//! off the fleet's book, never the sample's kind (§2.6):
 //! - **firing** while it reads *yes*: a fresh firing document of the
 //!   present instance;
 //! - **ok** on *no*: put resolved, deleted, or not held by its owner's
-//!   alarms, known whole (§2.14 step 5);
+//!   alarms, known whole (§2.14 step 5); under `alarms.v2` also `rebound`,
+//!   another identity's record on its slot under its run, told as a
+//!   resolve (§2.16);
 //! - **unobservable** on every other answer — stale, its owner absent (its
 //!   alarms last-known), an earlier instance's put, a put that does not
 //!   read — never ok.
@@ -76,7 +86,9 @@ use zenkey_fleet::{
     AlarmBook, AlarmFeed, AlarmReadLog, AlarmRefresh, AlarmRefreshed, AlarmScope, AlarmSpec,
     AlarmTransition, CondState,
 };
-use zenkey_model::alarms::{Alarm, AlarmRef, Answer, Judged, Reason, SetVerdict, Severity, State};
+use zenkey_model::alarms::{
+    Alarm, AlarmRef, Answer, Judged, Major, Reason, SetVerdict, Severity, State,
+};
 use zenkey_model::grammar::Addr;
 
 use crate::engine::RuleNotice;
@@ -153,6 +165,96 @@ pub fn state_of(a: AlarmAnswerToken) -> CondState {
         AlarmAnswerToken::No => CondState::Ok,
         AlarmAnswerToken::Unobservable | AlarmAnswerToken::NotAsked => CondState::Unobservable,
     }
+}
+
+/// A transition's notice identity, its `<what>`: the alarm's reference,
+/// `<system>/<service>/<alert_key>`, either major's (§2.16); an unnamed
+/// `alarms.v2` alarm, which matches none, its slot's key.
+pub fn identity(t: &AlarmTransition) -> String {
+    match &t.alarm {
+        Some(a) => format!("{}/{}/{}", a.system, a.service, a.alert_key),
+        None => t.key.clone(),
+    }
+}
+
+/// A remembered `<what>` read as a notice identity: an `alarms.v1` key, as a
+/// state file written before references held it, mapped onto its
+/// reference; a reference, or an unnamed alarm's slot key, as it is.
+pub fn identity_of(what: &str) -> String {
+    match AlarmRef::from_key(what) {
+        Some(a) => format!("{}/{}/{}", a.system, a.service, a.alert_key),
+        None => what.to_owned(),
+    }
+}
+
+/// The owner a notice identity names.
+fn owner_of(identity: &str) -> Option<Addr> {
+    let rest = identity.strip_prefix("zk2/").unwrap_or(identity);
+    let mut c = rest.split('/');
+    format!("{}/{}", c.next()?, c.next()?).parse().ok()
+}
+
+/// A notice id remembered in a state file, `<rule_id>:<what>`, with its
+/// `<what>` read onto a reference ([`identity_of`]): what an `alerts`
+/// rule's ledger entry written against `alarms.v1` keys becomes.
+pub fn migrate_id(id: &str) -> String {
+    match id.split_once(':') {
+        Some((rule, what)) => format!("{rule}:{}", identity_of(what)),
+        None => id.to_owned(),
+    }
+}
+
+/// Whether a transition is of the major its owner is read by: an owner
+/// whose descriptor lists `alarms.v2` is told by its slots, and its
+/// `alarms.v1` keys say nothing of its alarms (alarms.v2 §2.1); one that
+/// lists `alarms.v1`, or neither, by its keys.
+fn of_its_major(t: &AlarmTransition, book: &AlarmBook) -> bool {
+    let v2 = owner_of(&t.key).is_some_and(|o| book.major_of(&o) == Some(Major::V2));
+    v2 == t.profile.is_some()
+}
+
+/// An `alarms.v2` row's answer as a transition with no sample (§2.14): what
+/// a refresh judges again.
+fn judged_row(r: zenkey_fleet::report::AlarmRow) -> AlarmTransition {
+    AlarmTransition {
+        key: r.key,
+        alarm: r.alarm,
+        change: AlarmChange::Judged,
+        firing: r.firing,
+        severity: r.severity,
+        document: None,
+        stamp: None,
+        via: None,
+        lost: None,
+        profile: r.profile,
+        slot: r.slot,
+        words: r.words,
+        record: None,
+        displaced: r.displaced,
+    }
+}
+
+/// An `alarms.v2` alarm's words as a document, for a rendering: a table's
+/// alarm or one by words, with its `at`; `None` for one shown by its key or
+/// its numbers, or with no `at`, which a document cannot say absent.
+fn v2_document(t: &AlarmTransition) -> Option<Alarm> {
+    let w = t.words.as_ref()?;
+    let rec = t.record.as_ref()?;
+    let at_ms = rec["at"].as_u64()?;
+    Some(Alarm {
+        timestamp: at_ms,
+        observed_at_ms: None,
+        rule: w.rule.clone()?,
+        severity: t.severity?,
+        state: if rec["state"] == "resolved" {
+            State::Resolved
+        } else {
+            State::Firing
+        },
+        summary: w.summary.clone()?,
+        category: w.category.clone(),
+        labels: w.labels.clone(),
+    })
 }
 
 /// Whether an answer is the key's, rather than this reader's sight not yet
@@ -646,13 +748,13 @@ impl Counts {
     /// state file remembers it (`remembered`, before the first look judged
     /// anything).
     fn read(&mut self, ts: &[AlarmTransition], remembered: &BTreeMap<String, Said>) {
-        let mut last: BTreeMap<&str, &AlarmTransition> = BTreeMap::new();
+        let mut last: BTreeMap<String, &AlarmTransition> = BTreeMap::new();
         for t in ts.iter().filter(|t| t.change != AlarmChange::Lost) {
-            last.insert(t.key.as_str(), t);
+            last.insert(identity(t), t);
         }
         for (key, t) in last {
             let why = format!("{key} ({}: {})", t.firing.reason, t.firing.says);
-            match (settled(&t.firing), remembered.get(key)) {
+            match (settled(&t.firing), remembered.get(&key)) {
                 (false, None) => self.not_yet.push(why),
                 (false, Some(s)) => self.kept.push(format!(
                     "{why}; remembered {}",
@@ -696,9 +798,10 @@ impl AlarmRule {
                 remembered_observer = Some(m.state);
                 continue;
             }
-            if AlarmRef::from_key(what).is_some() {
+            let identity = identity_of(what);
+            if owner_of(&identity).is_some() {
                 self.said.insert(
-                    what.to_string(),
+                    identity,
                     Said {
                         state: m.state,
                         severity: Some(m.severity.clone()),
@@ -761,14 +864,17 @@ impl AlarmRule {
         if t.change == AlarmChange::Lost
             || !settled(&t.firing)
             || (!read && t.firing.reason == ABSENT)
+            || !of_its_major(t, book)
         {
             return None;
         }
         let state = state_of(t.firing.answer);
-        let prior = self.said.get(&t.key).cloned();
+        let id = identity(t);
+        let prior = self.said.get(&id).cloned();
         let document = t
             .document
             .clone()
+            .or_else(|| v2_document(t))
             .or_else(|| book.seen(&t.key).and_then(|s| s.document))
             .or_else(|| prior.as_ref().and_then(|p| p.document.clone()));
         let severity = t
@@ -781,7 +887,7 @@ impl AlarmRule {
             Some(p) => p.state != state || (state == CondState::Firing && p.severity != severity),
         };
         self.said.insert(
-            t.key.clone(),
+            id,
             Said {
                 state,
                 severity: severity.clone(),
@@ -808,14 +914,27 @@ impl AlarmRule {
         read: bool,
         at: &str,
     ) -> (Vec<RuleNotice>, Vec<String>) {
-        let held: BTreeSet<&str> = book.keys().collect();
+        // The identities the book holds, each by its owner's major: an
+        // `alarms.v1` key's reference, an `alarms.v2` row's.
+        let v2 = |a: &Addr| book.major_of(a) == Some(Major::V2);
+        let (now, wall) = (Instant::now(), SystemTime::now());
+        let mut held: BTreeSet<String> = book
+            .keys()
+            .filter(|k| AlarmRef::from_key(k).is_some_and(|_| owner_of(k).is_some_and(|o| !v2(&o))))
+            .map(identity_of)
+            .collect();
+        held.extend(
+            book.v2_rows(now, wall)
+                .into_iter()
+                .filter(|r| owner_of(&r.key).is_some_and(|o| v2(&o)))
+                .map(|r| identity(&judged_row(r))),
+        );
         let absent: Vec<String> = self
             .said
             .keys()
             .filter(|k| !held.contains(k.as_str()))
             .cloned()
             .collect();
-        let now = Instant::now();
         let mut out = Vec::new();
         let mut kept = Vec::new();
         for key in absent {
@@ -826,16 +945,21 @@ impl AlarmRule {
                 self.said.remove(&key);
                 continue;
             }
-            if !book.scope().selects_key(&key) {
+            let Some(owner) = owner_of(&key) else {
+                continue;
+            };
+            if !book.scope().selects_owner(&owner) {
                 kept.push(format!("{key} (no longer under the rule's selector)"));
                 continue;
             }
-            let Some(alarm) = AlarmRef::from_key(&key) else {
-                continue;
-            };
-            let Ok(owner) = format!("{}/{}", alarm.system, alarm.service).parse::<Addr>() else {
-                continue;
-            };
+            // A reference names its alarm; an unnamed alarm's slot key none.
+            let alarm = key.rsplit('/').next().and_then(|alert_key| {
+                (!key.starts_with("zk2/")).then(|| AlarmRef {
+                    system: owner.system.as_str().to_owned(),
+                    service: owner.service.as_str().to_owned(),
+                    alert_key: alert_key.to_owned(),
+                })
+            });
             let set = book.owner_set(&owner, now);
             let judged = match set.verdict {
                 SetVerdict::Established => Judged {
@@ -856,9 +980,16 @@ impl AlarmRule {
                     continue;
                 }
             };
+            let v2_owner = v2(&owner);
             let t = AlarmTransition {
-                key: key.clone(),
-                alarm: Some(alarm),
+                key: match &alarm {
+                    Some(a) if !v2_owner => format!(
+                        "zk2/{}/{}/alarms.v1/state/alarms/{}",
+                        a.system, a.service, a.alert_key
+                    ),
+                    _ => key.clone(),
+                },
+                alarm,
                 change: AlarmChange::Judged,
                 firing: answer_of(judged),
                 severity: said.severity.as_deref().and_then(Severity::parse),
@@ -866,7 +997,7 @@ impl AlarmRule {
                 stamp: None,
                 via: None,
                 lost: None,
-                profile: None,
+                profile: v2_owner.then_some(zenkey_model::alarms::v2::PROFILE),
                 slot: None,
                 words: None,
                 record: None,
@@ -907,6 +1038,15 @@ impl AlarmRule {
             };
             out.extend(self.judge(&t, book, true, at));
         }
+        // alarms.v2's rows: each slot, each displaced alarm (#984's S3).
+        for r in book.v2_rows(now, wall) {
+            if r.last_known.is_some() && r.latest.is_none() && r.displaced.is_none() {
+                // An archived record no slot holds: its owner's absence is
+                // the owner's row's, not news of the alarm.
+                continue;
+            }
+            out.extend(self.judge(&judged_row(r), book, true, at));
+        }
         out
     }
 
@@ -923,6 +1063,16 @@ impl AlarmRule {
         let mut lines = vec![format!(
             "alarm: system {system} · service {service} · alert key {alert_key} (alarms.v1 §2.12)"
         )];
+        if let Some(p) = t.profile {
+            lines.push(format!(
+                "{p}: {}{}",
+                t.slot
+                    .map_or_else(|| "on no slot".to_owned(), |s| format!("slot {s}")),
+                t.displaced
+                    .map(|d| format!(", {d} (another identity's record took its slot)"))
+                    .unwrap_or_default()
+            ));
+        }
         if let Some(d) = &document {
             lines.push(format!("alarm rule: {}", d.rule));
             if let Some(c) = &d.category {
@@ -948,7 +1098,7 @@ impl AlarmRule {
         ));
         RuleNotice {
             rule: self.name.clone(),
-            what: t.key.clone(),
+            what: identity(t),
             kind: NoticeKind::Alert,
             state,
             prior: prior.map(|p| p.state),
@@ -1105,6 +1255,9 @@ fn evidence(
         CondState::Ok => match t.firing.reason.as_str() {
             "resolved" => "resolved".to_string(),
             "deleted" => "deleted, which reads as resolved (§2.6)".to_string(),
+            "rebound" => "resolved: another identity's record took its slot under its run \
+                          (alarms.v2 §2.6, §2.16)"
+                .to_string(),
             "not_held" => {
                 "gone from its owner's alarms, known whole: resolved and deleted while this \
                  reader did not hear it"
@@ -1158,6 +1311,8 @@ mod tests {
     use zenoh::time::{NTP64, Timestamp, TimestampId};
 
     const A: &str = "zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da";
+    /// A's notice identity: its reference (alarms.v2 §2.16).
+    const A_REF: &str = "lab/svc/a659f813308ad1da";
     const ZID: &str = "a1";
 
     /// A rule's reader carries the routers the config's `binding` names
@@ -1389,7 +1544,8 @@ mod tests {
         .unwrap();
         assert_eq!(says(&n), (CondState::Firing, None, Some("warning")));
         assert_eq!(n.kind, NoticeKind::Alert);
-        assert_eq!(n.what, A);
+        assert_eq!(n.what, A_REF, "the alarm's reference, never its key");
+        assert_eq!(n.key.as_deref(), Some(A));
         assert_eq!(n.address.as_deref(), Some("lab/svc"));
         assert!(
             n.evidence.contains("raised at warning — down"),
@@ -1592,7 +1748,7 @@ mod tests {
             out[0]
                 .lines
                 .iter()
-                .any(|l| l.starts_with(&format!("- not yet: {A} ("))),
+                .any(|l| l.starts_with(&format!("- not yet: {A_REF} ("))),
             "{:?}",
             out[0].lines
         );
@@ -1662,12 +1818,41 @@ mod tests {
         assert_eq!(
             by,
             [
-                (gone, CondState::Ok, Some(CondState::Firing)),
+                (
+                    "lab/svc/0000000000000001",
+                    CondState::Ok,
+                    Some(CondState::Firing)
+                ),
                 (OBSERVER, CondState::Ok, Some(CondState::Unobservable)),
             ],
             "{out:?}"
         );
         assert!(out[0].evidence.contains("not_held"), "{}", out[0].evidence);
+    }
+
+    /// A notice's identity is the alarm's reference (alarms.v2 §2.16): a
+    /// state file's id by `alarms.v1` key is read onto it, a reference and
+    /// an unnamed alarm's slot key stand, and an id of no alarm is left.
+    #[test]
+    fn a_remembered_id_is_read_onto_the_alarms_reference() {
+        assert_eq!(migrate_id(&format!("fleet:{A}")), format!("fleet:{A_REF}"));
+        assert_eq!(
+            migrate_id(&format!("fleet:{A_REF}")),
+            format!("fleet:{A_REF}")
+        );
+        let slot = "fleet:zk2/lab/svc/alarms.v2/state/alarms/3";
+        assert_eq!(migrate_id(slot), slot);
+        assert_eq!(migrate_id("fleet:observer"), "fleet:observer");
+        assert_eq!(
+            owner_of(A_REF).map(|a| a.to_string()).as_deref(),
+            Some("lab/svc")
+        );
+        assert_eq!(
+            owner_of("zk2/lab/svc/alarms.v2/state/alarms/3")
+                .map(|a| a.to_string())
+                .as_deref(),
+            Some("lab/svc")
+        );
     }
 
     fn answer(answer: AlarmAnswerToken, reason: &str) -> AlarmAnswer {
