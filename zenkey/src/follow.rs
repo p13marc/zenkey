@@ -475,7 +475,7 @@ impl ReplyGate for SeedGate {
 
 /// Every descriptor `addr` answers on `session` (v2 §2.10's read of the
 /// address's descriptors): each instance's, as JSON.
-async fn read_descriptors(
+pub(crate) async fn read_descriptors(
     session: &zenoh::Session,
     addr: &Addr,
     timeout: Duration,
