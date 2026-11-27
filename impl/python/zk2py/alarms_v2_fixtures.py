@@ -230,12 +230,63 @@ def slots(path: Path) -> list[Result]:
     return out
 
 
+# -- words.json (§2.4, §5) -----------------------------------------------------------------
+
+def _record_read(r: Any) -> a2.Read | None:
+    """A case's ``record``: null for none, "undecodable", or the fields that
+    matter, ``rule`` and ``key``; the rest of a record that reads filled in."""
+    if r is None:
+        return None
+    if r == "undecodable":
+        return a2.Read(None, "length")
+    return a2.Read({"state": a2.FIRING, "severity": "warning", "argument": a2.NOT_AVAILABLE, **r})
+
+
+def _words_in(w: Any) -> Any:
+    """null, a decoded document, or {text}: a payload's text, as bytes."""
+    if isinstance(w, dict) and set(w) == {"text"}:
+        return w["text"].encode("utf-8", "surrogatepass")
+    return w
+
+
+def words(path: Path) -> list[Result]:
+    data = _load(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["takes"]):
+        t = a2.take_words(_record_read(c["record"]), _words_in(c["words"]))
+        got = {"taken": True, "how": t.how} if t.taken else {"taken": False, "why": t.reason}
+        out.append(_check(f"v2 words, take #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(data["shows"]):
+        view = a2.SlotView()
+        got_s, want_s = [], []
+        for st in c["steps"]:
+            if "words" in st:
+                view.put_words(_words_in(st["words"]))
+            else:
+                r = _record_read(st["record"])
+                if r is not None:
+                    view.put_record(r)
+            if view.record is None or view.record.value is None:
+                g: Any = None
+            elif not a2.by_words(view.record.value):
+                g = {"alert_key": None, "words": None}
+            else:
+                t = a2.take_words(view.record, view.words)
+                g = {"alert_key": a2.key_hex(view.record.value["key"]),
+                     "words": a2.read_words(view.words) if t.taken else None}
+            got_s.append(g)
+            want_s.append(st["expect"])
+        out.append(_check(f"v2 words, shows #{i}: {c['note']}", got_s, want_s))
+    return out
+
+
 FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": schema,
     "records.json": records,
     "tables.json": tables,
     "keys.json": keys,
     "slots.json": slots,
+    "words.json": words,
 }
 
 
