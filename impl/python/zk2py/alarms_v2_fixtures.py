@@ -280,6 +280,35 @@ def words(path: Path) -> list[Result]:
     return out
 
 
+# -- transitions.json (§2.6, §2.16) ----------------------------------------------------------
+
+def transitions(path: Path) -> list[Result]:
+    data = _load(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["cases"]):
+        rd = a2.SlotReader()
+        nt = a2.Notifier("lab", "svc")
+        got_s, want_s = [], []
+        for x in c["samples"]:
+            sm = x["sample"]
+            if sm == "delete":
+                st = rd.step(a2.DELETE)
+                notes = nt.put(0, a2.DELETE)
+            else:
+                p = sm["put"]
+                rec = a2.Read(None, "length") if p["record"] == "undecodable" else a2.Read(p["record"])
+                st = rd.step(rec, p["run"], p["alert_key"])
+                notes = nt.put(0, rec, p["run"], p["alert_key"])
+            g: dict[str, Any] = {"held": st.held, "reads": st.put}
+            if "reports" in x["expect"]:
+                g["reports"] = [{"report": "firing" if n.answer == "yes" else "resolved",
+                                 "alert_key": None if n.unnamed else n.reference[2]} for n in notes]
+            got_s.append(g)
+            want_s.append(x["expect"])
+        out.append(_check(f"v2 transitions #{i}: {c['note']}", got_s, want_s))
+    return out
+
+
 FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": schema,
     "records.json": records,
@@ -287,6 +316,7 @@ FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "keys.json": keys,
     "slots.json": slots,
     "words.json": words,
+    "transitions.json": transitions,
 }
 
 

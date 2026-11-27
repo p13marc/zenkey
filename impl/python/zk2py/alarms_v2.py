@@ -1346,40 +1346,52 @@ class Step:
         return ([self.held] if self.held else []) + [self.put]
 
 
+_DERIVE = object()
+
+
 class SlotReader:
     """One slot's samples "in the owner's order", each read "against the
     record it holds on that slot, as this table and the fixture do. … It
     holds each record with the run of the put that carried it: its
     envelope's, or its snapshot entry's (core §7.5)." A run is compared in
-    width and value (core §3.3)."""
+    width and value (core §3.3). Each record's alert key is the one the
+    reader has for it: derived through the owner's table by default, or
+    handed in (None for an unnamed alarm)."""
 
     def __init__(self, table: Table = NO_TABLE) -> None:
         self.table = table
         self.held: dict[str, Any] | None = None
+        self.key: str | None = None
         self.run: Any = None
 
-    def step(self, sample: Any, run: Any = None) -> Step:
+    def _key(self, value: dict[str, Any], given: Any) -> str | None:
+        return name_record(self.table, value).alert_key if given is _DERIVE else given
+
+    def step(self, sample: Any, run: Any = None, alert_key: Any = _DERIVE) -> Step:
         """``sample`` is :data:`DELETE` (a delete or a tombstone), a
         :class:`Read`, or a record's JSON reading."""
-        held, held_run = self.held, self.run
+        held, held_key, held_run = self.held, self.key, self.run
         if sample == DELETE:
-            self.held, self.run = None, None
-            hid = None if held is None else identity_of(self.table, held)
-            return Step(None, RESOLVED if held is not None and held["state"] == FIRING else RETIRED, None, hid)
+            self.held, self.key, self.run = None, None, None
+            return Step(None, RESOLVED if held is not None and held["state"] == FIRING else RETIRED, None, held_key)
         r = sample if isinstance(sample, Read) else Read(sample)
         if not r.reads or r.value is None:
-            self.held, self.run = None, None
+            self.held, self.key, self.run = None, None, None
             return Step(None, UNREADABLE_PUT)
         put = r.value
-        self.held, self.run = put, run
-        pid = identity_of(self.table, put)
+        key = self._key(put, alert_key)
+        self.held, self.key, self.run = put, key, run
         if held is None:
-            return Step(None, RAISED if put["state"] == FIRING else RESOLVED, None, pid)
-        hid = identity_of(self.table, held)
-        if same_identity(self.table, held, put):
-            return Step(None, _against(held, put), None, pid)
+            return Step(None, RAISED if put["state"] == FIRING else RESOLVED, None, key)
+        if held_key is not None and key is not None:
+            same = held_key == key
+        else:
+            same = (put.get("rule"), "labels" in put, put.get("labels")) == \
+                (held.get("rule"), "labels" in held, held.get("labels"))
+        if same:
+            return Step(None, _against(held, put), None, key)
         fate = DROPPED if held_run != run else (REBOUND if held["state"] == FIRING else REPLACED)
-        return Step(fate, RAISED if put["state"] == FIRING else RESOLVED, hid, pid)
+        return Step(fate, RAISED if put["state"] == FIRING else RESOLVED, held_key, key)
 
 
 def read_slot(samples: list[Any], table: Table = NO_TABLE) -> list[list[str]]:
@@ -1417,10 +1429,9 @@ class Notifier:
         self.readers: dict[int, SlotReader] = {}
         self.told: dict[tuple[Any, ...], tuple[str, str | None]] = {}
 
-    def _ref(self, slot: int, value: dict[str, Any]) -> tuple[tuple[Any, ...], bool]:
-        n = name_record(self.table, value)
-        if n.alert_key is not None:
-            return (self.system, self.service, n.alert_key), False
+    def _ref(self, slot: int, value: dict[str, Any], key: str | None) -> tuple[tuple[Any, ...], bool]:
+        if key is not None:
+            return (self.system, self.service, key), False
         return (self.system, self.service, slot, value.get("at")), True
 
     def _tell(self, ref: tuple[Any, ...], unnamed: bool, answer: str, severity: str | None,
@@ -1434,20 +1445,20 @@ class Notifier:
         self.told[ref] = now
         return [Notice(ref, answer, now[1], change, unnamed)]
 
-    def put(self, slot: int, sample: Any, run: Any = None) -> list[Notice]:
+    def put(self, slot: int, sample: Any, run: Any = None, alert_key: Any = _DERIVE) -> list[Notice]:
         rd = self.readers.setdefault(slot, SlotReader(self.table))
-        before = rd.held
-        st = rd.step(sample, run)
+        before, before_key = rd.held, rd.key
+        st = rd.step(sample, run, alert_key)
         out: list[Notice] = []
         if st.held == REBOUND and before is not None:
-            ref, un = self._ref(slot, before)
+            ref, un = self._ref(slot, before, before_key)
             out += self._tell(ref, un, "no", None, REBOUND)
         if rd.held is None:
             if sample == DELETE and before is not None:
-                ref, un = self._ref(slot, before)
+                ref, un = self._ref(slot, before, before_key)
                 out += self._tell(ref, un, "no", None, st.put)
             return out
-        ref, un = self._ref(slot, rd.held)
+        ref, un = self._ref(slot, rd.held, rd.key)
         firing = rd.held["state"] == FIRING
         out += self._tell(ref, un, "yes" if firing else "no", rd.held["severity"] if firing else None, st.put)
         return out
