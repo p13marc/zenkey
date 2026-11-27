@@ -6526,6 +6526,33 @@ async fn health_s7_an_inconsistent_status_is_a_finding_in_both_readings() {
 /// authenticate as `vehicle`, whom nothing denies. The returned path is the
 /// ground's `--zenoh-config`.
 async fn face_bus(deny_state: bool) -> (Bus, PathBuf) {
+    if deny_state {
+        face_bus_denying(&["zk2/vehicle-01/*/*/state/**"]).await
+    } else {
+        face_bus_denying(&[]).await
+    }
+}
+
+/// A vehicle session on the face router at `endpoint`, as the principal
+/// `vehicle`, whom nothing denies.
+async fn vehicle_session(endpoint: &str) -> zenoh::Session {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"client\"").expect("config");
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .expect("config");
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        "{ user: \"vehicle\", password: \"vehicle-pw\" }",
+    )
+    .expect("config");
+    zenoh::open(c).await.expect("the vehicle's session")
+}
+
+/// [`face_bus`] with the ground also denied each key expression of
+/// `denies` both ways: run A of health.v2's §8 the faults' key, run B the
+/// state, the heartbeats and the faults' key, run C the state and the
+/// heartbeats (`scenarios-v2.md` §8's setup).
+async fn face_bus_denying(denies: &[&str]) -> (Bus, PathBuf) {
     static NTH: AtomicU64 = AtomicU64::new(0);
     let home = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .join("live-zk2-home")
@@ -6551,13 +6578,10 @@ async fn face_bus(deny_state: bool) -> (Bus, PathBuf) {
         )
     };
     let mut rules = vec![rule("face-deny-presence", "zk2/**/@zk/**")];
-    let mut ids = vec!["\"face-deny-presence\""];
-    if deny_state {
-        rules.push(rule(
-            "face-deny-device-state",
-            "zk2/vehicle-01/*/*/state/**",
-        ));
-        ids.push("\"face-deny-device-state\"");
+    let mut ids = vec!["\"face-deny-presence\"".to_owned()];
+    for (i, ke) in denies.iter().enumerate() {
+        rules.push(rule(&format!("face-deny-{i}"), ke));
+        ids.push(format!("\"face-deny-{i}\""));
     }
     let text = format!(
         "{{\n  mode: \"router\",\n  \
@@ -6587,16 +6611,7 @@ async fn face_bus(deny_state: bool) -> (Bus, PathBuf) {
         .map(|l| l.to_string())
         .find(|l| l.starts_with("tcp/127.0.0.1:"))
         .expect("the router listens on loopback");
-    let mut c = base_config();
-    c.insert_json5("mode", "\"client\"").expect("config");
-    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
-        .expect("config");
-    c.insert_json5(
-        "transport/auth/usrpwd",
-        "{ user: \"vehicle\", password: \"vehicle-pw\" }",
-    )
-    .expect("config");
-    let owners = zenoh::open(c).await.expect("the vehicle's session");
+    let owners = vehicle_session(&endpoint).await;
     let ground = home.join("ground.json5");
     std::fs::write(
         &ground,
@@ -6727,6 +6742,831 @@ async fn health_s8_across_a_constrained_face() {
         drop((svc, h, bus));
     };
     tokio::join!(run_a, run_b);
+}
+
+// ── health.v2 (#986's Q2): spec/profiles/health/scenarios-v2.md §6–§8 ──────
+//
+// The tool's sections, under the same conventions as health.v1's above:
+// T takes the deployment's word for its clock in §6 and §7, every session
+// here on one host, and across §8's face judges by its subscription.
+
+/// An owner of `health.v2` at `address` through the runtime's `Health`, its
+/// status declared at `level` with `reason`, started.
+async fn health_v2_owner(
+    s: &zenoh::Session,
+    address: &str,
+    level: zenkey::health::Level,
+    reason: &str,
+) -> (Service, zenkey::health::Health) {
+    let mut b = ServiceBuilder::new(s, ServiceConfig::new(address.parse().expect("an address")));
+    let h = b.health_v2().await.expect("health.v2");
+    h.set_status(level, reason).await.expect("a status");
+    (b.start().await.expect("start"), h)
+}
+
+/// A `health.v2` word in a row's JSON: its number, how it was read, and
+/// its name where one.
+fn word_of(v: &Value) -> (u64, &str, Option<&str>) {
+    (
+        v["number"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("a word: {v}")),
+        v["read"].as_str().expect("how it was read"),
+        v["name"].as_str(),
+    )
+}
+
+/// health.v2 `scenarios-v2.md` §6 (§2.1): an owner holding `degraded`,
+/// `upstream_lost`, reads unhealthy, degraded, its reason shown as
+/// `upstream_lost`, the profile's reason 5. Once its process ends, a
+/// complete presence read holds no token of it and its GET draws no reply:
+/// not asked, absent — never `failed`, never stale — with the archive's
+/// status shown last-known, its reason by the profile's table, never as
+/// current. Nothing was asked, so the run is no verdict, exit 2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_v2_s6_an_absent_owner_is_not_asked_and_its_archive_last_known() {
+    use zenkey::health::Level;
+    let bus = Bus::bare(None).await;
+    let origin = "zk2/lab/svc/health.v2/state/status";
+    let archiving = client(&bus.endpoint, None).await;
+    let archive = Archive::start(
+        &archiving,
+        ArchiveConfig {
+            service: ServiceConfig::new("lab/archive".parse().expect("an address")),
+            records: vec![Recorded {
+                owner: "lab/svc".parse().expect("an address"),
+                selector: "zk2/lab/svc/health.v2/state/**".to_owned(),
+                implementation: zenkey::health::v2::implementation(),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+            watch: None,
+        },
+    )
+    .await
+    .expect("an archive");
+    let owning = client(&bus.endpoint, None).await;
+    let (svc, h) = health_v2_owner(&owning, "lab/svc", Level::Degraded, "upstream_lost").await;
+    let deadline = Instant::now() + SETTLE;
+    while archive.confirmed(origin).is_none() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        archive.confirmed(origin).is_some(),
+        "the archive recorded it"
+    );
+
+    // Step 1: T reads the owner.
+    let args = [
+        "health",
+        "lab/svc",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code == 1).await;
+    exits(&run, 1);
+    let doc = run.json();
+    let row = health_row(&doc, "lab/svc");
+    assert_eq!(row["profile"], "health.v2", "{run}");
+    assert_eq!(row["verdict"], "unhealthy", "{run}");
+    assert_eq!(row["reason"], "degraded");
+    assert_eq!(row["level"], "degraded");
+    assert_eq!(row["status"]["reason"], "upstream_lost", "{run}");
+    assert_eq!(
+        word_of(&row["status"]["word"]),
+        (5, "profile", Some("upstream_lost"))
+    );
+    assert!(
+        row["status"].get("since_ns").is_none(),
+        "whole seconds under health.v2: {run}"
+    );
+    assert!(row["status"]["since_s"].is_i64(), "{run}");
+
+    // Step 2: the owner's process ends.
+    drop(h);
+    svc.close().await.expect("the owner closes");
+    owning.close().await.expect("its session ends");
+
+    // Step 3: a complete presence read, the owner's GET, the archive's form.
+    let run = bus
+        .until(&args, |r| {
+            health_of(r, "lab/svc").is_some_and(|row| row["verdict"] == "not_asked")
+        })
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["presence"]["complete"], true, "{run}");
+    let row = health_row(&doc, "lab/svc");
+    assert_eq!(row["reason"], "absent", "{run}");
+    assert!(row.get("level").is_none(), "absent is no level: {run}");
+    assert!(
+        row.get("status").is_none(),
+        "the GET drew no reply, and nothing is shown as current: {run}"
+    );
+    for r in row["readings"].as_array().expect("readings") {
+        assert_eq!(
+            r["verdict"], "not_asked",
+            "never failed, never stale: {run}"
+        );
+    }
+    let lk = &row["last_known"];
+    assert_eq!(lk["archive"], "lab/archive", "{run}");
+    assert_eq!(lk["level"], "degraded");
+    assert_eq!(lk["reason"], "upstream_lost", "{run}");
+    assert_eq!(word_of(&lk["word"]), (5, "profile", Some("upstream_lost")));
+    assert!(lk["confirmed"].is_boolean(), "{run}");
+    let table = bus
+        .zenctl(&[
+            "health",
+            "lab/svc",
+            "--clocks-synced",
+            "--timeout",
+            "1",
+            "--format",
+            "table",
+        ])
+        .await;
+    assert!(
+        table
+            .stdout
+            .contains("DEGRADED upstream_lost (5) — last-known, never current"),
+        "{table}"
+    );
+    drop(archive);
+}
+
+/// `lab/two` of health.v2 `scenarios-v2.md` §7, a test owner by hand: its
+/// instance token, its descriptor listing `health.v2`'s revision 2.0
+/// (served first, core §8.2's order), and a queryable answering its state
+/// GET with the status's snapshot at asof 5 and the checks' at asof 7:
+/// status `ok` with the reason `serving`, check `disk` `failed`. The
+/// runtime builds both of one GET at one asof, so it cannot be this owner.
+async fn two_asofs(bus: &mut Bus) {
+    use zenkey::model::collection::{Confirmation, Entry, Page, Time};
+    use zenkey::model::health::v2::{self as hv2, Packed as _};
+    use zenkey_model::wire::{Run as WireRun, Seq, Tag};
+    use zenoh::Wait as _;
+    const INSTANCE: &str = "000000000000002a";
+    let instance = format!("zk2/lab/two/@zk/instance/{INSTANCE}");
+    let body = serde_json::to_vec(&json!({
+        "format": "zk2-descriptor/0.1",
+        "service": "lab/two",
+        "instance": INSTANCE,
+        "interfaces": [{"iface": "health.v2",
+                        "contract": format!("sha256:{}", hv2::FINGERPRINT),
+                        "minor": 0, "token": false}],
+        "meta": {"zid": bus.owners.zid().to_string()},
+    }))
+    .expect("a descriptor");
+    let descriptor = bus
+        .owners
+        .declare_queryable(instance.clone())
+        .callback(move |q| {
+            let _ = q
+                .reply(q.key_expr().clone(), body.clone())
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                .wait();
+        })
+        .await
+        .expect("lab/two's descriptor");
+    let token = bus
+        .owners
+        .liveliness()
+        .declare_token(instance)
+        .await
+        .expect("lab/two's instance token");
+    bus.keep((descriptor, token));
+    let page = |coll, asof, id: &str, seq, record: Vec<u8>, c| {
+        let since = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after 1970");
+        Page {
+            tag: Tag::new(3).expect("a tag"),
+            run: WireRun::U16(1),
+            asof: Seq::new(asof).expect("a seq"),
+            time: Time::from_unix_ms(since.as_millis() as i128, 0).expect("a time"),
+            index: 0,
+            more: false,
+            coll,
+            live: vec![Entry {
+                id: id.to_owned(),
+                run: None,
+                seq: Seq::new(seq).expect("a seq"),
+                confirmation: c,
+                record,
+            }],
+            tombs: vec![],
+        }
+        .write()
+        .expect("a page")
+    };
+    let status = hv2::Status {
+        level: Some(zenkey::health::Level::Ok),
+        reason: hv2::write_word(hv2::Kind::Reason, Some("serving"), None),
+        since: None,
+    }
+    .write(0)
+    .expect("a status")
+    .bytes;
+    let disk = hv2::Check {
+        level: Some(zenkey::health::Level::Failed),
+        detail: hv2::write_word(hv2::Kind::Detail, Some("timeout"), None),
+        at: None,
+    }
+    .write(0)
+    .expect("a check")
+    .bytes;
+    let q = bus
+        .owners
+        .declare_queryable("zk2/lab/two/health.v2/state/**")
+        .callback(move |q: zenoh::query::Query| {
+            for (key, payload) in [
+                (
+                    "zk2/lab/two/health.v2/state/status",
+                    page(1, 5, "", 4, status.clone(), Confirmation::AtTime),
+                ),
+                (
+                    "zk2/lab/two/health.v2/state/checks",
+                    page(0, 7, "disk", 6, disk.clone(), Confirmation::None),
+                ),
+            ] {
+                let _ = q
+                    .reply(key, payload)
+                    .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+                    .wait();
+            }
+        })
+        .await
+        .expect("lab/two's queryable");
+    bus.keep(q);
+}
+
+/// health.v2 `scenarios-v2.md` §7 (§2.2): `lab/liar` holds status `ok` and
+/// check `disk` `failed`, which §2.2 forbids and `Health` would never put,
+/// so it is written through the bare contract; `lab/frank` holds `failed`
+/// and `disk` `ok`; `lab/flip` sets `disk` to `failed` and back every
+/// 100 ms, its status following; each answers one GET at one asof. The
+/// liar reads unhealthy, inconsistent, at `failed`, and the break is the
+/// finding from one reading that is one instant; frank reads unhealthy,
+/// `failed`, with no break; 50 readings of flip, 37 ms apart, are each one
+/// instant and none shows a break. `lab/two` answers its two snapshots at
+/// two asofs: its first reading is not one instant and reports no break
+/// alone; the second, 2 s later, reports it, as `health.v1` §2.2 says.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_v2_s7_an_inconsistent_status_is_a_finding_from_one_instant() {
+    use zenkey::health::Level;
+    use zenkey::model::health::v2::{self as hv2, Packed as _};
+    let mut bus = Bus::bare(None).await;
+    let id = zenkey::health::v2::iface();
+    let none = Bindings::new();
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("lab/liar".parse().expect("an address")),
+    );
+    b.implement(zenkey::health::v2::implementation())
+        .expect("implement");
+    let status = b
+        .declare_state_writer(&id, zenkey::health::STATUS, &none)
+        .await
+        .expect("the status");
+    b.expose(&id, zenkey::health::CHECKS).expect("the checks");
+    let faults = b
+        .declare_writer(&id, zenkey::health::FAULTS, &none)
+        .await
+        .expect("the faults");
+    status
+        .put(
+            hv2::Status {
+                level: Some(Level::Ok),
+                reason: hv2::write_word(hv2::Kind::Reason, Some("serving"), None),
+                since: None,
+            }
+            .write(0)
+            .expect("a status")
+            .bytes,
+        )
+        .await
+        .expect("a status put");
+    let mut liar = b.start().await.expect("start");
+    let disk = liar
+        .state_writer(
+            &id,
+            zenkey::health::CHECKS,
+            &[("check".to_owned(), vec!["disk".to_owned()])].into(),
+        )
+        .await
+        .expect("a check");
+    disk.put(
+        hv2::Check {
+            level: Some(Level::Failed),
+            detail: hv2::write_word(hv2::Kind::Detail, Some("timeout"), None),
+            at: None,
+        }
+        .write(0)
+        .expect("a check")
+        .bytes,
+    )
+    .await
+    .expect("a check put");
+    let (frank, fh) = {
+        let mut b = ServiceBuilder::new(
+            &bus.owners,
+            ServiceConfig::new("lab/frank".parse().expect("an address")),
+        );
+        let h = b.health_v2().await.expect("health.v2");
+        h.set_status(Level::Failed, "misconfigured")
+            .await
+            .expect("a status");
+        h.set_check("disk", Level::Ok, "ok").await.expect("a check");
+        (b.start().await.expect("start"), h)
+    };
+    let (flip, flipping) = health_v2_owner(&bus.owners, "lab/flip", Level::Ok, "serving").await;
+    flipping
+        .set_check("disk", Level::Ok, "ok")
+        .await
+        .expect("a check");
+    let flipping = Arc::new(flipping);
+    let toggling = Arc::clone(&flipping);
+    bus.keep(Task(tokio::spawn(async move {
+        loop {
+            let _ = toggling.set_check("disk", Level::Failed, "timeout").await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let _ = toggling.set_check("disk", Level::Ok, "ok").await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })));
+    two_asofs(&mut bus).await;
+    bus.services.extend([liar, frank, flip]);
+    bus.keep((status, disk, faults, fh, flipping));
+    wait_for(&bus, &["lab/liar", "lab/frank", "lab/flip", "lab/two"]).await;
+
+    let read = |address: &'static str, grace: &'static str| {
+        [
+            "health",
+            address,
+            "--clocks-synced",
+            "--grace",
+            grace,
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ]
+    };
+    // Step 1: lab/liar and lab/frank, once each.
+    let run = bus
+        .until(&read("lab/liar", "2"), |r| {
+            health_of(r, "lab/liar").is_some_and(|row| row["agrees"]["answer"] == "no")
+        })
+        .await;
+    exits(&run, 1);
+    let liar = health_row(&run.json(), "lab/liar").clone();
+    assert_eq!(liar["profile"], "health.v2", "{run}");
+    assert_eq!(
+        (&liar["verdict"], &liar["reason"], &liar["level"]),
+        (
+            &json!("unhealthy"),
+            &json!("inconsistent"),
+            &json!("failed")
+        ),
+        "never healthy: {run}"
+    );
+    for r in liar["readings"].as_array().expect("readings") {
+        assert_eq!(r["one_instant"], true, "one run, one asof: {run}");
+        assert_eq!(r["reason"], "inconsistent", "{run}");
+    }
+    assert_eq!(liar["agrees"]["reason"], "inconsistent");
+    assert!(
+        liar["agrees"]["says"]
+            .as_str()
+            .is_some_and(|s| s.contains("one reading that is one instant")),
+        "the break from one reading: {run}"
+    );
+    let run = bus
+        .until(&read("lab/frank", "2"), |r| {
+            health_of(r, "lab/frank").is_some_and(|row| row["reason"] == "failed")
+        })
+        .await;
+    exits(&run, 1);
+    let frank = health_row(&run.json(), "lab/frank").clone();
+    assert_eq!(frank["verdict"], "unhealthy", "{run}");
+    assert_eq!(frank["level"], "failed");
+    assert_eq!(frank["agrees"]["answer"], "yes", "no break: {run}");
+    assert!(
+        frank["readings"]
+            .as_array()
+            .expect("readings")
+            .iter()
+            .all(|r| r["one_instant"] == true),
+        "{run}"
+    );
+
+    // Step 2: lab/flip, 50 readings 37 ms apart: 25 runs of two readings.
+    for _ in 0..25 {
+        let run = bus.zenctl(&read("lab/flip", "0.037")).await;
+        let row = health_of(&run, "lab/flip").unwrap_or_else(|| panic!("a row: {run}"));
+        for r in row["readings"].as_array().expect("readings") {
+            assert_eq!(r["one_instant"], true, "every reading one instant: {run}");
+            assert_ne!(r["reason"], "inconsistent", "never a break: {run}");
+        }
+        assert_ne!(row["agrees"]["answer"], "no", "no break reported: {run}");
+    }
+
+    // Step 3: lab/two, read once and again 2 s later.
+    let run = bus
+        .until(&read("lab/two", "2"), |r| {
+            health_of(r, "lab/two").is_some_and(|row| row["agrees"]["answer"] == "no")
+        })
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert!(
+        doc["apart_s"].as_f64().expect("apart_s") >= 1.9,
+        "two readings 2 s apart: {run}"
+    );
+    let two = health_row(&doc, "lab/two");
+    let readings = two["readings"].as_array().expect("readings");
+    assert_eq!(
+        readings[0],
+        json!({"verdict": "unhealthy", "reason": "inconsistent", "level": "failed",
+               "one_instant": false}),
+        "the first reading is not one instant, read at the check's level: {run}"
+    );
+    assert_eq!(readings[1]["one_instant"], false);
+    assert_eq!(two["agrees"]["answer"], "no", "{run}");
+    assert!(
+        two["agrees"]["says"]
+            .as_str()
+            .is_some_and(|s| s.contains("each of 2 readings")),
+        "reported after the second reading, a grace apart: {run}"
+    );
+}
+
+/// No health.v2 scenario runs under a catalog (zk2py's round 120 mend).
+/// `lab/cat` writes under one whose epoch is 2026-01-01, and its
+/// descriptor names it (core §8.6). Given that catalog (`--catalog`), T
+/// reads its status's `since` as this host's clock to the second, and
+/// judges it healthy; given none, its records' times count from an epoch T
+/// cannot have (`unknown_catalog`): its status is never read at a level
+/// read under another epoch, and never healthy.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_v2_reads_an_owner_under_a_catalog_by_its_epoch() {
+    use zenkey::health::Level;
+    use zenkey::model::catalog::Catalog;
+    const E: i64 = 1_767_225_600;
+    let mut bus = Bus::bare(None).await;
+    let catalog = Catalog::new(E).expect("a catalog");
+    let file = bus.home.join("cat.catalog.json");
+    std::fs::write(&file, catalog.to_jcs()).expect("the catalog file");
+    let mut b = ServiceBuilder::new(
+        &bus.owners,
+        ServiceConfig::new("lab/cat".parse().expect("an address")),
+    );
+    b.catalog(catalog).expect("the catalog");
+    let h = b.health_v2().await.expect("health.v2");
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after 1970")
+        .as_secs() as i64;
+    h.set_status(Level::Ok, "serving").await.expect("a status");
+    bus.services.push(b.start().await.expect("start"));
+    bus.keep(h);
+    wait_for(&bus, &["lab/cat"]).await;
+    let path = file.to_str().expect("a UTF-8 path");
+    let mut args = vec![
+        "health",
+        "lab/cat",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code != 0).await;
+    let row = health_of(&run, "lab/cat").unwrap_or_else(|| panic!("a row: {run}"));
+    assert_ne!(row["verdict"], "healthy", "no catalog in hand: {run}");
+    assert!(
+        row["status"]["since_s"].is_null(),
+        "no time read under another epoch: {run}"
+    );
+    args.extend(["--catalog", path]);
+    let run = bus.until(&args, |r| r.code == 0).await;
+    exits(&run, 0);
+    let row = health_of(&run, "lab/cat").unwrap_or_else(|| panic!("a row: {run}"));
+    assert_eq!(row["verdict"], "healthy", "{run}");
+    let since = row["status"]["since_s"].as_i64().expect("since");
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after 1970")
+        .as_secs() as i64;
+    assert!(
+        (before..=after).contains(&since),
+        "its since from the catalog's epoch, this host's clock: {since} ({before} to {after})"
+    );
+}
+
+/// The ground's own session on the face router at `endpoint`, as the
+/// principal `ground`: what G hears, byte for byte.
+async fn ground_session(endpoint: &str) -> zenoh::Session {
+    let mut c = base_config();
+    c.insert_json5("mode", "\"client\"").expect("config");
+    c.insert_json5("connect/endpoints", &format!("[\"{endpoint}\"]"))
+        .expect("config");
+    c.insert_json5(
+        "transport/auth/usrpwd",
+        "{ user: \"ground\", password: \"ground-pw\" }",
+    )
+    .expect("config");
+    zenoh::open(c).await.expect("the ground's session")
+}
+
+/// `vehicle-01/nav` of health.v2's §8 on the vehicle's side: `health.v2`
+/// with status `ok`, `serving`, on a 16-bit run, its clock guard watching
+/// `clock/heartbeat`, which `reference` puts through the router, so that
+/// the router stamps it (core §4.3).
+struct Nav {
+    svc: Service,
+    h: zenkey::health::Health,
+    reference: zenoh::Session,
+}
+
+impl Nav {
+    async fn start(bus: &Bus) -> Nav {
+        let mut cfg = ServiceConfig::new("vehicle-01/nav".parse().expect("an address"));
+        cfg.clock_reference = Some("clock/heartbeat".to_owned());
+        let mut b = ServiceBuilder::new(&bus.owners, cfg);
+        b.run_store(Arc::new(zenkey::run::FileRunStore::new(
+            bus.home.join("nav.run"),
+        )))
+        .expect("a run store");
+        let h = b.health_v2().await.expect("health.v2");
+        h.set_status(zenkey::health::Level::Ok, "serving")
+            .await
+            .expect("a status");
+        let svc = b.start().await.expect("start");
+        Nav {
+            svc,
+            h,
+            reference: vehicle_session(&bus.endpoint).await,
+        }
+    }
+
+    /// Sets the owner's clock `ms` ahead, and puts the reference until its
+    /// guard is as `ahead`.
+    async fn clock(&self, ms: i64, ahead: bool) {
+        self.svc.minter().simulate_offset(ms);
+        let deadline = Instant::now() + SETTLE;
+        while self.h.is_clock_ahead() != ahead {
+            assert!(
+                Instant::now() < deadline,
+                "the guard never moved to {ahead}"
+            );
+            self.reference
+                .put("clock/heartbeat", "tick")
+                .await
+                .expect("a reference put");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+}
+
+/// health.v2 `scenarios-v2.md` §8 (§2.8, §2.5): across a constrained face,
+/// where presence does not cross and G knows from its configuration that
+/// `vehicle-01/nav` implements health.v2 (`--across-face`, `--iface
+/// health.v2`). Run A, the face letting the status and its heartbeat cross
+/// and denying the faults' key: before the owner starts, unobservable,
+/// `nothing_crossed`; once it runs, healthy, `ok`, its status 12 bytes and
+/// its heartbeats 16 under its 16-bit run; with its clock 2 s ahead, no
+/// fault crosses and the heartbeat answers the clock question yes, `ahead`;
+/// once set right and no longer vouching, stale — never down, never
+/// `failed` — and the clock question no. Run B, the face denying the state,
+/// the heartbeats and the faults: `face_closed` and `nothing_heard` at
+/// every step. Run C, the faults alone crossing: the one `clock_ahead`
+/// fault is shown as an occurrence, and the clock question is unobservable,
+/// `nothing_heard`: a fault published once cannot say the hold lasts. The
+/// three runs share no router and run at once; each listens as long as the
+/// scenario says.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn health_v2_s8_across_a_constrained_face() {
+    const NAV: &str = "vehicle-01/nav";
+    const FAULTS: &str = "zk2/vehicle-01/nav/health.v2/stream/faults";
+    const STATE: &str = "zk2/vehicle-01/*/*/state/**";
+    const BEATS: &str = "zk2/vehicle-01/*/freshness.v2/stream/**";
+    const LIMIT: Duration = Duration::from_secs(120);
+    let health = |ground: &Path, face: &str, window: &str| -> Vec<String> {
+        [
+            "health",
+            NAV,
+            "--across-face",
+            face,
+            "--iface",
+            "health.v2",
+            "--for",
+            window,
+            "--timeout",
+            "1",
+            "--zenoh-config",
+            ground.to_str().expect("a UTF-8 path"),
+            "--format",
+            "json",
+        ]
+        .map(str::to_owned)
+        .to_vec()
+    };
+    let row_of = |run: &Run| health_of(run, NAV).unwrap_or_else(|| panic!("a row: {run}"));
+    let run_a = async {
+        let (bus, ground) = face_bus_denying(&[FAULTS]).await;
+        let heard = ground_session(&bus.endpoint).await;
+        let sizes: Arc<std::sync::Mutex<Vec<(String, usize)>>> = Arc::default();
+        let into = Arc::clone(&sizes);
+        let listening = heard
+            .declare_subscriber("zk2/vehicle-01/**")
+            .callback(move |s: zenoh::sample::Sample| {
+                into.lock()
+                    .expect("not poisoned")
+                    .push((s.key_expr().to_string(), s.payload().len()));
+            })
+            .await
+            .expect("the ground's subscriber");
+        let args = health(&ground, "crosses", "65");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        // Step 1: G listens before the owner starts.
+        let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
+        exits(&run, 2);
+        let row = row_of(&run);
+        assert_eq!(row["profile"], "health.v2", "the deployment's word: {run}");
+        assert_eq!(row["verdict"], "unobservable", "{run}");
+        assert_eq!(row["reason"], "nothing_crossed", "never stale: {run}");
+        // Step 2: the owner starts; G listens 65 s.
+        let nav = Nav::start(&bus).await;
+        let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
+        exits(&run, 0);
+        let doc = run.json();
+        assert!(
+            doc.get("presence").is_none(),
+            "presence does not cross: {run}"
+        );
+        let row = health_row(&doc, NAV);
+        assert_eq!(
+            (&row["verdict"], &row["reason"], &row["level"]),
+            (&json!("healthy"), &json!("ok"), &json!("ok")),
+            "{run}"
+        );
+        assert_eq!(row["clock_ahead"]["reason"], "confirmed", "{run}");
+        {
+            let sizes = sizes.lock().expect("not poisoned");
+            let of = |key: &str| -> BTreeSet<usize> {
+                sizes
+                    .iter()
+                    .filter(|(k, _)| k == key)
+                    .map(|(_, n)| *n)
+                    .collect()
+            };
+            assert_eq!(
+                of("zk2/vehicle-01/nav/health.v2/state/status"),
+                [12].into(),
+                "the status, 12 bytes under a 16-bit run: {sizes:?}"
+            );
+            assert_eq!(
+                of("zk2/vehicle-01/nav/freshness.v2/stream/heartbeat/health.v2"),
+                [16].into(),
+                "each heartbeat 16 bytes: {sizes:?}"
+            );
+        }
+        // Step 3: the owner's clock 2 s ahead; G listens 35 s.
+        nav.clock(2000, true).await;
+        let args = health(&ground, "crosses", "35");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
+        exits(&run, 1);
+        let row = row_of(&run);
+        assert_eq!(
+            (&row["clock_ahead"]["answer"], &row["clock_ahead"]["reason"]),
+            (&json!("yes"), &json!("ahead")),
+            "{run}"
+        );
+        assert!(row.get("faults").is_none(), "no fault crosses: {run}");
+        assert!(
+            !sizes
+                .lock()
+                .expect("not poisoned")
+                .iter()
+                .any(|(k, _)| k == FAULTS),
+            "the faults' key denied"
+        );
+        // Step 4: the clock set right; the owner stops vouching for its
+        // status once G hears it, and G listens 65 s past it. The ground's
+        // own subscriber goes first: the status's matching is then G's.
+        drop(listening);
+        nav.clock(0, false).await;
+        let writer = nav.h.status_writer().writer();
+        let matching = |want: bool| async move {
+            let deadline = Instant::now() + SETTLE;
+            while writer.matching().await.expect("matching") != want {
+                assert!(Instant::now() < deadline, "the status never matched {want}");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        matching(false).await;
+        let args = health(&ground, "crosses", "70");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let pending = bus.spawn_within(&args, LIMIT);
+        matching(true).await;
+        nav.h.set_confirming(false);
+        let run = pending.await.expect("the runner");
+        exits(&run, 1);
+        let row = row_of(&run);
+        assert_eq!(
+            row["verdict"], "stale",
+            "never down, failed or absent: {run}"
+        );
+        assert_eq!(row["reason"], "beyond_horizon", "{run}");
+        assert!(row.get("level").is_none(), "stale is no level: {run}");
+        assert_eq!(
+            (&row["clock_ahead"]["answer"], &row["clock_ahead"]["reason"]),
+            (&json!("no"), &json!("confirmed")),
+            "its heartbeats carry instants again: {run}"
+        );
+        drop((nav, heard, bus));
+    };
+    // Runs B and C: the face closed to the status and its heartbeat, the
+    // faults denied (B) or crossing (C).
+    let closed = |faults_cross: bool| async move {
+        let denies: &[&str] = if faults_cross {
+            &[STATE, BEATS]
+        } else {
+            &[STATE, BEATS, FAULTS]
+        };
+        let (bus, ground) = face_bus_denying(denies).await;
+        let judged = |run: &Run| {
+            let row = row_of(run);
+            assert_eq!(row["verdict"], "unobservable", "{run}");
+            assert_eq!(row["reason"], "face_closed", "{run}");
+            assert!(row.get("status").is_none(), "nothing of the status: {run}");
+            assert_eq!(
+                (&row["clock_ahead"]["answer"], &row["clock_ahead"]["reason"]),
+                (&json!("unobservable"), &json!("nothing_heard")),
+                "{run}"
+            );
+            row
+        };
+        let args = health(&ground, "denied", "65");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        // Step 1, before the owner starts.
+        let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
+        exits(&run, 2);
+        assert!(judged(&run).get("faults").is_none(), "{run}");
+        // Step 2, once it runs.
+        let nav = Nav::start(&bus).await;
+        let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
+        exits(&run, 2);
+        assert!(judged(&run).get("faults").is_none(), "{run}");
+        // Step 3, its clock 2 s ahead while G listens 35 s: the fault is
+        // published when the guard begins to hold, so G listens first.
+        let args = health(&ground, "denied", "35");
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let faults = nav.h.faults_writer();
+        let deadline = Instant::now() + SETTLE;
+        while faults.matching().await.expect("matching") {
+            assert!(Instant::now() < deadline, "the faults matched before G");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let pending = bus.spawn_within(&args, LIMIT);
+        if faults_cross {
+            let deadline = Instant::now() + SETTLE;
+            while !faults.matching().await.expect("matching") {
+                assert!(
+                    Instant::now() < deadline,
+                    "G never subscribed to the faults"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        } else {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+        nav.clock(2000, true).await;
+        let run = pending.await.expect("the runner");
+        exits(&run, 2);
+        let row = judged(&run);
+        if faults_cross {
+            assert_eq!(row["faults"], 1, "one clock_ahead fault: {run}");
+            let f = &row["last_fault"];
+            assert_eq!(f["code"], "clock_ahead", "{run}");
+            assert_eq!(word_of(&f["word"]), (1, "profile", Some("clock_ahead")));
+            assert_eq!(f["level"], "failed");
+            assert!(
+                matches!(f["argument"].as_u64(), Some(2 | 3)),
+                "the offset rounded up: {run}"
+            );
+        } else {
+            assert!(row.get("faults").is_none(), "nothing crosses: {run}");
+        }
+        drop((nav, bus));
+    };
+    tokio::join!(run_a, closed(false), closed(true));
 }
 
 /// `pulse.v1`: an event of two sources at most, live for its 2 s retention,
