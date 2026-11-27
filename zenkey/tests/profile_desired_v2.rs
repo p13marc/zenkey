@@ -1,6 +1,6 @@
 //! `spec/profiles/desired/scenarios-v2.md` §1–§8 and §10–§16 (`desired.v2`,
 //! #986's J3), one test per section, named after it. §9 is a tool's (J4).
-//! §16 runs its four runs at once, each on a router of its own.
+//! §16 runs its five runs at once, each on a router of its own.
 //! `config_v2_as_a_target` runs `desired.v2` §2.16 beside them.
 //!
 //! Common setup, the text's: R1 is a router with timestamping on, a
@@ -2995,7 +2995,137 @@ async fn s16_run_d() {
     a.kill().await;
 }
 
-/// §16 Both majors side by side (§2.18): runs A to D, each on a router of
+/// The targets' log: every `zenkey::desired` warning this binary's targets
+/// write, installed as the process's subscriber once, by the first run
+/// that reads it.
+fn desired_log() -> &'static Arc<Mutex<Vec<u8>>> {
+    #[derive(Clone)]
+    struct Buf(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Buf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    static LOG: std::sync::OnceLock<Arc<Mutex<Vec<u8>>>> = std::sync::OnceLock::new();
+    LOG.get_or_init(|| {
+        let buf = Arc::<Mutex<Vec<u8>>>::default();
+        let w = Buf(Arc::clone(&buf));
+        let _ = tracing::subscriber::set_global_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || w.clone())
+                .with_ansi(false)
+                .without_time()
+                .with_env_filter(tracing_subscriber::EnvFilter::new("zenkey::desired=warn"))
+                .finish(),
+        );
+        buf
+    })
+}
+
+/// The target's lines saying its role stopped under `run`, at the
+/// revision `fingerprint` (§2.18).
+fn stops_said(run: Run, fingerprint: &str) -> usize {
+    let text = String::from_utf8(desired_log().lock().unwrap().clone()).unwrap();
+    let at = format!("run={run}");
+    text.lines()
+        .filter(|l| l.contains("the role is stopped") && l.contains(fingerprint))
+        .filter(|l| l.split_whitespace().any(|w| w == at))
+        .count()
+}
+
+/// §16's run E: run D's target, told the scenarios' `tasking.v2`, its
+/// author on that revision, whose descriptor reaches the target. The
+/// author's process ends without closing, and it starts again on run C's
+/// revision, under a new run from its record, putting v1 again and then
+/// v2: the target reads the descriptor stating the new run before it
+/// judges anything of it (§2.18, "A new run is read first"), finds the
+/// other major, says the role is stopped, and acts on neither put.
+async fn s16_run_e() {
+    desired_log();
+    let bus = one_router().await;
+    let rec = records();
+    let s = record(&bus.ep1).await;
+    let a = author_of(&bus.ep1, tasking(0), &rec).await;
+    assert_eq!(a.author.major(), Major::V2, "run E: the author's revision");
+    author_seen(&bus.ep1, true).await;
+
+    // 7. The target starts, and the author puts v1: the target acts on v1,
+    //    and the report is converged on it.
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup::default(),
+    )
+    .await;
+    let target = target.expect("run E: its word names a revision it can report");
+    let svc = b.start().await.expect("run E: the target starts");
+    eventually("run E: the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    assert_eq!(
+        target.last_seed().unwrap().revision,
+        desired::AuthorRevision::Given,
+        "run E: its author's descriptor names the revision it was given"
+    );
+    let s1 = version(a.author.put(WORKER, bytes(&v(1))).await.unwrap());
+    s.until("run E: converged on v1", |r| converged_on(r, s1, 1))
+        .await;
+    assert_eq!(d.with(|x| x.running.clone()), v(1), "run E: v1 runs");
+    let acts = target.acts();
+    assert!(acts >= 1, "run E: acts on v1");
+
+    // 8. The author's process ends without closing, and starts again on run
+    //    C's revision, under a new run, from its record. It puts v1 again,
+    //    and then v2.
+    a.kill().await;
+    let theirs = tasking_v2_on_v1();
+    let fingerprint = zenkey::model::canonical::Fingerprint::of(theirs.contract()).to_string();
+    let mark = s.mark();
+    let a = author_of(&bus.ep1, theirs, &rec).await;
+    assert_eq!(a.author.major(), Major::V1, "run E: run C's revision");
+    for n in [1, 2] {
+        let put = a.author.put(WORKER, bytes(&v(n))).await.unwrap();
+        assert!(matches!(put, Written::Put(_)), "a desired.v1 put: {put:?}");
+    }
+    eventually("run E: both puts at S", || async {
+        s.on(D, mark).iter().filter(|r| !r.delete).count() >= 2
+    })
+    .await;
+    let run = s.on(D, mark)[0]
+        .inband
+        .expect("run E: the put carries an in-band stamp, which the target would order")
+        .run;
+    assert_ne!(run, s1.run, "run E: a new run");
+    // The target judges nothing of the new run before it reads the
+    // descriptor stating it, which names run C's revision: the role stops,
+    // and the target says so, once.
+    eventually("run E: the target says the role stopped", || async {
+        stops_said(run, &fingerprint) > 0
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(stops_said(run, &fingerprint), 1, "run E: said once");
+    assert_eq!(target.acts(), acts, "run E: acts on neither put");
+    assert!(s.on(RP, mark).is_empty(), "run E: Rp receives nothing");
+    assert!(s.on(RUN, mark).is_empty(), "run E: Run receives nothing");
+    assert_eq!(d.with(|x| x.running.clone()), v(1), "run E: v1 still runs");
+    assert!(
+        converged_on(&target.report_v2().await.unwrap(), s1, 1),
+        "run E: the report as it was"
+    );
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+    a.kill().await;
+}
+
+/// §16 Both majors side by side (§2.18): runs A to E, each on a router of
 /// its own, at once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s16_both_majors_side_by_side() {
@@ -3004,6 +3134,7 @@ async fn s16_both_majors_side_by_side() {
         s16_a_target_built_before(true),
         s16_run_c(),
         s16_run_d(),
+        s16_run_e(),
     );
 }
 

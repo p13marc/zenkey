@@ -615,9 +615,12 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   is `scenarios-v2.md` §1–§8 and §10–§16 over `tests/contracts/{tasking,
   worker}.v2.toml` (§13 a played author, §14 an author on a runtime of its
   own that the test stops, behind a router denying the target's session
-  `@zk`; §16's four runs at once, A and B by `by_word_alone` through R1
+  `@zk`; §16's five runs at once, A and B by `by_word_alone` through R1
   with timestamping off and on, C both directions of the refusal, D the
-  stop), with `config_v2_as_a_target`; the owner example's `--desired-v2`,
+  stop, E the new run read first: an author killed and restarted on run
+  C's revision under a new run, its two puts never judged, the stop's
+  warning read from the binary's `zenkey::desired` log, `desired_log`),
+  with `config_v2_as_a_target`; the owner example's `--desired-v2`,
   `--desired-ttl <s>` and `--desired-timeout-ms <ms>` drive it (`desired
   gets` listing `<held>=<unchanged|whole>`, `desired delete-unheld`,
   `desired watch`).
