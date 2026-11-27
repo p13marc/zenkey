@@ -13,6 +13,7 @@
 //! write(table, word, max)       ─▶ the index of a word its table holds, else out_of_range
 //! read(table, index)            ─▶ the entry │ the number, past the table or with none in hand │ out_of_range
 //! uses(contract, profile)       ─▶ whether the contract may declare that profile's tables
+//! instance_table(named)         ─▶ an instance's table among the revisions its descriptor names: none │ the one │ differ
 //! Lint                          ─▶ one finding of a profile's lint of a contract's tables
 //! ```
 //!
@@ -20,7 +21,9 @@
 //! a report resource's, indexed from 0 to 254, and `health.v2`'s three are
 //! an instance's, in the upper half of a 6-bit word under the profile's
 //! own names. So does each profile's `Major`, which reads a contract's
-//! `uses` for one and a descriptor's `interfaces` for the other.
+//! `uses` for one and a descriptor's `interfaces` for the other. An
+//! instance's table ([`Instance`]) is `health.v2`'s and `alarms.v2`'s, over
+//! a list of names for one and of rules for the other.
 
 use serde_json::{Value, json};
 
@@ -145,6 +148,48 @@ pub fn list(
     Some(out)
 }
 
+/// An instance's table (`health.v2` §2.10, `alarms.v2` §4): the one table
+/// among the contracts it implements, the revisions its descriptor names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Instance<T> {
+    /// No named revision in hand holds one.
+    None,
+    /// The one list they hold.
+    Table(Vec<T>),
+    /// Two hold two different lists: no table.
+    Differ,
+}
+
+impl<T> Instance<T> {
+    /// The table, where the instance has one.
+    #[must_use]
+    pub fn table(&self) -> Option<&[T]> {
+        match self {
+            Instance::Table(t) => Some(t),
+            Instance::None | Instance::Differ => None,
+        }
+    }
+}
+
+/// An instance's table, from the table of each revision its descriptor
+/// names that the reader holds (`None`: that revision holds none, or its
+/// declaration is invalid). Never a revision the descriptor does not
+/// name: a table read under the wrong revision gives wrong words.
+#[must_use]
+pub fn instance_table<'a, T: PartialEq + Clone + 'a>(
+    named: impl IntoIterator<Item = Option<&'a [T]>>,
+) -> Instance<T> {
+    let mut held: Option<&[T]> = None;
+    for table in named.into_iter().flatten() {
+        match held {
+            None => held = Some(table),
+            Some(first) if first == table => {}
+            Some(_) => return Instance::Differ,
+        }
+    }
+    held.map_or(Instance::None, |t| Instance::Table(t.to_vec()))
+}
+
 /// One finding of a profile's lint of a contract's tables and
 /// declarations: what a build and `zk2 contract lint` report as an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,6 +245,22 @@ mod tests {
         }
         assert_eq!(Index::of_json(&json!(256)), Err(WriteRefusal::Range));
         assert_eq!(Index::of_json(&json!("x")), Err(WriteRefusal::Value));
+    }
+
+    #[test]
+    fn an_instance_has_the_one_table_its_named_revisions_hold() {
+        let (a, b) = (vec![1, 2], vec![1, 3]);
+        assert_eq!(instance_table::<u8>([None, None]), Instance::None);
+        assert_eq!(
+            instance_table([Some(&a[..]), None, Some(&a[..])]),
+            Instance::Table(a.clone())
+        );
+        assert_eq!(
+            instance_table([Some(&a[..]), Some(&b[..])]),
+            Instance::Differ
+        );
+        assert_eq!(Instance::<u8>::Differ.table(), None);
+        assert_eq!(Instance::Table(a.clone()).table(), Some(&a[..]));
     }
 
     #[test]

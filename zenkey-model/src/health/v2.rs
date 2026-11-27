@@ -429,43 +429,17 @@ impl Tables {
 }
 
 /// An instance's table of one kind (§2.10): the one table among the
-/// contracts it implements.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Instance {
-    /// No named revision in hand holds one.
-    None,
-    /// The one list they hold.
-    Table(Vec<String>),
-    /// Two hold two different lists: no table. Its owner writes no word
-    /// from 32 to 62, and a reader shows numbers.
-    Differ,
-}
-
-impl Instance {
-    /// The table, where the instance has one.
-    #[must_use]
-    pub fn table(&self) -> Option<&[String]> {
-        match self {
-            Instance::Table(t) => Some(t),
-            Instance::None | Instance::Differ => None,
-        }
-    }
-}
+/// contracts it implements ([`words::Instance`]). Where two hold two
+/// different lists (`differ`), its owner writes no word from 32 to 62, and
+/// a reader shows numbers.
+pub type Instance = words::Instance<String>;
 
 /// An instance's table of one kind, from the table of that kind in each
 /// revision its descriptor names that the reader holds (`None`: that
 /// revision holds none, or its declaration is invalid).
 #[must_use]
 pub fn instance_table<'a>(named: impl IntoIterator<Item = Option<&'a [String]>>) -> Instance {
-    let mut held: Option<&[String]> = None;
-    for table in named.into_iter().flatten() {
-        match held {
-            None => held = Some(table),
-            Some(first) if first == table => {}
-            Some(_) => return Instance::Differ,
-        }
-    }
-    held.map_or(Instance::None, |t| Instance::Table(t.to_vec()))
+    words::instance_table(named)
 }
 
 /// An instance's three tables ([`Tables::of_instance`]).

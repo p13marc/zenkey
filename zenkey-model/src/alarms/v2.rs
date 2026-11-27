@@ -1407,29 +1407,9 @@ pub fn table_of(c: &Contract) -> Option<Vec<Rule>> {
 }
 
 /// An instance's table (§4): the one table among the contracts it
-/// implements.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Instance {
-    /// No named revision in hand holds one: its owner writes every alarm
-    /// by words.
-    None,
-    /// The one list they hold.
-    Table(Vec<Rule>),
-    /// Two hold two different lists: no table, and its owner writes every
-    /// alarm by words.
-    Differ,
-}
-
-impl Instance {
-    /// The table, where the instance has one.
-    #[must_use]
-    pub fn table(&self) -> Option<&[Rule]> {
-        match self {
-            Instance::Table(t) => Some(t),
-            Instance::None | Instance::Differ => None,
-        }
-    }
-}
+/// implements ([`words::Instance`]). With none, or where two hold two
+/// different lists (`differ`), its owner writes every alarm by words.
+pub type Instance = words::Instance<Rule>;
 
 /// An instance's table, from the table of each revision its descriptor
 /// names that the reader holds (`None`: that revision holds none, or its
@@ -1438,15 +1418,7 @@ impl Instance {
 /// right state and severity.
 #[must_use]
 pub fn instance_table<'a>(named: impl IntoIterator<Item = Option<&'a [Rule]>>) -> Instance {
-    let mut held: Option<&[Rule]> = None;
-    for table in named.into_iter().flatten() {
-        match held {
-            None => held = Some(table),
-            Some(first) if first == table => {}
-            Some(_) => return Instance::Differ,
-        }
-    }
-    held.map_or(Instance::None, |t| Instance::Table(t.to_vec()))
+    words::instance_table(named)
 }
 
 /// How a table moved from one revision to the next (§4): a table grows by
