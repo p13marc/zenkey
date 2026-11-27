@@ -9,7 +9,7 @@
 //!     [--cardinality <iface>:<resource>=<n>]...
 //!     [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>]
 //!     [--config-no-persist]
-//!     [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
+//!     [--alarms] [--alarms-v2] [--alarms-record <file>] [--alarms-archive <system>/<service>]
 //!     [--alarms-rules <rule>[,<rule>...]] [--telemetry] [--telemetry-v2]
 //!     [--desired-author] [--desired-record <file>] [--desired-window <s>]
 //!     [--desired-target <system>/<service>] [--desired-unbound] [--desired-archive <system>/<service>]
@@ -330,6 +330,44 @@
 //! answered `alarm adoption source=<record|archive|nothing> adopted=<keys>
 //! retired=<key>:<resolved|undecodable|phantom>,… resolved=<keys>
 //! over_bound=<keys>`, each list comma-separated, `-` when empty.
+//!
+//! **`alarms.v2`** (`spec/profiles/alarms/v2.md`, #984's S2) is implemented
+//! by the runtime ([`zenkey::alarms::v2`]) in place of `alarms.v1` with
+//! `--alarms-v2`, or when a contract file given is the standard one (its
+//! fingerprint is `2292477c…`, as `spec/profiles/alarms/alarms.v2.toml`
+//! is). With `--alarms-v2`, an `alarms.v2` contract file of another
+//! revision is implemented on that revision instead, its `freshness.ttl_s`
+//! setting the confirmation period and the refresh window, half of it. The
+//! table of rules is the one `alarms.rules` among the other contract files
+//! (§4), implemented before the alarms; with none, every alarm goes by
+//! words. `--alarms-record` is its record, by slot: `{"profile":
+//! "alarms.v2", "slots": {"<slot>": {"record": <record>, "words": <words>,
+//! "alert_key": "<16 hex>", "reading"?: "<decimal>"}, …}}`, each record in
+//! core §7.6's JSON reading and each words an `alarms.v2.Words` document,
+//! a resolved one included; an `alarms.v1` record's file is read as its
+//! documents, adopted onto slots, and rewritten as this one at the first
+//! save (§2.9, "From `alarms.v1`"). `--alarms-rules` and `--cardinality
+//! alarms.v2:state/alarms/{slot}=<n>` are as for `alarms.v1`;
+//! `--alarms-archive` is refused, since no archive is read under it. The
+//! same `alarm` commands drive it, with these answers:
+//!
+//! ```text
+//! alarm raise <json>                      {"rule", "severity", "summary", "labels"?, "category"?, "reading"?}
+//!   → alarm raised|escalated|refreshed|deferred|unchanged <alert_key> <slot> {"record": …, "words": …|null}
+//! alarm resolve <alert_key>               → alarm resolved <alert_key> <slot> {…}, or alarm none <alert_key>
+//! alarm confirm <alert_key>|all on|off    → alarm confirm <alert_key>|all on|off
+//! alarm list                              → alarm held {"<slot>": {"alert_key", "record", "words", "reading"?}, …}
+//! alarm adoption                          → alarm adoption source=<record|record_v1|nothing>
+//!                                             adopted=<slots> resolved=<slots> free=<slots|keys> left=<slots|keys> failed=<keys>
+//! ```
+//!
+//! `reading` is a decimal, a string or a number. A record is its JSON
+//! reading (core §7.6): `rule` and `argument` a number or
+//! `"not_available"`, `at` in milliseconds since the Unix epoch, absent
+//! with no code, `key` an integer. `deferred` is a refresh within the window
+//! of the last one, nothing put (§2.5). A raise with every slot firing is
+//! answered `refused …` (§2.8). In `adoption`, an entry from an
+//! `alarms.v1` record that went on no slot is named by its alert key.
 //!
 //! **`telemetry.v1`** (`spec/profiles/telemetry/v1.md`, #819) is the
 //! runtime's writers' ([`zenkey::telemetry`]): every writer of a metric
@@ -717,6 +755,9 @@ pub struct Options {
     /// `--alarms`, or implied by an `--alarms-*` option or the standard
     /// contract among the files: `alarms.v1` by the runtime.
     pub alarms: bool,
+    /// `--alarms-v2`, or the standard `alarms.v2` contract among the files:
+    /// `alarms.v2` in `alarms.v1`'s place (#984's S2).
+    pub alarms_v2: bool,
     /// `--alarms-record <file>`: the owner's persistent record (§2.9).
     pub alarms_record: Option<PathBuf>,
     /// `--alarms-archive <system>/<service>`: an archive on its own side.
@@ -873,7 +914,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--cardinality <iface>:<resource>=<n>]...
     [--config] [--config-v2] [--config-floor <s>] [--config-apply-after-ms <ms>]
     [--config-no-persist]
-    [--alarms] [--alarms-record <file>] [--alarms-archive <system>/<service>]
+    [--alarms] [--alarms-v2] [--alarms-record <file>] [--alarms-archive <system>/<service>]
     [--alarms-rules <rule>[,<rule>...]] [--telemetry] [--telemetry-v2]
     [--desired-author] [--desired-record <file>] [--desired-window <s>]
     [--desired-target <system>/<service>] [--desired-unbound]
@@ -924,7 +965,8 @@ Command words:
                                           heartbeat (freshness.v2 §2.4)
   config ...                              config.v1 (--config) or config.v2
                                           (--config-v2), below
-  alarm ...                               alarms.v1 (--alarms), below
+  alarm ...                               alarms.v1 (--alarms) or alarms.v2
+                                          (--alarms-v2), below
   telemetry ...                           telemetry.v1's writers and telemetry.v2's
                                           frames (--telemetry-v2), below
   desired ...                             desired.v1 (--desired-*), below
@@ -1074,6 +1116,55 @@ alarms.v1 (spec/profiles/alarms/v1.md)
   A restart is the process's: kill it (no close), or close standard input (a
   clean close, which resolves and deletes nothing), then start it again with
   the same --alarms-record.
+
+alarms.v2 (spec/profiles/alarms/v2.md)
+  Implemented by the runtime in alarms.v1's place with --alarms-v2, or when a
+  contract file given is the standard alarms.v2 (fingerprint 2292477c...).
+  With --alarms-v2, an alarms.v2 contract file of another revision is
+  implemented on that revision instead, its freshness.ttl_s setting the
+  confirmation period and the refresh window (half of it: 450 s at the
+  standard 900 s, 2 s at 4 s). Each alarm is one packed record on its slot,
+  zk2/<system>/<service>/alarms.v2/state/alarms/<slot>, written by the table
+  the other contract files declare (alarms.rules, implemented before the
+  alarms), else by words, whose document goes first on .../state/words/<slot>.
+  A resolve is one put, and no delete.
+
+  --alarms-v2                     implement alarms.v2; needs nothing more
+  --alarms-record <file>          its record, by slot, read at start and rewritten
+                                  whole after every act:
+                                  {\"profile\": \"alarms.v2\", \"slots\": {\"<slot>\":
+                                  {\"record\": <record>, \"words\": <words>,
+                                  \"alert_key\": \"<16 hex>\", \"reading\"?: \"<decimal>\"}, ...}},
+                                  a resolved one included; an alarms.v1 record file is
+                                  read as its documents and adopted onto slots
+  --alarms-rules <rule>,...       the rules evaluated, by name: a firing record of
+                                  another rule found at start is put resolved
+  --cardinality alarms.v2:state/alarms/{slot}=<n>
+                                  the slots, lowered before the adoption
+  (--alarms-archive is refused under --alarms-v2)
+
+  alarm raise <json>              the condition holds: {\"rule\": <string>,
+                                  \"severity\": \"info\"|\"warning\"|\"critical\",
+                                  \"summary\": <string>, \"labels\"?: {<name>: <value>, ...},
+                                  \"category\"?: <string>, \"reading\"?: <decimal>}
+  alarm resolve <alert_key>       the resolved record on its slot, no delete
+  alarm confirm <alert_key>|all on|off
+                                  off: its bit cleared, and it goes stale
+  alarm list                      the slots held
+  alarm adoption                  what the start took over
+
+  Answers, one line each (<json> is {\"record\": <record>, \"words\": <words>|null},
+  a record in core §7.6's JSON reading: at in ms since the Unix epoch, absent
+  with no code; rule and argument a number or \"not_available\"; key an integer):
+    alarm raised|escalated|refreshed|deferred|unchanged <alert_key> <slot> <json>
+                                  deferred: a refresh within the window, nothing put
+    alarm resolved <alert_key> <slot> <json>, or alarm none <alert_key>
+    alarm confirm <alert_key>|all on|off
+    alarm held <json>             by slot: {\"alert_key\", \"record\", \"words\", \"reading\"?}
+    alarm adoption source=<record|record_v1|nothing> adopted=<slots> resolved=<slots>
+      free=<slots|keys> left=<slots|keys> failed=<keys>
+                                  an alarms.v1 document on no slot by its alert key
+    refused <line>: <why>         a raise with every slot firing, the bound named
 
 telemetry.v1 (spec/profiles/telemetry/v1.md)
   Every writer of a metric resource checks each put against its declaration,
@@ -1556,6 +1647,7 @@ impl Options {
             config_apply_after_ms: 1000,
             config_persist: true,
             alarms: false,
+            alarms_v2: false,
             alarms_record: None,
             alarms_archive: None,
             alarms_rules: None,
@@ -1715,6 +1807,11 @@ impl Options {
                 }
                 [flag, tail @ ..] if flag == "--alarms" => {
                     o.alarms = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--alarms-v2" => {
+                    o.alarms = true;
+                    o.alarms_v2 = true;
                     rest = tail;
                 }
                 [flag, value, tail @ ..] if flag == "--alarms-record" => {
@@ -2147,9 +2244,22 @@ pub async fn run_with(
             rfcfg = Some(imp);
             continue;
         }
+        // And alarms.v2 (#984's S2): the standard one, or with
+        // --alarms-v2 another revision of it.
+        if imp.iface() == &alarms::v2::iface() {
+            if imp.fingerprint().hex().to_string() == alarms::v2::FINGERPRINT {
+                opts.alarms = true;
+                opts.alarms_v2 = true;
+                continue;
+            }
+            if opts.alarms_v2 {
+                alarms_revision = Some(imp);
+                continue;
+            }
+        }
         // And alarms.v1 (#800): the standard one, or with --alarms another
         // revision of it.
-        if imp.iface() == &alarms::iface() {
+        if imp.iface() == &alarms::iface() && !opts.alarms_v2 {
             if imp.fingerprint().hex().to_string() == alarms::FINGERPRINT {
                 opts.alarms = true;
                 continue;
@@ -2541,8 +2651,8 @@ struct Ctx<'a> {
     configured: Option<(Startup, Arc<config::SimDevice>)>,
     /// config.v2's startup, device and config contract, with `--config-v2`.
     configured_v2: Option<(config_v2::Startup, Arc<config::SimDevice>, Implementation)>,
-    /// The revision of alarms.v1 among the files, with `--alarms`; `None`:
-    /// the standard one.
+    /// The revision of alarms.v1 among the files, with `--alarms`, or of
+    /// alarms.v2, with `--alarms-v2`; `None`: the standard one.
     alarms_revision: Option<Implementation>,
     /// desired.v1's contracts and the target's watch session, with a
     /// `--desired-*` option.
@@ -2585,6 +2695,8 @@ struct Up {
     config: Option<Configuration>,
     config_v2: Option<config_v2::Configuration>,
     alarms: Option<Alarms>,
+    /// alarms.v2's owner, with `--alarms-v2`, in alarms.v1's place.
+    alarms_v2: Option<alarms::v2::Alarms>,
     /// desired.v1's author, its target and the target's drive.
     author: Option<desired::Author>,
     target: Option<desired::Target>,
@@ -2876,7 +2988,12 @@ impl Ctx<'_> {
         // Core §3.3: a template's bound lowered in the descriptor, which the
         // runtime then keeps (§2.7). alarms.v1's goes in its startup, set
         // before the adoption.
-        let alarms_iface = alarms::iface().to_string();
+        let alarms_iface = if opts.alarms_v2 {
+            alarms::v2::iface()
+        } else {
+            alarms::iface()
+        }
+        .to_string();
         for (iface, resource, n) in &opts.cardinality {
             if opts.alarms && *iface == alarms_iface {
                 continue;
@@ -2933,7 +3050,43 @@ impl Ctx<'_> {
         };
         // alarms.v1 §2.9: the previous instance's alarms taken over here,
         // before the tokens.
-        let alarms = if opts.alarms {
+        // alarms.v2 §2.9: likewise, by slot, in alarms.v1's place.
+        let alarms_v2 = if opts.alarms_v2 {
+            if opts.alarms_archive.is_some() {
+                return Err(
+                    "--alarms-archive: no archive is read under alarms.v2 (#984's S2); \
+                            give --alarms-record"
+                        .into(),
+                );
+            }
+            let mut startup = alarms::v2::Startup::default();
+            if let Some(path) = &opts.alarms_record {
+                startup = startup.with_record(Arc::new(alarms::v2::FileRecord::new(path)));
+            }
+            if let Some(rules) = &opts.alarms_rules {
+                startup = startup.evaluating(rules.iter().cloned());
+            }
+            for (iface, resource, n) in &opts.cardinality {
+                if *iface == alarms_iface {
+                    if resource != alarms::v2::ALARMS {
+                        return Err(format!(
+                            "--cardinality {iface}:{resource}: alarms.v2's template is {}",
+                            alarms::v2::ALARMS
+                        )
+                        .into());
+                    }
+                    startup = startup.with_cardinality(*n);
+                }
+            }
+            let imp = self
+                .alarms_revision
+                .clone()
+                .unwrap_or_else(alarms::v2::implementation);
+            Some(b.alarms_v2_with(imp, startup).await?)
+        } else {
+            None
+        };
+        let alarms = if opts.alarms && !opts.alarms_v2 {
             let mut startup = alarms::Startup::default();
             if let Some(path) = &opts.alarms_record {
                 startup = startup.with_record(Arc::new(FileRecord::new(path)));
@@ -3126,6 +3279,7 @@ impl Ctx<'_> {
             config,
             config_v2,
             alarms,
+            alarms_v2,
             author,
             target,
             drive: drive_,
@@ -3599,6 +3753,109 @@ async fn alarm_command(words: &[&str], rest: &str, a: &Alarms) -> Result<String,
                 ),
                 listed(r.resolved),
                 listed(r.over_bound)
+            ))
+        }
+        _ => Err(
+            "usage: alarm raise <json> | resolve <alert_key> | confirm <alert_key>|all on|off | \
+             list | adoption"
+                .to_owned(),
+        ),
+    }
+}
+
+/// An `alarms.v2` act's JSON: the record on the slot, in core §7.6's JSON
+/// reading, and its words for an alarm by words, else null.
+fn record_line(record: &alarms::v2::Record, words: Option<&alarms::v2::Words>) -> String {
+    serde_json::json!({
+        "record": record.to_json(),
+        "words": words.map(alarms::v2::Words::to_json),
+    })
+    .to_string()
+}
+
+/// Answers an `alarm` command under `--alarms-v2` (the module doc's).
+async fn alarm_v2_command(
+    words: &[&str],
+    rest: &str,
+    a: &alarms::v2::Alarms,
+) -> Result<String, String> {
+    use zenkey::model::alarms::v2::Adoption as Step;
+    match words {
+        ["alarm", "raise", _, ..] => {
+            let c: alarms::v2::Condition = serde_json::from_str(rest).map_err(|e| {
+                format!(
+                    "not a condition {{rule, severity, summary, labels?, category?, reading?}}: {e}"
+                )
+            })?;
+            let done = a.raise(c).await.map_err(|e| e.to_string())?;
+            Ok(format!(
+                "alarm {} {} {} {}",
+                done.act.as_str(),
+                done.alert_key,
+                done.slot,
+                record_line(&done.record, done.words.as_ref())
+            ))
+        }
+        ["alarm", "resolve", key] => match a.resolve(key).await.map_err(|e| e.to_string())? {
+            Some(done) => Ok(format!(
+                "alarm resolved {} {} {}",
+                done.alert_key,
+                done.slot,
+                record_line(&done.record, done.words.as_ref())
+            )),
+            None => Ok(format!("alarm none {key}")),
+        },
+        ["alarm", "confirm", key, on @ ("on" | "off")] => {
+            let on_ = *on == "on";
+            if *key == "all" {
+                a.set_confirming_all(on_).await;
+            } else if !a.set_confirming(key, on_).await {
+                return Err(match a.get(key).await {
+                    Some(s) => format!(
+                        "the alarm {key} is resolved on slot {}, and a resolved record is never \
+                         confirmed (alarms.v2 §2.7)",
+                        s.slot
+                    ),
+                    None => format!("no slot holds the alarm {key}"),
+                });
+            }
+            Ok(format!("alarm confirm {key} {on}"))
+        }
+        ["alarm", "list"] => {
+            let held: serde_json::Map<String, serde_json::Value> = a
+                .held()
+                .await
+                .into_values()
+                .map(|s| {
+                    let mut e = serde_json::json!({
+                        "alert_key": s.alert_key,
+                        "record": s.record.to_json(),
+                        "words": s.words.to_json(),
+                    });
+                    if let Some(r) = s.reading {
+                        e["reading"] = r.into();
+                    }
+                    (s.slot.to_string(), e)
+                })
+                .collect();
+            Ok(format!("alarm held {}", serde_json::Value::Object(held)))
+        }
+        ["alarm", "adoption"] => {
+            let r = a.adoption();
+            let of = |step: Step| {
+                listed(r.took.iter().filter(|t| t.step == step).map(|t| {
+                    t.slot
+                        .map_or_else(|| t.alert_key.clone(), |slot| slot.to_string())
+                }))
+            };
+            Ok(format!(
+                "alarm adoption source={} adopted={} resolved={} free={} left={} failed={}",
+                r.source.as_str(),
+                of(Step::Adopted),
+                of(Step::Resolved),
+                of(Step::Free),
+                of(Step::Left),
+                listed(r.failed.into_iter().map(|(k, _)| k))
             ))
         }
         _ => Err(
@@ -4165,8 +4422,14 @@ async fn command(line: &str, up: &mut Up, device: Option<&config::SimDevice>) ->
     let refuse = |why: &str| format!("refused {}: {why}", words.join(" "));
     let rest = |n: usize| words.get(n..).map(|w| w.join(" ")).unwrap_or_default();
     if words.first() == Some(&"alarm") {
+        if let Some(a) = &up.alarms_v2 {
+            return match alarm_v2_command(&words, after_words(line, 2), a).await {
+                Ok(answer) => answer,
+                Err(why) => refuse(&why),
+            };
+        }
         let Some(a) = &up.alarms else {
-            return refuse("alarms.v1 is not implemented here (--alarms)");
+            return refuse("alarms.v1 is not implemented here (--alarms, --alarms-v2)");
         };
         return match alarm_command(&words, after_words(line, 2), a).await {
             Ok(answer) => answer,
