@@ -1948,3 +1948,126 @@ async fn s9_an_instances_table_is_its_contracts_one_table() {
     );
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// No section of `scenarios-v2.md` runs an owner under a catalog (zk2py's
+/// round 120 mend): its conventions give none, so every record's times
+/// count from 0, and an owner that wrote them from 0 under a catalog would
+/// pass §1 to §9. Here `lab/cat` runs under a catalog whose epoch is
+/// 2026-01-01 (core §8.6). Its status's `since`, its check's `at` and its
+/// fault's `at` are whole seconds from that epoch (§2.3, core §7.6): read
+/// under it, each is this host's clock to the second; read under 0, each
+/// is that epoch early, in 1970. Its snapshots' time counts from it too,
+/// and its descriptor names the catalog, so a reader knows which epoch to
+/// read by.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn under_a_catalog_every_time_counts_from_its_epoch() {
+    use zenkey::model::catalog::Catalog;
+    const CAT: &str = "lab/cat";
+    const E: i64 = 1_767_225_600;
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    let (_s, log) = record(&rs, "zk2/lab/cat/health.v2/**").await;
+    let catalog = Catalog::new(E).unwrap();
+    let id = catalog.id();
+    let mut b = ServiceBuilder::new(&os, config(CAT));
+    b.catalog(catalog).unwrap();
+    let h = b.health_v2().await.unwrap();
+    assert_eq!(b.deployment_epoch(), E);
+    matched(h.status_writer().writer()).await;
+    matched(h.faults_writer()).await;
+    let before = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    h.set_status(Level::Ok, "serving").await.unwrap();
+    h.set_check("disk", Level::Ok, "ok").await.unwrap();
+    let svc = b.start().await.unwrap();
+    h.fault_argument("disk_full", Level::Degraded, Some(7))
+        .await
+        .unwrap();
+    let got = at_least(&log, 3).await;
+    let after = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let now = |t: Option<i64>, what: &str| {
+        let t = t.unwrap_or_else(|| panic!("{what}: a time the catalog's epoch codes"));
+        assert!(
+            (before..=after).contains(&t),
+            "{what}: {t} is this host's clock, {before} to {after}"
+        );
+    };
+    let envelope = |r: &Rec| {
+        let e = r.envelope();
+        (e.tag.get(), e.record.to_vec())
+    };
+    let status = got.iter().find(|r| r.is_status()).expect("the status");
+    let (tag, record) = envelope(status);
+    now(
+        v2::Status::read(tag, &record, E).unwrap().since,
+        "the status's since",
+    );
+    assert_eq!(
+        v2::Status::read(tag, &record, 0).unwrap().since,
+        v2::Status::read(tag, &record, E)
+            .unwrap()
+            .since
+            .map(|t| t - E),
+        "read under 0, the catalog's epoch early"
+    );
+    let disk = got
+        .iter()
+        .find(|r| r.check() == Some("disk"))
+        .expect("disk");
+    let (tag, record) = envelope(disk);
+    now(
+        v2::Check::read(tag, &record, E).unwrap().at,
+        "the check's at",
+    );
+    let fault = got.iter().find(|r| r.is_fault()).expect("the fault");
+    let (tag, record) = envelope(fault);
+    let f = v2::Fault::read(tag, &record, E).unwrap();
+    assert_eq!(
+        (f.code, f.argument),
+        (v2::Word::OUT_OF_RANGE, v2::Argument::Number(7))
+    );
+    now(f.at, "the fault's at");
+
+    // A late joiner's GET: the snapshots' time, and the entries' records,
+    // under the epoch the descriptor names.
+    let d = descriptor_of(&rs, CAT).await;
+    assert_eq!(
+        d.stated_catalog(),
+        Some(id),
+        "its descriptor names the catalog"
+    );
+    let answer = get_state(&rs, CAT).await;
+    let replies: Vec<(String, Vec<u8>)> = answer
+        .of(CAT)
+        .into_iter()
+        .map(|s| {
+            (
+                s.key_expr().as_str().to_owned(),
+                s.payload().to_bytes().into_owned(),
+            )
+        })
+        .collect();
+    let reading = m2::Reading::of(replies.iter().map(|(k, p)| (k.as_str(), p.as_slice())), E);
+    let snapshot = reading.status.as_ref().expect("the status's snapshot");
+    let ms = snapshot
+        .heard
+        .time
+        .unix_ms(E)
+        .expect("a snapshot's time, known") as i64;
+    now(Some(ms / 1000), "the snapshot's time");
+    match &snapshot.entry {
+        StatusEntry::Live(e) => now(
+            e.record.as_ref().expect("a record").since,
+            "the snapshot's status",
+        ),
+        other => panic!("no live status: {other:?}"),
+    }
+    assert!(reading.is_one_instant());
+    svc.close().await.unwrap();
+}
