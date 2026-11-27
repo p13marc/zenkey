@@ -277,7 +277,7 @@ fn refusal(v: &Value) -> v2::Refusal {
 fn desired_v2_order() {
     let doc = read_json(&dir().join("order.json"));
     let cases = doc["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 67);
+    assert_eq!(cases.len(), 69);
     for case in cases {
         let what = format!("{}", case["note"]);
         let mut t = Target::new();
@@ -385,7 +385,7 @@ fn admit(t: &mut Target, from: Via, kind: Mutation, v: Stamp) {
 fn desired_v2_watch() {
     let doc = read_json(&dir().join("watch.json"));
     let cases = doc["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 25);
+    assert_eq!(cases.len(), 27);
     for case in cases {
         let what = format!("{}", case["note"]);
         let key = case["key"].as_str().expect("key");
@@ -572,7 +572,7 @@ fn desired_v2_declarations() {
         assert_eq!(case["expect"], desired_declaration_json(&d), "{what}");
     }
     let reports = doc["reports"].as_array().expect("reports");
-    assert_eq!(reports.len(), 34);
+    assert_eq!(reports.len(), 38);
     for case in reports {
         let requires = names(&case["requires"]);
         let res = Res::of(&case["resource"]);
@@ -609,7 +609,7 @@ fn desired_v2_declarations() {
 fn desired_v2_slices() {
     let doc = read_json(&dir().join("slices.json"));
     let cases = doc["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 16);
+    assert_eq!(cases.len(), 17);
     for case in cases {
         let what = format!("{}", case["note"]);
         let r = &case["reading"];

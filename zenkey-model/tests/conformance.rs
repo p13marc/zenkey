@@ -3714,8 +3714,8 @@ fn seed_held() {
         assert_eq!(got, case["expect"], "{note}");
     }
     assert!(sent > 0 && none > 0, "asks on both sides");
-    seed_cases("held.json", 29);
-    assert_eq!(doc["cases"].as_array().expect("cases").len(), 29);
+    seed_cases("held.json", 30);
+    assert_eq!(doc["cases"].as_array().expect("cases").len(), 30);
 }
 
 /// `spec/conformance/envelope/held.json` (core 0.110 §7.5, the held stamp,

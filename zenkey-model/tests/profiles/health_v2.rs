@@ -496,7 +496,7 @@ fn health_v2_tables() {
     );
 
     let instances = doc["instances"].as_array().expect("instances");
-    assert_eq!(instances.len(), 9, "instances");
+    assert_eq!(instances.len(), 10, "instances");
     for case in instances {
         let holds: BTreeMap<&str, Tables> = case["holds"]
             .as_object()
@@ -780,7 +780,7 @@ fn health_v2_judgements() {
     const EPOCH: i64 = 1_767_225_600;
     let doc = read_json(&dir().join("judgements.json"));
     let cases = doc["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 60, "judgements.json's cases");
+    assert_eq!(cases.len(), 61, "judgements.json's cases");
     let record = |v: &Value| {
         (
             u8::try_from(v["tag"].as_u64().expect("tag")).expect("a tag"),
