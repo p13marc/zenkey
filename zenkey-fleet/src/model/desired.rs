@@ -813,7 +813,9 @@ fn declared_params(role: &str, offline: &ContractSet) -> Result<BTreeMap<String,
         0 => Ok(BTreeMap::new()),
         1 => Ok(found.remove(0).1),
         _ => Err(format!(
-            "--contracts holds several revisions that require role {role} and order its target              parameters differently ({}): say each with --param NAME=self.system or              NAME=self.service",
+            "--contracts holds several revisions that require role {role} and order its target \
+             parameters differently ({}): say each with --param NAME=self.system or \
+             NAME=self.service",
             found
                 .iter()
                 .map(|(i, _)| i.as_str())
