@@ -440,6 +440,72 @@ health in namespace "acme" — worst FAILED: 1 healthy, 1 unhealthy, 1 stale, 1 
     );
 }
 
+/// `zenctl health` over `health.v2` owners (#986's Q2): each row names the
+/// major it was read by, a word by its name with its number where a table
+/// in hand names it, by its number where none does, and a word no table
+/// names as that — never a name, never no word (health.v2 §2.10, §5); a
+/// break reported from one reading that is one instant; and a clock ahead
+/// from the last read heartbeat, the `clock_ahead` fault an occurrence
+/// beside it.
+#[test]
+fn a_health_v2_reading_shows_its_words_by_the_tables_in_hand() {
+    let report = fx::health_v2_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+health in namespace "acme" — worst FAILED: 2 healthy, 3 unhealthy, 0 stale, 0 unobservable, 0 not asked
+✗  lab/tc     unhealthy (degraded, DEGRADED) — its status is DEGRADED
+    read under health.v2
+    status DEGRADED tc_netns_gone (32) — its owner's reply, stamped 2026-11-22T15:25:59.000000000Z by 6c61622f7463
+    checks qdisc DEGRADED timeout (3)
+    agrees with its checks: yes — its status is fresh at a level, and no current check is worse
+    clock ahead: no — its last read heartbeat's time was an instant: its clock guard did not hold when it wrote it
+    1 fault(s) heard, the last tc_netns_restarted (32) DEGRADED, argument 3 — an occurrence
+✗  lab/plain  unhealthy (degraded, DEGRADED) — its status is DEGRADED
+    read under health.v2
+    status DEGRADED (a word no table names) — its owner's reply, stamped 2026-11-22T15:25:59.000000000Z by 6c61622f7463
+    agrees with its checks: yes — its status is fresh at a level, and no current check is worse
+    clock ahead: no — its last read heartbeat's time was an instant: its clock guard did not hold when it wrote it
+✓  lab/old    healthy (ok, OK) — its status is OK and confirmed, and no check is worse
+    read under health.v2
+    status OK (#33) — its owner's reply, stamped 2026-11-22T15:25:59.000000000Z by 6c61622f7463
+    agrees with its checks: yes — its status is fresh at a level, and no current check is worse
+    clock ahead: no — its last read heartbeat's time was an instant: its clock guard did not hold when it wrote it
+✗  lab/liar   unhealthy (inconsistent, FAILED) — a check is worse than its status, which health.v2 §2.2 forbids
+    read under health.v2
+    status OK serving (2) — its owner's reply, stamped 2026-11-22T15:25:59.000000000Z by 6c61622f7463
+    checks disk FAILED
+    agrees with its checks: no — a current check is worse than its fresh status in one reading that is one instant, its two snapshots under one run and one asof with no entry above it: its owner breaks health.v2 §2.2
+    clock ahead: no — its last read heartbeat's time was an instant: its clock guard did not hold when it wrote it
+✓  lab/ahead  healthy (ok, OK) — its status is OK and confirmed, and no check is worse
+    read under health.v2
+    status OK fallback (6) — its owner's reply, stamped 2026-11-22T15:25:59.000000000Z by 6c61622f7463
+    agrees with its checks: yes — its status is fresh at a level, and no current check is worse
+    clock ahead: yes — its last heartbeat's time was ahead: its clock guard held
+    1 fault(s) heard, the last clock_ahead (1) FAILED, argument 3 — an occurrence
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let rows = &lines[1..];
+    assert!(rows.iter().all(|r| r["profile"] == "health.v2"));
+    let tc = rows.iter().find(|r| r["address"] == "lab/tc").unwrap();
+    assert_eq!(
+        tc["status"]["word"],
+        serde_json::json!({"number": 32, "read": "service", "name": "tc_netns_gone"})
+    );
+    assert!(tc["status"].get("since_ns").is_none(), "{tc}");
+    assert_eq!(tc["last_fault"]["argument"], 3);
+    let plain = rows.iter().find(|r| r["address"] == "lab/plain").unwrap();
+    assert_eq!(plain["status"]["word"]["read"], "out_of_range");
+    assert!(plain["status"]["word"].get("name").is_none());
+    let liar = rows.iter().find(|r| r["address"] == "lab/liar").unwrap();
+    assert_eq!(liar["readings"][0]["one_instant"], true);
+}
+
 /// `zenctl timing` (#908, MC): one row per timed resource and per member,
 /// §5's three answers in the fixtures' tokens in every medium — a miss with
 /// its owner's state and its due, the period's span and arrivals, the
@@ -1067,6 +1133,7 @@ fn no_family_emits_trailing_whitespace() {
         table(&fx::why_report_silent()),
         table(&fx::conform_report()),
         table(&fx::health_report()),
+        table(&fx::health_v2_report()),
         table(&fx::alarms_report()),
         table(&fx::desired_report()),
         table(&fx::desired_v2_report()),

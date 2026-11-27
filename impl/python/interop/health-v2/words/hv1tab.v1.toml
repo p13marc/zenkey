@@ -1,0 +1,16 @@
+# Round 123 (F-593): a contract of the owner's own that lists health.v1, not
+# health.v2, and carries a table of reasons. health.v2 §2.10: `not_used`, so
+# the instance holds no table, and the owner writes the word out_of_range.
+[interface]
+name    = "hv1tab"
+major   = 1
+minor   = 0
+summary = "lists health.v1, carries health.v2's table of reasons"
+uses    = ["health.v1"]
+
+[defaults]
+annotations = { "health.reasons" = ["tc_netns_gone"] }
+
+[resources.rates]
+kind = "stream"
+type = { raw = "application/octet-stream" }

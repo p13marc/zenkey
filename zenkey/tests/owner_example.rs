@@ -572,6 +572,184 @@ async fn the_owner_example_reports_a_clock_ahead() {
     o.stop().await;
 }
 
+/// `health.v2` in the owner example (#986's Q2): `--health-v2` implements
+/// it in place of `health.v1`, a status and a check given on the command
+/// line are put as packed records before the tokens, their words written
+/// by the profile's tables and by the tables a contract file given
+/// declares; the commands move them, each answered with what is published
+/// and the number its reason was written as; a fault carries its argument;
+/// and with a clock reference, the guard's hold publishes one `clock_ahead`
+/// fault, which `clock-guard` reports.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_implements_health_v2() {
+    use zenkey::health::v2::{self, Packed as _};
+
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let faults = tool
+        .declare_subscriber("zk2/ex/packed/health.v2/stream/faults")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+    let fault = || async {
+        let s = tokio::time::timeout(SETTLE, faults.recv_async())
+            .await
+            .expect("a fault")
+            .unwrap();
+        let stamped_by_owner = s.timestamp().map(|t| t.get_id().to_string());
+        let f = v2::Fault::read(v2::Fault::tag(), &common::record(&s), 0).unwrap();
+        (f, stamped_by_owner)
+    };
+    let tc = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/health/tc.v1.toml");
+    let tc = tc.display().to_string();
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--health-v2",
+        "--health-status",
+        "DEGRADED:tc_netns_gone",
+        "--health-check",
+        "disk=OK:ok",
+        "--clock-reference",
+        "clock/heartbeat",
+        "ex/packed",
+        &tc,
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let instance = ready.rsplit('/').next().unwrap().parse().unwrap();
+    let addr = "ex/packed".parse().unwrap();
+    let d = loop {
+        match presence::descriptor(&tool, &addr, &instance, T)
+            .await
+            .unwrap()
+        {
+            presence::Found::Nothing => continue,
+            found => break found.into_descriptor().unwrap(),
+        }
+    };
+    let e = d
+        .interfaces
+        .iter()
+        .find(|e| e.iface == "health.v2")
+        .expect("health.v2 listed");
+    assert_eq!(e.contract, format!("sha256:{}", v2::FINGERPRINT));
+    assert!(
+        !d.interfaces.iter().any(|e| e.iface == "health.v1"),
+        "one major per instance (§2.3)"
+    );
+    let status = state(&tool, "zk2/ex/packed/health.v2/state/status").await;
+    assert_eq!(status[0].len(), 6, "a record of 6 bytes");
+    let s = v2::Status::read(v2::Status::tag(), &status[0], 0).unwrap();
+    assert_eq!(
+        (s.level, s.reason.code()),
+        (Some(zenkey::health::Level::Degraded), 32),
+        "the service's own reason, by the table its contract file declares"
+    );
+
+    assert_eq!(
+        o.ask("check disk FAILED timeout").await,
+        "health status=FAILED declared=DEGRADED raised_by=disk word=4"
+    );
+    let check = state(&tool, "zk2/ex/packed/health.v2/state/checks/disk").await;
+    let c = v2::Check::read(v2::Check::tag(), &check[0], 0).unwrap();
+    assert_eq!(
+        (c.level, c.detail.code()),
+        (Some(zenkey::health::Level::Failed), 3)
+    );
+    assert_eq!(
+        o.ask("fault tc_netns_restarted DEGRADED 3").await,
+        "health status=FAILED declared=DEGRADED raised_by=disk word=4"
+    );
+    let (f, _) = fault().await;
+    assert_eq!(
+        (f.code.code(), f.level, f.argument),
+        (
+            32,
+            Some(zenkey::health::Level::Degraded),
+            v2::Argument::Number(3)
+        )
+    );
+    assert_eq!(
+        o.ask("fault ex_unlisted OK").await,
+        "health status=FAILED declared=DEGRADED raised_by=disk word=4"
+    );
+    let (f, _) = fault().await;
+    assert_eq!(
+        (f.code, f.argument),
+        (v2::Word::OUT_OF_RANGE, v2::Argument::NotAvailable),
+        "a code no table names, and no argument"
+    );
+    let refused = o.ask("fault clock_ahead FAILED 2").await;
+    assert!(
+        refused.starts_with("refused fault clock_ahead FAILED 2: clock_ahead is a code of"),
+        "{refused}"
+    );
+    assert!(
+        o.ask("fault tc_netns_restarted OK 65535")
+            .await
+            .starts_with("refused")
+    );
+    assert!(o.ask("status UNSPECIFIED").await.starts_with("refused"));
+    assert_eq!(
+        o.ask("retire disk").await,
+        "health status=DEGRADED declared=DEGRADED raised_by=- word=32"
+    );
+    assert_eq!(
+        o.ask("status OK kernel too old for this qdisc").await,
+        "health status=OK declared=OK raised_by=- word=63"
+    );
+    assert_eq!(
+        o.ask("status OK").await,
+        "health status=OK declared=OK raised_by=- word=0"
+    );
+    assert_eq!(
+        o.ask("check probe UNSPECIFIED cannot_run").await,
+        "health status=OK declared=OK raised_by=- word=0"
+    );
+
+    // The clock guard: released, then held once the offset clock meets a
+    // router-stamped reference; one clock_ahead fault, with no Zenoh
+    // timestamp of the owner's.
+    assert_eq!(o.ask("clock-guard").await, "clock-guard released");
+    assert_eq!(o.ask("clock-offset 2000").await, "clock-offset 2000");
+    loop {
+        tool.put("clock/heartbeat", "tick").await.unwrap();
+        if o.ask("clock-guard").await == "clock-guard held" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let (f, stamp) = fault().await;
+    assert!(f.is_clock_ahead());
+    assert_eq!(f.level, Some(zenkey::health::Level::Failed));
+    assert!(
+        matches!(f.argument, v2::Argument::Number(2 | 3)),
+        "{:?}",
+        f.argument
+    );
+    let owner_zid = d
+        .meta
+        .get("zid")
+        .and_then(|z| z.as_str())
+        .map(str::to_owned);
+    assert!(owner_zid.is_some(), "the descriptor states the owner's zid");
+    assert_ne!(stamp, owner_zid, "no Zenoh timestamp of the owner's");
+    assert_eq!(o.ask("clock-offset 0").await, "clock-offset 0");
+    for piece in [
+        "[--health] [--health-v2]",
+        "health.v2 (spec/profiles/health/v2.md)",
+        "--health-v2                     implement health.v2; needs nothing more",
+        "fault <code> <LEVEL> [<argument>]",
+        "clock-guard held",
+        "health status=<LEVEL> declared=<LEVEL> raised_by=<name> word=<n>",
+        "health.reasons, health.details, health.codes",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+    o.stop().await;
+}
+
 /// The knobs that reach each bound (core §2.7, #741; `budget.md` §4–§7):
 /// `--cardinality` lowers a state's bound in the descriptor, and `fill`,
 /// `put` and `delete` drive the runtime's refusals, each answered with the

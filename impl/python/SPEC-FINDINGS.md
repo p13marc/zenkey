@@ -30829,6 +30829,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
   it (core E020). One that lists `health.v1` loads, and holds none."
 - **Changes:** nothing a reader does. It corrects what an author is
   told.
+- **Round 123, live:** both owners start with a contract that lists `health.v1` and carries a table, and write its name `out_of_range`, `not_used`; both readers show no name. The sentence stands in 0.2. Open.
 
 ### F-594 · gap · `health.v2` §2.10: what a linter says of an invalid declaration
 
@@ -30849,6 +30850,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
   `health.v1` is worth a warning: it is the one an author can write by
   leaving `uses` unmoved. `desired.v2` has the same gap (F-583).
 - **Changes:** whether two linters agree on a contract's exit code.
+- **Round 123, live:** the reference's owner example starts with a `value` and a `disagrees` file its linter refuses, as zk2py's owner does, and both write the word `out_of_range`. Open.
 
 ### F-595 · minor · `scenarios-v2.md` §1, Expected 1: 12 bytes under either CH
 
@@ -30865,6 +30867,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
   4 of §1 states its run: "16 bytes under a 16-bit run".
 - **Fix:** "12 bytes under a 16-bit run, CH `0x03`, and 14 under a
   32-bit run, CH `0x13`". In §8, "under a 16-bit run".
+- **Round 123: resolved by `health.v2` 0.2.** Each figure states its run; the owner example's put is 12 bytes, CH `0x03`, under its run file, and 14, CH `0x13`, with none.
 
 ### F-596 · contradiction · `scenarios-v2.md` §8: the face as worded lets the heartbeat and the faults cross
 
@@ -30899,6 +30902,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
   the faults' key in runs A and B.
 - **Changes:** whether §8 can be run as written, and whether a deployer
   who copies run B's deny believes the clock question is closed.
+- **Round 123: resolved by `health.v2` 0.2.** On 0.2's denies §8 is 10 of 10 with each owner and zk2py's G, and with zk2py's owner and `zenctl health` as G.
 
 ### F-597 · minor · core §2.6: an event's time "as a heartbeat's is"
 
@@ -30915,6 +30919,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
   the first clause says.
 - **Fix:** drop "as a heartbeat's is", or "where a heartbeat's is the
   ahead time (§7.5)".
+- **Round 123:** unchanged in core, and no `health.v2` event exists to run. Open.
 
 ### F-598 · ambiguity · `health.v2` §2.5: which owner heartbeats count
 
@@ -30944,6 +30949,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
   `health.v2` included". A word on the `link` class. Three payloads in
   `clock.json`.
 - **Changes:** what a reader without the catalog answers.
+- **Round 123, live: the two readers disagree on the first case.** With no catalog, over a hold, zk2py counts the `host` owner heartbeat whose group it reads `unknown_catalog` and answers yes, `ahead`; `zenctl health` answers unobservable, `nothing_heard`. With the catalog both answer yes, `ahead`. Open.
 
 ### F-599 · minor · `tables.json`: an empty list beside another list
 
@@ -30958,6 +30964,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
 - **Also unpinned:** `judgements.json` has no case that reaches step 3
   with no status read.
 - **Fix:** one instance case, and one judgement.
+- **Round 123, live:** a `[]` table beside `["tc_a"]`: both owners write `tc_a` `out_of_range`, `differ`. Open.
 
 ### F-600 · ambiguity · `health.v2` §2.5: "In every other case the heartbeats answer"
 
@@ -30975,6 +30982,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
 - **zk2py's first writing followed §2.5's sentence,** and passed. It
   now asks `health.v1`'s question of such a service.
 - **Fix:** "In every other case under this major".
+- **Round 123, live:** `zenctl health` reads the owner example's `health.v1`, its guard holding, by `health.v1`'s question (yes, `clock_ahead`, from a fault), never `ahead`. The sentence stands. Open.
 
 ### F-601 · minor · three "Not verified" lines the tree does not bear out
 
@@ -30994,6 +31002,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
 - **The entries may be true of the commit that wrote them.** On the
   tree a reader is handed they are not.
 - **Fix:** a line under each, as core 0.111 corrected 0.109's entry.
+- **Round 123:** the three lines stand, and 0.2's entry adds no correction. At 82613b50 the owner example still writes the ahead time. Open.
 
 ### F-602 · minor · `scenarios-v2.md` §9, step 4: T reads after step 2 replaced the status
 
@@ -31011,6 +31020,7 @@ health.v2/`, zk2py's own computation, and `zk2 contract fingerprint` of
   after step 2, and S's subscription holds the fault.
 - **Fix:** "T and T2 subscribe to both owners before step 1", or a read
   after step 1.
+- **Round 123: resolved by `health.v2` 0.2.** zk2py's T and T2 meet Expected 4 with each owner. The reference's tool does not show a status since replaced (F-611).
 
 ### F-569 to F-592
 
@@ -31592,5 +31602,259 @@ a call left unanswered draws, the router's in 0 to 5 of 12 on either.
   None is a blocker. F-608 is the one to settle first: it is the one
   rule whose fact now names an exception.
 - **Open:** F-437 to F-441; F-569 to F-609.
+
+  F-365 stays open as #965's.
+
+## At health.v2 0.2, against the reference
+
+Round 123 read this tree at 82613b50 (#986 Q2), its black boxes built
+from 82613b50. **One text version moved, editorially:** `health.v2`
+0.2. **And the reference speaks `health.v2`:** its owner example with
+`--health-v2`, and `zenctl health`, the doctor's `health-*` checks and
+`check conform`'s `health` cases reading either major. So this round is
+the two implementations' first meeting on `health.v2`, which round 120
+could not run.
+
+### The entry, read against the tree
+
+zk2py diffed `spec/` and `examples/zk2/` between round 122's tree
+(32662a0f) and this one. `spec/CLAUDE.md` moved, and is outside the
+barrier, unread. The rest:
+- **`scenarios-v2.md`:** four hunks. The intro names who runs which
+  sections. §1 Expected 1 states each run's bytes. §8's setup says a
+  heartbeat and a fault are stream samples, each run names what it
+  denies of them, and run A's step 2 and run C state their run. §9's
+  setup has T and T2 subscribe before step 1, and step 4 reads by GET
+  and shows "what it heard and what it read".
+- **`v2.md`:** its header, 0.1 to 0.2. **`profiles/README.md`:** its row.
+- **Unchanged,** byte for byte against round 120's 08f3600a:
+  `conformance/v2/`'s six files, `health.v2.toml` and `health.v2.json`.
+  `RULES.md` lists 297 rules, as before.
+- **Outside `spec/`:** two contracts under
+  `zenkey/tests/contracts/health/`, the reference's `tc.v1` and its
+  earlier revision. They hold §9's tables, as zk2py's copies do, beside
+  another resource.
+
+**The entry says all of it.** Each hunk is one of its four items, and
+its "Deliberately not changed" is true of this tree: no rule, no
+fixture, no scenario under a catalog, the header still against core
+0.113 and `freshness.v2` 0.12. **The walk:** 8125 of 8125 (8117 of 8119
+before any line of this round: the header's 0.1, and F-595's sentence,
+gone).
+
+### Live: the two pairings
+
+The black boxes are `owner`, `archive`, `zenctl` and `zk2` of 82613b50,
+run and never read. Every router is zenoh-python 1.10.2's.
+`health_v2_scenarios --owner rust` runs each section with the owner
+example where zk2py's owner process stood, read by zk2py.
+`health_v2_pairings --owner zk2py` runs each with zk2py's owner, read by
+`zenctl health`, the doctor and `check conform`. README's "Live" for
+round 123 has each step.
+
+| Section | The reference's owner, zk2py's reader | zk2py's owner, the reference's reader |
+|---|---|---|
+| §1 | 8 of 8 | 7 of 7, the doctor's four checks and `check conform`'s two cases beside |
+| §2 | 3 of 3 | 3 of 3 |
+| §3 | 4 of 4 | 4 of 4 |
+| §4 | 14 of 14, step 6 included | 8 of 8, step 6 included |
+| §5 | 2 of 2: 100 processes | 1 of 1: 100 rows, each healthy |
+| §6 | 2 of 2, the reference's archive | 3 of 3, the same archive |
+| §7 | 6 of 6 | 6 of 6 |
+| §8 | 10 of 10 on 0.2's denies | 10 of 10 on 0.2's denies |
+| §9 | 6 of 6 | 3 of 4 (F-611) |
+
+- **Every Expected that was run was met,** but §9's Expected 4 with the
+  reference's tool: `zenctl health` shows the last status and the last
+  fault, and nothing of step 1's status (F-611).
+- **Each against itself:** zk2py's owner and readers 70 of 70; the
+  reference's owner read by `zenctl` 63 of 65, the same two as with
+  zk2py's owner (F-611, and F-598's first case), so both are the
+  reference's reader's.
+- **§1 Expected 1 under either run:** the owner example's put is 12
+  bytes, CH `0x03`, under its run file, and 14 bytes, CH `0x13`, with
+  none (`132883ece800000001b584b97280`). zk2py's: the same.
+- **§7's `lab/liar` and `lab/two` are zk2py's in each pairing.** The
+  owner example's `status` and `check` answer `raised_by=<check>`: it
+  raises its status, and has no word for a test owner that breaks §2.2.
+
+### The bytes, side by side
+
+Both owners, each with a 16-bit run file, given the same nine commands,
+read by one subscriber and one GET (`--only bytes`). **Every put, every
+delete and every snapshot entry is the same bytes,** run and seq
+included, since both runs were `0000` and both started at seq 0; only
+the heartbeat's time differs, and its digest, which covers each owner's
+own key:
+
+| Put | zk2py | The reference |
+|---|---|---|
+| status ok, serving | `03000000000042b584bbcc00` | the same |
+| status degraded, `tc_netns_gone` (32) | `030000000001a0b584bbcc80` | the same |
+| status failed, `check` (raised) | `030000000002c4b584bbcc80` | the same |
+| check disk failed, `timeout` | `030000000003c3b584bbcc80` | the same |
+| fault `tc_netns_restarted` (32), degraded, 3 | `0b0000000000820003b584bbcd00` | the same |
+| fault `out_of_range`, failed, `not_available` | `0b0000000001ffffffb584bbcd00` | the same |
+| check net unknown, `cannot_run` | `03000000000405b584bbcd00` | the same |
+| delete of checks/net, its attachment | `200000000005` | the same |
+| status ok, `out_of_range` | `0300000000087fb584bbcd80` | the same |
+| heartbeat | `c100000000006b09779882e04d7bf9f0` | `c100000000006b0977988afd27e7ef10` |
+
+- **The heartbeats:** times 1795782552.523 and .555; digests `026bdfcf`
+  and `e93f3f78`, each core §7.5's over its own owner's status key and
+  stamp, as zk2py computes them.
+- **One difference in what was put, not in its bytes:** when a check
+  recovers, the owner example puts its declared status back itself
+  (`raised_by=-`). zk2py's owner leaves that to its application. §2.2's
+  "then the status, if it improves" allows both. The runner tells both
+  owners the status, and the example puts nothing again.
+- **The owner heartbeat under a catalog:** both owners' `host` put holds
+  one group, `health.v2` at the catalog's index 0, its time the
+  catalog's epoch's instant, then the ahead time while the guard holds.
+  Neither sends a `link` owner heartbeat: `health.v2`'s collections are
+  of the `host` class.
+
+### What round 120 could not run
+
+- **§6 to §8 with zk2py's owner:** run, read by `zenctl health`, the
+  doctor and `check conform`. 19 of 19.
+- **§7's `lab/two`:** zk2py's owner `--two-asofs` answers the status's
+  snapshot at the status's seq and the checks' at the last seq minted.
+  zk2py's T: the first reading not one instant (`asof`), unhealthy,
+  `inconsistent`, at `failed`, `two_readings`; the break seen again 2 s
+  later. `zenctl health`: neither reading one instant, the same
+  verdict, `agrees` no. The doctor's `health-inconsistent` names
+  `lab/liar` and `lab/two`, and not `lab/frank` or `lab/flip`.
+- **Owner heartbeats, live, under a catalog:** each owner `--catalog
+  --owner-heartbeat`. zk2py's reader, holding the catalog, reads the
+  group, confirms the status by it and answers no, `confirmed`, then
+  yes, `ahead` from it. `zenctl health --catalog` answers the same, and
+  judges the status confirmed: unhealthy, `degraded`, never stale.
+  Without the catalog the two disagree (F-598).
+- **A `health.v2` owner under a catalog's later epoch:** **both owners
+  write every time from the catalog's epoch:** the status's `since`, a
+  check's `at` (one held before the tokens too), a fault's `at`, each
+  snapshot's `time`, an entry's `conf` and the heartbeat's time, read
+  under the epoch as this instant. **Each reader given the catalog
+  reads them so:** zk2py's, and `zenctl health --catalog`, whose
+  `since_s` and `at_s` are Unix seconds of this instant. **Without the
+  catalog both refuse:** `zenctl` shows the status and the checks
+  `undecodable`, and judges unobservable, `no_stamp` (or `undecodable`
+  over a window). zk2py read under
+  0 before this round, a guess core §8.6 forbids; it now refuses each
+  timed record `unknown_catalog`, with the same verdict (F-610).
+
+### F-610 · ambiguity · core §8.6 and `health.v2` §2.6: a record whose time counts from a catalog the reader does not hold
+
+> Core §8.6: "**Never a guess.** A reader MUST refuse each of these: an
+> id, when it holds neither that catalog nor one whose `lineage` holds
+> it (`unknown_catalog`)". `catalog/succession.json`: "the epoch alone,
+> of a catalog not held" → `unknown_catalog`.
+> `health.v2` §2.6: "Core §7.6's reading refuses a record by its tag,
+> its length or its pad. A reader MUST read a status whose record it
+> refuses as unknown, never as `ok`, and never at a level read from its
+> bits."
+
+- **Two readings.** §8.6 refuses the epoch. §2.6 names three refusals of
+  a record, and not this one. So a status whose `since` counts from a
+  catalog the reader does not hold is either refused whole, its level
+  unread, or read at its level, its time unread.
+- **Measured.** `zenctl health` without `--catalog`, against either
+  owner naming a catalog: the status and the check `undecodable`, a
+  fault "malformed", the verdict unobservable, `no_stamp` on the
+  deployment's word for the clock and `undecodable` over a window, exit
+  2.
+  zk2py's reader now does the same (`unknown_catalog`). Before this
+  round it read under 0, the 1970 instants of round 120's mend: a guess,
+  and zk2py's error.
+- **What neither text says:** a record whose time is absent needs no
+  epoch. zk2py reads such a record. A heartbeat's time and an owner
+  heartbeat's raise the same question, and there the two readers part
+  (F-598).
+- **No case pins it.** `records.json` writes and reads under a later
+  epoch held, and under none not held.
+- **Fix:** in §2.6, "and a record whose `since` or `at` counts from a
+  catalog it does not hold (core §8.6, `unknown_catalog`)", and one case
+  in `records.json`.
+- **Changes:** what a tool shows of such a service, a level or
+  `undecodable`. Its verdict is unobservable either way: step 3, the
+  freshness, cannot date a confirmation, and comes before step 4.
+
+### F-611 · minor · `scenarios-v2.md` §9, step 4: a tool shows a status since replaced, in a section called the runtime's
+
+> Intro: "§1 to §5 and §9 are the runtime's. §6 to §8 are a tool's."
+> Setup: "T and T2 each subscribe to both owners' `health.v2/**` before
+> step 1. A later read answers no status since replaced, and no fault."
+> Step 4: "Each shows what it heard and what it read."
+> Expected 4: "T shows `lab/tc`'s reason as `tc_netns_gone` and its
+> fault's code as `tc_netns_restarted`, with the argument 3."
+
+- **Expected 4 is a tool's.** It says what T and T2 show, which no
+  runtime does.
+- **The reference's tools do not show it.** `zenctl health --contracts
+  tc.v1 --for 8`, its window over steps 1 to 3: the fault heard,
+  `tc_netns_restarted`, the service's word 32, argument 3; step 2's
+  status read, 63, `out_of_range`; nothing of step 1's status. `zenctl
+  echo` on the same keys shows step 1's put with `"reason": 32`, the
+  number. zk2py's T keeps each status heard, and shows `tc_netns_gone`.
+- **Nothing in §5 asks a tool to show a status since replaced.** A
+  health tool's questions are about now.
+- **The reference runs §9 in `zenkey`'s tests,** by the intro, so its T
+  there is a test's reader. That is consistent, and is why the
+  reference's own tool cannot be §9's T.
+- **Fix:** Expected 4: "S's record of step 1's status shows its reason
+  as `tc_netns_gone`", or call §9's step 4 a tool's and say a tool
+  shows each status heard.
+- **Changes:** whether `zenctl health` can be §9's T.
+
+### F-593 to F-602 after the live run
+
+| Finding | What round 123 showed, live |
+|---|---|
+| F-593 | `hv1tab.v1` (lists `health.v1`, carries a table) loads in both linters, and both owners start with it and write `tc_netns_gone` as `out_of_range`: `not_used`. Both readers show "a word no table names". The sentence stands in 0.2. Open. |
+| F-594 | The reference's `zk2 contract lint` refuses `value` and `disagrees`, exit 1. Its owner example starts with each of those files all the same, as zk2py's does, and each writes the word `out_of_range`; both readers show no name. So a linter's error stops no runtime, and the text still names no lint. Open. |
+| F-595 | **Resolved at 0.2.** Each figure states its run, and both owners' puts are those bytes. |
+| F-596 | **Resolved at 0.2.** §8 on 0.2's denies: 10 of 10 with each owner and zk2py's G, and 10 of 10 with zk2py's owner and `zenctl health --across-face` as G. |
+| F-597 | Unchanged in core. No `health.v2` event exists to run. Open. |
+| F-598 | **The two readers disagree on its first case.** Without the catalog, over a hold, zk2py's reader reads the `host` owner heartbeat's group `unknown_catalog`, counts the put "whatever became of its groups", and answers yes, `ahead`; `zenctl health` answers unobservable, `nothing_heard`, with each owner. With the catalog both answer yes, `ahead`. Neither owner sends a `link` owner heartbeat for `health.v2`, so the `link` class's question did not arise. Open. |
+| F-599 | `empty.v1` (`[]`) beside `full.v1` (`["tc_a"]`): both owners write `tc_a` as `out_of_range`, `differ`; both readers show no name. The fixture still has no case. Open. |
+| F-600 | The owner example with `--health`, its guard holding, read by `zenctl health`: under `health.v1`'s question, `yes, clock_ahead` from a fault heard, never this major's `yes, ahead`. The reference reads §2.12's way. The sentence stands. Open. |
+| F-601 | The three lines stand in their entries, and 0.2's entry adds no correction. At 82613b50 the owner example writes the ahead time in its heartbeats and its owner heartbeats, as at 08f3600a. Open. |
+| F-602 | **Resolved at 0.2.** zk2py's T and T2 subscribe before step 1 and meet Expected 4, with each owner (6 of 6). The reference's tool does not (F-611). |
+
+### What the reference's tools say, beside the texts
+
+No finding: these are the reference's words, and its verdicts are
+`health.v2`'s.
+- **The doctor's `health-*` checks** cite `health.v1 §2.1`, `§2.2` and
+  `§2.4`, and their reasons count "service(s) implementing health.v1"
+  of services that list `health.v2` alone. Their findings are right.
+- **`check conform`'s `health` cases** cite `health.v1 §5` and `§2.2`.
+  Its `--help` says the case asks "when its descriptor lists health.v1";
+  it judges a `health.v2` service too.
+- **`zenctl health`'s window** reads presence before it opens. A service
+  whose tokens come up during it reads absent at both readings, though
+  the second's GET answered its status. zk2py's runner starts such a
+  window after the owner's tokens.
+
+### Not run
+
+- **§4 with a moved system clock:** the owners' clocks are offset in
+  their runtimes, "Without root".
+- **§8 on a `link.v2` face:** V is a router with access control, its one
+  subject selected by link protocol.
+- **A `lab/liar` or `lab/two` of the reference's:** its usage has none.
+- **A stock zenohd:** `bin/current` holds none.
+
+### Counts at health.v2 0.2
+
+611 entries.
+- **New: F-610 and F-611:** one ambiguity, F-610, and one minor error,
+  F-611. Neither is a blocker. F-610 is the one to settle first: the two
+  readers now agree on records, and part on the heartbeat's time
+  (F-598).
+- **Resolved: F-595, F-596 and F-602,** by `health.v2` 0.2.
+- **Open:** F-437 to F-441; F-569 to F-594, F-597 to F-601, F-603 to
+  F-611.
 
   F-365 stays open as #965's.

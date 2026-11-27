@@ -69,7 +69,10 @@ use crate::model::catalog::zid_value;
 use crate::model::catalog::{Catalog, ContractState, DescriptorRead, Observed, Revision};
 use crate::model::config::{V2Target, V2Unread};
 use crate::model::examples::Examples;
-use crate::model::health::{Got, Trust, agreement_over, listing, reading};
+use crate::model::health::{
+    Got, Trust, agreement_over, agreement_over_v2, instance_tables, listing, major_of, reading,
+    word_seen,
+};
 use crate::report::{
     Asked, CheckId, CheckReport, ConfigPremise, DoctorConfig, DoctorFinding, DoctorHealth,
     DoctorPresence, DoctorReport, DoctorScope, DoctorSeverity, HealthAnswer, HealthAnswerToken,
@@ -682,7 +685,7 @@ struct PresencePhase {
 async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> PresencePhase {
     let (s, t) = (&bus.session, spec.timeout);
     let scope = Scope::all();
-    let health = HealthTarget::All.state_selector();
+    let health = HealthTarget::All;
     let config = ConfigTarget::All.state_selector(false);
     let mut readings = Vec::new();
     let mut config_readings = Vec::new();
@@ -3744,13 +3747,16 @@ struct HealthRead {
     unlisted: usize,
 }
 
-/// Every present service's `health.v1` readings, as `zenctl health` builds
-/// them ([`crate::model::health::reading`]): presence from the instance
-/// token and the descriptor's listing, never the interface token (§2.7);
-/// the status's freshness from the GET's reply alone, aged on the
-/// deployment's word ([`DoctorSpec::clocks_synced`]) or not at all, since
-/// the doctor listens to no status; the checks of the same answer (§2.4).
-/// The first reading counts for a service whose instance token the first
+/// Every present service's `health.v1` or `health.v2` readings, as `zenctl
+/// health` builds them ([`crate::model::health::reading`]), each by the
+/// major its descriptor lists, `health.v2` where it lists both (v2 §2.11,
+/// §2.12): presence from the instance token and the descriptor's listing,
+/// never the interface token (§2.7); the status's freshness from the GET's
+/// reply alone, aged on the deployment's word ([`DoctorSpec::clocks_synced`])
+/// or not at all, since the doctor listens to no status; the checks of the
+/// same answer (§2.4). Under `health.v2` a break of §2.2 is also read from
+/// one reading that is one instant, and the reason is shown by the tables
+/// of the revisions held that its descriptor names. The first reading counts for a service whose instance token the first
 /// presence read held.
 fn health_read(p: &Presence<'_>, spec: &DoctorSpec) -> HealthRead {
     let trust = if spec.clocks_synced {
@@ -3789,8 +3795,8 @@ fn health_read(p: &Presence<'_>, spec: &DoctorSpec) -> HealthRead {
             Listing::Unread => {
                 out.undecided.push(unjudged(
                     addr.to_string(),
-                    "no descriptor of it read: whether it implements health.v1 cannot be told, \
-                     and its interface token says nothing (health.v1 §2.7)",
+                    "no descriptor of it read: whether it implements health.v1 or health.v2 \
+                     cannot be told, and its interface token says nothing (health.v1 §2.7)",
                 ));
                 continue;
             }
@@ -3807,25 +3813,54 @@ fn health_read(p: &Presence<'_>, spec: &DoctorSpec) -> HealthRead {
             }
         };
         let presence = HealthPresence::Present(listed);
-        let last = reading(presence, Got::of(Some(second), addr), None, &trust, false);
+        let major = major_of(p.after, addr).unwrap_or(zenkey_model::health::Major::V1);
+        let last = reading(
+            presence,
+            Got::of_major(Some(second), addr, major),
+            None,
+            &trust,
+            false,
+        );
+        let one_instant = |g: Option<&HealthGet>| {
+            g.and_then(|g| g.v2.get(addr))
+                .and_then(|s| s.reading_v2.as_ref())
+                .is_some_and(zenkey_model::health::v2::Reading::is_one_instant)
+        };
         let mut agreements = Vec::new();
+        let mut instants = Vec::new();
         if let (Some(first), Some(before)) = (first, &before)
             && before.has_instance(addr)
         {
-            let got = Got::of(first.as_ref().ok(), addr);
+            let got = Got::of_major(first.as_ref().ok(), addr, major);
             agreements.push(reading(presence, got, None, &trust, false).agreement());
+            instants.push(one_instant(first.as_ref().ok()));
         }
         agreements.push(last.agreement());
+        instants.push(one_instant(Some(second)));
+        let value = second
+            .services_of(major)
+            .get(addr)
+            .and_then(|g| g.status.as_ref())
+            .and_then(|r| r.value.as_ref());
+        let said = value.map(|v| match v.word {
+            None => v.reason.clone(),
+            Some(w) => {
+                let tables = instance_tables(p.after, addr, |iface, fp| {
+                    let key = (iface.parse().ok()?, Fingerprint::parse(fp).ok()?);
+                    let state = p.obs.contracts.get(&key)?.as_ref().ok()?;
+                    Some(state.revision()?.contract())
+                });
+                word_seen(zenkey_model::health::v2::Kind::Reason, w, Some(&tables)).words()
+            }
+        });
         out.subjects.push(HealthSubject {
             addr: addr.clone(),
             last: last.judged(),
-            agreement: agreement_over(&agreements),
-            said: second
-                .services
-                .get(addr)
-                .and_then(|g| g.status.as_ref())
-                .and_then(|r| r.value.as_ref())
-                .map(|v| v.reason.clone()),
+            agreement: match major {
+                zenkey_model::health::Major::V1 => agreement_over(&agreements),
+                zenkey_model::health::Major::V2 => agreement_over_v2(&agreements, &instants),
+            },
+            said,
         });
     }
     if !p.complete {
@@ -4050,7 +4085,7 @@ fn unlisted_note(n: usize) -> String {
     if n == 0 {
         String::new()
     } else {
-        format!("; {n} present service(s) do not list health.v1, and are not asked")
+        format!("; {n} present service(s) list neither health.v1 nor health.v2, and are not asked")
     }
 }
 
@@ -4119,8 +4154,8 @@ fn health_level(p: &Presence<'_>, spec: &DoctorSpec, level: Level) -> CheckRepor
     }
     let clean = if h.subjects.is_empty() && undecided.is_empty() {
         format!(
-            "no present service's descriptor lists health.v1: health is asked of none (health.v1 \
-             §2.7){}",
+            "no present service's descriptor lists health.v1 or health.v2: health is asked of \
+             none (health.v1 §2.7){}",
             unlisted_note(h.unlisted)
         )
     } else {
@@ -4169,8 +4204,8 @@ fn health_stale(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
     }
     let clean = if h.subjects.is_empty() && undecided.is_empty() {
         format!(
-            "no present service's descriptor lists health.v1: health is asked of none (health.v1 \
-             §2.7){}",
+            "no present service's descriptor lists health.v1 or health.v2: health is asked of \
+             none (health.v1 §2.7){}",
             unlisted_note(h.unlisted)
         )
     } else {
@@ -4228,8 +4263,8 @@ fn health_inconsistent(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
     }
     let clean = if h.subjects.is_empty() && undecided.is_empty() {
         format!(
-            "no present service's descriptor lists health.v1: health is asked of none (health.v1 \
-             §2.7){}",
+            "no present service's descriptor lists health.v1 or health.v2: health is asked of \
+             none (health.v1 §2.7){}",
             unlisted_note(h.unlisted)
         )
     } else {
@@ -6914,8 +6949,11 @@ mod tests {
     /// An owner's answer: its status at `level`, `age_s` old, and its checks.
     fn answered(level: Level, age_s: u64, checks: &[(&str, Level)]) -> ServiceGot {
         ServiceGot {
+            reading_v2: None,
             status: Some(Replied {
                 value: Some(StatusValue {
+                    word: None,
+                    since_s: None,
                     level: Read::Level(level),
                     reason: "netns gone".into(),
                     since_ns: 1,
@@ -6932,6 +6970,8 @@ mod tests {
                         (*n).to_owned(),
                         Replied {
                             value: Some(CheckValue {
+                                word: None,
+                                at_s: None,
                                 level: Read::Level(*l),
                                 detail: String::new(),
                             }),
@@ -6945,6 +6985,7 @@ mod tests {
 
     fn reading_of(services: Vec<(&str, ServiceGot)>) -> HealthGet {
         HealthGet {
+            v2: BTreeMap::new(),
             selector: "zk2/*/*/health.v1/state/**".into(),
             read_at: now(),
             complete: true,
@@ -7073,7 +7114,7 @@ mod tests {
             let why = clean(&health_check(&o, &s, id));
             assert!(why.contains("4 service(s)"), "{id}: {why}");
             assert!(
-                why.contains("1 present service(s) do not list"),
+                why.contains("1 present service(s) list neither"),
                 "{id}: {why}"
             );
         }

@@ -6,7 +6,7 @@
         [--level <level>] [--reason <word>] [--check <name>=<level>[:<detail>]]...
         [--contract <file>]... [--reference <key>] [--offset-ms <ms>] [--liar]
         [--auth <user>:<password>] [--run-record <file>] [--catalog <file>]
-        [--many <n> --nav <file>]
+        [--owner-heartbeat] [--two-asofs] [--many <n> --nav <file>]
         <system>/<service>
 
 Standard output: ``ready zk2/<system>/<service>/@zk/instance/<id> run <hex>``,
@@ -21,6 +21,12 @@ then one line per command read on standard input:
   ``failed`` and back, the status following in §2.2's order;
 - ``state``: one JSON line, what the owner holds, its guard and its log;
 - ``close``.
+
+``--owner-heartbeat`` confirms by owner heartbeats (``freshness.v2`` §2.4)
+every interface its catalog lists, and needs ``--catalog``. ``--two-asofs``
+is a test owner's (scenarios §7, ``lab/two``): one GET's status snapshot is
+at the status's own seq, its checks' at the last seq minted, so the two are
+not one instant (round 123).
 
 ``--many <n>`` starts ``<system>/dev0`` to ``dev<n-1>`` in this one process,
 each implementing ``health.v2`` and the contract ``--nav`` names, with
@@ -126,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--auth")
     p.add_argument("--run-record")
     p.add_argument("--catalog")
+    p.add_argument("--owner-heartbeat", action="store_true")
+    p.add_argument("--two-asofs", action="store_true")
     p.add_argument("--many", type=int, default=0)
     p.add_argument("--nav")
     a = p.parse_args(argv)
@@ -171,6 +179,20 @@ def main(argv: list[str] | None = None) -> int:
         from . import catalog as cat
 
         o.owner.catalog = cat.read(Path(a.catalog).read_bytes())
+        if a.owner_heartbeat:
+            o.owner.owner_heartbeats = True
+    if a.two_asofs:
+        def asof(col: Any, header: dict[str, Any], members: list[Any]) -> int:
+            # the status's snapshot at the status's own seq, which is at or
+            # below the answer's asof, so every mutation at or below it was
+            # recorded (core §4.2); every other at the answer's
+            if col.resource["template"] != "status":
+                return header["asof"]
+            seqs = [h.inband.seq for _, _, h in members if h.inband is not None
+                    and (h.inband.width, h.inband.run) == (header["run_width"], header["run"])]
+            return min([header["asof"], *seqs])
+
+        o.owner.snapshot_asof = asof
     # checks held before the tokens: a test owner's (scenarios §7)
     for spec in a.check:
         name, _, rest = spec.partition("=")

@@ -877,7 +877,9 @@ fn rate_case(
     })
 }
 
-/// `health.v1` (#721, PF): §5's "is this service healthy?" (`health`) and
+/// `health.v1` (#721, PF) and `health.v2` (#986's Q2), the service read by
+/// the major its descriptor lists, `health.v2` where it lists both (v2
+/// §2.12): §5's "is this service healthy?" (`health`) and
 /// "does its status agree with its checks?" (`health-aggregation`), from
 /// the reading taken over the suite's window, its subject the service.
 /// Unhealthy or stale, and a break of §2.2 seen in both readings, are the
@@ -885,7 +887,8 @@ fn rate_case(
 /// on the operator's word, or against a clock measured on a live put of the
 /// same clock — the suite's subscriptions' puts included, since the owner
 /// stamps every one with its session's clock. Not asked of a service whose
-/// descriptor does not list `health.v1` (§2.7).
+/// descriptor lists neither major (§2.7). Under `health.v2` a break of §2.2
+/// is also the finding from one reading that is one instant (v2 §2.2).
 fn health_cases(obs: &ConformObservation) -> [ConformCase; 2] {
     const S: &str = "service";
     fn unseen(c: CaseId, why: String) -> ConformCase {
@@ -916,15 +919,15 @@ fn health_cases(obs: &ConformObservation) -> [ConformCase; 2] {
                     zenkey_model::health::Listing::NotListed,
                 ) => both(
                     not,
-                    "its descriptor does not list health.v1, so health is not asked of it \
-                     (health.v1 §2.7)"
+                    "its descriptor lists neither health.v1 nor health.v2, so health is not \
+                     asked of it (health.v1 §2.7)"
                         .to_owned(),
                 ),
                 _ => both(
                     unseen,
                     "its presence or its descriptor could not be read: whether it implements \
-                     health.v1 cannot be told, and its interface token says nothing (health.v1 \
-                     §2.7)"
+                     health.v1 or health.v2 cannot be told, and its interface token says nothing \
+                     (health.v1 §2.7)"
                         .to_owned(),
                 ),
             },
@@ -966,11 +969,12 @@ fn health_cases(obs: &ConformObservation) -> [ConformCase; 2] {
             CaseId::Health,
             S,
             format!(
-                "{} ({}{level}): {} — health.v1's finding about the service (§5); stale is never \
-                 a level, and never down",
+                "{} ({}{level}): {} — {}'s finding about the service (§5); stale is never a \
+                 level, and never down",
                 row.verdict.as_str(),
                 row.reason,
-                row.says
+                row.says,
+                row.profile.unwrap_or("health.v1"),
             ),
         ),
         HealthVerdict::Unobservable => ConformCase::unobservable(
@@ -988,7 +992,7 @@ fn health_cases(obs: &ConformObservation) -> [ConformCase; 2] {
         HealthAnswerToken::No => ConformCase::failed(
             CaseId::HealthAggregation,
             S,
-            format!("{} (health.v1 §2.2)", a.says),
+            format!("{} ({} §2.2)", a.says, row.profile.unwrap_or("health.v1")),
         ),
         HealthAnswerToken::Unobservable => ConformCase::unobservable(
             CaseId::HealthAggregation,
@@ -5051,20 +5055,27 @@ mod tests {
             let c = case(&r, id, "service");
             assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
             assert!(
-                c.detail.as_deref().unwrap().contains("does not list"),
+                c.detail
+                    .as_deref()
+                    .unwrap()
+                    .contains("lists neither health.v1 nor health.v2"),
                 "{c:#?}"
             );
         }
         let at = read_at();
         let got = |status: Level, check: Level| HealthGet {
+            v2: BTreeMap::new(),
             selector: "zk2/lab/m/health.v1/state/**".into(),
             read_at: at,
             complete: true,
             services: BTreeMap::from([(
                 "lab/m".parse().unwrap(),
                 ServiceGot {
+                    reading_v2: None,
                     status: Some(Replied {
                         value: Some(StatusValue {
+                            word: None,
+                            since_s: None,
                             level: Read::Level(status),
                             reason: "r".into(),
                             since_ns: 1,
@@ -5078,6 +5089,8 @@ mod tests {
                         "disk".to_owned(),
                         Replied {
                             value: Some(CheckValue {
+                                word: None,
+                                at_s: None,
                                 level: Read::Level(check),
                                 detail: String::new(),
                             }),
@@ -5105,9 +5118,11 @@ mod tests {
                 }
             }
             o.health = Some(HealthObservation {
+                tables: BTreeMap::new(),
                 namespace: String::new(),
                 target: HealthTarget::One("lab/m".parse().unwrap()),
                 spec: HealthSpec {
+                    contracts: Default::default(),
                     timeout: WINDOW,
                     window: None,
                     grace: WINDOW,

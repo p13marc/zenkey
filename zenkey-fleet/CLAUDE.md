@@ -850,3 +850,52 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   fifth row, an owner heartbeat under the ahead time
   (`OWNER_HEARTBEAT_BLESS=1` regenerates
   `zenctl/tests/cmd/fixtures/owner-heartbeat.zrec`).
+  `health.v2` (#986's Q2, text 0.2) is read beside `health.v1` in all
+  four layers, each service by the major its descriptors list (v2
+  §2.11, §2.12): `model::health::major_of` (`Major::of` over every
+  served descriptor of the address, v2 where any lists it), `listing`
+  listing either major (its `token` the major's entry's), across a face
+  the deployment's word (`AcrossFace::major`, zenctl's `--iface`), and
+  with no descriptor in hand the GET that answered
+  (`HealthGet::answered_major`, v2 first). A reading is two GETs at once,
+  `<major>/state/**` each (`bus::health::get` over
+  `HealthTarget::state_selectors`, `get_of` per major), held apart
+  (`HealthGet::{services, v2}`, `services_of`); a `health.v2` record is
+  read under CH's tag (`packed_record`) and its owner's epoch
+  (`EntryEpochs::of`, an epoch not had reading `Undecodable`) into the
+  same `StatusValue`/`CheckValue`/`FaultValue` with a `word` (and
+  `since_s`, `at_s`, `argument`), and each owner's pages again as one
+  `zenkey_model::health::v2::Reading` (`ServiceGot::reading_v2`). The
+  window subscribes both majors: v2's status through
+  `Consumer::subscribe_heartbeats`, so every read heartbeat (confirmed,
+  diverged or absent; a group of a `host` owner heartbeat too) goes to
+  the clock question as `ClockHeard::Heartbeat(time)` in
+  `ServiceHeard::clock`, faults as `ClockAhead`/`Fault`, records kept raw
+  and read at `Window::close` under the epoch presence gives
+  (`HealthWindow::{heard_v2, status_v2}`, `heard_of`, `status_of`). The
+  tables: `bus::health::tables` reads, per v2 owner, `Tables::of` each
+  revision its descriptors name (the standard contract skipped), held
+  offline (`HealthSpec::contracts`) or retrieved by fingerprint, into
+  `Tables::of_instance` (`HealthObservation::tables`); across a face the
+  revisions held. An absent owner's archive is asked for the v2 status
+  key, then v1's (`ArchivedStatus::major`). The judge: the clock question
+  is `v2::clock_ahead` over `clock` (the last read heartbeat, a fault
+  nothing), the agreement `model::health::agreement_over_v2` (a break the
+  last reading shows, reported alone where it is one instant, else v1's
+  two readings), a word `model::health::word_seen` (the report's
+  `WordSeen { number, read: none|profile|service|number|out_of_range,
+  name }`; a reason's text the name, the number where no table in hand
+  names it, empty for none and `out_of_range`), a level `level_read_of`
+  (`unknown`, never `unspecified`), and a rule's section named by the
+  row's major. The report adds, each omitted when absent:
+  `HealthRow::profile`, `HealthReadingVerdict::one_instant`,
+  `StatusSeen::{word, since_s}` (`since_ns` now an option, absent under
+  v2), `CheckSeen::{word, at_s}`, `FaultSeen::{word, argument, at_s}`
+  (`class` the word's `read`), `LastKnownStatus::{word, since_s}`. The
+  doctor's `health-*` checks read by `major_of` the same way (the reason
+  shown by the tables of the revisions it holds, `instance_tables`), and
+  `check conform`'s `health` cases name the row's major.
+  `judge::health`'s `a_health_v2_*` and `the_health_v2_clock_question_*`
+  tests, and `report-fixtures`' `health_v2_report`. Not done: zengui's
+  nodes pane shows a v2 row's reason as text and its words nowhere else;
+  zenwatch reads v2 through the doctor alone.

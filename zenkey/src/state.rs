@@ -801,6 +801,10 @@ struct Collection {
 /// so a confirmation never lands on a value put after it was read.
 pub(crate) type Vouched = Vec<(String, wire::Stamp)>;
 
+/// How many times [`Store::answer`] takes a snapshot's asof before it
+/// answers with an entry above it (core §4.2, "Its asof", allows one).
+const AS_OF_TAKES: usize = 4;
+
 /// How many distinct selectors a [`Store`] counts the GETs of; a GET on a
 /// selector past them is counted apart, as reaching no key.
 const ASKED_SELECTORS: usize = 1024;
@@ -1251,21 +1255,38 @@ impl Store {
             .map(AsRef::as_ref)
             .filter(|c| qk.intersects(&c.pattern))
             .collect();
-        // The run and asof first, then the store read: every mutation at or
-        // below asof is in the map by then, or a later one of its member.
-        let mark = reached.iter().any(|c| !c.per_key).then(|| minter.as_of());
-        let window = self.window;
-        let live = || {
-            let mut map = self.map.lock().expect("not poisoned");
-            map.retain(|_, e| e.value.is_some() || e.at.elapsed() <= window);
-            map
-        };
-        let mut map = live();
         let under_root = |k: &OwnedKeyExpr| {
             k.as_str()
                 .strip_prefix(root)
                 .is_some_and(|r| r.starts_with('/'))
         };
+        // The run and asof first, then the store read: every mutation at or
+        // below asof is in the map by then, or a later one of its member.
+        // A mutation recorded between the two shows above asof, and the
+        // GET's snapshots are then of no one instant (`health.v2` §2.2,
+        // "One instant"): the mark is taken again while one shows, a few
+        // times, since a writer may always be faster.
+        let by_snapshot = reached.iter().any(|c| !c.per_key);
+        let window = self.window;
+        let take = || {
+            let mut takes = 0;
+            loop {
+                let mark = by_snapshot.then(|| minter.as_of());
+                let mut map = self.map.lock().expect("not poisoned");
+                takes += 1;
+                let above = mark.is_some_and(|m| {
+                    map.iter().any(|(k, e)| {
+                        let s = e.stamped.stamp;
+                        under_root(k) && s.run == m.run && s.seq.get() > m.seq.get()
+                    })
+                });
+                if !above || takes >= AS_OF_TAKES {
+                    map.retain(|_, e| e.value.is_some() || e.at.elapsed() <= window);
+                    break (mark, map);
+                }
+            }
+        };
+        let (mut mark, mut map) = take();
         // A conditional read (core 0.110 §4.2): the held stamp alone, where
         // the member's last mutation carries exactly the stamp the GET
         // names. Every other GET is answered whole, below.
@@ -1280,14 +1301,14 @@ impl Store {
             // A `desired.v2` desired resource's GET is kept for its author
             // (`Author::reads`), before its answer goes, and under no other
             // lock of the store's: the decision is made, and a whole
-            // answer reads the map again. Every mutation at or below
-            // `mark` is still in it, or a later one of its member.
+            // answer takes its mark and reads the map again, so its
+            // snapshots are still of one instant.
             drop(map);
             self.note_read(qk, asked);
             if let Some(held) = held {
                 return unchanged(held);
             }
-            map = live();
+            (mark, map) = take();
         } else if let Some(held) = held {
             return unchanged(held);
         }

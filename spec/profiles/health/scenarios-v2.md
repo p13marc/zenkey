@@ -7,7 +7,9 @@ a setup, steps, and expected observations. §1 to §8 restate
 changes, and §9 is new. §1 to §5 and §9 are the runtime's. §6 to §8 are
 a tool's.
 
-No implementation runs them yet. The reference implements `health.v1`.
+The reference runs §1 to §5 and §9
+(`zenkey/tests/profile_health_v2.rs`), and §6 to §8
+(`zenctl/tests/live_zk2.rs`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.3) are v2.md's rules. Core
@@ -70,8 +72,9 @@ No implementation runs them yet. The reference implements `health.v1`.
 1. Both of T's GETs answer the status's snapshot: one entry, `unknown`
    with the reason 1, under the run the owner's descriptor states (core
    §3.3), with its confirmation (`freshness.v2` §2.4). It was put before
-   the tokens (§2.3). Its put, as S heard it, is 12 bytes: CH `0x03` or
-   `0x13`, the run, the seq, and a record of 6 bytes.
+   the tokens (§2.3). Its put, as S heard it, is CH, the run, the seq
+   and a record of 6 bytes. Under a 16-bit run it is 12 bytes, with CH
+   `0x03`. Under a 32-bit run it is 14, with CH `0x13`.
 2. `lab/quiet` holds an instance token and no `alive/health.v2/…` or
    `alive/freshness.v2/…` token. Its descriptor lists `health.v2` with
    `"token": false`, and T's GET at the instance token answers its
@@ -264,11 +267,17 @@ session G that is a client of V, with `zk2/**/@zk/**` denied on the
 face. The owner is `vehicle-01/nav` on V, implementing `health.v2` with
 status `ok`. G knows from its configuration that `vehicle-01/nav`
 implements `health.v2`.
+The faults' key is `zk2/vehicle-01/nav/health.v2/stream/faults`. A
+heartbeat and a fault are stream samples. A deny of the state leaves
+them crossing. So each run names what it denies of them.
 - **Run A:** the face lets `zk2/vehicle-01/nav/health.v2/state/status`
-  cross, and the heartbeat covering `health.v2` with it.
-- **Run B:** the face denies `zk2/vehicle-01/*/*/state/**`.
-- **Run C:** the face denies the state as run B does, and lets
-  `zk2/vehicle-01/nav/health.v2/stream/faults` cross.
+  cross, and the heartbeat covering `health.v2` with it. It denies the
+  faults' key.
+- **Run B:** the face denies `zk2/vehicle-01/*/*/state/**`. It denies
+  the heartbeats, `zk2/vehicle-01/*/freshness.v2/stream/**`, and the
+  faults' key.
+- **Run C:** the face denies the state and the heartbeats as run B
+  does. It lets the faults' key cross.
 
 **Steps.**
 1. G subscribes to the owner's status, its heartbeat key and its faults
@@ -283,8 +292,9 @@ implements `health.v2`.
 **Expected.**
 - **Run A:**
   1. G receives nothing, and judges **unobservable**, `nothing_crossed`.
-  2. G receives the status, 12 bytes, and the heartbeats that vouch for
-     it, 16 bytes each. G judges **healthy**, `ok`.
+  2. G receives the status and the heartbeats that vouch for it.
+     Under a 16-bit run they are 12 bytes, and 16 bytes each. G judges
+     **healthy**, `ok`.
   3. No fault crosses. G reads a heartbeat whose time is ahead, and
      answers **yes**, `ahead`.
   4. G judges **stale**: never down, never `failed`, and never absent.
@@ -293,9 +303,10 @@ implements `health.v2`.
 - **Run B:** nothing crosses at any step. G judges **unobservable**,
   `face_closed`, each time, and the clock question **unobservable**,
   `nothing_heard`.
-- **Run C:** at step 3, G receives one `clock_ahead` fault, 14 bytes,
-  and shows it as an occurrence. It answers the clock question
-  **unobservable**, `nothing_heard`: no heartbeat crosses, and a fault
+- **Run C:** at step 3, G receives one `clock_ahead` fault, and shows
+  it as an occurrence. It is 14 bytes under a 16-bit run. G answers the
+  clock question **unobservable**, `nothing_heard`: no heartbeat
+  crosses, and a fault
   published once cannot say that the hold lasts (§2.5). G judges health
   **unobservable**, `face_closed`.
 
@@ -314,7 +325,9 @@ its own, `tc.v1`, which lists `health.v2` in `uses` and declares on
 A second owner, `lab/plain`, implements `health.v2` and declares no
 table. T holds `tc.v1`'s revision, the one `lab/tc`'s descriptor names.
 T2 is a tool that holds an earlier revision of `tc.v1` alone, whose
-`health.reasons` is `["tc_qdisc_missing", "tc_netns_gone"]`.
+`health.reasons` is `["tc_qdisc_missing", "tc_netns_gone"]`. T and T2
+each subscribe to both owners' `health.v2/**` before step 1. A later
+read answers no status since replaced, and no fault.
 
 **Steps.**
 1. `lab/tc` puts status `degraded` with its own reason `tc_netns_gone`,
@@ -323,7 +336,8 @@ T2 is a tool that holds an earlier revision of `tc.v1` alone, whose
 2. `lab/tc` puts status `degraded` with a reason its table does not
    hold, "kernel too old for this qdisc".
 3. `lab/plain` puts status `degraded` with the same reason as step 1's.
-4. T and T2 read both owners.
+4. T and T2 read both owners by GET. Each shows what it heard and
+   what it read.
 
 **Expected.**
 1. The status's record carries the reason 32, and the fault's the code

@@ -178,6 +178,7 @@ priority = 60
 filter = """
 binary_id(zenctl::live_zk2)
 | binary_id(zenkey::profile_health)
+| binary_id(zenkey::profile_health_v2)
 | binary_id(zenkey::profile_config)
 | binary_id(zenkey::profile_config_v2)
 | binary_id(zenkey::profile_alarms)

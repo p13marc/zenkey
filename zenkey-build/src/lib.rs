@@ -323,18 +323,22 @@ impl Config {
                     }
                     // desired.v2 §2.2, §2.10: an invalid declaration of a
                     // desired resource or of a report resource, in a
-                    // contract that lists desired.v2, is an error too.
-                    Some(c) if !zenkey_model::desired::v2::lint_contract(&c).is_empty() => {
-                        let findings = zenkey_model::desired::v2::lint_contract(&c)
-                            .iter()
-                            .map(|x| format!("error[desired.v2 {}] {}: {}", x.token, x.at, x.says))
-                            .collect::<Vec<_>>();
-                        return Err(Error::Lint {
-                            file: shown,
-                            report: findings.join("\n"),
-                        });
+                    // contract that lists desired.v2, is an error too. So
+                    // is an invalid table of words in one that lists
+                    // health.v2 (health.v2 §2.10): an owner would write no
+                    // word of it, and a reader would show numbers.
+                    Some(c) => {
+                        let lints = table_lints(&c);
+                        if !lints.is_empty() {
+                            let findings =
+                                lints.iter().map(ToString::to_string).collect::<Vec<_>>();
+                            return Err(Error::Lint {
+                                file: shown,
+                                report: findings.join("\n"),
+                            });
+                        }
+                        out.push((f, c));
                     }
-                    Some(c) => out.push((f, c)),
                     None => {
                         let errors: Vec<String> =
                             l.report.errors().map(ToString::to_string).collect();
@@ -348,6 +352,16 @@ impl Config {
         }
         Ok(out)
     }
+}
+
+/// The findings of the profiles whose tables a contract declares
+/// (`zenkey_model::words`): `desired.v2`'s declarations and `health.v2`'s
+/// tables of words, each none for a contract that does not list its
+/// profile.
+fn table_lints(c: &Contract) -> Vec<zenkey_model::words::Lint> {
+    let mut out = zenkey_model::desired::v2::lint_contract(c);
+    out.extend(zenkey_model::health::v2::lint_contract(c));
+    out
 }
 
 /// The schema files and include roots a contract file names, for

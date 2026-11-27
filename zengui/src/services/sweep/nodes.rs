@@ -43,6 +43,9 @@ pub fn health(
                 clocks_synced,
                 face: None,
                 catalogs,
+                // A `health.v2` owner's tables come from the revisions its
+                // descriptor names, retrieved (health.v2 §2.10).
+                contracts: Default::default(),
             };
             let report = zenkey_fleet::run_health(
                 &session,

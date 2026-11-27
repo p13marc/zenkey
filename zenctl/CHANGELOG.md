@@ -6,6 +6,25 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `health` reads `health.v2` (#986's Q2)
+
+`health.v2` 0.2 §2.2, §2.5, §2.10, §2.11, §2.12, §5. `health`, the
+doctor's `health-*` checks and `check conform`'s `health` cases read each
+service by the major its descriptor lists, `health.v2` where it lists both.
+Two flags are new on `health`, `--iface` and `--contracts`. No exit code
+changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| a `health.v2` service: not asked, `not_listed` | read as `health.v2`: its packed records under CH's tag and its owner's epoch, the verdicts, reasons and roll-up one set with `health.v1`'s | a reading is two GETs, `zk2/*/*/health.v2/state/**` and `…/health.v1/state/**`; `asked` lists both, and the window subscribes both majors |
+| a `health` row | also `profile`, `health.v1` or `health.v2`; absent where none was read (absent, not listed) | across a face, the deployment's word: `--across-face … --iface health.v2` |
+| `status.reason`, `checks[].detail`, `last_fault.code`: text | under `health.v2`, the word's name where a table in hand names it, its number where none does, empty for no word and for `out_of_range`; beside it `word`: `{number, read, name}`, `read` one of `none`, `profile`, `service`, `number`, `out_of_range` | a word is never shown by another revision's table: the tables are those of the revisions the owner's descriptor names, `--contracts` first, else retrieved by fingerprint |
+| `status.since_ns`, `last_known.since_ns` | absent under `health.v2`, which has `since_s`, whole seconds, absent where the record carries none; a check's `at_s`; a fault's `argument` and `at_s` | `since_ns` is still always present under `health.v1` |
+| `agrees`: a break is the finding only when both readings show it | under `health.v2`, also from one reading whose two snapshots are one instant; `readings[].one_instant` says which were | from any other reading, as before |
+| `clock_ahead` | under `health.v2`, the last read heartbeat's time: `ahead` yes, `confirmed` no, `time_unknown` or `nothing_heard` unobservable; a `clock_ahead` fault answers nothing, and is shown as the occurrence it is | the ahead time under `health.v1` still answers nothing alone |
+| a status at no level under `health.v2` | `unknown`, never `unspecified` | |
+| the doctor's and `check conform`'s "does not list health.v1" | "lists neither health.v1 nor health.v2" | |
+
 ## Unreleased (`main`, zk2) — zenoh 1.10.2, and the binding `zenoh-1.10.2` (#1165)
 
 Core 0.114 §0 and Appendix B; `link.v2` 0.25 §2.4, §2.19. zenctl links

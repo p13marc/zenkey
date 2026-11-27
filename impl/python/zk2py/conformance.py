@@ -4331,7 +4331,8 @@ def family_readings(root: Path) -> list[Result]:
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
         + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
-        + _round120_readings(root) + _round121_readings(root) + _round122_readings(root)
+        + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
+        + _round123_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4611,14 +4612,16 @@ def _round120_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out: list[tuple[str, Any, Any]] = []
     at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
-    out.append(("core 0.113 or later, freshness.v2 0.12 or later, health.v1 0.11 or later, and health.v2 at text 0.1, "
-                "written against core 0.113 and using freshness.v2 0.12 and health.v1 0.11: each header says so",
-                [at is not None and _at_least(at.group(1), "0.113")]
+    v2_at = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", v2t)
+    out.append(("core 0.113 or later, freshness.v2 0.12 or later, health.v1 0.11 or later, and health.v2 at text 0.1 "
+                "or later (0.2, round 123), written against core 0.113 and using freshness.v2 0.12 and health.v1 "
+                "0.11: each header says so",
+                [at is not None and _at_least(at.group(1), "0.113"),
+                 v2_at is not None and _at_least(v2_at.group(1), "0.1")]
                 + missing(f2, "| **Text version** | 0.12 (") + missing(v1t, "| **Text version** | 0.11 (")
-                + missing(v2t, "| **Text version** | 0.1 ([`CHANGELOG.md`](CHANGELOG.md)) |",
-                          "| **Written against** | core 0.113 ([`../../core.md`](../../core.md)) |",
+                + missing(v2t, "| **Written against** | core 0.113 ([`../../core.md`](../../core.md)) |",
                           "[`freshness.v2`](../freshness/v2.md), text 0.12", "[`health.v1`](v1.md)'s rules by "
-                          "reference, text 0.11"), [True]))
+                          "reference, text 0.11"), [True, True]))
     # -- the ahead time through every reader of a heartbeat's time ---------------------------
     lo = h2.standard_layout()
     sections = {"state/status": {"digest": "00000001", "vouched": True}}
@@ -4760,21 +4763,25 @@ def _round120_readings(root: Path) -> list[tuple[str, Any, Any]]:
     fa = h2.clock_ahead_fault(2, 1_800_000_000_000)
     hb16 = zk2c.heartbeat(zk2c.InBand(16, 9, 1), bodies["instant"], lo.tag)
     hb32 = zk2c.heartbeat(zk2c.InBand(32, 9, 1), bodies["instant"], lo.tag)
-    out.append(("scenarios-v2 §1 Expected 1 (F-595): a status's put is 12 bytes under a 16-bit run, CH 0x03, and 14 "
-                "under a 32-bit run, CH 0x13; a fault's 14 and 16; the heartbeat's 16 and 18; the text gives 12 for "
-                "both CHs",
+    out.append(("scenarios-v2 §1 Expected 1 (F-595, answered at health.v2 0.2): a status's put is 12 bytes under a "
+                "16-bit run, CH 0x03, and 14 under a 32-bit run, CH 0x13; a fault's 14 and 16; the heartbeat's 16 and "
+                "18; the text now states each figure's run, and 0.1's 12 for both CHs is gone",
                 [[len(h2.payload(h2.STATUS, st, 7, 1, w)) for w in (16, 32)],
                  [h2.payload(h2.STATUS, st, 7, 1, w)[0] for w in (16, 32)],
                  [len(h2.payload(h2.FAULT, fa, 7, 1, w)) for w in (16, 32)], [len(hb16), len(hb32)]]
-                + missing(sc, "Its put, as S heard it, is 12 bytes: CH `0x03` or `0x13`, the run, the seq, and a "
-                              "record of 6 bytes."),
+                + missing(sc, "Its put, as S heard it, is CH, the run, the seq and a record of 6 bytes. Under a "
+                              "16-bit run it is 12 bytes, with CH `0x03`. Under a 32-bit run it is 14, with CH "
+                              "`0x13`.")
+                + [q for q in ("Its put, as S heard it, is 12 bytes: CH `0x03` or `0x13`",) if q in sc],
                 [[12, 14], [0x03, 0x13], [14, 16], [16, 18]]))
-    out.append(("scenarios-v2 §8 (F-596): runs B and C deny the state alone, and expect that no heartbeat and, in "
-                "B, no fault crosses; the heartbeat's key and the faults' are stream keys, which that deny does not "
-                "name",
+    out.append(("scenarios-v2 §8 (F-596, answered at health.v2 0.2): the heartbeat's key and the faults' are stream "
+                "keys, which a deny of the state does not name; the setup says so, and each run names what it denies "
+                "of them",
                 [zk2c.key_token(heartbeat.heartbeat_key("vehicle-01", "nav", "health.v2")),
                  zk2c.key_token("zk2/vehicle-01/nav/health.v2/stream/faults")]
                 + missing(sc, "- **Run B:** the face denies `zk2/vehicle-01/*/*/state/**`.",
+                          "A heartbeat and a fault are stream samples. A deny of the state leaves them crossing. So "
+                          "each run names what it denies of them.",
                           "- **Run B:** nothing crosses at any step.",
                           "no heartbeat crosses, and a fault published once cannot say that the hold lasts (§2.5)."),
                 ["stream", "stream"]))
@@ -5103,6 +5110,98 @@ def _round122_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + missing(llog, "Case 51 is case 0's router on `zenoh-1.10.2`. Its plan is case 0's but for its "
                                 "`binding`, and each principal is narrowed over the same nine. 52 cases."),
                 [52, [stock, two], ["/binding"], "zenoh-1.10.2", True, []]))
+    return out
+
+
+def _round123_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """health.v2 0.2, editorial (#609, round 123; #986 Q2): its header, its
+    entry and the index's row; ``conformance/v2/`` and the contract byte for
+    byte as round 120 read them; and each of the entry's four changes to
+    ``scenarios-v2.md`` read where it is stated: §8's runs, by zenoh's own
+    key expressions, §9's subscriptions, every byte figure's run, and the
+    intro. No rule moved, and no session is opened."""
+    import hashlib
+    import re
+
+    from . import acl, heartbeat
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    v2t, log, sc, idx = (flat("profiles/health/v2.md"), flat("profiles/health/CHANGELOG.md"),
+                         flat("profiles/health/scenarios-v2.md"), flat("profiles/README.md"))
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    out: list[tuple[str, Any, Any]] = []
+    v2_at = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", v2t)
+    out.append(("health.v2 at text 0.2 or later, still written against core 0.113 and freshness.v2 0.12, its entry "
+                "editorial: no rule, no fixture; the index's row says 0.2, experimental, used by none",
+                [v2_at is not None and _at_least(v2_at.group(1), "0.2")]
+                + missing(v2t, "| **Written against** | core 0.113 ([`../../core.md`](../../core.md)) |",
+                          "[`freshness.v2`](../freshness/v2.md), text 0.12")
+                + missing(log, "## health.v2 0.2 — 2026-11-27: editorial: three scenario texts zk2py's round 120 "
+                               "found wrong, and who runs the scenarios, no rule changed (#986)",
+                          "- **No rule** of `v2.md`, and no fixture of `conformance/v2/`.",
+                          "- **The header** is still written against core 0.113 and `freshness.v2` 0.12.")
+                + missing(idx, "| [`health.v2`](health/v2.md) | 0.2 | experimental | none | 0.113 |"),
+                [True]))
+    # The fixtures and the contract: the bytes round 120 read at 08f3600a.
+    held = {"conformance/v2/clock.json": "01c3a3c5", "conformance/v2/judgements.json": "43d81c8b",
+            "conformance/v2/records.json": "ef450a52", "conformance/v2/schema.json": "7bd2ecf7",
+            "conformance/v2/snapshots.json": "5b4ab525", "conformance/v2/tables.json": "4bbfb7e5",
+            "health.v2.json": "46039b70", "health.v2.toml": "c8c75eff"}
+    here = spec / "profiles" / "health"
+    out.append(("health.v2 0.2's \"no fixture of conformance/v2/\": every file of it, the packed schema and the "
+                "standard contract are the bytes round 120 read at 08f3600a, and no file was added",
+                [{k: hashlib.sha256((here / k).read_bytes()).hexdigest()[:8] for k in held},
+                 sorted(p.name for p in (here / "conformance" / "v2").glob("*.json"))],
+                [held, sorted(k.rsplit("/", 1)[1] for k in held if k.startswith("conformance/"))]))
+    # §8's runs, by zenoh's own key expressions: what each denies of the three keys G subscribes to.
+    status, faults = "zk2/vehicle-01/nav/health.v2/state/status", "zk2/vehicle-01/nav/health.v2/stream/faults"
+    hb = heartbeat.heartbeat_key("vehicle-01", "nav", "health.v2")
+    token = "zk2/vehicle-01/nav/@zk/instance/0000000000000001"
+    face = ["zk2/**/@zk/**"]
+    runs = {"A": face + [faults],
+            "B": face + ["zk2/vehicle-01/*/*/state/**", "zk2/vehicle-01/*/freshness.v2/stream/**", faults],
+            "C": face + ["zk2/vehicle-01/*/*/state/**", "zk2/vehicle-01/*/freshness.v2/stream/**"]}
+    crosses = {r: [k for k, name in ((status, "status"), (hb, "heartbeat"), (faults, "faults"), (token, "token"))
+                   if not any(acl._includes(d, k) for d in denies) for k in [name]]
+               for r, denies in runs.items()}
+    out.append(("scenarios-v2 §8 at health.v2 0.2 (F-596 answered): on the setup's deny of presence and each run's "
+                "own denies, by zenoh's KeyExpr.includes, run A lets the status and the heartbeat cross, run B "
+                "nothing, run C the faults alone, as each run's Expected has it; the heartbeat's key is under run "
+                "B's freshness.v2/stream/**",
+                [crosses, acl._includes("zk2/vehicle-01/*/freshness.v2/stream/**", hb)]
+                + missing(sc, "It denies the faults' key.",
+                          "It denies the heartbeats, `zk2/vehicle-01/*/freshness.v2/stream/**`, and the faults' key.",
+                          "- **Run C:** the face denies the state and the heartbeats as run B does. It lets the "
+                          "faults' key cross.",
+                          "- **Run B:** nothing crosses at any step.",
+                          "3. No fault crosses."),
+                [{"A": ["status", "heartbeat"], "B": [], "C": ["faults"]}, True]))
+    out.append(("scenarios-v2 §9 at health.v2 0.2 (F-602 answered): T and T2 subscribe to both owners before step 1, "
+                "a later read answers no replaced status and no fault, and each shows what it heard and what it "
+                "read; 0.1's step 4 is gone",
+                missing(sc, "T and T2 each subscribe to both owners' `health.v2/**` before step 1. A later read "
+                            "answers no status since replaced, and no fault.",
+                        "4. T and T2 read both owners by GET. Each shows what it heard and what it read.")
+                + [q for q in ("4. T and T2 read both owners. **Expected.**",) if q in sc], []))
+    # Every byte figure of scenarios-v2.md, by sentence: each but a record's 6 names its run.
+    sentences = re.split(r"(?<=[.:])\s+(?=[A-Z0-9*-])", sc)
+    figures = [x for x in sentences if re.search(r"\b(\d+) bytes\b", x) and not re.search(r"record of 6 bytes", x)]
+    out.append(("scenarios-v2 at health.v2 0.2 (F-595 answered): every sentence that gives a put's bytes names the "
+                "run it is under: four, two in §1 (Expected 1 and 4) and two in §8 (run A's 2, run C); a record's "
+                "6 bytes need none",
+                [[bool(re.search(r"under a (16|32)-bit run", x, re.I)) for x in figures], len(figures)],
+                [[True] * len(figures), 4]))
+    out.append(("scenarios-v2's intro at health.v2 0.2: the reference runs §1 to §5 and §9 in zenkey's tests and §6 "
+                "to §8 in zenctl's; 0.1's \"No implementation runs them yet\" is gone; no owner is given a catalog",
+                missing(sc, "The reference runs §1 to §5 and §9 (`zenkey/tests/profile_health_v2.rs`), and §6 to "
+                            "§8 (`zenctl/tests/live_zk2.rs`).",
+                        "- **The epoch.** No owner is given a catalog, so the deployment epoch is 0")
+                + missing(log, "- **No scenario runs under a catalog.**")
+                + [q for q in ("No implementation runs them yet.",) if q in sc], []))
     return out
 
 

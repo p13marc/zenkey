@@ -1,6 +1,9 @@
-//! `health.v1` (#721, PF), the reads: how well each service says it serves
-//! (`spec/profiles/health/v1.md`), read as §2.11's reader reads it, through
-//! a session in the deployment's namespace.
+//! `health.v1` (#721, PF) and `health.v2` (#986's Q2), the reads: how well
+//! each service says it serves (`spec/profiles/health/v1.md`, `v2.md`),
+//! read as §2.11's reader reads it, through a session in the deployment's
+//! namespace. Each service is read by the major its descriptor lists, and
+//! `health.v2` where it lists both (v2 §2.11, §2.12); across a face, by the
+//! major the deployment's word names ([`AcrossFace::major`]).
 //!
 //! What is read, in order:
 //! 1. with a window, first: a subscription to every status and to the
@@ -20,19 +23,34 @@
 //!    this read, which was answered after the subscriptions were declared
 //!    (#819 TE, F-154); across a face, after the first reading's GET, the
 //!    round trip there (#819 TG, F-159);
-//! 3. two readings, a grace apart (or the window apart): each one GET of the
-//!    owners' `health.v1/state/**`, target `All`, consolidation `None`
-//!    (core S4), which answers a status and its checks together (§2.4, core
-//!    S2) — so a status is never paired with a check from another instant
-//!    (§2.2);
-//! 4. for one service named and absent, an archive's form of its status
-//!    (core §4.4): last-known, never current (S6).
+//! 3. two readings, a grace apart (or the window apart): each two GETs, of
+//!    the owners' `health.v2/state/**` and `health.v1/state/**` (v2
+//!    §2.12), target `All`, consolidation `None` (core S4), each of which
+//!    answers a status and its checks together (§2.4, core S2) — so a
+//!    status is never paired with a check from another instant (§2.2). A
+//!    `health.v2` owner's two snapshots are also read as one reading
+//!    ([`zenkey_model::health::v2::Reading`]), which is one instant or not
+//!    (v2 §2.2);
+//! 4. the tables of each `health.v2` owner's words (v2 §2.10): from the
+//!    revisions its descriptor names, held offline ([`HealthSpec::contracts`])
+//!    or retrieved by fingerprint (core §8.4), never another revision's;
+//!    across a face, from the revisions held, the deployment's word;
+//! 5. for one service named and absent, an archive's form of its status
+//!    (core §4.4), of either major: last-known, never current (S6).
+//!
+//! **The window under `health.v2`** hands every read heartbeat to §5's
+//! clock question (v2 §2.5): a heartbeat covering `health.v2` or a group
+//! of an owner heartbeat of the `host` class, whatever its section says,
+//! answers by its time alone (ahead, an instant, unknown). A fault and a
+//! put of the status answer nothing.
 //!
 //! Nothing is judged here: [`crate::judge::health`] decides every verdict
 //! from the [`HealthObservation`] this returns. The payloads are decoded
 //! here, into the levels and words a verdict needs, with the runtime's own
-//! types (`zenkey::health::v1`); a payload that does not decode is
-//! [`Read::Undecodable`], never a level (§2.6).
+//! types (`zenkey::health::v1`) or the model's packed records
+//! (`zenkey_model::health::v2`, under CH's tag and the owner's epoch); a
+//! payload that does not decode, and a record core §7.6 refuses, is
+//! [`Read::Undecodable`], never a level (§2.6, v2 §2.6).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
@@ -43,7 +61,8 @@ use zenkey::health::v1;
 use zenkey::prost::Message as _;
 use zenkey_model::freshness::{ClockMeasure, Observation};
 use zenkey_model::grammar::{Addr, GRAMMAR, IfaceId, KindToken, ZkKey};
-use zenkey_model::health::{self as hm, Heard, Read};
+use zenkey_model::health::v2::{self as hv2, ClockHeard, Packed as _};
+use zenkey_model::health::{self as hm, Heard, Major, Read};
 use zenoh::Session;
 use zenoh::query::{ConsolidationMode, QueryTarget};
 use zenoh::sample::{Sample, SampleKind};
@@ -86,11 +105,25 @@ impl HealthTarget {
         }
     }
 
-    /// The selector a reading's GET goes out on: the owners'
+    /// The selector a reading's `health.v1` GET goes out on: the owners'
     /// `health.v1/state/**`, base-relative (§2.4).
     pub fn state_selector(&self) -> String {
+        self.state_selector_of(Major::V1)
+    }
+
+    /// The selector a reading's GET of `major` goes out on: the owners'
+    /// `<major>/state/**`, base-relative (§2.4, v2 §2.12).
+    pub fn state_selector_of(&self, major: Major) -> String {
         let (sys, svc) = self.chunks();
-        [GRAMMAR, &sys, &svc, hm::IFACE, "state", "**"].join("/")
+        [GRAMMAR, &sys, &svc, major.iface(), "state", "**"].join("/")
+    }
+
+    /// Both GETs' selectors, `health.v2`'s first (v2 §2.12).
+    pub fn state_selectors(&self) -> [String; 2] {
+        [
+            self.state_selector_of(Major::V2),
+            self.state_selector_of(Major::V1),
+        ]
     }
 
     fn scope(&self) -> Scope {
@@ -102,12 +135,14 @@ impl HealthTarget {
 }
 
 /// A service across a constrained face (§2.8, core §8.5): presence and
-/// descriptors do not cross, and the deployment's word says it implements
-/// `health.v1` (R7).
+/// descriptors do not cross, and the deployment's word says which major it
+/// implements (R7, v2 §2.10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AcrossFace {
     /// Whether the face lets `state/status` cross.
     pub status_crosses: bool,
+    /// The major the deployment's word names: `health.v1` or `health.v2`.
+    pub major: Major,
 }
 
 /// What a reading asks.
@@ -132,6 +167,11 @@ pub struct HealthSpec {
     /// names, read through these (`bus::query::EntryEpochs`; #1087). With
     /// none, an owner naming a catalog leaves its confirmations undated.
     pub catalogs: crate::model::deployment::Catalogs,
+    /// The revisions held offline (`--contracts`): a `health.v2` owner's
+    /// words are read by the tables of the revisions its descriptor names,
+    /// these first, one not held retrieved by fingerprint (core §8.4); across
+    /// a face, these alone, the deployment's word (v2 §2.10).
+    pub contracts: crate::model::catalog::ContractSet,
 }
 
 /// A stamp's time, and the id of the clock that issued it (core §4.1).
@@ -164,11 +204,23 @@ impl Stamped {
 }
 
 /// A status as decoded (§2.6): its level as read, and the words beside it.
+/// Under `health.v1` its reason is text; under `health.v2` it is a word,
+/// read by the instance's tables where the row is built (v2 §2.10), and
+/// its `since` whole seconds, absent where the record carries none (v2
+/// §2.3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusValue {
     pub level: Read,
+    /// `health.v1`'s text; empty under `health.v2`.
     pub reason: String,
+    /// `health.v1`'s nanoseconds; 0 under `health.v2`.
     pub since_ns: u64,
+    /// `health.v2`'s reason, a word; `None` under `health.v1`, and for a
+    /// record refused.
+    pub word: Option<hv2::Word>,
+    /// `health.v2`'s `since`, seconds since the Unix epoch; `None` where
+    /// the record carries none, and under `health.v1`.
+    pub since_s: Option<i64>,
 }
 
 impl StatusValue {
@@ -179,8 +231,27 @@ impl StatusValue {
                 level: s.read(),
                 reason: s.reason,
                 since_ns: s.since_ns,
+                word: None,
+                since_s: None,
             },
             Err(_) => StatusValue::undecodable(),
+        }
+    }
+
+    /// A `health.v2` status record under CH's `tag`, its `since` counted
+    /// from the deployment epoch in force for its owner (core §7.6, §8.6):
+    /// a record the layout refuses, and one whose owner's epoch cannot be
+    /// had, is [`Read::Undecodable`], never a level (v2 §2.6).
+    pub fn decode_v2(tag: u8, record: &[u8], epoch: Option<i64>) -> StatusValue {
+        match epoch.map(|e| hv2::Status::read(tag, record, e)) {
+            Some(Ok(s)) => StatusValue {
+                level: hv2::level_read(Ok(s.level)),
+                reason: String::new(),
+                since_ns: 0,
+                word: Some(s.reason),
+                since_s: s.since,
+            },
+            _ => StatusValue::undecodable(),
         }
     }
 
@@ -190,15 +261,22 @@ impl StatusValue {
             level: Read::Undecodable,
             reason: String::new(),
             since_ns: 0,
+            word: None,
+            since_s: None,
         }
     }
 }
 
-/// A check as decoded (§2.6).
+/// A check as decoded (§2.6), its detail text under `health.v1` and a word
+/// under `health.v2`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckValue {
     pub level: Read,
     pub detail: String,
+    /// `health.v2`'s detail, a word; `None` under `health.v1`.
+    pub word: Option<hv2::Word>,
+    /// `health.v2`'s `at`, seconds since the Unix epoch, where it carries one.
+    pub at_s: Option<i64>,
 }
 
 impl CheckValue {
@@ -208,8 +286,24 @@ impl CheckValue {
             Ok(c) => CheckValue {
                 level: c.read(),
                 detail: c.detail,
+                word: None,
+                at_s: None,
             },
             Err(_) => CheckValue::undecodable(),
+        }
+    }
+
+    /// A `health.v2` check record, as [`StatusValue::decode_v2`] reads a
+    /// status.
+    pub fn decode_v2(tag: u8, record: &[u8], epoch: Option<i64>) -> CheckValue {
+        match epoch.map(|e| hv2::Check::read(tag, record, e)) {
+            Some(Ok(c)) => CheckValue {
+                level: hv2::level_read(Ok(c.level)),
+                detail: String::new(),
+                word: Some(c.detail),
+                at_s: c.at,
+            },
+            _ => CheckValue::undecodable(),
         }
     }
 
@@ -218,16 +312,82 @@ impl CheckValue {
         CheckValue {
             level: Read::Undecodable,
             detail: String::new(),
+            word: None,
+            at_s: None,
         }
     }
 }
 
-/// A fault as decoded (§2.3, §2.10): an occurrence.
+/// A fault as decoded (§2.3, §2.10): an occurrence. Under `health.v2` its
+/// code is a word and its detail a number (v2 §2.3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaultValue {
+    /// `health.v1`'s code; empty under `health.v2`.
     pub code: String,
     pub level: Read,
     pub detail: String,
+    /// `health.v2`'s code, a word; `None` under `health.v1`.
+    pub word: Option<hv2::Word>,
+    /// `health.v2`'s `argument`.
+    pub argument: Option<hv2::Argument>,
+    /// `health.v2`'s `at`, seconds since the Unix epoch, where it carries one.
+    pub at_s: Option<i64>,
+}
+
+impl FaultValue {
+    /// A `health.v1` fault payload, or one that does not decode.
+    pub fn decode(bytes: &[u8]) -> FaultValue {
+        match v1::Fault::decode(bytes) {
+            Ok(f) => FaultValue {
+                level: f.read(),
+                code: f.code,
+                detail: f.detail,
+                word: None,
+                argument: None,
+                at_s: None,
+            },
+            Err(_) => FaultValue::undecodable(),
+        }
+    }
+
+    /// A `health.v2` fault record, as [`StatusValue::decode_v2`] reads a
+    /// status.
+    pub fn decode_v2(tag: u8, record: &[u8], epoch: Option<i64>) -> FaultValue {
+        match epoch.map(|e| hv2::Fault::read(tag, record, e)) {
+            Some(Ok(f)) => FaultValue {
+                code: String::new(),
+                level: hv2::level_read(Ok(f.level)),
+                detail: String::new(),
+                word: Some(f.code),
+                argument: Some(f.argument),
+                at_s: f.at,
+            },
+            _ => FaultValue::undecodable(),
+        }
+    }
+
+    /// A payload that does not decode.
+    pub fn undecodable() -> FaultValue {
+        FaultValue {
+            code: String::new(),
+            level: Read::Undecodable,
+            detail: String::new(),
+            word: None,
+            argument: None,
+            at_s: None,
+        }
+    }
+
+    /// Whether it is a `clock_ahead` fault, of either major (§2.5, v2
+    /// §2.10): the profile's code 1 under `health.v2`.
+    pub fn is_clock_ahead(&self) -> bool {
+        match self.word {
+            Some(w) => {
+                hv2::read_word(hv2::Kind::Code, w, None) == hv2::Named::Profile(hm::CLOCK_AHEAD)
+            }
+            None => self.code == hm::CLOCK_AHEAD,
+        }
+    }
 }
 
 /// One state member as a GET answered it: a value, or `None` for a
@@ -238,40 +398,85 @@ pub struct Replied<T> {
     pub stamp: Option<Stamped>,
 }
 
-/// What one GET of `health.v1/state/**` answered for one service.
+/// What one GET of `<major>/state/**` answered for one service.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServiceGot {
     /// The status; `None` when no reply named it.
     pub status: Option<Replied<StatusValue>>,
     /// Each check answered, by the `{check}` chunk of its key.
     pub checks: BTreeMap<String, Replied<CheckValue>>,
+    /// Under `health.v2`, the owner's replies read as one reading of its two
+    /// snapshots (v2 §2.2, §2.4): whether it is one instant, and whether it
+    /// shows a status better than a check. `None` under `health.v1`.
+    pub reading_v2: Option<hv2::Reading>,
 }
 
-/// One reading's GET, every service's answer by address.
+/// One reading's GETs, every service's answer by address, under each major.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HealthGet {
-    /// The selector, base-relative.
+    /// The `health.v1` GET's selector, base-relative.
     pub selector: String,
-    /// This host's clock as the GET ended: the instant its replies' stamps
-    /// are aged at (`freshness.v1` §2.6).
+    /// This host's clock as the GETs ended: the instant their replies'
+    /// stamps are aged at (`freshness.v1` §2.6).
     pub read_at: SystemTime,
-    /// Whether the GET ended without an error reply (a timeout among them).
+    /// Whether both GETs ended without an error reply (a timeout among
+    /// them).
     pub complete: bool,
+    /// What the `health.v1` GET answered.
     pub services: BTreeMap<Addr, ServiceGot>,
+    /// What the `health.v2` GET answered (v2 §2.12).
+    pub v2: BTreeMap<Addr, ServiceGot>,
 }
 
-/// What the window's subscriptions heard of one service.
+impl HealthGet {
+    /// What the GET of `major` answered.
+    pub fn services_of(&self, major: Major) -> &BTreeMap<Addr, ServiceGot> {
+        match major {
+            Major::V1 => &self.services,
+            Major::V2 => &self.v2,
+        }
+    }
+
+    /// Every address either GET answered for.
+    pub fn addresses(&self) -> impl Iterator<Item = &Addr> {
+        self.services.keys().chain(self.v2.keys())
+    }
+
+    /// The major a service whose descriptor is not in hand is read by: the
+    /// one whose GET answered for it, `health.v2` first, else `health.v1`.
+    pub fn answered_major(&self, addr: &Addr) -> Option<Major> {
+        if self.v2.contains_key(addr) {
+            Some(Major::V2)
+        } else if self.services.contains_key(addr) {
+            Some(Major::V1)
+        } else {
+            None
+        }
+    }
+}
+
+/// What the window's subscriptions heard of one service, under one major.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServiceHeard {
     /// The last status put heard, with its stamp.
     pub last: Option<Replied<StatusValue>>,
-    /// Status puts and deletes and faults, in arrival order, consecutive
-    /// repeats collapsed, at most [`SEQUENCE_CAP`]: what §5's clock
-    /// question reads.
+    /// Under `health.v1`: status puts and deletes, faults and heartbeats
+    /// read in step, in arrival order, consecutive repeats collapsed, at
+    /// most [`SEQUENCE_CAP`]: what §5's clock question reads.
     pub sequence: Vec<Heard>,
+    /// Under `health.v2`: every read heartbeat by its time, status puts
+    /// and deletes and faults, in arrival order, repeats collapsed, at most
+    /// [`SEQUENCE_CAP`]: what v2 §2.5's clock question reads, the last read
+    /// heartbeat answering.
+    pub clock: Vec<ClockHeard>,
     /// Faults heard.
     pub faults: u64,
     pub last_fault: Option<FaultValue>,
+    /// Under `health.v2`, the last status record and the last fault record
+    /// as they arrived (CH's tag, the record), read under the owner's epoch
+    /// once presence says which ([`Window::close`]).
+    pub(crate) raw_status: Option<(u8, Vec<u8>, Option<Stamped>)>,
+    pub(crate) raw_fault: Option<(u8, Vec<u8>)>,
 }
 
 impl ServiceHeard {
@@ -284,6 +489,16 @@ impl ServiceHeard {
         }
         self.sequence.push(h);
     }
+
+    fn push_clock(&mut self, h: ClockHeard) {
+        if self.clock.last() == Some(&h) {
+            return;
+        }
+        if self.clock.len() >= SEQUENCE_CAP {
+            self.clock.remove(0);
+        }
+        self.clock.push(h);
+    }
 }
 
 /// What the window heard, read at its end.
@@ -293,19 +508,44 @@ pub struct HealthWindow {
     pub selectors: Vec<String>,
     /// How long the subscriptions listened, to the second reading.
     pub listened: Duration,
-    /// By address, every service heard.
+    /// By address, every service heard under `health.v1`.
     pub heard: BTreeMap<Addr, ServiceHeard>,
-    /// The status member's `freshness.v1` observation at the second reading
+    /// The `health.v1` status member's observation at the second reading
     /// (§2.5), for every service the run read, heard or not.
     pub status: BTreeMap<Addr, Observation>,
+    /// By address, every service heard under `health.v2`.
+    pub heard_v2: BTreeMap<Addr, ServiceHeard>,
+    /// The `health.v2` status member's observation at the second reading,
+    /// for every service the run read.
+    pub status_v2: BTreeMap<Addr, Observation>,
     /// Per stamping clock, what the window measured of it (§2.6, ground 2).
     pub clocks: BTreeMap<String, ClockMeasure>,
 }
 
-/// An archive's status for an absent owner (core §4.4, S6).
+impl HealthWindow {
+    /// What the window heard under `major`.
+    pub fn heard_of(&self, major: Major) -> &BTreeMap<Addr, ServiceHeard> {
+        match major {
+            Major::V1 => &self.heard,
+            Major::V2 => &self.heard_v2,
+        }
+    }
+
+    /// The status observations under `major`.
+    pub fn status_of(&self, major: Major) -> &BTreeMap<Addr, Observation> {
+        match major {
+            Major::V1 => &self.status,
+            Major::V2 => &self.status_v2,
+        }
+    }
+}
+
+/// An archive's status for an absent owner (core §4.4, S6), of the major
+/// whose status key it recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchivedStatus {
     pub archive: Addr,
+    pub major: Major,
     pub value: Option<StatusValue>,
     pub stamp: Option<Stamped>,
     pub confirmed: bool,
@@ -329,6 +569,11 @@ pub struct HealthObservation {
     /// For one service named and absent: the first archive presence shows
     /// that holds its status, or none; `None` when not asked.
     pub archived: Option<Result<Option<ArchivedStatus>, String>>,
+    /// Each `health.v2` owner's tables (v2 §2.10), read from the revisions
+    /// its descriptor names that this reader holds or retrieved; across a
+    /// face, from the revisions held. An owner with none here has none, and
+    /// its words from 32 to 62 are shown as numbers.
+    pub tables: BTreeMap<Addr, hv2::InstanceTables>,
 }
 
 impl HealthObservation {
@@ -339,7 +584,7 @@ impl HealthObservation {
         if let Some(Ok(p)) = &self.presence {
             out.push(p.selector.clone());
         }
-        out.push(self.target.state_selector());
+        out.extend(self.target.state_selectors());
         if let Some(Ok(w)) = &self.window {
             out.extend(w.selectors.iter().cloned());
         }
@@ -351,32 +596,37 @@ impl HealthObservation {
 
 /// The member key of `addr`'s status: `zk2/<addr>/health.v1/state/status`.
 pub fn status_key(addr: &Addr) -> String {
+    status_key_of(addr, Major::V1)
+}
+
+/// The member key of `addr`'s status under `major`.
+pub fn status_key_of(addr: &Addr, major: Major) -> String {
     [
         GRAMMAR,
         addr.system.as_str(),
         addr.service.as_str(),
-        hm::IFACE,
+        major.iface(),
         "state",
         hm::STATUS,
     ]
     .join("/")
 }
 
-/// `health.v1`'s interface id.
-fn iface() -> IfaceId {
-    IfaceId::from_str(hm::IFACE).expect("health.v1 is an interface id")
+/// `major`'s interface id.
+fn iface(major: Major) -> IfaceId {
+    IfaceId::from_str(major.iface()).expect("a health major is an interface id")
 }
 
 /// A health reading's key, parsed: its owner and its resource chunks,
-/// when it is a `health.v1` key of the kind `kind`.
-fn health_key(key: &str, kind: KindToken) -> Option<(Addr, Vec<String>)> {
+/// when it is a state key of `major` of the kind `kind`.
+fn health_key_of(key: &str, kind: KindToken, major: Major) -> Option<(Addr, Vec<String>)> {
     match zenkey_model::grammar::parse(key) {
         Ok(ZkKey::Data {
             addr,
             iface: got,
             kind: k,
             resource,
-        }) if got == iface() && k == kind => Some((addr, resource)),
+        }) if got == iface(major) && k == kind => Some((addr, resource)),
         _ => None,
     }
 }
@@ -504,7 +754,6 @@ pub async fn observe(
                 .map_err(|e| crate::one_line(&e)),
         ),
     };
-    let selector = target.state_selector();
     // An owner's entries are dated under the catalog its descriptor
     // names, read through the catalogs given, 0 where it names none; with
     // no descriptor in hand, as across a face, the catalogs' own (the
@@ -520,7 +769,7 @@ pub async fn observe(
     // window opens on (#819 TG, as zk2py round 49's F-159 found of
     // `telemetry`); without a face, the presence read above was.
     let across = if spec.face.is_some() {
-        Some(get(session, &selector, t, epochs).await)
+        Some(get(session, &target, t, epochs).await)
     } else {
         None
     };
@@ -535,14 +784,14 @@ pub async fn observe(
     let opened = Instant::now();
     let first = match across {
         Some(first) => first,
-        None => get(session, &selector, t, epochs).await,
+        None => get(session, &target, t, epochs).await,
     };
     let wait = match spec.window {
         Some(w) => (opened + w).saturating_duration_since(Instant::now()),
         None => spec.grace,
     };
     tokio::time::sleep(wait).await;
-    let second = get(session, &selector, t, epochs).await;
+    let second = get(session, &target, t, epochs).await;
     let window = window.map(|w| {
         w.map(|w| {
             let mut addrs: BTreeSet<Addr> = BTreeSet::new();
@@ -553,17 +802,24 @@ pub async fn observe(
                 addrs.extend(Catalog::new(p).addresses().cloned());
             }
             for g in [&first, &second].into_iter().flatten() {
-                addrs.extend(g.services.keys().cloned());
+                addrs.extend(g.addresses().cloned());
             }
-            w.close(addrs)
+            w.close(addrs, epochs)
         })
     });
     let archived = match (&target, &presence) {
         (HealthTarget::One(a), Some(Ok(p))) if p.complete && !Catalog::new(p).has_instance(a) => {
-            Some(archived(session, a, t).await)
+            Some(archived(session, a, t, epochs).await)
         }
         _ => None,
     };
+    let tables = tables(
+        session,
+        &target,
+        &spec,
+        presence.as_ref().and_then(|p| p.as_ref().ok()),
+    )
+    .await;
     HealthObservation {
         namespace: namespace.to_owned(),
         target,
@@ -573,21 +829,132 @@ pub async fn observe(
         second,
         window,
         archived,
+        tables,
     }
 }
 
-/// One reading's GET (core S4): target `All`, consolidation `None`, a
+/// Each `health.v2` owner's tables (v2 §2.10): with no face, for each
+/// service whose descriptors list `health.v2`, the tables of the revisions
+/// they name, read from those held offline or retrieved by fingerprint
+/// (core §8.4), never another revision's; across a face, where no
+/// descriptor crosses, the revisions held, the deployment's word. The
+/// standard contract writes none, so its revision is not retrieved.
+async fn tables(
+    session: &Session,
+    target: &HealthTarget,
+    spec: &HealthSpec,
+    presence: Option<&Observed>,
+) -> BTreeMap<Addr, hv2::InstanceTables> {
+    let mut out = BTreeMap::new();
+    match (spec.face, presence) {
+        (Some(face), _) => {
+            if let (HealthTarget::One(a), Major::V2) = (target, face.major) {
+                let held: Vec<hv2::Tables> = spec
+                    .contracts
+                    .iter()
+                    .map(|r| hv2::Tables::of(r.contract()))
+                    .collect();
+                out.insert(a.clone(), hv2::Tables::of_instance(&held));
+            }
+        }
+        (None, Some(o)) => {
+            let catalog = Catalog::new(o);
+            let mut named: BTreeMap<
+                Addr,
+                BTreeSet<(IfaceId, zenkey_model::canonical::Fingerprint)>,
+            > = BTreeMap::new();
+            for a in catalog.addresses() {
+                if crate::model::health::major_of(o, a) != Some(Major::V2) {
+                    continue;
+                }
+                let revisions = named.entry(a.clone()).or_default();
+                for ((at, _), read) in o.descriptors.iter().flatten() {
+                    let Some(d) = read.descriptor().filter(|_| at == a) else {
+                        continue;
+                    };
+                    for e in &d.interfaces {
+                        let (Ok(i), Ok(f)) = (
+                            IfaceId::from_str(&e.iface),
+                            zenkey_model::canonical::Fingerprint::parse(&e.contract),
+                        ) else {
+                            continue;
+                        };
+                        if e.iface == hv2::IFACE && f.hex().to_string() == hv2::FINGERPRINT {
+                            continue;
+                        }
+                        revisions.insert((i, f));
+                    }
+                }
+            }
+            let store = crate::bus::contracts::BundleStore::new(spec.timeout);
+            store.seed(&spec.contracts);
+            let wanted: Vec<_> = named
+                .values()
+                .flatten()
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let got = store.fetch_all(session, &wanted).await;
+            let held: BTreeMap<_, hv2::Tables> = wanted
+                .into_iter()
+                .zip(got)
+                .filter_map(|(w, g)| {
+                    let g = g.ok()?;
+                    let r = g.revision()?;
+                    Some((w, hv2::Tables::of(r.contract())))
+                })
+                .collect();
+            for (a, revisions) in named {
+                let tables: Vec<&hv2::Tables> =
+                    revisions.iter().filter_map(|w| held.get(w)).collect();
+                out.insert(a, hv2::Tables::of_instance(tables));
+            }
+        }
+        (None, None) => {}
+    }
+    out
+}
+
+/// One reading's GETs (core S4), `health.v2`'s and `health.v1`'s at once
+/// (v2 §2.12), each as [`get_of`] reads it.
+pub async fn get(
+    session: &Session,
+    target: &HealthTarget,
+    timeout: Duration,
+    epochs: &crate::bus::query::EntryEpochs,
+) -> Result<HealthGet, String> {
+    let [v2, v1] = target.state_selectors();
+    let (v2, v1) = tokio::join!(
+        get_of(session, &v2, timeout, epochs, Major::V2),
+        get_of(session, &v1, timeout, epochs, Major::V1)
+    );
+    let (v2, v1) = (v2?, v1?);
+    Ok(HealthGet {
+        selector: v1.selector,
+        read_at: SystemTime::now(),
+        complete: v1.complete && v2.complete,
+        services: v1.services,
+        v2: v2.services,
+    })
+}
+
+/// One reading's GET of `major` (core S4): target `All`, consolidation `None`, a
 /// snapshot's page read as its entries, each entry's confirmation dated
 /// under its owner's epoch (`epochs`), every reply merged per key by its
 /// stamp, never the last to arrive, and grouped by the owner its key
-/// names. A reply on a key that is not a
-/// `health.v1` state key, or on a wildcard key, is not a member and is left
-/// out (R6).
-pub async fn get(
+/// names. A reply on a key that is not a state key of `major`, or on a
+/// wildcard key, is not a member and is left out (R6). Under `health.v2` a
+/// record is read under CH's tag and its owner's epoch, and each owner's
+/// pages are read again as one reading of its two snapshots
+/// ([`ServiceGot::reading_v2`], v2 §2.2). The returned GET holds its answer
+/// in `services`, whichever the major.
+pub async fn get_of(
     session: &Session,
     selector: &str,
     timeout: Duration,
     epochs: &crate::bus::query::EntryEpochs,
+    major: Major,
 ) -> Result<HealthGet, String> {
     let replies = session
         .get(selector)
@@ -601,6 +968,7 @@ pub async fn get(
         read_at: SystemTime::now(),
         complete: true,
         services: BTreeMap::new(),
+        v2: BTreeMap::new(),
     };
     // A snapshot's page is its entries, a live entry's confirmation its
     // stamp under its owner's epoch (core §4.2, `freshness.v2` §2.6;
@@ -618,7 +986,36 @@ pub async fn get(
     // owner's answer: undecodable, `form` (core §4.2, 0.102). An owner on
     // revision 1.0 confirms its status by `freshness.v1`, so it answers per
     // key, and its `reply_del` is a deletion.
-    let health = zenkey::health::implementation().shared_contract();
+    // Under `health.v2`, each owner's pages as they came, read as one
+    // reading of its two snapshots (v2 §2.2).
+    if major == Major::V2 {
+        let mut pages: BTreeMap<Addr, Vec<(String, Vec<u8>)>> = BTreeMap::new();
+        for s in &samples {
+            let key = s.key_expr().as_str();
+            if s.kind() != SampleKind::Put {
+                continue;
+            }
+            if let Some((addr, _)) = health_key_of(key, KindToken::State, major) {
+                pages
+                    .entry(addr)
+                    .or_default()
+                    .push((key.to_owned(), s.payload().to_bytes().into_owned()));
+            }
+        }
+        for (addr, pages) in pages {
+            let epoch = epochs
+                .of(&status_key_of(&addr, major))
+                .unwrap_or(zenkey_model::catalog::EPOCH_WITHOUT_CATALOG);
+            let reading =
+                hv2::Reading::of(pages.iter().map(|(k, p)| (k.as_str(), p.as_slice())), epoch);
+            out.services.entry(addr).or_default().reading_v2 = Some(reading);
+        }
+    }
+    let health = match major {
+        Major::V1 => zenkey::health::implementation(),
+        Major::V2 => zenkey::health::v2::implementation(),
+    }
+    .shared_contract();
     let held = [&*health];
     let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
     let (entries, strays) =
@@ -628,7 +1025,8 @@ pub async fn get(
         .await;
     let samples: Vec<Sample> = entries.into_iter().map(|e| e.sample).collect();
     for sample in &strays {
-        let Some((addr, resource)) = health_key(sample.key_expr().as_str(), KindToken::State)
+        let Some((addr, resource)) =
+            health_key_of(sample.key_expr().as_str(), KindToken::State, major)
         else {
             continue;
         };
@@ -657,20 +1055,28 @@ pub async fn get(
         if key.contains('*') {
             continue;
         }
-        let Some((addr, resource)) = health_key(key, KindToken::State) else {
+        let Some((addr, resource)) = health_key_of(key, KindToken::State, major) else {
             continue;
         };
         let stamp = Stamped::of(sample);
+        let epoch = epochs.of(key);
         // The envelope first (core §7.5): a payload is its record, a refused
-        // envelope undecodable.
-        let bytes = (sample.kind() == SampleKind::Put)
-            .then(|| crate::model::inband::record_of(sample).ok());
+        // envelope undecodable. A `health.v2` record is read under CH's tag
+        // (core §7.6); one with no envelope has none, and is refused.
+        let record = (sample.kind() == SampleKind::Put).then(|| match major {
+            Major::V1 => crate::model::inband::record_of(sample)
+                .ok()
+                .map(|b| (0, b.into_owned())),
+            Major::V2 => packed_record(sample),
+        });
         let got = out.services.entry(addr).or_default();
         match resource.as_slice() {
             [s] if s == hm::STATUS => {
                 got.status = Some(Replied {
-                    value: bytes.map(|b| {
-                        b.map_or_else(StatusValue::undecodable, |b| StatusValue::decode(&b))
+                    value: record.map(|r| match (major, r) {
+                        (_, None) => StatusValue::undecodable(),
+                        (Major::V1, Some((_, b))) => StatusValue::decode(&b),
+                        (Major::V2, Some((tag, b))) => StatusValue::decode_v2(tag, &b, epoch),
                     }),
                     stamp,
                 });
@@ -679,8 +1085,10 @@ pub async fn get(
                 got.checks.insert(
                     name.clone(),
                     Replied {
-                        value: bytes.map(|b| {
-                            b.map_or_else(CheckValue::undecodable, |b| CheckValue::decode(&b))
+                        value: record.map(|r| match (major, r) {
+                            (_, None) => CheckValue::undecodable(),
+                            (Major::V1, Some((_, b))) => CheckValue::decode(&b),
+                            (Major::V2, Some((tag, b))) => CheckValue::decode_v2(tag, &b, epoch),
                         }),
                         stamp,
                     },
@@ -693,21 +1101,39 @@ pub async fn get(
     Ok(out)
 }
 
-/// The window's subscriptions, while they listen.
+/// A put's packed record and CH's tag (core §7.5, §7.6): `None` for a put
+/// with no envelope, a refused one, and any other form.
+fn packed_record(sample: &Sample) -> Option<(u8, Vec<u8>)> {
+    let bytes = sample.payload().to_bytes();
+    let encoding = sample.encoding().to_string();
+    match crate::model::inband::payload(sample.key_expr().as_str(), Some(&encoding), &bytes) {
+        crate::model::inband::Payload::Record { record, tag, .. } => {
+            Some((tag.get(), record.to_vec()))
+        }
+        _ => None,
+    }
+}
+
+/// The window's subscriptions, while they listen: each major's status and
+/// faults.
 struct Window {
     status: zenkey::consumer::Subscription,
     faults: zenkey::consumer::Subscription,
+    status_v2: zenkey::consumer::Subscription,
+    faults_v2: zenkey::consumer::Subscription,
     heard: Arc<Mutex<BTreeMap<Addr, ServiceHeard>>>,
+    heard_v2: Arc<Mutex<BTreeMap<Addr, ServiceHeard>>>,
     selectors: Vec<String>,
 }
 
 impl Window {
-    /// Subscribes to the target's status and faults through the runtime's
-    /// consumer, at once and without presence (R1), then seeds the status's
-    /// views by S4's GET, as a late joiner does (`freshness.v2` §2.5; #978's
-    /// F4): a status put before the window is in the view, so the owner's
-    /// next heartbeat confirms it. A GET that fails seeds nothing, and the
-    /// subscription re-reads after two heartbeats out of step.
+    /// Subscribes to the target's status and faults under each major
+    /// through the runtime's consumer, at once and without presence (R1),
+    /// then seeds the status's views by S4's GET, as a late joiner does
+    /// (`freshness.v2` §2.5; #978's F4): a status put before the window is
+    /// in the view, so the owner's next heartbeat confirms it. A GET that
+    /// fails seeds nothing, and the subscription re-reads after two
+    /// heartbeats out of step.
     ///
     /// The subscription hears the owner's heartbeat and its owner
     /// heartbeats (`freshness.v2` §2.5, "Both forms"), a group read through
@@ -721,23 +1147,28 @@ impl Window {
         catalogs: &crate::model::deployment::Catalogs,
     ) -> Result<Window, String> {
         let provider = target.provider();
-        let consumer = zenkey::consumer::Consumer::for_tool(
-            session,
-            zenkey::health::implementation().shared_contract(),
-            &[provider.as_str()],
-            &BTreeMap::new(),
-        )
-        .map_err(|e| e.to_string())?
-        .with_catalogs(catalogs.held().iter().cloned());
+        let consumer_of = |imp: zenkey::Implementation| {
+            zenkey::consumer::Consumer::for_tool(
+                session,
+                imp.shared_contract(),
+                &[provider.as_str()],
+                &BTreeMap::new(),
+            )
+            .map(|c| c.with_catalogs(catalogs.held().iter().cloned()))
+            .map_err(|e| e.to_string())
+        };
+        let consumer = consumer_of(zenkey::health::implementation())?;
+        let consumer_v2 = consumer_of(zenkey::health::v2::implementation())?;
         let mut selectors = Vec::new();
-        for r in [zenkey::health::STATUS, zenkey::health::FAULTS] {
-            selectors.extend(
-                consumer
-                    .selectors(r)
-                    .map_err(|e| e.to_string())?
-                    .iter()
-                    .map(|k| k.as_str().to_owned()),
-            );
+        for c in [&consumer_v2, &consumer] {
+            for r in [zenkey::health::STATUS, zenkey::health::FAULTS] {
+                selectors.extend(
+                    c.selectors(r)
+                        .map_err(|e| e.to_string())?
+                        .iter()
+                        .map(|k| k.as_str().to_owned()),
+                );
+            }
         }
         let heard: Arc<Mutex<BTreeMap<Addr, ServiceHeard>>> = Arc::default();
         let h = Arc::clone(&heard);
@@ -782,18 +1213,7 @@ impl Window {
             .subscribe(
                 zenkey::health::FAULTS,
                 move |d: zenkey::consumer::Delivery| {
-                    let fault = match v1::Fault::decode(d.sample.payload().to_bytes().as_ref()) {
-                        Ok(f) => FaultValue {
-                            level: f.read(),
-                            code: f.code,
-                            detail: f.detail,
-                        },
-                        Err(_) => FaultValue {
-                            code: String::new(),
-                            level: Read::Undecodable,
-                            detail: String::new(),
-                        },
-                    };
+                    let fault = FaultValue::decode(d.sample.payload().to_bytes().as_ref());
                     let mut all = h.lock().expect("not poisoned");
                     let s = all.entry(d.provider).or_default();
                     s.faults += 1;
@@ -807,47 +1227,140 @@ impl Window {
             )
             .await
             .map_err(|e| e.to_string())?;
-        let asked = Instant::now();
-        if let Ok(answer) = consumer
-            .get_answer(zenkey::health::STATUS, None, timeout)
+        // `health.v2` (v2 §2.5): every read heartbeat answers the clock
+        // question by its time, whatever its section did (confirmed,
+        // diverged or absent), a heartbeat covering `health.v2` and a group
+        // of an owner heartbeat of the `host` class alike. A heartbeat of
+        // another revision, refused or older is no read one, and the
+        // subscription hands it to no one. A record is kept as it came, and
+        // read under its owner's epoch once presence says which.
+        let heard_v2: Arc<Mutex<BTreeMap<Addr, ServiceHeard>>> = Arc::default();
+        let h = Arc::clone(&heard_v2);
+        let read = Arc::clone(&heard_v2);
+        let status_v2 = consumer_v2
+            .subscribe_heartbeats(
+                zenkey::health::STATUS,
+                move |d: zenkey::consumer::Delivery| {
+                    let mut all = h.lock().expect("not poisoned");
+                    let s = all.entry(d.provider).or_default();
+                    if d.sample.kind() == SampleKind::Delete {
+                        s.push_clock(ClockHeard::StatusDeleted);
+                        return;
+                    }
+                    s.push_clock(ClockHeard::StatusPut);
+                    s.raw_status = Some((
+                        d.tag.map_or(0, |t| t.get()),
+                        d.sample.payload().to_bytes().into_owned(),
+                        Stamped::of(&d.sample),
+                    ));
+                },
+                move |r: zenkey::consumer::HeartbeatRead| {
+                    let time = r
+                        .owner_time
+                        .unwrap_or(zenkey::model::heartbeat::Time::Unknown);
+                    let mut all = read.lock().expect("not poisoned");
+                    all.entry(r.provider)
+                        .or_default()
+                        .push_clock(ClockHeard::Heartbeat(time));
+                },
+            )
             .await
-        {
+            .map_err(|e| e.to_string())?;
+        let h = Arc::clone(&heard_v2);
+        let faults_v2 = consumer_v2
+            .subscribe(
+                zenkey::health::FAULTS,
+                move |d: zenkey::consumer::Delivery| {
+                    let tag = d.tag.map_or(0, |t| t.get());
+                    let bytes = d.sample.payload().to_bytes().into_owned();
+                    // Its code is a word whatever the epoch: the record's
+                    // time plays no part in whether it is `clock_ahead`.
+                    let clock_ahead = FaultValue::decode_v2(tag, &bytes, Some(0)).is_clock_ahead();
+                    let mut all = h.lock().expect("not poisoned");
+                    let s = all.entry(d.provider).or_default();
+                    s.faults += 1;
+                    s.push_clock(if clock_ahead {
+                        ClockHeard::ClockAhead
+                    } else {
+                        ClockHeard::Fault
+                    });
+                    s.raw_fault = Some((tag, bytes));
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let asked = Instant::now();
+        let (one, two) = tokio::join!(
+            consumer.get_answer(zenkey::health::STATUS, None, timeout),
+            consumer_v2.get_answer(zenkey::health::STATUS, None, timeout)
+        );
+        if let Ok(answer) = one {
             status.seed(&answer, asked);
+        }
+        if let Ok(answer) = two {
+            status_v2.seed(&answer, asked);
         }
         Ok(Window {
             status,
             faults,
+            status_v2,
+            faults_v2,
             heard,
+            heard_v2,
             selectors,
         })
     }
 
     /// What the window heard, read now: every address's status as a
-    /// `freshness.v1` observation (§2.5), and each clock's measurement
-    /// across both subscriptions, faults included: a stamp ahead of this
-    /// host's clock beyond the delta proves the clocks disagree (§2.6).
-    fn close(self, addrs: BTreeSet<Addr>) -> HealthWindow {
+    /// `freshness.v1` observation (§2.5) under each major, each `health.v2`
+    /// record read under its owner's epoch (`epochs`), and each clock's
+    /// measurement across every subscription, faults included: a stamp
+    /// ahead of this host's clock beyond the delta proves the clocks
+    /// disagree (§2.6).
+    fn close(self, addrs: BTreeSet<Addr>, epochs: &crate::bus::query::EntryEpochs) -> HealthWindow {
         let heard = self.heard.lock().expect("not poisoned").clone();
-        let mut clocks = self.status.clock_offsets();
-        for (clock, m) in self.faults.clock_offsets() {
-            clocks
-                .entry(clock)
-                .and_modify(|all| *all = all.merge(m))
-                .or_insert(m);
+        let mut heard_v2 = self.heard_v2.lock().expect("not poisoned").clone();
+        for (a, h) in &mut heard_v2 {
+            let epoch = epochs.of(&status_key_of(a, Major::V2));
+            if let Some((tag, bytes, stamp)) = h.raw_status.take() {
+                h.last = Some(Replied {
+                    value: Some(StatusValue::decode_v2(tag, &bytes, epoch)),
+                    stamp,
+                });
+            }
+            if let Some((tag, bytes)) = h.raw_fault.take() {
+                h.last_fault = Some(FaultValue::decode_v2(tag, &bytes, epoch));
+            }
         }
-        let status = addrs
-            .into_iter()
-            .chain(heard.keys().cloned())
-            .map(|a| {
-                let o = self.status.freshness(&status_key(&a));
-                (a, o)
-            })
-            .collect();
+        let mut clocks = self.status.clock_offsets();
+        for sub in [&self.faults, &self.status_v2, &self.faults_v2] {
+            for (clock, m) in sub.clock_offsets() {
+                clocks
+                    .entry(clock)
+                    .and_modify(|all| *all = all.merge(m))
+                    .or_insert(m);
+            }
+        }
+        let observe = |sub: &zenkey::consumer::Subscription,
+                       heard: &BTreeMap<Addr, ServiceHeard>,
+                       major: Major| {
+            addrs
+                .iter()
+                .cloned()
+                .chain(heard.keys().cloned())
+                .map(|a| {
+                    let o = sub.freshness(&status_key_of(&a, major));
+                    (a, o)
+                })
+                .collect()
+        };
         HealthWindow {
             selectors: self.selectors,
             listened: self.status.listened(),
+            status: observe(&self.status, &heard, Major::V1),
+            status_v2: observe(&self.status_v2, &heard_v2, Major::V2),
             heard,
-            status,
+            heard_v2,
             clocks,
         }
     }
@@ -855,31 +1368,41 @@ impl Window {
 
 /// An absent owner's status, from the first archive presence shows that
 /// holds it (core §4.4, S5): presence read whole, its `archive.v1`
-/// providers by token or by descriptor, each asked in turn.
+/// providers by token or by descriptor, each asked in turn, for the
+/// `health.v2` status key first and then `health.v1`'s. A `health.v2`
+/// record is read under CH's tag and the owner's epoch (`epochs`).
 async fn archived(
     session: &Session,
     owner: &Addr,
     timeout: Duration,
+    epochs: &crate::bus::query::EntryEpochs,
 ) -> Result<Option<ArchivedStatus>, String> {
     let all = crate::bus::presence::observe(session, &Scope::all(), timeout)
         .await
         .map_err(|e| crate::one_line(&e))?;
     let archive = IfaceId::from_str(ARCHIVE).expect("archive.v1 is an interface id");
-    let origin = status_key(owner);
     for a in &Catalog::new(&all).providers_of(&archive) {
-        let got = zenkey::archive::last_known(session, a, &origin, timeout)
-            .await
-            .map_err(|e| e.to_string())?;
-        if let Some(lk) = got {
-            return Ok(Some(ArchivedStatus {
-                archive: a.clone(),
-                value: lk.value.as_deref().map(StatusValue::decode),
-                stamp: lk.timestamp.map(|t| Stamped {
-                    time: t.get_time().to_system_time(),
-                    clock: t.get_id().to_string(),
-                }),
-                confirmed: lk.confirmed,
-            }));
+        for major in [Major::V2, Major::V1] {
+            let origin = status_key_of(owner, major);
+            let got = zenkey::archive::last_known(session, a, &origin, timeout)
+                .await
+                .map_err(|e| e.to_string())?;
+            if let Some(lk) = got {
+                let tag = lk.tag.map_or(0, |t| t.get());
+                return Ok(Some(ArchivedStatus {
+                    archive: a.clone(),
+                    major,
+                    value: lk.value.as_deref().map(|v| match major {
+                        Major::V1 => StatusValue::decode(v),
+                        Major::V2 => StatusValue::decode_v2(tag, v, epochs.of(&origin)),
+                    }),
+                    stamp: lk.timestamp.map(|t| Stamped {
+                        time: t.get_time().to_system_time(),
+                        clock: t.get_id().to_string(),
+                    }),
+                    confirmed: lk.confirmed,
+                }));
+            }
         }
     }
     Ok(None)
@@ -901,6 +1424,7 @@ mod tests {
         let a: Addr = "lab/nav".parse().unwrap();
         let got = |complete: bool, replied: bool| {
             Ok(HealthGet {
+                v2: BTreeMap::new(),
                 selector: "zk2/lab/nav/health.v1/state/**".into(),
                 read_at: SystemTime::now(),
                 complete,
@@ -969,11 +1493,19 @@ mod tests {
         );
         assert_eq!(status_key(&a), "zk2/lab/svc/health.v1/state/status");
         assert_eq!(
-            health_key("zk2/lab/svc/health.v1/state/checks/disk", KindToken::State),
+            health_key_of(
+                "zk2/lab/svc/health.v1/state/checks/disk",
+                KindToken::State,
+                Major::V1
+            ),
             Some((a, vec!["checks".to_owned(), "disk".to_owned()]))
         );
         assert_eq!(
-            health_key("zk2/lab/svc/nav.v2/state/status", KindToken::State),
+            health_key_of(
+                "zk2/lab/svc/nav.v2/state/status",
+                KindToken::State,
+                Major::V1
+            ),
             None
         );
     }
@@ -988,6 +1520,8 @@ mod tests {
         assert_eq!(
             StatusValue::decode(&s.encode_to_vec()),
             StatusValue {
+                word: None,
+                since_s: None,
                 level: Read::Level(hm::Level::Failed),
                 reason: "down".into(),
                 since_ns: 7

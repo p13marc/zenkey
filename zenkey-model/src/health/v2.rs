@@ -35,6 +35,7 @@ use crate::contract::Contract;
 use crate::heartbeat;
 use crate::packed::{self, Layout, ReadRefusal, Record, WriteRefusal};
 use crate::wire::{Envelope, Run, Seq, Stamp, Tag};
+use crate::words::{self, Index};
 
 /// The profile's id, which is also its standard contract's interface id.
 pub const PROFILE: &str = "health.v2";
@@ -81,7 +82,7 @@ pub const STATUS_CLASS: heartbeat::Class = heartbeat::Class::Host;
 /// the service's own tables (§2.10).
 #[must_use]
 pub fn uses_v2(c: &Contract) -> bool {
-    c.uses.iter().any(|u| u.to_string() == PROFILE)
+    words::uses(c, PROFILE)
 }
 
 // --- §2.10: words -------------------------------------------------------------
@@ -123,6 +124,14 @@ pub const OWN_FIRST: u8 = 32;
 /// The most names a service's own table holds (§2.10): the words 32 to 62.
 pub const OWN_MAX: usize = 31;
 
+/// The first word of the profile's tables (§2.10): the name at index i is
+/// the word 1 + i.
+const PROFILE_FIRST: u8 = 1;
+
+/// The greatest place either half of the numbers names: 31 words each, 1
+/// to 31 and 32 to 62.
+const HALF_MAX: u8 = 30;
+
 /// A word (§0, §2.10): a status's `reason`, a check's `detail` or a
 /// fault's `code`, a number from 0 to 63 in 6 bits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -138,7 +147,7 @@ impl Word {
 
     /// The record's name for [`Word::OUT_OF_RANGE`] (core §7.6's reserved
     /// code).
-    pub const OUT_OF_RANGE_NAME: &'static str = "out_of_range";
+    pub const OUT_OF_RANGE_NAME: &'static str = words::OUT_OF_RANGE;
 
     /// The largest number that is a value, 62.
     pub const MAX: u8 = 62;
@@ -247,19 +256,7 @@ pub fn is_name(s: &str) -> bool {
 /// twice. `None` for any other value.
 #[must_use]
 pub fn names(v: &Value) -> Option<Vec<String>> {
-    let list = v.as_array()?;
-    if list.len() > OWN_MAX {
-        return None;
-    }
-    let mut out: Vec<String> = Vec::with_capacity(list.len());
-    for n in list {
-        let n = n.as_str()?;
-        if !is_name(n) || out.iter().any(|seen| seen == n) {
-            return None;
-        }
-        out.push(n.to_owned());
-    }
-    Some(out)
+    words::list(v, OWN_MAX, is_name, true)
 }
 
 /// Why a contract's declaration of one table is invalid (§2.10), the
@@ -520,22 +517,19 @@ pub fn write_word(kind: Kind, word: Option<&str>, own: Option<&[String]>) -> Wor
     let Some(word) = word else {
         return Word::NONE;
     };
-    // The word at index `i` of a table whose first word is `first`, within
-    // that table's half of the numbers.
-    let place = |i: usize, first: u8| {
-        u8::try_from(i)
-            .ok()
-            .and_then(|i| first.checked_add(i))
-            .filter(|n| *n < first.saturating_add(31))
-            .map(Word)
+    // Each table names 31 numbers, from its first: its places 0 to 30.
+    let place = |index: Index, first: u8| match index {
+        Index::At(i) => Word(first + i),
+        Index::OutOfRange => Word::OUT_OF_RANGE,
     };
-    if let Some(i) = kind.profile().iter().position(|n| *n == word) {
-        // The profile's table names 1 to 31.
-        return place(i, 1).unwrap_or(Word::OUT_OF_RANGE);
+    // A name in both tables is the profile's.
+    if kind.profile().contains(&word) {
+        return place(words::write(kind.profile(), word, HALF_MAX), PROFILE_FIRST);
     }
-    own.and_then(|t| t.iter().position(|n| n == word))
-        .and_then(|i| place(i, OWN_FIRST))
-        .unwrap_or(Word::OUT_OF_RANGE)
+    place(
+        own.map_or(Index::OutOfRange, |t| words::write(t, word, HALF_MAX)),
+        OWN_FIRST,
+    )
 }
 
 /// A word as a reader shows it (§2.10, §5).
@@ -565,13 +559,15 @@ pub fn read_word(kind: Kind, word: Word, own: Option<&[String]>) -> Named<'_> {
     } else if word.is_out_of_range() {
         Named::OutOfRange
     } else if n < OWN_FIRST {
-        kind.profile()
-            .get(usize::from(n - 1))
-            .copied()
-            .map_or(Named::Number(n), Named::Profile)
+        match words::read(Some(kind.profile()), Index::At(n - PROFILE_FIRST)) {
+            words::Word::Entry(name) => Named::Profile(name),
+            _ => Named::Number(n),
+        }
     } else {
-        own.and_then(|t| t.get(usize::from(n - OWN_FIRST)))
-            .map_or(Named::Number(n), |name| Named::Service(name.as_str()))
+        match words::read(own, Index::At(n - OWN_FIRST)) {
+            words::Word::Entry(name) => Named::Service(name),
+            _ => Named::Number(n),
+        }
     }
 }
 
@@ -614,13 +610,10 @@ pub fn growth(old: &[String], new: &[String]) -> Growth {
 }
 
 /// One finding of [`lint_contract`]: the resource whose value drew it, by
-/// its kind token and template, the key, and the reason.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Lint {
-    pub at: String,
-    pub key: &'static str,
-    pub reason: Invalid,
-}
+/// its kind token and template, the key, and the reason's token and words
+/// ([`Invalid::as_str`], [`Invalid::says`]). [`crate::words`]'s shape,
+/// which `desired.v2` shares.
+pub use crate::words::Lint;
 
 /// What a linter reports of a contract that lists `health.v2` (§2.10):
 /// each kind whose declaration is invalid, at the first resource whose
@@ -641,11 +634,12 @@ pub fn lint_contract(c: &Contract) -> Vec<Lint> {
             .collect();
         let values = carrying.iter().map(|r| &r.annotations[kind.key()]);
         if let (Declared::Invalid(reason), Some(i)) = declared(true, values) {
-            let r = carrying[i];
             out.push(Lint {
-                at: format!("{}/{}", r.token, r.template.as_str()),
-                key: kind.key(),
-                reason,
+                profile: PROFILE,
+                at: Lint::place(carrying[i]),
+                key: Some(kind.key()),
+                token: reason.as_str(),
+                says: reason.says(),
             });
         }
     }

@@ -590,6 +590,7 @@ async fn a_daemon_with_alerts_publishes_the_alarm_and_its_alarms_check() {
         NS,
         zenkey_fleet::HealthTarget::One(ADDRESS.parse().expect("an address")),
         zenkey_fleet::HealthSpec {
+            contracts: Default::default(),
             timeout: zk2::T,
             window: None,
             grace: Duration::from_millis(100),

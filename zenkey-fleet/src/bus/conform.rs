@@ -493,6 +493,7 @@ pub async fn observe(
             clocks_synced: spec.clocks_synced,
             face: None,
             catalogs: catalogs.clone(),
+            contracts: crate::model::catalog::ContractSet::default(),
         };
         let target = crate::bus::health::HealthTarget::One(address.clone());
         Some(

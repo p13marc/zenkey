@@ -259,14 +259,18 @@ fn health_report(clocks_synced: bool) -> zenkey_fleet::report::HealthReport {
     use zenkey_model::health::{Level, Read};
     let read_at = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
     let got = HealthGet {
+        v2: Default::default(),
         selector: "zk2/lab/svc/health.v1/state/**".into(),
         read_at,
         complete: true,
         services: BTreeMap::from([(
             addr("lab/svc"),
             ServiceGot {
+                reading_v2: None,
                 status: Some(Replied {
                     value: Some(StatusValue {
+                        word: None,
+                        since_s: None,
                         level: Read::Level(Level::Ok),
                         reason: "nominal".into(),
                         since_ns: 1,
@@ -281,9 +285,11 @@ fn health_report(clocks_synced: bool) -> zenkey_fleet::report::HealthReport {
         )]),
     };
     zenkey_fleet::judge_health(&zenkey_fleet::HealthObservation {
+        tables: Default::default(),
         namespace: String::new(),
         target: zenkey_fleet::HealthTarget::One(addr("lab/svc")),
         spec: zenkey_fleet::HealthSpec {
+            contracts: Default::default(),
             timeout: Duration::from_secs(1),
             window: None,
             grace: Duration::from_secs(1),
