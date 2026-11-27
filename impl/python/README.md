@@ -9364,6 +9364,111 @@ Neither is a blocker. F-595, F-596 and F-602 are resolved by 0.2. F-569
 to F-594, F-597 to F-601 and F-603 to F-609 stay open. See "At
 health.v2 0.2, against the reference" in `SPEC-FINDINGS.md`.
 
+## `alarms.v2` 0.1 and core 0.115: a new major, each part written before its fixture, then live in both pairings (round 124)
+
+Round 124 read this tree at d1dd4196 (#984), with its black boxes built
+from d1dd4196.
+- **Core 0.115:** Appendix D's `alarms` row gains `alarms.v2`'s `rules`,
+  and §8.1's tokenless list names `alarms.v2`. No rule moved: 297.
+- **`alarms.v2` 0.1:** an alarm in a slot, a transition in one packed
+  record, words by the service's own table, a resolve with no delete,
+  and "nothing fires" from one snapshot. Its standard contract is
+  revision 2.0 in `spec/profiles/.history/alarms.v2/`. It comes with
+  ten fixture files, 477 cases, and twelve scenarios.
+- **The reference speaks it:** the owner example's `--alarms-v2`,
+  `zenctl alarms` and `check conform`'s `alarm-*` cases. zk2py learnt
+  each from its `--help`.
+
+**The walk.** zk2py's linter reads W105's table by major, and now has
+`alarms.v2`'s `rules`. `_round124_readings` checks:
+- each header;
+- core's two places;
+- the index's row and its layout's history line (F-612);
+- revision 2.0: zk2py's linter gives §3's fingerprint, and zk2py's own
+  bundle is the history's file byte for byte;
+- W105's three cases.
+
+**Six answers from the text first** are in `SPEC-FINDINGS.md`, committed
+before any code: a restart with one identity firing on two slots, a
+reader with no run, an alarm whose words are not taken, "nothing fires"
+from one snapshot, either reader beside the other major, a deferred
+refresh and a re-mint.
+
+**`zk2py.alarms_v2`, part by part, each committed before its file was
+opened:**
+1. the schemas;
+2. the record;
+3. the tables and naming;
+4. the keys;
+5. the slots and the adoption;
+6. the words;
+7. transitions by identity and the notifier;
+8. confirmations by the heartbeat;
+9. `at` and acknowledgements;
+10. the conclusions.
+
+`alarms_v2_fixtures` runs the ten files: 477 cases. The first runs missed
+3: two writer tokens the text does not name, and a run held without its
+width (zk2py's, core §3.3). None was the text's error.
+
+**`just py-conformance`: 8641 of 8641.**
+
+### Live
+
+```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.alarms_v2_scenarios \
+  --pairing ref-owner|zk2py-owner [--only 1|…|15]... [--out <dir>]
+```
+
+- **`ref-owner`:** the owner example (`owner --alarms-v2`) is every
+  `alarms.v2` owner. zk2py's S, G and T read it.
+- **`zk2py-owner`:** zk2py's owner process plays every owner, driven by
+  the example's command words. `zenctl alarms --format json
+  --clocks-synced` is G and T, and `check conform` runs beside §1.
+- **In both:** `lab/old` is the example's `--alarms`, and `lab/liar` is
+  zk2py's. Each owner keeps a run file: a 16-bit run.
+- **The extra sections:** 13 is §2 step 4 and §6 at the full 900 s, 14
+  the bytes side by side, 15 a far reader.
+
+| | ref-owner | zk2py-owner |
+|---|---|---|
+| §1 to §12 | 54 of 54 | 53 of 53 |
+| §2 step 4 and §6 at 900 s | 4 of 4 | 4 of 4 |
+| the bytes, both owners on one bus | | 9 of 9 |
+| across a face | | 2 of 2 |
+
+- **§2 and §6 on the copy** with `freshness.ttl_s = 4`. Heartbeats come
+  every 2 s, at the copy's own tag, 12. Revision 2.0's 7 is checked in
+  the slow tier.
+- **zenctl ages the copy by 900 s,** so on it A reads firing at 7 s
+  (F-613). At 900 s it judges A `stale`, as zk2py does.
+- **§9's T2:** zenctl retrieves the revision the descriptor names, so
+  it cannot hold the earlier one alone.
+- **§11's T1** has no reference reader.
+- **The bytes:** every record, its at included, is the same from both
+  owners. The alarms' page differs in its time alone, the words' page
+  not at all. The heartbeats differ in time and in digest.
+
+### What changed in zk2py
+
+- **`alarms_v2`, new:** the text's ten parts, session-free.
+- **`alarms_v2_fixtures`, new,** and the `alarms` family reads
+  `conformance/v2/` through it.
+- **`alarms_v2_live`, `alarms_v2_owner` and `alarms_v2_scenarios`,
+  new:**
+  - the owner: slots, words first, `at`, the refresh window, the bound,
+    a record by slot, and a restart's adoption, including from a v1
+    record;
+  - the reader: S, a collection read of `alarms/**` and `words/**`,
+    §2.15 and §2.14;
+  - the runner.
+- **Two owner bugs the live run found, fixed:**
+  - a resolved record's heartbeat bit was left set;
+  - the words were written with spaces.
+- **`contract.py`:** W105's `alarms.v2` table.
+- **`interop/alarms-v2/`:** the reference's `tc.v1` and its earlier and
+  later revisions, copied.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -9675,6 +9780,12 @@ impl/python/
     alarms.py         alarms.v1 the key and the sanitizing step, references, strict JSON, the document, transitions,
                                 the conclusions, AlarmsOwner, the reader on a bus
     alarms_scenarios.py alarms.v1 scenarios.md §1–§10 against zk2py's owner or the Rust owner example
+    alarms_v2.py      alarms.v2 the record, tables and words, keys and slots, a restart's adoption, transitions by identity,
+                      the heartbeat over a reader's slots, at, and the conclusions
+    alarms_v2_fixtures.py alarms.v2 the runner of conformance/v2/
+    alarms_v2_live.py alarms.v2 the owner and the reader on a bus
+    alarms_v2_owner.py alarms.v2 the owner as a process, driven by the owner example's words
+    alarms_v2_scenarios.py alarms.v2 scenarios-v2.md §1 to §12 in both cross pairings, the bytes side by side, a far reader
     telemetry.py      telemetry.v1 the standard schema's ids, declarations, carriers, a sample's conformance,
                                 a pair's epoch, continuity and rate, a contract's and a bundle's resources
     telemetry_scenarios.py telemetry.v1 scenarios.md §1–§9 against zk2py's owner or the Rust owner example, §8 across a face too,

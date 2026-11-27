@@ -31964,3 +31964,242 @@ Each was written here from `v2.md`, with `v1.md` beside it, before any
      free. Its snapshot leaves them out, neither live nor tombstoned
      (§2.9). A reader that held them reads them as the previous
      instance's last word, then `not_held`.
+
+### What moved, and the walk
+
+- **Core 0.115:** Appendix D's `alarms` row and its paragraph, and §8.1's
+  tokenless list. No rule moved: `RULES.md` lists 297 rules, and the
+  walk's 310 rows keep their verdicts.
+- **`alarms.v2` 0.1:** a new text, its contract (revision 2.0 in
+  `spec/profiles/.history/alarms.v2/`), its packed schema, the words'
+  JSON Schema, ten fixture files and twelve scenarios.
+- **W105.** zk2py's linter already read W105's table by the major a
+  contract lists. It now has `alarms.v2`'s one key, `rules`. Before that,
+  `ok-alarms-v2-rules` drew W105. The other two cases already passed.
+
+**The published revision, computed zk2py's own way:**
+- zk2py's linter loads `alarms.v2.toml` with no finding, at
+  `sha256:2292477c…2cb7`, the fingerprint §3 states.
+- zk2py's own bundle of it is byte for byte the file in
+  `.history/alarms.v2/`, and zk2py's §9.6 steps verify that file under
+  that fingerprint.
+- Each schema's artifact id is the sha256 of its JCS bytes, and each is
+  §3's: `fe59e748…2b2a` for the packed file, `a3515ad4…99de` for the JSON
+  Schema.
+- The heartbeat's tag, from the fingerprint, is 7. `Alarm`'s layout tag
+  is 11. Both are §3's.
+
+### `alarms.v2` from the text first, then its cases
+
+Each part of `zk2py.alarms_v2` was committed before its file was opened,
+then run once.
+
+| File | Cases | Missed on the first run | Whose error |
+|---|---:|---|---|
+| `schema.json` | 6 | none | |
+| `records.json` | 78 | writes #33 and #34, by their token alone | zk2py's guess. §2.4's "nor `labels` or an `argument` other than `not_available` under a `rule` of `not_available`" names no token. zk2py wrote two, and the file's description names one, `by_words_fields`. |
+| `tables.json` | 124 | none | |
+| `keys.json` | 40 | none | |
+| `slots.json` | 25 | view #6, "a 16-bit run and a 32-bit run of the same value are two runs" | zk2py's. Its runner held a run as an integer, and core §3.3 says "So `"00a1"` and `"000000a1"` are two runs". |
+| `words.json` | 30 | none | |
+| `transitions.json` | 35 | none | |
+| `confirmations.json` | 23 | none | |
+| `acks.json` | 21 | none | |
+| `conclusions.json` | 95 | none | |
+
+That is 477 cases, as the entry says, and 3 missed. None was the text's
+error, nor the reference's.
+- **What changed after a file was opened is its format.** The file hands
+  each put its alert key. A reading's freshness comes as a verdict, so
+  the six steps run over a judged freshness. A restart's adoption runs
+  over each slot's facts.
+- **The two cases written by hand** passed as written: §2.9's identity
+  firing on two slots, and §2.6's reader with no run stated. The second
+  reads its sentence more widely than zk2py's answer 2 did (F-614).
+- **The suite:** `just py-conformance` passes 8641 of 8641.
+
+### F-612 · index · `profiles/README.md`: two lines its new row leaves behind
+
+> "`.history/` published revisions of the profiles' standard contracts
+> (health.v1, health.v2, config.v1, alarms.v1, freshness.v2)"
+> "`health.v2` and `alarms.v2` each have a standard contract. Each is a
+> text and its fixtures so far. No implementation runs either yet."
+
+- **`spec/profiles/.history/`** holds `alarms.v2/` too, with revision
+  2.0. That is the file §3 names and the examples family walks. The
+  layout line lists five and omits it.
+- **"No implementation runs either yet"** is wrong of both.
+  - `health.v2` is run by the reference, in its own tests and in
+    `zenctl health`, and by zk2py since round 120. `health.v2` 0.2's
+    intro says the reference runs §1 to §9.
+  - `alarms.v2`'s entry says "The reference's runtime runs the owner's
+    scenarios on real sessions". zk2py runs every case and twelve
+    sections (round 124).
+- **Proposed:** name `alarms.v2` in the layout line, and replace the
+  sentence with who runs each profile.
+
+### F-613 · ambiguity · `scenarios-v2.md`, Conventions, against `v2.md` §2.7 and §2.14: a 4 s copy that a reader ages at 900 s
+
+> scenarios-v2, Conventions: "§2 and §6 wait it out. A runner MAY keep
+> them in a slow tier, and run them on a copy of the standard contract
+> with `freshness.ttl_s = 4`, made in memory and never published."
+> §2.7: "`alarms/{slot}` is the contract's one collection, of
+> cardinality 256, at a 900 s horizon." §2.14: "**Step 6, its
+> freshness,** is `freshness.v2`'s at 900 s."
+
+- **Two readings.** A reader takes its horizon from the revision its
+  owner's descriptor names (`freshness.v2`; the copy says 4 s). Or it
+  takes §2.14's fixed 900 s.
+- **Under the second,** §2's and §6's readings cannot be run on the
+  copy.
+- **The reference reads the second.** Each owner ran on the copy, and
+  `zenctl alarms` was given it by `--contracts`. 7 s after A's bit
+  cleared, zenctl judged A **yes**, `firing`, "confirmed it within
+  900 s". That held of the reference's owner and of zk2py's. zk2py's S,
+  aging by the copy, judged A unobservable, `stale`.
+- **At the full horizon the two readers agree.** The slow tier ran §2
+  step 4 and §6 at 900 s, and both judged A `stale`.
+- **Proposed:** say whether §2.14's 900 s is the standard contract's
+  horizon or a constant, and if a constant, what a runner on the copy
+  may judge.
+
+### F-614 · contradiction · `v2.md` §2.6: "a reader with no run stated, as across a face, takes no slot", against §2.11 and §2.15's far reader
+
+> §2.6, "One identity on two slots": "A slot is taken only under the
+> present run. So a reader with no run stated, as across a face, takes
+> no slot."
+> §2.15, "Across a face": "a GET by grant, answered by a complete
+> snapshot | established. Each firing entry is aged by its
+> confirmation".
+> §2.11: "**One snapshot establishes them.** A far reader's collection
+> read is answered by the alarms' snapshot, with an entry or with none".
+
+- **The bullet's scope.** zk2py's answer 2, written from the text alone,
+  read the sentence within its bullet: one identity on two slots.
+- **The fixture reads it wider.** `slots.json`'s last view, written by
+  hand from this sentence, takes no slot for either identity. That
+  includes B, which is on one slot alone. zk2py's implementation follows
+  the file and passes it.
+- **Then a far reader holds nothing on any slot,** and the answer §2.15
+  gives contradicts it.
+  - Its alarms are established by a complete snapshot.
+  - Each alarm is "none" of §2.14's step 5, so `not_held`, so **no**.
+  - "Anything firing" then reads **no** for an owner whose snapshot lists
+    firing entries. §2.11's "never 'nothing fires'" is said only of a
+    closed face, so nothing guards against it.
+- **Proposed:** say "takes" of the choice between slots of one identity
+  alone. A far reader judges each entry by its slot, as §2.15's table
+  says, and compares no identity across slots.
+
+### F-615 · minor · `conformance/v2/README.md`: "No implementation has run them yet"
+
+> "No implementation has run them yet."
+> The entry: "**What the reference's model found,** running every case.
+> … Its model runs every case of the ten files as written".
+
+- The reference's model ran them before the file landed, by its entry.
+  zk2py runs all 477 (round 124).
+- The same README says "Each of the 475 cases was changed once". 475 is
+  right: 477 less the two written by hand, which "were computed once".
+  That is worth saying in place, since the entry gives 477.
+
+### Live: the two pairings
+
+The black boxes are `owner`, `archive` and `zenctl` of d1dd4196, run and
+never read. Every router is zenoh-python's. Each owner keeps a run file,
+so every put is under a 16-bit run, as the text's sizes are.
+`alarms_v2_scenarios --pairing ref-owner|zk2py-owner` runs each section.
+The README's round 124 has each step.
+
+| Section | The reference's owner, zk2py's reader | zk2py's owner, the reference's reader |
+|---|---|---|
+| §1 | 8 of 8 | 9 of 9, `check conform`'s `alarm-key` and `alarm-document` beside |
+| §2 (4 s copy) | 4 of 4 | 4 of 4 |
+| §3 | 5 of 5 | 5 of 5 |
+| §4 | 4 of 4 | 5 of 5 |
+| §5 | 7 of 7 | 5 of 5 |
+| §6 (4 s copy) | 3 of 3 | 3 of 3, zenctl's at 900 s (F-613) |
+| §2 step 4 and §6, at 900 s | 4 of 4 | 4 of 4 |
+| §7 | 3 of 3 | 3 of 3 |
+| §8, the reference's `archive` | 3 of 3 | 3 of 3 |
+| §9 | 8 of 8 | 8 of 8, T2 not as worded (below) |
+| §10 | 4 of 4 | 4 of 4 |
+| §11 | 3 of 3 | Expected 3 met; T1 not run |
+| §12 | 2 of 2 | 2 of 2 |
+
+The pairings agree on every answer of every section both ran, but in
+the three places named below.
+- **§6 on the 4 s copy.** zenctl ages by 900 s, so A reads yes, `firing`
+  at 7 s. At 900 s both readers judge A `stale` and B `resolved`
+  (F-613).
+- **§9's T2 is no part zenctl can play.** Given the earlier revision
+  alone, it "retrieves by fingerprint" the revision the descriptor
+  names, as its `--help` says. So it names `lab/svc`'s A `link_down`,
+  correctly, where T2 shows `rule 1, labels 2`. Neither names it
+  `door_open`.
+- **§11's T1** is a reader of `alarms.v1` alone. The reference has none;
+  every reader of its reads both majors. zk2py's v1 reader plays it in
+  the first pairing.
+
+**The bytes, side by side.** Both owners ran on one bus with the same
+contract and the same acts. Every put has the same key, CH, size and
+record. These are the records, with time, run and seq included, since
+they fell alike:
+
+| Act | Key | Both owners' payload after the stamp | Bytes |
+|---|---|---|---:|
+| raise A | `alarms/0` | `2036b09b08c8000017ffff80` | 18 |
+| raise B | `alarms/1` | `2076b09b08d7ffff80` | 15 |
+| raise W by words | `words/2`, then `alarms/2` | JCS words; `3ff6b09b08e7ffffdc6745664df953ae00` | 77, 23 |
+| raise H at 85.5 | `alarms/3` | `0016b09b08f0027380` | 15 |
+| resolve B | `alarms/1` | `a076b09b0907ffff80` | 15 |
+| raise C on B's slot | `alarms/1` | `2036b09b090800002fffff80` | 18 |
+
+- **The alarms' page** (94 bytes) differs in its time alone:
+  `…6b09b09102d3…` against `…02d4…`.
+- **The words' page** is identical.
+- **The heartbeat** is 18 bytes from each, live count 4, every bit set.
+  The two differ in time and in digest, each over its own owner's keys.
+
+**What the live run found in zk2py**, both fixed before the counts
+above:
+- **A resolved record's bit.** zk2py's owner left it set in its
+  heartbeat, and dated its snapshot entry `time`. §2.7 says "A resolved
+  record has its bit clear, from its resolved put on". In §6's state the
+  reference sent `cc00000000046b09a4d2daeb4a0a3e2020` and zk2py
+  `cc00000000046b09a4e6686b4a0a3e2022`. They differ in time and in the
+  last bit, slot 1's: B resolved.
+- **The words' spacing.** zk2py wrote its words as JSON with spaces, 6
+  bytes more than the reference's. Both are strict JSON, so the text
+  allowed either. zk2py now writes JCS.
+
+**Across a face** (F-614): one owner was read with the deployment's
+word, `granted`. zk2py's reader and `zenctl alarms --across-face
+granted` each judge it established by its snapshot. Each answers both
+firing entries yes, `firing`, by its slot, and "anything firing" yes, 2.
+Neither takes "no slot" as `slots.json`'s last view does.
+
+### Not run
+
+- **§11's T1 against zk2py's owner:** the reference has no reader of
+  `alarms.v1` alone.
+- **§5's and §12's notifier N** is zk2py's `Notifier` in both pairings.
+  zenwatch is outside this round.
+- **§12 with `tc.v1` beside the v1 owner:** `lab/old` and §12's v1
+  `lab/svc` ran with no contract of their own. The adoption's table is
+  the v2 instance's.
+- **A `lab/liar` of the reference's:** its usage has no word for a
+  record put on purpose. §9's is zk2py's in both pairings.
+
+### Counts at alarms.v2 0.1
+
+615 entries.
+- **New: F-612 to F-615.** Two index and wording errors, F-612 and
+  F-615. One ambiguity, F-613. One contradiction, F-614, which is the one
+  to settle first: the fixture and both readers disagree on what a far
+  reader takes.
+- **Resolved:** none.
+- **Open:** F-437 to F-441, F-569 to F-594, F-597 to F-601 and F-603 to
+  F-615.
+
+  F-365 stays open as #965's.
