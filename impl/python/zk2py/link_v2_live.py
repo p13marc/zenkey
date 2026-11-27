@@ -61,6 +61,8 @@ from typing import Any
 import socket
 
 from .blackbox import BLACKBOX, workdir
+from .stamp_live import (ENROLLMENT, OPER, RADIO, Heard, Relay, _close_all, _codes, conventions_policy, near_config,
+                         open_router)
 
 
 def _zp() -> str:
@@ -75,8 +77,19 @@ def _zp() -> str:
 #: binding's file is read through zenoh's own loader by the reference's
 #: ``zenctl check face`` (§2.19's reference note), so each is run here.
 STOCK = ("zenoh-1.10.1", "zenoh-1.10.2")
-from .stamp_live import (ENROLLMENT, OPER, RADIO, Heard, Relay, _close_all, _codes, conventions_policy, near_config,
-                         open_router)
+
+
+def _with_binding(policy: str, binding: str) -> str:
+    """``policy``, a link.v2 policy naming ``zenoh-1.10.1``, under
+    ``binding``. It refuses a policy with no single binding line to swap,
+    so a check meant for another binding never runs under 1.10.1 again
+    (review-bot on #1167)."""
+    line = 'binding  = "zenoh-1.10.1"'
+    if binding == "zenoh-1.10.1":
+        return policy
+    if policy.count(line) != 1:
+        raise ValueError(f"the policy has no single {line!r} line to swap for {binding}")
+    return policy.replace(line, f'binding  = "{binding}"')
 
 Result = tuple[str, bool, str]
 
@@ -1015,7 +1028,7 @@ def _null(work: str) -> list[Result]:
 
     out: list[Result] = []
     stock = conventions_policy()
-    fork = stock.replace('"zenoh-1.10.1"', '"zm-1.10.2-r1"')
+    fork = _with_binding(stock, "zm-1.10.2-r1")
     if fork == stock:
         return [("the Conventions' policy names the binding zenoh-1.10.1", False, stock[:120])]
     face = f"unixsock-stream/{os.path.join(work, 'face.sock')}"
@@ -1047,7 +1060,7 @@ def _null(work: str) -> list[Result]:
         # "names zenoh's refusal, and asks none of §5's questions of that
         # file. It read no key, so it reports no transport_differs".
         for binding in STOCK:
-            text = stock.replace('"zenoh-1.10.1"', f'"{binding}"')
+            text = _with_binding(stock, binding)
             code, rows, err, lines = _zenctl_face(work, f"stock-{binding}-{key}", text, nulled)
             if left_out:
                 out.append((f"a null {path}, binding {binding}: zenctl check face reports no transport finding",
@@ -1062,7 +1075,7 @@ def _null(work: str) -> list[Result]:
     stringed = json.loads(json.dumps(conf))
     stringed["transport"]["link"]["tx"]["lease"] = "2000"
     code, rows, err, lines = _zenctl_face(work, "stock-string", stock, stringed)
-    code2, rows2, err2, lines2 = _zenctl_face(work, "stock2-string", stock.replace('"zenoh-1.10.1"', '"zenoh-1.10.2"'),
+    code2, rows2, err2, lines2 = _zenctl_face(work, "stock2-string", _with_binding(stock, "zenoh-1.10.2"),
                                               stringed)
     stringed_fork = json.loads(json.dumps(conf_fork))
     stringed_fork["transport"]["link"]["tx"]["lease"] = "2000"
@@ -1086,12 +1099,12 @@ def _null(work: str) -> list[Result]:
     bogus["mode"] = "bogus"
     for binding in STOCK:
         code, rows, err, lines = _zenctl_face(work, f"stock-mode-{binding}",
-                                              stock.replace('"zenoh-1.10.1"', f'"{binding}"'), bogus)
+                                              _with_binding(stock, binding), bogus)
         out.append((f"a file zenoh refuses at none of the eight keys (a mode that is none), binding {binding}: "
                     "zenctl check face names zenoh's refusal, prints no row and ends at exit 2",
                     code == 2 and "zenoh refused the config" in err and lines == 0,
                     f"exit {code}; {lines} lines; {err}"))
-    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", stock.replace('"zenoh-1.10.1"', '"zenoh-1.10.2"')),
+    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", _with_binding(stock, "zenoh-1.10.2")),
                           ("zm-1.10.2-r1", fork)):
         code, rows, err, lines = _zenctl_face(work, f"nojson-{binding}", text, "{ this is not : json5 ")
         out.append((f"a file that is no JSON5, binding {binding}: zenctl check face names its loader's refusal, "
@@ -1176,7 +1189,7 @@ def _peer(work: str) -> list[Result]:
 
     out: list[Result] = []
     stock = conventions_policy()
-    fork = stock.replace('"zenoh-1.10.1"', '"zm-1.10.2-r1"')
+    fork = _with_binding(stock, "zm-1.10.2-r1")
     face = f"unixsock-stream/{os.path.join(work, 'face.sock')}"
 
     def tx(lease: Any, keep_alive: Any) -> dict[str, Any]:
@@ -1188,7 +1201,7 @@ def _peer(work: str) -> list[Result]:
              ("a string lease", tx("2000", 4), ["peer_differs transport.lease_ms"]),
              ("a null keep_alive", tx(2000, None), ["peer_differs transport.keep_alive"])]
     refused_by_zenoh = {"a null lease", "a string lease", "a null keep_alive"}
-    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", stock.replace('"zenoh-1.10.1"', '"zenoh-1.10.2"')),
+    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", _with_binding(stock, "zenoh-1.10.2")),
                           ("zm-1.10.2-r1", fork)):
         conf, _ = near_config(text, work, "tcp/127.0.0.1:0", face)
         for what, peer, want in cases:
@@ -1266,7 +1279,7 @@ def _mode(work: str) -> list[Result]:
 
     out: list[Result] = []
     stock = conventions_policy()
-    fork = stock.replace('"zenoh-1.10.1"', '"zm-1.10.2-r1"')
+    fork = _with_binding(stock, "zm-1.10.2-r1")
     face = f"unixsock-stream/{os.path.join(work, 'face.sock')}"
     warn = ["face_timestamping timestamping"]
     #: (what, the file's mode or ..., its timestamping/enabled or ..., the text's finding, whether the text says)
@@ -1283,7 +1296,7 @@ def _mode(work: str) -> list[Result]:
         ("a router's value off beside a mode name that is none of the three, which the text does not name", ...,
          {"router": False, "relay": True}, [], False),
     ]
-    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", stock.replace('"zenoh-1.10.1"', '"zenoh-1.10.2"')),
+    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", _with_binding(stock, "zenoh-1.10.2")),
                           ("zm-1.10.2-r1", fork)):
         conf, _ = near_config(text, work, "tcp/127.0.0.1:0", face)
         for n, (what, mode, stamping, want, said) in enumerate(shapes):

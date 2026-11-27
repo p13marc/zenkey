@@ -111,7 +111,11 @@ class Relay:
                 c, _ = self.sock.accept()
             except OSError:
                 return
-            u = socket.create_connection(self.upstream)
+            try:
+                u = socket.create_connection(self.upstream)
+            except OSError:
+                c.close()  # the router is gone: refuse this one, keep accepting
+                continue
             self.conns += [c, u]
             threading.Thread(target=self._pump, args=(c, u, None, True), daemon=True).start()
             threading.Thread(target=self._pump, args=(u, c, self.flowing, False), daemon=True).start()
