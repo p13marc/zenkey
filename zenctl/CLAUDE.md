@@ -564,6 +564,23 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `null`, and `time ahead` in an owner heartbeat's table line, never
   `time unknown` and never an instant. `tests/cmd/owner-heartbeat.trycmd`
   reads the capture's fifth row, an owner heartbeat written under the
-  guard (edited from real output). `health`'s clock question still reads
-  health.v1, where the ahead time is `heartbeat_held`: its answers did not
-  move.
+  guard (edited from real output). `health`'s clock question under
+  health.v1 reads the ahead time as `heartbeat_held`: its answers did not
+  move. Under health.v2 (#986's Q2) the last read heartbeat answers it:
+  ahead yes, `ahead`.
+  `health` reads health.v2 beside health.v1 (#986's Q2, text 0.2), each
+  service by the major its descriptor lists, health.v2 where it lists both;
+  across a face by `--iface health.v1|health.v2` (requires
+  `--across-face`, default health.v1). Its words are read by the tables of
+  the revisions an owner's descriptor names: `--contracts` first (an
+  authoring file, a directory, a `.history` root), else retrieved by
+  fingerprint; across a face, `--contracts` alone. A row names its
+  `profile`; a v2 status, check and fault carry `word` (`{number, read,
+  name}`), `since_s`/`at_s` and a fault's `argument`, and the table shows
+  a word as `name (n)`, `(#n)`, `(no word)` or `(a word no table names)`
+  under a `read under health.v2` line. `tests/live_zk2.rs` runs
+  `scenarios-v2.md` §6–§8 (`health_v2_s6_*`, `health_v2_s7_*` with a
+  hand-made `lab/two` whose two snapshots are at two asofs, and
+  `health_v2_s8_*`, three face runs at once, about 240 s) and
+  `health_v2_reads_an_owner_under_a_catalog_by_its_epoch`; `render.rs`
+  pins `health_v2_report`.
