@@ -110,7 +110,12 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   session over a link protocol it is not kept off matches no subject, user
   names and CNs read apart since 0.5); the
   windows of §2.11 when given, and `acl gen --check`'s comparison, which
-  now covers the downsampling items and a subject's link protocols. Its
+  now covers the downsampling items and a subject's link protocols. The
+  plan's warnings ride beside the verdict and never move it (#1173):
+  `cmd::acl::plan_notes` says them on stderr in every format, and the
+  JSON carries them as rows, `face_warning` for each face plan's
+  (`code`, `face`, `at`) and `warning` and `refusal` as `acl gen`'s, never
+  among the notes, which would say them twice. Its
   plans are pinned (`tests/fixtures/acl/`, `ACL_BLESS=1`; every face plan
   passes its own `check face` in both postures) and judged by a live router
   (`tests/acl_live.rs`, `tests/acl_face.rs`, and `tests/link_face.rs`,

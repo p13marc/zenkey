@@ -4125,6 +4125,11 @@ fn applies_to(d: &DownsamplingDoc, link_protocols: &[String]) -> bool {
 /// whatever the policy says (`wait_under_lease`); with `ask.peer`, the far
 /// end's lease and keep-alives against the router's (`peer_differs`); and
 /// with `ask.catalog`, the catalog the far side holds (`catalog_mismatch`).
+///
+/// The plan's warnings ride beside the verdict, as `acl gen --face-policy`
+/// carries them (#1173): its own, each face plan's (`link.v1` §2.3,
+/// `owner_heartbeat_denied` among them) and its refusals. Each is about the
+/// plan, not the block, so none moves the judgement.
 pub fn check_face(
     plan: &AclPlan,
     policy: &FacePolicy,
@@ -4320,6 +4325,13 @@ pub fn check_face(
         transport,
         catalog,
         comparison,
+        warnings: plan.warnings.clone(),
+        face_warnings: plan
+            .faces
+            .iter()
+            .flat_map(|f| f.findings.iter().cloned())
+            .collect(),
+        refusals: plan.refusals.clone(),
         judgement,
     }
 }
@@ -6119,6 +6131,39 @@ link_bps     = 2400
         );
         assert!(codes(&off).is_empty(), "{:?}", codes(&off));
         assert_eq!(to_json5(&on), to_json5(&off), "the option changes no grant");
+        // `check face` over the block the plan wrote carries the warning,
+        // with its face and its service, and passes (#1173).
+        let parsed = link::parse(&v1);
+        let block = to_json5(&on);
+        let c = zenoh::Config::from_json5(&format!("{{\n{block}}}")).unwrap();
+        let acl: AclConfigDoc =
+            serde_json::from_str(&c.get_json("access_control").unwrap()).unwrap();
+        let ds: Vec<DownsamplingDoc> = c
+            .get_json("downsampling")
+            .ok()
+            .and_then(|d| serde_json::from_str(&d).ok())
+            .unwrap_or_default();
+        let checked = check_face(
+            &on,
+            parsed.policy.as_ref().unwrap(),
+            &config(&acl, &ds, None),
+            &FaceAsk::default(),
+            "router.json5",
+        );
+        assert_eq!(
+            checked.face_warnings,
+            [link::Finding::new(
+                link::Code::OwnerHeartbeatDenied,
+                Some("rf"),
+                "b1"
+            )]
+        );
+        assert!(checked.findings.is_empty(), "{:?}", checked.findings);
+        assert_eq!(
+            checked.judgement.conclusive(),
+            Some(false),
+            "a warning moves no verdict"
+        );
         // Under link.v2 the `link` key crosses where the heartbeat does.
         let v2 = format!(
             "profile = \"link.v2\"\nsystem = \"lab\"\nservices = [\"b1\"]\nbinding = \"zenoh-1.10.1\"\n\n\

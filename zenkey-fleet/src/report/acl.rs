@@ -935,6 +935,21 @@ pub struct FaceCheck {
     pub catalog: Option<FaceCatalog>,
     /// The block against the plan, as `acl gen --check` compares them.
     pub comparison: AclCheck,
+    /// The plan's own warnings, [`AclPlan::warnings`], the face policy
+    /// linter's among them (#1173). Each is a word about the plan, never
+    /// about the block: none moves the judgement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<AclWarning>,
+    /// Each face plan's warnings (`link.v1` §2.3), as
+    /// [`FacePlan::findings`] holds them, faces in the plan's order:
+    /// `owner_heartbeat_denied` at its service, `interval_over_horizon` at
+    /// its resource, each with its face (#1173). None moves the judgement.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub face_warnings: Vec<LinkFinding>,
+    /// The principals the plan refused to place, [`AclPlan::refusals`]
+    /// (#1173): left out of the plan, so of the comparison too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refusals: Vec<AclRefusal>,
     pub judgement: Judgement,
 }
 
@@ -1562,6 +1577,9 @@ history   = true
             transport: Vec::new(),
             catalog: None,
             comparison,
+            warnings: Vec::new(),
+            face_warnings: Vec::new(),
+            refusals: Vec::new(),
             judgement: Judgement::Established,
         };
         let v = serde_json::to_value(&check).unwrap();
@@ -1595,7 +1613,52 @@ history   = true
                 },
                 "judgement": { "answer": "established" },
             }),
-            "windows not asked: absent; read through zenoh's loader: absent"
+            "windows not asked: absent; read through zenoh's loader: absent; the plan \
+             warning of nothing and refusing nobody: absent"
+        );
+        // The plan's warnings and refusals (#1173), as `AclPlan` carries
+        // them, beside the verdict.
+        let warned = FaceCheck {
+            warnings: vec![AclWarning {
+                kind: AclWarningKind::FacePolicy,
+                about: Some("radio".into()),
+                text: "no_arq at arq: …".into(),
+                cite: "link.v2 §2.1".into(),
+            }],
+            face_warnings: vec![LinkFinding::new(
+                zenkey_model::link::Code::OwnerHeartbeatDenied,
+                Some("rf"),
+                "b1",
+            )],
+            refusals: vec![AclRefusal {
+                principal: "ghost".into(),
+                reason: "it runs service \"h9/tc\", which the enrollment does not declare".into(),
+                cite: "§11.1".into(),
+            }],
+            ..check.clone()
+        };
+        let v = serde_json::to_value(&warned).unwrap();
+        assert_eq!(
+            (&v["warnings"], &v["face_warnings"], &v["refusals"]),
+            (
+                &json!([{
+                    "kind": "face_policy",
+                    "about": "radio",
+                    "text": "no_arq at arq: …",
+                    "cite": "link.v2 §2.1",
+                }]),
+                &json!([{
+                    "code": "owner_heartbeat_denied",
+                    "severity": "warning",
+                    "face": "rf",
+                    "at": "b1",
+                }]),
+                &json!([{
+                    "principal": "ghost",
+                    "reason": "it runs service \"h9/tc\", which the enrollment does not declare",
+                    "cite": "§11.1",
+                }]),
+            )
         );
         // Read as data (#1044): said, beside the comparison's own.
         let data = FaceCheck {

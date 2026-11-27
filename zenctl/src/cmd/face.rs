@@ -184,6 +184,8 @@ pub async fn run(cli: crate::cli::CheckFaceArgs) -> Result<()> {
         },
         &router.display().to_string(),
     );
+    // The plan's warnings and refusals: said on stderr in every format, and
+    // carried as the report's rows (#1173). None moves the verdict.
     acl::plan_notes(&plan);
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     crate::exit::verdict(&report.judgement)

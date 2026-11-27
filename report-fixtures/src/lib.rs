@@ -3462,6 +3462,9 @@ pub fn face_check() -> FaceCheck {
             ],
             judgement: Judgement::Established,
         },
+        warnings: Vec::new(),
+        face_warnings: Vec::new(),
+        refusals: Vec::new(),
         judgement: Judgement::Established,
     }
 }
