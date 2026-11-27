@@ -984,40 +984,69 @@ class Adoption:
     record: dict[str, Any] | None = None
 
 
-def adopt(kept: list[Kept], evaluates: Any, table: Table, bound: int = CARDINALITY) -> list[Adoption]:
-    """§2.9's four steps, slot by slot in slot order:
-    1. resolved: nothing is put, the slot is free;
-    2. it does not read, or its words do not derive its alert key: nothing;
-    3. firing, under a rule the owner no longer evaluates: put resolved on
-       its slot;
-    4. firing otherwise: adopted, put again on its slot, ``at`` kept.
+@dataclass(frozen=True)
+class Found:
+    """What a restart finds of one kept slot, as §2.9's steps read it: the
+    identity, whether it fires, whether its entry reads, whether its words
+    derive its alert key, and whether the new instance still evaluates its
+    rule."""
 
-    "One identity firing on two slots of the record breaks §2.2. The owner
-    adopts it on the lowest of them, by the steps above, and puts nothing on
-    the others: they are free." "Past a lowered bound, a slot at or above
-    the new bound is neither put nor resolved." "By name, never by index":
-    each put is written by the new table where it names the words, else by
-    words. ``evaluates`` is a predicate on a rule's name, or the set of the
-    names the new instance evaluates."""
-    ev = evaluates if callable(evaluates) else (lambda name, s=set(evaluates): name in s)
-    out: list[Adoption] = []
+    slot: int
+    identity: str | None
+    firing: bool
+    reads: bool
+    derives: bool
+    evaluated: bool
+
+
+def adoption(found: list[Found], bound: int = CARDINALITY) -> dict[int, str]:
+    """§2.9's steps for each slot, in slot order: resolved, free; it does
+    not read or its words do not derive its key, free; then "One identity
+    firing on two slots of the record … The owner adopts it on the lowest of
+    them, by the steps above, and puts nothing on the others: they are
+    free"; "Past a lowered bound, a slot at or above the new bound is
+    neither put nor resolved" (``past_bound``); a rule no longer evaluated,
+    put resolved; else adopted."""
+    out: dict[int, str] = {}
     seen: set[str] = set()
-    for k in sorted(kept, key=lambda x: x.slot):
+    for f in sorted(found, key=lambda x: x.slot):
+        if not f.firing:
+            out[f.slot] = FREE_RESOLVED
+        elif not f.reads or not f.derives or f.identity is None:
+            out[f.slot] = FREE_UNREADABLE
+        elif f.identity in seen:
+            out[f.slot] = FREE_TWICE
+        elif f.slot >= bound:
+            seen.add(f.identity)
+            out[f.slot] = PAST_BOUND
+        else:
+            seen.add(f.identity)
+            out[f.slot] = ADOPT if f.evaluated else PUT_RESOLVED
+    return out
+
+
+def adopt(kept: list[Kept], evaluates: Any, table: Table, bound: int = CARDINALITY) -> list[Adoption]:
+    """:func:`adoption` over an owner's persistent record, and each put's
+    record: "By name, never by index": written by the new table where it
+    names the words, else by words, its ``at`` kept. ``evaluates`` is a
+    predicate on a rule's name, or the set of the names the new instance
+    evaluates."""
+    ev = evaluates if callable(evaluates) else (lambda name, s=set(evaluates): name in s)
+    found = []
+    for k in kept:
         r = k.record
-        if r is not None and r.get("state") == RESOLVED:
-            out.append(Adoption(k.slot, FREE_RESOLVED))
+        reads = r is not None and undecodable_by_key(r) is None
+        found.append(Found(k.slot, k.alert_key, r is not None and r.get("state") == FIRING if r else True, reads,
+                           reads and derives(k), k.rule is not None and ev(k.rule)))
+    acts = adoption(found, bound)
+    out: list[Adoption] = []
+    for k in sorted(kept, key=lambda x: x.slot):
+        act = acts[k.slot]
+        if act not in (ADOPT, PUT_RESOLVED):
+            out.append(Adoption(k.slot, act))
             continue
-        if r is None or undecodable_by_key(r) is not None or not derives(k):
-            out.append(Adoption(k.slot, FREE_UNREADABLE))
-            continue
-        assert k.alert_key is not None and k.rule is not None
-        if k.alert_key in seen:
-            out.append(Adoption(k.slot, FREE_TWICE))
-            continue
-        seen.add(k.alert_key)
-        if k.slot >= bound:
-            out.append(Adoption(k.slot, PAST_BOUND))
-            continue
+        assert k.record is not None and k.rule is not None
+        r = k.record
         w = write_by(table, k.rule, k.labels, None, k.summary, k.category)
         rec = {key: v for key, v in r.items() if key not in ("rule", "labels", "argument", "key")}
         rec.update(w.fields())
@@ -1025,12 +1054,23 @@ def adopt(kept: list[Kept], evaluates: Any, table: Table, bound: int = CARDINALI
             # The record's argument code is kept where the new table's rule
             # declares an argument: the text says only "its at kept".
             rec["argument"] = r.get("argument", NOT_AVAILABLE)
-        if ev(k.rule):
-            out.append(Adoption(k.slot, ADOPT, rec))
-        else:
+        if act == PUT_RESOLVED:
             rec["state"] = RESOLVED
-            out.append(Adoption(k.slot, PUT_RESOLVED, rec))
+        out.append(Adoption(k.slot, act, rec))
     return out
+
+
+def restarted(found: list[Found], bound: int = CARDINALITY) -> Slots:
+    """The new instance's slots after its adoption: "The new instance holds
+    what it put, and nothing else": each adopted alarm firing, each one put
+    resolved."""
+    new = Slots(bound)
+    for slot, act in adoption(found, bound).items():
+        f = next(x for x in found if x.slot == slot)
+        if act in (ADOPT, PUT_RESOLVED):
+            assert f.identity is not None
+            new.held[slot] = Held(f.identity, act == ADOPT)
+    return new
 
 
 def _declares_argument(table: Table, rule: str) -> bool:
@@ -1043,14 +1083,16 @@ def _declares_argument(table: Table, rule: str) -> bool:
 @dataclass(frozen=True)
 class SlotSeen:
     """One slot a reader holds for an identity: its slot, and the run and
-    seq of the put (or snapshot entry) that carried it."""
+    seq of the put (or snapshot entry) that carried it. A run is compared in
+    width and value: "So "00a1" and "000000a1" are two runs" (core §3.3),
+    so it is held as its hex digits, or as a (width, value) pair."""
 
     slot: int
-    run: int
+    run: Any
     seq: int
 
 
-def reader_slot(seen: list[SlotSeen], present_run: int | None) -> int | None:
+def reader_slot(seen: list[SlotSeen], present_run: Any) -> int | None:
     """§2.6 "One identity on two slots": "A reader takes the record under
     the run its owner's present descriptor states (core §3.3). Where no slot
     is under that run, it takes none … Two under that one run break §2.2.
@@ -1064,6 +1106,14 @@ def reader_slot(seen: list[SlotSeen], present_run: int | None) -> int | None:
     if not under:
         return None
     return max(under, key=lambda x: x.seq).slot
+
+
+def doubles(seen: dict[str, list[SlotSeen]], present_run: Any) -> list[str]:
+    """The alert keys two slots of the present run name: §2.6's "Two under
+    that one run break §2.2 … a tool MAY report the break (§5)"."""
+    if present_run is None:
+        return []
+    return sorted(k for k, xs in seen.items() if sum(1 for x in xs if x.run == present_run) > 1)
 
 
 def one_slot_each(slots: dict[int, tuple[str | None, int]], present_run: int | None, established: bool) -> str:

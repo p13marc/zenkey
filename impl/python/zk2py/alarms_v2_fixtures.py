@@ -176,11 +176,66 @@ def keys(path: Path) -> list[Result]:
     return out
 
 
+# -- slots.json (§2.2, §2.6, §2.8, §2.9) ---------------------------------------------------
+
+_ACTION = {a2.FREE_RESOLVED: "free", a2.FREE_UNREADABLE: "free", a2.FREE_TWICE: "free", a2.PAST_BOUND: "left",
+           a2.PUT_RESOLVED: "resolved", a2.ADOPT: "adopted"}
+
+
+def _holds(slots: a2.Slots) -> dict[str, Any]:
+    return {str(s): {"id": h.identity, "state": a2.FIRING if h.firing else a2.RESOLVED}
+            for s, h in sorted(slots.held.items())}
+
+
+def slots(path: Path) -> list[Result]:
+    data = _load(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["cases"]):
+        sl = a2.Slots(c["bound"])
+        got_e, want_e = [], []
+        for e in c["events"]:
+            if "raise" in e:
+                ident = e["raise"]
+                before = sl.slot_of(ident)
+                firing_before = before is not None and sl.held[before].firing
+                r = sl.raise_(ident)
+                if r == a2.REFUSED:
+                    g: Any = {"refused": "bound"}
+                elif firing_before:
+                    g = {"none": "firing"}
+                else:
+                    g = {"put": r, "state": "firing"}
+            elif "resolve" in e:
+                r = sl.resolve(e["resolve"])
+                g = {"none": "not_firing"} if r is None else {"put": r, "state": "resolved"}
+            else:
+                rec, bound = e["restart"]["record"], e["restart"]["bound"]
+                found = [a2.Found(int(k), v["id"], v["state"] == a2.FIRING, v["reads"], v["derives"], v["evaluated"])
+                         for k, v in (rec or {}).items()]
+                g = {str(k): _ACTION[v] for k, v in sorted(a2.adoption(found, bound).items())}
+                sl = a2.restarted(found, bound)
+            got_e.append([g, _holds(sl)] if "holds" in e else [g])
+            want_e.append([e["expect"], e["holds"]] if "holds" in e else [e["expect"]])
+        out.append(_check(f"v2 slots #{i}: {c['note']}", got_e, want_e))
+    for i, v in enumerate(data["views"]):
+        # core §3.3: "So "00a1" and "000000a1" are two runs": a run is its
+        # width and its value, held here as its hex digits.
+        run = v["present_run"]
+        by_key: dict[str, list[a2.SlotSeen]] = {}
+        for h in v["held"]:
+            if h["alert_key"] is not None:
+                by_key.setdefault(h["alert_key"], []).append(a2.SlotSeen(h["slot"], h["run"], h["seq"]))
+        got = {"takes": {k: a2.reader_slot(xs, run) for k, xs in by_key.items()}, "double": a2.doubles(by_key, run)}
+        out.append(_check(f"v2 slots, view #{i}: {v['note']}", got, v["expect"]))
+    return out
+
+
 FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": schema,
     "records.json": records,
     "tables.json": tables,
     "keys.json": keys,
+    "slots.json": slots,
 }
 
 
