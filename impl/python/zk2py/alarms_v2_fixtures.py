@@ -97,9 +97,60 @@ def records(path: Path) -> list[Result]:
     return out
 
 
+# -- tables.json (§2.4, §4) ----------------------------------------------------------------
+
+def _table(tables: dict[str, Any], name: Any) -> a2.Table:
+    """A case's ``table``: a name of ``tables``, null for none, or
+    "differ"."""
+    if name is None:
+        return a2.NO_TABLE
+    if name == a2.DIFFER:
+        return a2.Table(None, True)
+    return a2.Table(tuple(tables[name]))
+
+
+def _declared(d: a2.Declared) -> Any:
+    return {"invalid": d.invalid} if d.invalid is not None else (None if d.rules is None else list(d.rules))
+
+
+def _named(n: a2.Named) -> dict[str, Any]:
+    if n.unnamed is not None:
+        return {"unnamed": n.unnamed}
+    if n.by_words:
+        return {"by_words": n.alert_key}
+    return {"named": {"rule": n.rule, "labels": n.labels, "alert_key": n.alert_key, "summary": n.summary,
+                      "category": n.category, "argument": n.argument}}
+
+
+def tables(path: Path) -> list[Result]:
+    data = _load(path)
+    tabs = data["tables"]
+    out: list[Result] = []
+    for i, c in enumerate(data["declarations"]):
+        got = a2.contract_table(c["uses"], list(c["resources"].values()))
+        out.append(_check(f"v2 tables, declaration #{i}: {c['note']}", _declared(got), c["expect"]))
+    for i, c in enumerate(data["instances"]):
+        held = {fp: a2.Declared(None if t is None else tuple(t)) for fp, t in c["holds"].items()}
+        got = a2.instance_table(c["names"], held)
+        want = c["expect"]
+        out.append(_check(f"v2 tables, instance #{i}: {c['note']}",
+                          a2.DIFFER if got.differ else (None if got.rules is None else list(got.rules)), want))
+    for i, c in enumerate(data["writes"]):
+        w = a2.write_by(_table(tabs, c["table"]), c["rule"], c["labels"], c["argument"])
+        out.append(_check(f"v2 tables, write #{i}: {c['note']}", w.fields(), c["expect"]))
+    for i, c in enumerate(data["reads"]):
+        n = a2.name_record(_table(tabs, c["table"]), c["record"])
+        out.append(_check(f"v2 tables, read #{i}: {c['note']}", _named(n), c["expect"]))
+    for i, c in enumerate(data["growth"]):
+        out.append(_check(f"v2 tables, growth #{i}: {c['note']}", a2.growth(tabs[c["old"]], tabs[c["new"]]),
+                          c["expect"]))
+    return out
+
+
 FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": schema,
     "records.json": records,
+    "tables.json": tables,
 }
 
 
