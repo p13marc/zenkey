@@ -1462,3 +1462,172 @@ class Notifier:
         firing = rd.held["state"] == FIRING
         out += self._tell(ref, un, "yes" if firing else "no", rd.held["severity"] if firing else None, st.put)
         return out
+
+
+# -- §2.7 and §3, confirmation by the heartbeat, and a snapshot's page -------------------------
+
+ALARMS_RESOURCE = "state/alarms/{slot}"
+
+
+@lru_cache(maxsize=1)
+def standard():
+    """The standard contract, loaded."""
+    from .contract import load_contract
+
+    return load_contract(CONTRACT)
+
+
+def heartbeat_layout(canonical: dict[str, Any] | None = None, fingerprint: str | None = None) -> Any:
+    """The heartbeat's layout for revision 2.0 (``freshness.v2`` §2.4, core
+    §7.5): one section, ``alarms/{slot}``, the words having no horizon; tag
+    7. A copy with another ``freshness.ttl_s`` is handed in whole."""
+    from . import heartbeat
+
+    k = standard()
+    return heartbeat.layout_of(canonical or k.canonical, fingerprint or k.fingerprint)
+
+
+@dataclass
+class SlotHeld:
+    """What a reader's view holds of one slot: the record's JSON reading,
+    its put's in-band stamp, when it was taken (ns), and its last heartbeat
+    confirmation since (ns), or None."""
+
+    record: dict[str, Any]
+    width: int
+    run: int
+    seq: int
+    at_ns: int
+    confirmed_ns: int | None = None
+
+
+class OwnerAlarms:
+    """One reader's view of one owner's alarms, read against its heartbeats
+    (§2.7): "Its heartbeat carries a digest, a live count of 9 bits, and one
+    bit or one rank for each live member (core §7.5, ``freshness.v2``
+    §2.4)." "Neither a count nor a bit is a state": the record says it.
+    "Ranks follow key order, in bytes: slot 10 ranks before slot 2 (core
+    §7.5). A rank is a place among the live members, never a slot."
+
+    The heartbeat is read by :class:`zk2py.freshness_v2.View`, over the
+    slots' keys under ``system``/``service``."""
+
+    def __init__(self, system: str, service: str, layout: Any = None, ttl_s: int = TTL_S) -> None:
+        from . import freshness_v2 as f2
+
+        self.system, self.service = system, service
+        self.layout = layout or heartbeat_layout()
+        self.ttl_s = ttl_s
+        self.view = f2.View(self.layout, [ALARMS_RESOURCE], f"{system}/{service}")
+        self.slots: dict[int, SlotHeld] = {}
+
+    def key(self, slot: int) -> str:
+        k = slot_key(self.system, self.service, slot)
+        assert k is not None
+        return k
+
+    def put(self, slot: int, record: dict[str, Any], width: int, run: int, seq: int, at_ns: int) -> bool:
+        """A put heard on ``alarms/<slot>``; False where the view did not
+        take it (an older put of one run)."""
+        from . import zk2c
+
+        if not self.view.mutate(self.key(slot), zk2c.InBand(width, run, seq), at_ns, True):
+            return False
+        self.slots[slot] = SlotHeld(dict(record), width, run, seq, at_ns)
+        return True
+
+    def heartbeat(self, tag: int, width: int, run: int, seq: int, body: bytes, at_ns: int) -> dict[str, Any]:
+        """One heartbeat read over the view, in ``freshness.v2`` §2.5's steps:
+        what it says (its live count, the digest in step or not), the view's
+        count of firing records beside it, and the slots it confirmed, by
+        rank."""
+        from . import heartbeat, zk2c
+
+        got = self.view.heartbeat(tag, zk2c.InBand(width, run, seq), body, at_ns)
+        out: dict[str, Any] = {"firing": self.firing_count(), "held": len(self.slots)}
+        try:
+            value = heartbeat.read(self.layout, body)
+            sec = value["sections"].get(ALARMS_RESOURCE)
+            out["live"] = None if sec is None else sec["live"]
+        except heartbeat.Refused as e:
+            out["live"] = None
+            out["refused"] = e.token
+        if "read" not in got:
+            out["read"] = got
+            out["confirmed"] = []
+            return out
+        sec_r = got["read"]["sections"][ALARMS_RESOURCE]
+        if isinstance(sec_r, dict):
+            confirmed = [self._slot(k) for k in sec_r["confirmed"]]
+            for s in confirmed:
+                self.slots[s].confirmed_ns = at_ns
+            out["in_step"] = True
+            out["confirmed"] = confirmed
+        else:
+            out["in_step"] = False
+            out["section"] = sec_r
+            out["confirmed"] = []
+        return out
+
+    def _slot(self, key: str) -> int:
+        s = slot_of(key)
+        assert s is not None
+        return s["slot"]
+
+    def firing_count(self) -> int:
+        return sum(1 for h in self.slots.values() if h.record.get("state") == FIRING)
+
+    def ranks(self) -> list[int]:
+        """The live slots in rank order: their keys' byte order."""
+        return [self._slot(k) for k in self.view.live_keys(self.layout.collection(ALARMS_RESOURCE))]
+
+    def answer(self, slot: int, now_ns: int) -> dict[str, str]:
+        """"Is this alarm firing?" of one slot, by its record and its age
+        alone (§2.7, §2.14 steps 5 and 6): a resolved record **no**,
+        ``resolved``, "whatever its age"; a firing one **yes**, ``firing``,
+        within 900 s of its last confirmation (its put, or the last
+        heartbeat that vouched for it), else **unobservable**, ``stale``:
+        "neither firing nor resolved"."""
+        h = self.slots.get(slot)
+        if h is None:
+            return {"answer": "unobservable", "reason": "not_read"}
+        if h.record.get("state") == RESOLVED:
+            return {"answer": "no", "reason": RESOLVED}
+        last = max(h.at_ns, h.confirmed_ns or h.at_ns)
+        if now_ns - last <= self.ttl_s * 1_000_000_000:
+            return {"answer": "yes", "reason": FIRING}
+        return {"answer": "unobservable", "reason": "stale"}
+
+
+def read_page(data: bytes, epoch: int | None = None) -> dict[str, Any]:
+    """A snapshot's page of the alarms or the words (§3: "In a snapshot the
+    alarms are collection 0 and the words collection 1 … A member's id is
+    its slot"), read entry by entry: each live entry's slot, its stamp, its
+    confirmation and its record read as §2.4 says (or its words as §2.4
+    reads them), and each tombstone."""
+    from . import snapshot
+
+    page = snapshot.read_page(data)
+    out: dict[str, Any] = {"run_width": page["run_width"], "run": page["run"], "asof": page["asof"],
+                           "index": page["index"], "more": page["more"], "coll": page["coll"],
+                           "time": page["time"], "live": [], "tombs": []}
+    for e in page["live"]:
+        slot = parse_slot_chunk(e["id"])
+        rec = bytes.fromhex(e["record"])
+        entry: dict[str, Any] = {"id": e["id"], "slot": slot, "seq": e["seq"], "confirmation": e["confirmation"]}
+        if e.get("run") is not None:
+            entry["run_width"], entry["run"] = e["run_width"], e["run"]
+        if "conf" in e:
+            entry["conf"] = e["conf"]
+        if page["coll"] == COLLECTION[ALARMS]:
+            r = read(page["tag"], rec, epoch)
+            entry["record"] = r.value if r.reads else {"undecodable": r.undecodable}
+        else:
+            entry["words"] = read_words(rec)
+        out["live"].append(entry)
+    for e in page["tombs"]:
+        t = {"id": e["id"], "slot": parse_slot_chunk(e["id"]), "seq": e["seq"]}
+        if e.get("run") is not None:
+            t["run_width"], t["run"] = e["run_width"], e["run"]
+        out["tombs"].append(t)
+    return out
