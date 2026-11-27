@@ -110,11 +110,12 @@ pub struct Cli {
     pub face: Option<String>,
 
     /// The zenoh the deployment's routers run, by its `link.v2` name
-    /// (§2.4): `zenoh-1.10.1` or `zm-1.10.2-r1` (#1011). A budget badge and
-    /// the Workbench's arbitration view read by its defaults (`link.v2`
-    /// §2.19): how long this window may stall before it counts a loss
-    /// (zm-1.10.2-r1 waits 10 s before it closes a transport, zenoh 1.10.1
-    /// 5 s), and the lease an owner stays present past a window. Omitted,
+    /// (§2.4): `zenoh-1.10.1`, `zenoh-1.10.2` or `zm-1.10.2-r1` (#1011). A
+    /// budget badge and the Workbench's arbitration view read by its
+    /// defaults (`link.v2` §2.19): how long this window may stall before it
+    /// counts a loss (zm-1.10.2-r1 waits 10 s before it closes a transport,
+    /// stock zenoh, 1.10.1 and 1.10.2, 5 s), and the lease an owner stays
+    /// present past a window. Omitted,
     /// zenoh 1.10.1's. No routers' face policy is read: `--face-policy` is
     /// the face the owners sit across.
     #[arg(long, value_name = "NAME")]
@@ -1174,11 +1175,14 @@ mod tests {
             parse(&["--binding", "zenoh-1.10.1"]).unwrap().routers(),
             Routers::default()
         );
+        let next = parse(&["--binding", "zenoh-1.10.2"]).unwrap();
+        assert_eq!(next.binding, Binding::Zenoh1_10_2);
+        assert_eq!(next.routers(), Routers::default(), "1.10.1's defaults");
         let fork = parse(&["--binding", "zm-1.10.2-r1"]).unwrap();
         assert_eq!(fork.binding, Binding::Zm1_10_2R1);
         assert_eq!(fork.routers().wait_before_close, Duration::from_secs(10));
         assert_eq!(fork.routers().stall_bound(), Duration::from_millis(7_500));
         assert_eq!(stock.routers().stall_bound(), Duration::from_secs(5));
-        assert!(parse(&["--binding", "zenoh-1.10.2"]).is_err());
+        assert!(parse(&["--binding", "zenoh-1.10.0"]).is_err());
     }
 }

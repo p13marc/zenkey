@@ -70,11 +70,12 @@ pub struct Config {
     #[serde(default)]
     pub clocks_synced: bool,
     /// The zenoh the deployment's routers run, by its `link.v2` name (§2.4):
-    /// `"zenoh-1.10.1"` or `"zm-1.10.2-r1"`. The alarm rules (`alerts`,
-    /// `alert-firing`) read by its defaults (`link.v2` §2.19; #1011): how
-    /// long a reader may stall before it counts a loss, and how long past
-    /// a window its owners are watched ([`Config::routers`]). zm-1.10.2-r1
-    /// waits 10 s before it closes a transport, zenoh 1.10.1 5 s. Absent:
+    /// `"zenoh-1.10.1"`, `"zenoh-1.10.2"` or `"zm-1.10.2-r1"`. The alarm
+    /// rules (`alerts`, `alert-firing`) read by its defaults (`link.v2`
+    /// §2.19; #1011): how long a reader may stall before it counts a loss,
+    /// and how long past a window its owners are watched
+    /// ([`Config::routers`]). zm-1.10.2-r1 waits 10 s before it closes a
+    /// transport, stock zenoh, 1.10.1 and 1.10.2, 5 s. Absent:
     /// zenoh 1.10.1's. Any other name is refused at the parse. No routers'
     /// face policy is read, so the lease and the keep-alives are the
     /// binding's defaults.
@@ -1225,6 +1226,9 @@ mod tests {
         let stock = with(r#""zenoh-1.10.1""#).unwrap();
         assert_eq!(stock.binding, Some(Binding::Zenoh1_10_1));
         assert_eq!(stock.routers(), Routers::default());
+        let next = with(r#""zenoh-1.10.2""#).unwrap();
+        assert_eq!(next.binding, Some(Binding::Zenoh1_10_2));
+        assert_eq!(next.routers(), Routers::default(), "1.10.1's defaults");
         let fork = with(r#""zm-1.10.2-r1""#).unwrap();
         assert_eq!(fork.binding, Some(Binding::Zm1_10_2R1));
         assert_eq!(fork.routers(), Routers::of_binding(Binding::Zm1_10_2R1));
@@ -1233,9 +1237,11 @@ mod tests {
             std::time::Duration::from_secs(10)
         );
         assert!(check(&fork).is_empty(), "{:?}", check(&fork));
-        let e = with(r#""zenoh-1.10.2""#).unwrap_err().to_string();
+        let e = with(r#""zenoh-1.10.0""#).unwrap_err().to_string();
         assert!(
-            e.contains("zenoh-1.10.2") && e.contains("`zm-1.10.2-r1`"),
+            e.contains("zenoh-1.10.0")
+                && e.contains("`zenoh-1.10.2`")
+                && e.contains("`zm-1.10.2-r1`"),
             "{e}"
         );
         assert!(with("true").is_err(), "a name, never a switch");

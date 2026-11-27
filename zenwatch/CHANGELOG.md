@@ -7,6 +7,15 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — zenoh 1.10.2, and `binding: "zenoh-1.10.2"` (#1165)
+
+Core 0.114; `link.v2` 0.25 §2.4, §2.19. No rule changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| built on zenoh 1.10.1 | built on zenoh 1.10.2 (the lock) | a `bus.zenoh_config` file reads as before: zenoh's loader is 1.10.1's |
+| `binding: "zenoh-1.10.2"`: refused at the parse, exit 2 | taken: stock 1.10.2, its readers by 1.10.1's defaults, a 5 s `wait_before_close` | any other name is refused at the parse, as before |
+
 ## Unreleased (`main`, zk2) — an owner heartbeat's key across a face (#1110)
 
 Observer 0.34 §7.5. zenwatch reads no heartbeat's bytes itself: its

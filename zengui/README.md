@@ -58,14 +58,15 @@ is what the face's plan lets cross, every session runs the face's
 wildcard address, a policy the linter refuses and a face it does not name
 are refused at launch. The strip's scope reads "across a face".
 
-**The routers' zenoh** (`--binding zenoh-1.10.1`, the default, or
-`zm-1.10.2-r1`; `link.v2` §2.4): a budget badge and the Workbench's
-arbitration view read by its defaults (`link.v2` §2.19, observer §5.2),
-how long this window may stall before it counts a loss and the lease an
-owner stays present past a window. zm-1.10.2-r1 waits 10 s before it closes
-a transport where zenoh 1.10.1 waits 5 s, so a window on it may stall 7.5 s,
-not 5 s. zengui reads no routers' face policy: `--face-policy` is the face
-the owners sit across, and the bound is the binding's defaults either way.
+**The routers' zenoh** (`--binding zenoh-1.10.1`, the default,
+`zenoh-1.10.2` or `zm-1.10.2-r1`; `link.v2` §2.4): a budget badge and the
+Workbench's arbitration view read by its defaults (`link.v2` §2.19,
+observer §5.2), how long this window may stall before it counts a loss and
+the lease an owner stays present past a window. zm-1.10.2-r1 waits 10 s
+before it closes a transport where stock zenoh, 1.10.1 and 1.10.2, waits
+5 s, so a window on it may stall 7.5 s, not 5 s. zengui reads no routers'
+face policy: `--face-policy` is the face the owners sit across, and the
+bound is the binding's defaults either way.
 
 ## The lens and presence
 
