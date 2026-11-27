@@ -376,6 +376,34 @@ fn section(b: &common::Beat) -> (u64, Vec<u64>) {
     )
 }
 
+/// The first heartbeat after `from` that `f` accepts, waited for up to
+/// `within`, the heartbeat's bound: 450 s at the standard contract, where
+/// [`eventually`]'s 20 s would give up.
+async fn beat_within(
+    beats: &Beats,
+    from: Instant,
+    within: Duration,
+    f: impl Fn(&common::Beat) -> bool,
+) -> common::Beat {
+    let deadline = from + within + JITTER;
+    loop {
+        let found = beats
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|b| b.at > from && f(b))
+            .cloned();
+        if let Some(b) = found {
+            return b;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no such heartbeat within {within:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// What a GET answered: its replies as they arrived.
 struct Got {
     samples: Vec<Sample>,
@@ -1118,19 +1146,7 @@ async fn resolve_one_put(imp: Implementation, bound: Duration) {
 
     // 4. The owner's next heartbeat: a live count of 1, slot 0's bit
     // clear, in step with S's view. S judges A resolved, never stale.
-    let from = Instant::now();
-    eventually("the next heartbeat", || async {
-        beats.lock().unwrap().iter().any(|b| b.at > from)
-    })
-    .await;
-    let beat = beats
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|b| b.at > from)
-        .cloned()
-        .unwrap();
-    assert!(beat.at - from <= bound + JITTER);
+    let beat = beat_within(&beats, Instant::now(), bound, |_| true).await;
     assert_eq!(section(&beat), (1, vec![]), "live, its bit clear");
     let (firing, _) = judge_s(&g, &sub, &snapshot(&s.log), 0, presence);
     assert_eq!(pair(firing), (Answer::No, Reason::Resolved));
@@ -1480,7 +1496,7 @@ async fn s5_a_restart_mid_incident() {
 /// §6 on `imp`: the owner stops confirming A and keeps its tokens; each
 /// heartbeat counts A and B's resolved record live with both bits clear;
 /// past the horizon A is stale and B still resolved.
-async fn stops_confirming(imp: Implementation, quiet: Duration) {
+async fn stops_confirming(imp: Implementation, quiet: Duration, bound: Duration) {
     let dir = tempfile::tempdir().unwrap();
     let (_r1, ep) = router(None).await;
     let os = client(&ep).await;
@@ -1507,12 +1523,8 @@ async fn stops_confirming(imp: Implementation, quiet: Duration) {
     a.resolve(B_KEY).await.unwrap().unwrap();
     at_least(&s.log, 3).await;
     // A vouched for by a heartbeat first.
-    eventually("a heartbeat vouching for A", || async {
-        beats
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|b| section(b) == (2, vec![0]))
+    beat_within(&beats, Instant::now(), bound, |b| {
+        section(b) == (2, vec![0])
     })
     .await;
 
@@ -1521,18 +1533,15 @@ async fn stops_confirming(imp: Implementation, quiet: Duration) {
     assert!(a.set_confirming(A_KEY, false).await);
     assert_eq!(a.is_confirming(A_KEY).await, Some(false));
     let cleared = Instant::now();
-    let last_vouched = eventually_some("a heartbeat with both bits clear", || async {
-        let beats = beats.lock().unwrap();
-        let first_clear = beats
-            .iter()
-            .position(|b| b.at > cleared && section(b) == (2, vec![]))?;
-        beats[..first_clear]
-            .iter()
-            .rev()
-            .find(|b| section(b) == (2, vec![0]))
-            .map(|b| b.at)
-    })
-    .await;
+    let first_clear = beat_within(&beats, cleared, bound, |b| section(b) == (2, vec![])).await;
+    let last_vouched = beats
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|b| b.at < first_clear.at && section(b) == (2, vec![0]))
+        .map(|b| b.at)
+        .next_back()
+        .expect("a heartbeat vouching for A before the first clear one");
 
     // 2. `quiet` after the last heartbeat that vouched for A.
     tokio::time::sleep_until((last_vouched + quiet).into()).await;
@@ -1581,7 +1590,7 @@ async fn stops_confirming(imp: Implementation, quiet: Duration) {
 /// for A.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s6_a_hung_owner_goes_stale() {
-    stops_confirming(fast(4), Duration::from_secs(5)).await;
+    stops_confirming(fast(4), Duration::from_secs(5), Duration::from_secs(2)).await;
 }
 
 /// §6 at the standard contract: 905 s after the last heartbeat that
@@ -1589,7 +1598,12 @@ async fn s6_a_hung_owner_goes_stale() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "slow tier: §6 waits 905 s at the contract's 900 s horizon"]
 async fn s6_a_hung_owner_goes_stale_at_900_s() {
-    stops_confirming(av2::implementation(), Duration::from_secs(905)).await;
+    stops_confirming(
+        av2::implementation(),
+        Duration::from_secs(905),
+        Duration::from_secs(450),
+    )
+    .await;
 }
 
 /// §7: at the descriptor's bound of 2, a raise with both slots firing is
