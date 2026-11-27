@@ -1051,13 +1051,13 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   one `no_entry` answer no run, which is no verdict only because that
   target holds nothing.
 
-**zk2py rounds 116 to 123, answered (#609, #986, #1165).** Core 0.115
+**zk2py rounds 116 to 123, answered (#609, #986, #1165).** Core 0.116
 (298 rules: §4.3's new deployment MUST NOT, a run's record that was lost
 or restored, F-578; "by then" is the answer's arrival, `seed/held.json`
 case 29; a tool's raw GET body is its user's, observer 0.36 §4.1;
 Appendix B's conditional-read bytes itemized; §8.5's QUIC exception on
-1.10.1; §0's "1.10.1" is zenoh's own crates; S1's alarms.v2 drafted a
-0.115 too, and whichever merges second renumbers). `desired.v2` 0.2: a
+1.10.1; §0's "1.10.1" is zenoh's own crates; drafted as 0.115, it took
+0.116 behind alarms.v2's S1). `desired.v2` 0.2: a
 deployment MUST NOT bind a pre-v2 target to a v2 author through a router
 that timestamps (§2.18, scenarios §16, F-588); a target given an author
 of a major it cannot report MUST refuse to start; a failed revert keeps

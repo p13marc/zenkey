@@ -11,8 +11,8 @@ headed `desired.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 
 zk2py's rounds 118, 119 and 121 read 0.1 cold, then ran it against the
 reference (F-576 to F-592, F-603 to F-606). This version answers each.
-F-578's rule is core 0.115's, and its scenario's step is here. F-587 is
-core 0.115's and `link.v2` 0.26's, and F-591 `link.v2` 0.26's. §9's
+F-578's rule is core 0.116's, and its scenario's step is here. F-587 is
+core 0.116's and `link.v2` 0.26's, and F-591 `link.v2` 0.26's. §9's
 step 4 was also the reference's J4 finding: its test runs both readings.
 
 **One rule changed, for a mixed deployment (F-588, a contradiction).**
@@ -110,7 +110,7 @@ intent.**
   - §12 names its contract: `configs.v1` at minor 2 (F-606).
   - §13's v1 document is 40 bytes, as its author puts it (F-584).
     Appendix B's 44-byte document is W2's.
-  - §6's author starts with no run's record, by core 0.115's rule
+  - §6's author starts with no run's record, by core 0.116's rule
     (F-578). That rule binds the deployment, which knows what it lost.
   - §16's run D is a target that learns its author's major after its
     start.

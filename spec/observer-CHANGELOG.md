@@ -17,7 +17,7 @@ scenarios; this text carries none: its evidence is the core's
 
 zk2py's round 116 found a tool's raw GET read two ways (F-572), and its
 round 122 found §0 naming a release where it meant the core's appendix
-(F-607). Core 0.115 answers the core's half of each
+(F-607). Core 0.116 answers the core's half of each
 ([`CHANGELOG.md`](CHANGELOG.md)).
 
 **Answered: F-572, an ambiguity. A tool whose GET carries a body its user

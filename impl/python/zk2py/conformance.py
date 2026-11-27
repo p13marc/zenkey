@@ -5547,13 +5547,17 @@ def _round124_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out: list[tuple[str, Any, Any]] = []
     at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
     v2_at = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", v2t)
-    out.append(("core 0.115 or later, observer still 0.35, alarms.v1 still 0.14, freshness.v2 0.12, and alarms.v2 "
-                "at text 0.1 or later, experimental, written against core 0.115, using freshness.v2 0.12 and "
-                "restating alarms.v1 0.14: each header says so, and each changelog has its entry",
+    obs_at = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", obs)
+    f2_at = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", f2)
+    out.append(("core 0.115 or later, observer 0.35 or later (0.36, round 125), alarms.v1 still 0.14, freshness.v2 "
+                "0.12 or later (0.13, round 125), and alarms.v2 at text 0.1 or later, experimental, written against "
+                "core 0.115, using freshness.v2 0.12 and restating alarms.v1 0.14: each header says so, and each "
+                "changelog has its entry",
                 [at is not None and _at_least(at.group(1), "0.115"),
                  v2_at is not None and _at_least(v2_at.group(1), "0.1")]
-                + missing(obs, "| **Text version** | 0.35 (") + missing(v1t, "| **Text version** | 0.14 (")
-                + missing(f2, "| **Text version** | 0.12 (")
+                + ([] if obs_at is not None and _at_least(obs_at.group(1), "0.35") else ["observer below 0.35"])
+                + missing(v1t, "| **Text version** | 0.14 (")
+                + ([] if f2_at is not None and _at_least(f2_at.group(1), "0.12") else ["freshness.v2 below 0.12"])
                 + missing(v2t, "| **Status** | experimental |",
                           "| **Written against** | core 0.115 ([`../../core.md`](../../core.md)) |",
                           "[`freshness.v2`](../freshness/v2.md), text 0.12",

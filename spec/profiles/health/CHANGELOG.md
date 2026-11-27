@@ -12,7 +12,7 @@ headed `health.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 zk2py's round 120 read 0.1 cold, and its round 123 ran it against the
 reference (F-593 to F-602, F-610, F-611). 0.2 resolved F-595, F-596 and
 F-602. This version answers the rest. F-597 is core §2.6's, answered in
-core 0.115.
+core 0.116.
 
 **Decided where the two implementations differ.**
 - **A record whose time no catalog in hand dates (F-610).** Core §8.6

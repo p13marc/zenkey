@@ -18,7 +18,7 @@ answered F-591's first half.
   unless its template's first chunk is a parameter" now adds: "or its
   contract uses `redundancy.v1`". Every state of such a contract is per
   key, by §2.11's own list and core §4.2's. Both implementations' plans
-  already floored it. Core 0.115 says the same of §4.3's table.
+  already floored it. Core 0.116 says the same of §4.3's table.
 - **§2.19, "As data" (F-575).** A value per mode is read at the mode
   read alone. A value zenoh refuses at another mode plays no part, and
   neither does a member that names no mode. Both tools read so.
