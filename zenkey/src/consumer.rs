@@ -342,6 +342,9 @@ pub struct Consumer {
     /// How long a re-read of a diverged collection waits for its replies
     /// (`freshness.v2` §2.5; core §8.1: timeouts are the caller's).
     reread_timeout: Duration,
+    /// How long a read of an owner's descriptor waits for its replies, to
+    /// learn the catalog it names (core §8.6, §8.1).
+    catalog_timeout: Duration,
     /// The deployment epoch its typed reads count packed `time` fields
     /// from, in seconds (core §7.6, §8.6): its service's catalog's, else 0.
     epoch: i64,
@@ -357,6 +360,11 @@ pub struct Consumer {
 /// How long a re-read waits unless [`Consumer::with_reread_timeout`] says
 /// otherwise: a GET's timeout, the caller's choice (core §8.1).
 pub const REREAD_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a read of an owner's descriptor, for the catalog it names,
+/// waits unless [`Consumer::with_owner_catalog_timeout`] says otherwise: a
+/// GET's timeout, the caller's choice (core §8.1).
+pub const OWNER_CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A live subscription through a role. Dropping it undeclares it, and
 /// stops its `timing.v1` engine.
@@ -408,9 +416,11 @@ struct Seen {
     /// Reads of its owners' descriptors made for that
     /// ([`crate::answer::owner_catalog`]).
     catalog_reads: AtomicU64,
-    /// Owner heartbeats read with no catalog because [`OWNER_QUEUE`]
-    /// waited already.
+    /// Owner heartbeats heard past [`OWNER_QUEUE`], their owner's catalog
+    /// not known: each read in its turn with none.
     owner_unqueued: AtomicU64,
+    /// Owner heartbeats dropped with [`OWNER_HELD`] already held.
+    owner_dropped: AtomicU64,
     /// The groups read, waiting for the callback.
     outbox: Mutex<Outbox>,
     /// The providers whose collection a re-read is running for, and the
@@ -485,11 +495,24 @@ pub struct OwnerGroup {
 }
 
 /// How many owner heartbeats of one subscription may wait for an owner's
-/// descriptor to be read. Past it one is read at once with no catalog,
-/// every group `unknown_catalog`, and counted
-/// ([`Subscription::owner_heartbeats_unqueued`]): never fresh, and the
-/// queue stays bounded behind a read that is slow to answer.
+/// descriptor to be read (`freshness.v2` §2.5, "What it holds is
+/// bounded"). Past it a put waits for no read: it is read in its turn,
+/// behind those held, through the catalog known for its run when it
+/// arrived, or with none, every group `unknown_catalog`, and counted
+/// ([`Subscription::owner_heartbeats_unqueued`]). So it is never fresh
+/// for want of a read, and never read ahead of the puts held on its key,
+/// whose sequence it would move (#1146).
 pub const OWNER_QUEUE: usize = 64;
+
+/// How many owner heartbeats of one subscription may be held at all while
+/// a descriptor's read runs: [`OWNER_QUEUE`] waiting for it, and past
+/// them those decided without it, each holding its body until its turn.
+/// One more is dropped, never read and counted
+/// ([`Subscription::owner_heartbeats_dropped`]), so what a slow read
+/// holds stays bounded whatever the put rate and the caller's timeout
+/// (review-bot on #1169). Its key then reads a gap at its next put read:
+/// the members it would have confirmed go stale, never fresh.
+pub const OWNER_HELD: usize = 4 * OWNER_QUEUE;
 
 /// How long a read of an owner's descriptor that failed stands for its
 /// run before the next one is made: its owner heartbeats meanwhile read no
@@ -632,6 +655,7 @@ impl Consumer {
             declaring: None,
             refused: None,
             reread_timeout: REREAD_TIMEOUT,
+            catalog_timeout: OWNER_CATALOG_TIMEOUT,
             epoch: zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
             far: None,
             catalogs: Arc::default(),
@@ -642,9 +666,11 @@ impl Consumer {
     /// §2.21), as `far` states it:
     /// - **every GET waits at least the face's `reply_timeout_ms`**: S4's
     ///   GET and a seed ([`Consumer::get`], [`Consumer::get_answer`]), an
-    ///   event's replay, and a re-read of a diverged collection. A reply
-    ///   later than the query's timeout is dropped by the router (core
-    ///   Appendix B);
+    ///   event's replay, a re-read of a diverged collection, and the read
+    ///   of an owner's descriptor for the catalog it names, where it is
+    ///   read ([`Consumer::with_owner_catalog_timeout`]). A reply later
+    ///   than the query's timeout is dropped by the router (core Appendix
+    ///   B);
     /// - **where the medium repairs no lost frame** (`arq = false`), each
     ///   subscription with a horizon is declared again after two horizons
     ///   of silence while the session's transport stayed up
@@ -658,6 +684,7 @@ impl Consumer {
     #[must_use]
     pub fn across(mut self, far: &zenkey_model::link::FarSide) -> Self {
         self.reread_timeout = far.at_least(self.reread_timeout);
+        self.catalog_timeout = far.at_least(self.catalog_timeout);
         self.far = Some(far.clone());
         self
     }
@@ -695,6 +722,20 @@ impl Consumer {
         self
     }
 
+    /// How long a subscription's read of an owner's descriptor waits for
+    /// its replies, to learn the catalog the owner names under a run (core
+    /// §8.6; `freshness.v2` §2.5): across a slow hop, at least the
+    /// descriptor's round trip, which took 5.7 s over RF (#1146).
+    /// [`OWNER_CATALOG_TIMEOUT`] unless set, and at least the face's reply
+    /// timeout across one ([`Consumer::across`]). The owner heartbeats
+    /// heard meanwhile wait for it, at most [`OWNER_QUEUE`] of them, and
+    /// a read that fails names no catalog for [`OWNER_CATALOG_RETRY`].
+    #[must_use]
+    pub fn with_owner_catalog_timeout(mut self, timeout: Duration) -> Self {
+        self.catalog_timeout = self.reply_wait(timeout);
+        self
+    }
+
     /// Reads packed records' `time` fields under `epoch`, the deployment
     /// epoch in seconds (core §7.6, §8.6). A service's consumer reads under
     /// its catalog's ([`crate::ServiceBuilder::catalog`]), the deployment's
@@ -719,7 +760,9 @@ impl Consumer {
     /// heartbeat's group is read through the one its owner's descriptor
     /// names among them, or a successor of it (core §7.5; `freshness.v2`
     /// §2.5). Where no descriptor reaches this consumer, as across a
-    /// constrained face, the last one given is the deployment's word. A
+    /// constrained face, the last one given is the deployment's word; with
+    /// presence unavailable ([`Consumer::with_presence`]) no descriptor is
+    /// read, and it is the word at once. A
     /// subscription made outside a tokio runtime reads no descriptor, so
     /// it reads no group: an owner that names no catalog writes no index,
     /// and its own catalog would be a guess (core §8.6). With none given,
@@ -764,7 +807,11 @@ impl Consumer {
     }
 
     /// Marks presence unobservable for this role's providers (R7): set by a
-    /// deployment whose providers sit across a constrained face.
+    /// deployment whose providers sit across a constrained face. Its
+    /// subscriptions then read no descriptor for an owner heartbeat's
+    /// catalog, since none crosses (core §8.5, §8.6): each group is read
+    /// at once through the last catalog given, the deployment's word
+    /// ([`Consumer::with_catalogs`]; `freshness.v2` §2.5).
     #[must_use]
     pub fn with_presence(mut self, presence: Presence) -> Self {
         self.presence = presence;
@@ -1447,10 +1494,16 @@ impl Consumer {
     /// heartbeats, and a subscriber cannot tell which before it hears one.
     /// Each owner heartbeat is read through the catalog its owner names
     /// ([`crate::answer::owner_catalog`], read once a run on a task of the
-    /// subscription's, the owner heartbeats heard meanwhile kept in
-    /// order, at most [`OWNER_QUEUE`] of them), and each group read for
-    /// this interface handed to `on_confirm` as one heartbeat, under no
-    /// lock of the subscription's.
+    /// subscription's within [`Consumer::with_owner_catalog_timeout`]'s
+    /// timeout, the owner heartbeats heard meanwhile kept in order, at
+    /// most [`OWNER_QUEUE`] of them waiting for it and those past it read
+    /// in their turn), and each group read for this interface handed to
+    /// `on_confirm` as one heartbeat, under no lock of the subscription's.
+    ///
+    /// **With presence unavailable** ([`Consumer::with_presence`]) no
+    /// descriptor crosses to it (core §8.5): each owner heartbeat is read
+    /// at once through the last catalog it holds, the deployment's word
+    /// (§8.6, R7), and no descriptor is read (#1146).
     ///
     /// **A consumer that holds no catalog declares none.** It could read no
     /// group (core §8.6), so the key would tell it nothing it can use: a
@@ -1490,13 +1543,18 @@ impl Consumer {
             class,
         ));
         let rt = tokio::runtime::Handle::try_current().ok();
+        // Core §8.5, §8.6: where presence is unavailable no descriptor
+        // crosses, and the last catalog held is the deployment's word.
+        let word = (self.presence == Presence::Unavailable)
+            .then(|| self.catalogs.last().map(zenkey_model::catalog::Catalog::id));
         let reader = Arc::new(OwnerReader {
             f: Arc::clone(f),
             seen: Arc::clone(seen),
             on_read: Arc::clone(on_confirm),
             held: Arc::clone(&self.catalogs),
             session: self.session.clone(),
-            timeout: self.reread_timeout,
+            reread_timeout: self.reread_timeout,
+            catalog_timeout: self.catalog_timeout,
             rt: rt.clone(),
         });
         // The owner heartbeats that wait for their owner's descriptor, read
@@ -1544,7 +1602,7 @@ impl Consumer {
                         return;
                     }
                 };
-                let beat = OwnerBeat {
+                let mut beat = OwnerBeat {
                     addr,
                     class,
                     key,
@@ -1552,21 +1610,31 @@ impl Consumer {
                     tag,
                     body: sample.payload().to_bytes().into_owned(),
                     arrival,
+                    decided: None,
                 };
                 {
                     let mut named = reader.seen.named.lock().expect("not poisoned");
-                    let known = named.of(&beat.addr, stamp.run, arrival);
+                    let known = word.or_else(|| named.of(&beat.addr, stamp.run, arrival));
                     match (known, named.pending, &waiting) {
                         // Its owner's catalog is known and none waits: read
                         // here, under the lock that keeps the order.
                         (Some(through), 0, _) => reader.apply(&beat, through),
-                        // The queue is full behind a read slow to answer:
-                        // read now with no catalog, and counted.
-                        (_, n, Some(_)) if n >= OWNER_QUEUE => {
-                            reader.seen.owner_unqueued.fetch_add(1, Ordering::Relaxed);
-                            reader.apply(&beat, None);
+                        // Others wait: it waits its turn behind them, so no
+                        // put on its key is read ahead of one held
+                        // (`freshness.v2` §2.5). Past the bound it waits
+                        // for no read of its own: it is read through the
+                        // catalog known now, or with none, and counted.
+                        (_, n, Some(_)) if n >= OWNER_HELD => {
+                            reader.seen.owner_dropped.fetch_add(1, Ordering::Relaxed);
                         }
-                        (_, _, Some(tx)) => {
+                        (known, n, Some(tx)) => {
+                            beat.decided = match known {
+                                None if n >= OWNER_QUEUE => {
+                                    reader.seen.owner_unqueued.fetch_add(1, Ordering::Relaxed);
+                                    Some(None)
+                                }
+                                known => known,
+                            };
                             named.pending += 1;
                             if tx.send(beat).is_err() {
                                 named.pending -= 1;
@@ -2584,12 +2652,22 @@ impl Subscription {
         self.seen.catalog_reads.load(Ordering::Relaxed)
     }
 
-    /// Owner heartbeats read with no catalog, every group
-    /// `unknown_catalog`, because [`OWNER_QUEUE`] of them waited already
-    /// for a descriptor's read. They confirmed nothing.
+    /// Owner heartbeats heard past [`OWNER_QUEUE`], while that many waited
+    /// for a descriptor's read and their own owner's catalog was not
+    /// known: each is read in its turn, behind those held, with no
+    /// catalog, every group `unknown_catalog`, and confirms nothing.
+    /// Counted as each is heard.
     #[must_use]
     pub fn owner_heartbeats_unqueued(&self) -> u64 {
         self.seen.owner_unqueued.load(Ordering::Relaxed)
+    }
+
+    /// Owner heartbeats dropped unread, [`OWNER_HELD`] being held behind a
+    /// descriptor's read. Each leaves a gap its key reads at the next put
+    /// read, so the members it would have confirmed go stale.
+    #[must_use]
+    pub fn owner_heartbeats_dropped(&self) -> u64 {
+        self.seen.owner_dropped.load(Ordering::Relaxed)
     }
 
     /// The last heartbeat of `key`'s provider that vouched for it, with
@@ -2766,6 +2844,10 @@ struct OwnerBeat {
     tag: zenkey_model::wire::Tag,
     body: Vec<u8>,
     arrival: Instant,
+    /// The catalog it is read through, where its arrival decided it: the
+    /// one known for its run then, or none, past [`OWNER_QUEUE`]. `None`:
+    /// its turn reads its owner's descriptor where none is known by then.
+    decided: Option<Option<zenkey_model::catalog::CatalogId>>,
 }
 
 /// What reads a subscription's owner heartbeats (`freshness.v2` §2.5):
@@ -2777,7 +2859,9 @@ struct OwnerReader<F> {
     on_read: Arc<F>,
     held: Arc<Vec<zenkey_model::catalog::Catalog>>,
     session: zenoh::Session,
-    timeout: Duration,
+    /// A re-read's timeout, and a descriptor read's (core §8.1).
+    reread_timeout: Duration,
+    catalog_timeout: Duration,
     rt: Option<tokio::runtime::Handle>,
 }
 
@@ -2785,9 +2869,10 @@ impl<F> OwnerReader<F>
 where
     F: Fn(HeartbeatRead) + Send + Sync + 'static,
 {
-    /// Reads the owner heartbeats that waited, in order: each through the
-    /// catalog its owner's descriptor names under its run, read once a
-    /// run (core §8.6).
+    /// Reads the owner heartbeats that waited, in order of arrival: each
+    /// through the catalog its arrival decided, else the one its owner's
+    /// descriptor names under its run, read once a run within the
+    /// consumer's [`Consumer::with_owner_catalog_timeout`] (core §8.6).
     /// - **No descriptor reaches the reader**, as across a constrained
     ///   face: the deployment's word, the last catalog this consumer was
     ///   given.
@@ -2796,11 +2881,13 @@ where
     ///   asks again: never a guess, and never a GET a put.
     async fn wait(self: Arc<Self>, rx: flume::Receiver<OwnerBeat>) {
         while let Ok(beat) = rx.recv_async().await {
-            let known = self.seen.named.lock().expect("not poisoned").of(
-                &beat.addr,
-                beat.stamp.run,
-                Instant::now(),
-            );
+            let known = beat.decided.or_else(|| {
+                self.seen.named.lock().expect("not poisoned").of(
+                    &beat.addr,
+                    beat.stamp.run,
+                    Instant::now(),
+                )
+            });
             let read = match known {
                 Some(_) => None,
                 None => {
@@ -2810,7 +2897,7 @@ where
                             &self.session,
                             &beat.key,
                             beat.stamp.run,
-                            self.timeout,
+                            self.catalog_timeout,
                         )
                         .await,
                     )
@@ -2914,7 +3001,7 @@ where
                 f,
                 seen,
                 &beat.addr,
-                self.timeout,
+                self.reread_timeout,
             );
         }
         let (lost, groups) = match applied {

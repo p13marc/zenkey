@@ -160,7 +160,11 @@ pub struct HealthSpec {
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1).
     pub clocks_synced: bool,
-    /// The service sits across a constrained face (§2.8).
+    /// The service sits across a constrained face (§2.8): the operator's
+    /// word, `zenctl health --across-face` and nothing else. Presence is
+    /// not read, and an owner heartbeat's groups are read through the
+    /// catalogs given with no descriptor read, as `WatchReads::across_face`
+    /// and `ConfigSpec::across_face` mean (#1146).
     pub face: Option<AcrossFace>,
     /// The deployment catalogs given (`--catalog`, core §8.6): a GET's
     /// entry is dated under the epoch of the catalog its owner's descriptor
@@ -742,7 +746,9 @@ pub async fn observe(
     let t = spec.timeout;
     let fresh = presence.is_none();
     let window = match spec.window {
-        Some(_) => Some(Window::open(session, &target, t, &spec.catalogs).await),
+        Some(_) => {
+            Some(Window::open(session, &target, t, spec.face.is_some(), &spec.catalogs).await)
+        }
         None => None,
     };
     let presence = match (spec.face, presence) {
@@ -1139,11 +1145,15 @@ impl Window {
     /// heartbeats (`freshness.v2` §2.5, "Both forms"), a group read through
     /// `catalogs`, the ones the tool was given (core §8.6): with none, no
     /// group is read, and an owner that sends owner heartbeats alone has
-    /// its status unconfirmed.
+    /// its status unconfirmed. The catalog its owner names is read from
+    /// its descriptor within `timeout`, as a re-read is (#1146); `across`
+    /// a face none is read, and the last catalog given is the deployment's
+    /// word.
     async fn open(
         session: &Session,
         target: &HealthTarget,
         timeout: Duration,
+        across: bool,
         catalogs: &crate::model::deployment::Catalogs,
     ) -> Result<Window, String> {
         let provider = target.provider();
@@ -1154,7 +1164,7 @@ impl Window {
                 &[provider.as_str()],
                 &BTreeMap::new(),
             )
-            .map(|c| c.with_catalogs(catalogs.held().iter().cloned()))
+            .map(|c| crate::bus::consume::tool_consumer(c, Some(timeout), across, catalogs))
             .map_err(|e| e.to_string())
         };
         let consumer = consumer_of(zenkey::health::implementation())?;

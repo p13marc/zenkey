@@ -15674,6 +15674,200 @@ async fn watch_reads_a_real_owners_owner_heartbeats() {
     );
 }
 
+/// #1146 (`freshness.v2` §2.5; core §8.1, §8.5, §8.6): `watch --catalog`
+/// reads the catalog an owner names from its descriptor within
+/// `--timeout`, and, told the owner sits across a face, reads none.
+/// `lab/trio` is hand-written, as the runtime's `owner_heartbeat` suite's
+/// is: an owner heartbeat on its `host` key every 300 ms, one group,
+/// `alpha.v1`'s at index 0 of catalog A, under run 7; its descriptor names
+/// A and answers 6 s after each read, as one over RF answered after
+/// 5.7 s. The tool is given A, then B, which lists `bravo.v1` at index 0:
+/// B, the last given, is its deployment's word, and reads the group as
+/// another interface's. So a confirmation row says the descriptor's reply
+/// was read.
+/// - **The default 5 s:** the read ends before the reply, and no group
+///   is confirmed, whether the read names no catalog or B.
+/// - **`--timeout 12`:** the reply is read, and each group confirms.
+/// - **`--across-face`, given A alone:** no descriptor is asked, and A is
+///   the word at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn watch_waits_its_timeout_for_the_catalog_its_owner_names() {
+    use zenkey::model::canonical::Fingerprint;
+    use zenkey::model::catalog::Catalog;
+    use zenkey::model::heartbeat::{
+        Class, Digest, Group, Layout, Members, OwnerHeartbeat, Section, Time, owner_key,
+    };
+    use zenkey::model::wire::{Run as WireRun, Seq, Stamp};
+
+    let mut bus = Bus::bare(None).await;
+    let trio = Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/tests/contracts/trio");
+    let load = |name: &str| {
+        let l = load_path(&trio.join(format!("{name}.toml")));
+        l.contract
+            .unwrap_or_else(|| panic!("{name} does not load:\n{}", l.report))
+    };
+    let catalog_of = |order: [&str; 3]| {
+        let mut c = Catalog::new(0).expect("a catalog");
+        for name in order {
+            let k = load(name);
+            c.push(k.iface.clone(), Fingerprint::of(&k))
+                .expect("an entry");
+        }
+        c
+    };
+    let a = catalog_of(["alpha.v1", "bravo.v1", "charlie.v1"]);
+    let b = catalog_of(["bravo.v1", "alpha.v1", "charlie.v1"]);
+    assert_ne!(a.id(), b.id(), "two catalogs");
+    let dir = tempfile::tempdir().expect("a directory");
+    let file = |name: &str, c: &Catalog| {
+        let p = dir.path().join(name);
+        std::fs::write(&p, c.to_jcs()).expect("the catalog's file");
+        p.to_str().expect("a UTF-8 path").to_owned()
+    };
+    let (fa, fb) = (file("a.json", &a), file("b.json", &b));
+    let contracts = trio.to_str().expect("a UTF-8 path").to_owned();
+
+    // Its descriptor, answered 6 s after each read.
+    let alpha = load("alpha.v1");
+    let descriptor = format!(
+        r#"{{"format": "zk2-descriptor/0.1", "service": "lab/trio", "instance": "000000000000000a",
+            "run": "{}", "catalog": "{}",
+            "interfaces": [{{"iface": "alpha.v1", "contract": "{}"}}]}}"#,
+        WireRun::U16(7),
+        a.id(),
+        Fingerprint::of(&alpha)
+    );
+    let asked = Arc::new(AtomicU64::new(0));
+    let (n, rt) = (Arc::clone(&asked), tokio::runtime::Handle::current());
+    let queryable = bus
+        .owners
+        .declare_queryable("zk2/lab/trio/@zk/instance/*")
+        .callback(move |q| {
+            n.fetch_add(1, Ordering::Relaxed);
+            let text = descriptor.clone();
+            rt.spawn(async move {
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                let _ = q
+                    .reply("zk2/lab/trio/@zk/instance/000000000000000a", text)
+                    .await;
+            });
+        })
+        .await
+        .expect("the descriptor's queryable");
+    bus.keep(queryable);
+
+    // Its owner heartbeats: alpha.v1's group, its status's map bit set.
+    let layout = Layout::of(&alpha);
+    let sections: Vec<Option<Section>> = layout
+        .collections
+        .iter()
+        .map(|c| {
+            (c.resource() == "state/status").then_some(Section {
+                digest: Digest::EMPTY,
+                members: Members::One { vouched: true },
+            })
+        })
+        .collect();
+    let group = Group::of(0, &layout, &sections).expect("a group");
+    let owners = bus.owners.clone();
+    let beats = tokio::spawn(async move {
+        let host = owner_key("lab", "trio", Class::Host);
+        // At most 300 s of them: the case is over long before.
+        for seq in 0u32..1000 {
+            let body = OwnerHeartbeat {
+                time: Time::Unknown,
+                groups: vec![group.clone()],
+            }
+            .envelope(Stamp {
+                run: WireRun::U16(7),
+                seq: Seq::new(seq).expect("a seq"),
+            })
+            .expect("an owner heartbeat");
+            owners.put(&host, body).await.expect("a put");
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+    });
+
+    let rows = |r: &Run| -> Vec<Value> {
+        r.stdout
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .collect()
+    };
+    let confirmations = |r: &Run| -> Vec<Value> {
+        rows(r)
+            .into_iter()
+            .filter(|l| l["row"] == "confirmation")
+            .collect()
+    };
+    let watch = |extra: &[&str]| {
+        let mut args = vec![
+            "watch",
+            "lab/trio",
+            "alpha.v1",
+            "state/status",
+            "--contracts",
+            contracts.as_str(),
+            "--format",
+            "ndjson",
+        ];
+        args.extend_from_slice(extra);
+        args.into_iter().map(str::to_owned).collect::<Vec<_>>()
+    };
+    fn refs(v: &[String]) -> Vec<&str> {
+        v.iter().map(String::as_str).collect()
+    }
+
+    // The default 5 s: the read ends before the reply.
+    let before = asked.load(Ordering::Relaxed);
+    let args = watch(&["--catalog", &fa, "--catalog", &fb, "--for", "8"]);
+    let r = bus.zenctl(&refs(&args)).await;
+    assert_eq!(confirmations(&r), Vec::<Value>::new(), "{r}");
+    assert_eq!(asked.load(Ordering::Relaxed), before + 1, "one read: {r}");
+
+    // `--timeout 12`: the reply is read, A, and each group confirms.
+    let before = asked.load(Ordering::Relaxed);
+    let args = watch(&[
+        "--catalog",
+        &fa,
+        "--catalog",
+        &fb,
+        "--timeout",
+        "12",
+        "--for",
+        "10",
+    ]);
+    let r = bus.zenctl(&refs(&args)).await;
+    let got = confirmations(&r);
+    assert!(!got.is_empty(), "no confirmation row: {r}");
+    for c in &got {
+        assert_eq!(c["provider"], "lab/trio", "{c}");
+        assert_eq!(c["group"], 0, "{c}");
+        assert_eq!(
+            c["key"], "zk2/lab/trio/freshness.v2/stream/heartbeats/host",
+            "{c}"
+        );
+        assert_eq!(c["confirmed"], json!([]), "{c}");
+    }
+    let seqs: Vec<u64> = got
+        .iter()
+        .filter_map(|c| c["heartbeat"]["seq"].as_u64())
+        .collect();
+    assert!(
+        seqs.windows(2).all(|w| w[1] == w[0] + 1),
+        "those heard while it waited, read in order: {seqs:?}"
+    );
+    assert_eq!(asked.load(Ordering::Relaxed), before + 1, "one read: {r}");
+
+    // `--across-face`, given A alone: no descriptor is asked.
+    let before = asked.load(Ordering::Relaxed);
+    let args = watch(&["--across-face", "--catalog", &fa, "--for", "3"]);
+    let r = bus.zenctl(&refs(&args)).await;
+    assert!(!confirmations(&r).is_empty(), "no confirmation row: {r}");
+    assert_eq!(asked.load(Ordering::Relaxed), before, "no read: {r}");
+    beats.abort();
+}
+
 /// Core 0.110 §4.2 and §7.5 through the raw `get` (#986's J1): `--body
 /// @FILE` holding a member's held stamp is a conditional read, since zenoh
 /// sends a query's payload under `zenoh/bytes` unless told otherwise, the

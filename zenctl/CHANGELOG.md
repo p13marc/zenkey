@@ -6,6 +6,18 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `watch` waits `--timeout` for the catalog its owner names (#1146)
+
+`freshness.v2` §2.5; core §8.1, §8.5, §8.6. A reader of an owner heartbeat
+reads the catalog its owner names from the owner's descriptor, once a run.
+No flag is new, and no exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `watch --catalog`: that descriptor read waited 5 s, whatever `--timeout` or the face said. Over RF its reply took 5.7 s, the read named no catalog, and nothing was confirmed for 30 s, then again | it waits `--timeout`: the face's `reply_timeout_ms` by default under `--face-policy`, and never less than it. A re-read of a diverged collection waits the same | `health`'s and `config`'s windows read their owners' catalogs within their `--timeout` too |
+| `watch --across-face --catalog`: the descriptor read all the same | none is read: the last `--catalog` is the deployment's word at once, as where no descriptor answers | `health --across-face` and `config --across-face` windows alike. With no `--catalog`, no owner heartbeat key is declared, as before |
+| past 64 owner heartbeats held behind a descriptor read, one more read at once with no catalog, ahead of those held: they then read `older`, and confirmed nothing | it waits its turn behind them, read through the catalog known when it arrived, or with none | `freshness.v2` §2.5: what a subscriber held it reads in the order of arrival, before any later put on that key |
+
 ## Unreleased (`main`, zk2) — `alarms` reads `alarms.v2` (#984's S3)
 
 `alarms.v2` 0.1 §2.1, §2.2, §2.4, §2.6, §2.14 to §2.17, §4, §5. `alarms`,

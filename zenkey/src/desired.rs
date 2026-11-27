@@ -1373,7 +1373,8 @@ pub struct TargetStartup {
     /// `None`: none.
     pub reread: Option<Duration>,
     /// The timeout of every GET and presence read (core §8.1: the
-    /// caller's), 1 s by default.
+    /// caller's), 1 s by default: the read of its author's descriptor for
+    /// the catalog it names among them (`desired.v2` §2.5; #1146).
     pub timeout: Duration,
     /// How often presence is read without a watch session.
     pub poll: Duration,
