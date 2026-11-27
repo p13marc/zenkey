@@ -1,0 +1,15 @@
+# core §9.2 E028, cascade 7: a packed file with a number outside the
+# canonical domain, beside a type whose layout tag is 0. The file has
+# E028, once, so E051 reads none of its types: their forms have no JCS
+# bytes every implementation agrees on (§9.6).
+[interface]
+name = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/tag-unsafe.json"]
+
+[resources.zero]
+kind = "stream"
+type = "packed:Zero"

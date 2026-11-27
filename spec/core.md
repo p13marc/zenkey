@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.116** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.117** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -2527,6 +2527,17 @@ section defines its bytes and how they are read.
 - **The tag is a check.** A reader compares it with the revision it
   holds, as §7.6's reader compares a type's tag. Another revision still
   matches it 1 time in 16.
+- **Its tag may be 0.** One revision in 16 has the tag 0, which an owner
+  heartbeat's CH and a record of any other kind carry too. No lint
+  refuses it, as E051 refuses a packed type at 0 (§9.2).
+  - **The key and the form tell them apart,** never the tag (below). A
+    tool reads a heartbeat by its envelope's form, and never as a record,
+    whatever its tag (observer §7.3).
+  - **A revision cannot move it cheaply.** Its fingerprint is the whole
+    contract's (§9.5). A packed type moves its tag by its own layout, and
+    a revision only by being another revision.
+  - **The derivation stands.** One from more bits would move the tag of
+    every revision already published.
 - **Its run and seq** are its key's. They count as any stream key's do
   (§4.3), so a gap in the seqs is a heartbeat lost.
 - **Who sends one** is [`freshness.v2`](profiles/freshness/v2.md)'s to
@@ -3155,6 +3166,16 @@ descriptions are left out, so a field renamed keeps its tag. The tag is
 the low four bits of the last byte of the sha256 of the form's JCS bytes
 (RFC 8785). An implementation that writes a record MUST write the type's
 tag in CH's tag bits (§7.5). `[F: packed/vectors.json]`
+- **Never 0.** A type whose tag is 0 is E051 (§9.2). `[F: contracts/e051-packed-tag]`
+  - **Why.** A record of any other kind carries 0 (§7.5). A tool that
+    holds no type sniffs a payload whose tag is 0 (observer §7.3), so it
+    would read such a type's records as some other payload's bytes.
+  - **The fix is the author's.** One layout form in 16 has the tag 0. An
+    author moves it by changing the form: two fields of different forms
+    swapped, a bound moved, a reserved code or a marker added. A rename
+    does not move it, since names are left out.
+  - **The derivation stands.** One that skipped 0 would move the tags of
+    the types already published, and every record written under them.
 
 **Writing.** An implementation that writes a record MUST write the bits
 above for its value, then the pad. `[F: packed/vectors.json]` An
@@ -3184,7 +3205,8 @@ this order:
   `[F: packed/vectors.json]`
 
 **What the checks catch.** A reader that holds another revision of a
-type, or another type, still matches its tag 1 time in 16.
+type, or another type, still matches its tag 1 time in 15: a type's tag
+is from 1 to 15.
 - **The length** refuses most of those. A type with no optional field and
   no marker has one length, so a record of another length is refused.
 - **Optional fields and markers** weaken it. The record's length then
@@ -4197,6 +4219,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | E048 | a `frame` value outside §7.7's table: `records` not from 1 to 256; `step_ms` not from 1 to 2^32 − 1, given with `records` 1, or absent with `records` above 1; `jitter_ms` without `step_ms`, or above `step_ms` / 2; `keyframe_every` not from 1 to 65,536; a deadband's `delta` not a decimal string above 0, or its `max_records` not from 1 to 65,536 | per key; per deadband member |
 | E049 | a deadband naming no field of the record type, or a field that is not an `int`, `fixed` or `counter` (§7.7) | per deadband entry |
 | E050 | timing a frame resource cannot keep (`timing.v1` §2.3): a `timing.deadline_ms` below its span; a deadband beside a `timing.deadline_ms`, unless its `max_records` × the frame's interval is at most the deadline, an unstated interval never; a `timing.lifespan_ms` | per condition: the deadline once, each deadband once, the lifespan once |
+| E051 | a packed type whose layout tag is 0 (§7.6), the tag a record of any other kind carries (§7.5) | per type |
 | W101 | two resolved resources under one token whose templates overlap, with different types (the payload type, or an operation's request and response) | per pair |
 | W102 | an operation's request type has a top-level field named like a template parameter | per resource |
 | W103 | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it, judged on resolved types only (cascade 6) | per field (a defaulted one is silent) |
@@ -4237,7 +4260,11 @@ because of these rules:
    - E042 and E045 read the fields of a record that have neither E038 nor
      E043. A repeat inside one field's `values` or `reserved` is E042 too,
      on a field without E038.
-   `[F: contracts/e038-packed-shape, e042-packed-duplicate, e045-packed-extension]`
+   - E051 reads a type with none of E038 to E045, in a file without
+     E028. Only such a type has a layout form whose JCS bytes every
+     implementation agrees on (§9.6). It reads every type the file
+     defines, whether a resource names it or not, as E038 to E045 do.
+   `[F: contracts/e038-packed-shape, e042-packed-duplicate, e045-packed-extension, e051-packed-tag]`
 8. **On a frame resource,** E046 alone where `frame` cannot be.
    - E047 and E049 read the record type, so they wait for one that
      resolves (E023, E024). E047's marker half and E049 also wait for a

@@ -254,7 +254,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   tag is the low four bits of the last byte of the sha256 of the root's
   layout form (no names), and a reader refuses `tag`, `length`, `code`,
   `extension`, `pad` in that order; E038–E045 and cascade 7 lint it, E044
-  its placement (never an explicit stream, an attachment or an operation);
+  its placement (never an explicit stream, an attachment or an operation),
+  and since core 0.117 (#1152) E051 refuses a type whose layout tag is 0,
+  per type, in a file without E028 (`packed/vectors.json`'s `Grow` moved to
+  a maximum of 100; a heartbeat's tag 0 is accepted, §7.5);
   §9.8 classifies it by layout (growth behind a marker compatible);
   `spec/conformance/packed/vectors.json` is its evidence, written by an
   independent Python reading of the text, kept out of the repo so zk2py

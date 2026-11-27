@@ -3,6 +3,87 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.117 — 2026-11-28: §9.2's E051, a packed type whose layout tag is 0; §7.5 accepts a heartbeat's tag 0, and says why (#1152)
+
+alarms.v2's `Alarm` record, as first drafted, hashed to the tag 0 (#984).
+§7.6 derives a type's tag from 4 bits of its layout form's sha256, so one
+layout in 16 has the tag 0. §7.5 writes 0 in the CH of a record of any
+other kind, and observer §7.3 sniffs a payload whose tag is 0. A tool
+holding no type would read that type's records as some other payload's
+bytes: the draft's fixture held a case where `{"state":"firing"}` read as
+a valid record. The draft swapped two fields to reach the tag 11. An
+adopter's contract has no one to notice.
+
+**What changed.**
+- **§9.2, E051:** a packed type whose layout tag is 0, per type. A
+  contract that declares one is invalid.
+- **Cascade 7.** E051 reads a type with none of E038 to E045, in a file
+  without E028: only such a type has a layout form whose JCS bytes every
+  implementation agrees on (§9.6). It reads every type the file
+  defines, whether a resource names it or not, as E038 to E045 do.
+- **§7.6, "The tag".** A new item, "Never 0": why, and how an author
+  moves a tag. Two fields of different forms swapped, a bound moved, a
+  reserved code or a marker added each change the form. A rename does
+  not, since names are left out of it.
+- **§7.6, "What the checks catch".** Another type or revision matches a
+  type's tag 1 time in 15, where it said 16: a type's tag is now from 1
+  to 15.
+- **§7.5, "The heartbeat".** A new item, "Its tag may be 0". One revision
+  in 16 has a heartbeat whose tag is 0. No lint refuses it. The key and
+  the form tell a heartbeat from an owner heartbeat and from a record,
+  never the tag, and a tool never reads a heartbeat as a record
+  (observer §7.3). A revision cannot move its tag as a packed type does:
+  its fingerprint is the whole contract's.
+
+**What deliberately did not change.**
+- **No derivation.** A tag derived so as to skip 0, or a heartbeat's from
+  more bits, would move the tags already published, and every record and
+  heartbeat written under them. The issue's default rejected both.
+- **A heartbeat's tag 0 is accepted,** as §7.5 already admitted (the
+  issue's default for its third item). The text now says why.
+- **A frame's tag** (§7.7) is the frame form's, 0 for one declaration in
+  16, and no lint reads it. E051 reads a frame resource's record type
+  as any packed type, though only the frame's tag travels in CH. #1152
+  asked about packed types; a frame's tag 0 is left to its own issue.
+- **The reader's checks** (§7.6, "Reading") are unchanged: a reader still
+  compares CH's tag with the type's.
+- **No keyword.** E051 is a lint, as E044 is. `RULES.md` gains its rule id.
+
+**The cases.**
+- **`contracts/e051-packed-tag`:** a file of three types. `Zero`, an
+  `int` from 0 to 127 then a marker, has the tag 0. `Unnamed` is its form
+  under other names, and no resource names it: the tag 0 too. `Fine` is
+  `Zero` with a maximum of 100, the tag 11. Two E051.
+- **`contracts/e028-packed-tag`:** `Zero` beside a type whose bounds lie
+  outside the canonical domain. E028 alone, once for the file.
+- **`packed/vectors.json`:** `Grow`, an `int` from 0 to 127 then a marker,
+  had the tag 0, and no contract could list it. Its maximum is now 100,
+  still 7 bits, so its marker still ends on a byte boundary. Its layout's
+  form, sha256 (`3f95fe8a…`) and tag (11) moved, and so did its three
+  reads' tag. Their bytes and readings did not: 5 is written the same.
+  The reference's copy of the schema, `zenkey/tests/contracts/packed/`,
+  moves with it.
+- **How they were made.** Each tag was computed by an independent
+  reading of §7.6 (Python, standard library: the form, its JCS bytes,
+  their sha256), checked against the 14 layouts of `packed/vectors.json`
+  that lie inside the canonical domain, and then against the reference.
+  Never blessed.
+
+**The survey (#1152's second item).** Every packed type that `spec/`,
+`examples/zk2/` (with its `.history`), `zenkey/tests/contracts/` and
+`zenkey/bundles/` declare: 287 declarations in 97 files, each published
+bundle's included.
+- **No published revision and no adopter's mapping** has a type at the
+  tag 0: not zenoh-modem's `modem.v3` and `sx1262_config.v1` (each of
+  their revisions in `.history`), nor `health.v2`, `desired.v2`,
+  `config.v2`'s `rfcfg.v1`, `telemetry.v2`'s `meterframe.v1` or
+  `link.v2`'s `probe.v1` and `sampler.v1`.
+- **`packed/vectors.json`'s `Grow`** had it, with the reference's copy.
+  Both are moved above.
+- **`frame/layouts.json`'s `Tick`** has it. It is a frame fixture's
+  record type, which no contract lists. Its records travel as frames,
+  under the frame's tag, so it is kept.
+
 ## 0.116 — 2026-11-28: zk2py's rounds 116 to 123: a run's record that is gone, "by then" as the answer's arrival, a tool's raw body, a conditional read's bytes itemized, a 1.10.1 router's QUIC batch, and which mentions of 1.10.1 reach 1.10.2 (#609, #986, #1165)
 
 zk2py's rounds 116 to 123 filed ten findings against the core: F-569 to

@@ -1,0 +1,39 @@
+{
+  "description": "core §7.6, §9.2 E051: Zero's layout form hashes to the tag 0, and so does Unnamed's, the same form under other names. Fine is Zero with a maximum of 100, the tag 11.",
+  "types": {
+    "Zero": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "..."
+      ]
+    },
+    "Unnamed": {
+      "description": "No resource names it.",
+      "fields": [
+        {
+          "name": "b",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "..."
+      ]
+    },
+    "Fine": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "..."
+      ]
+    }
+  }
+}

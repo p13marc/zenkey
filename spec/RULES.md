@@ -58,7 +58,7 @@ The owner, consumer and caller sections each point to them.
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 87, 27 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 81 |
 | Every rule, once | 298 |
-| [Rule ids](#rule-ids) | 85 |
+| [Rule ids](#rule-ids) | 86 |
 
 ## Owner
 
@@ -1020,6 +1020,7 @@ MAY, and a row with no keyword, are listed here alone.
 | [E048](core.md#92-the-lints) | implementation | core §9.2 The lints | a `frame` value outside §7.7's table … |
 | [E049](core.md#92-the-lints) | implementation | core §9.2 The lints | a deadband naming no field of the record type, or a field that is … |
 | [E050](core.md#92-the-lints) | implementation | core §9.2 The lints | timing a frame resource cannot keep (`timing.v1` §2.3) … |
+| [E051](core.md#92-the-lints) | implementation | core §9.2 The lints | a packed type whose layout tag is 0 (§7.6), the tag a record of … |
 | [W101](core.md#92-the-lints) | implementation | core §9.2 The lints | two resolved resources under one token whose templates overlap, with different types (the payload … |
 | [W102](core.md#92-the-lints) | implementation | core §9.2 The lints | an operation's request type has a top-level field named like a template parameter |
 | [W103](core.md#92-the-lints) | implementation | core §9.2 The lints | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it … |

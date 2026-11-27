@@ -1,0 +1,27 @@
+{
+  "description": "core §9.2 E028 and cascade 7: Zero's layout form hashes to the tag 0, beside Wide, whose bounds lie outside the canonical domain. The file has E028, so E051 reads none of its types.",
+  "types": {
+    "Zero": {
+      "fields": [
+        {
+          "name": "a",
+          "type": "int",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "..."
+      ]
+    },
+    "Wide": {
+      "fields": [
+        {
+          "name": "v",
+          "type": "int",
+          "minimum": -4611686018427387904,
+          "maximum": 4611686018427387904,
+          "reserved": ["not_available"]
+        }
+      ]
+    }
+  }
+}
