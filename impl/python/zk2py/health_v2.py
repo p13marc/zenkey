@@ -352,6 +352,26 @@ def contract_tables(canonical: dict[str, Any]) -> dict[str, Declared]:
     return {k: contract_table(k, canonical.get("uses"), ann) for k in KINDS}
 
 
+def lint_contract(canonical: dict[str, Any]) -> list[dict[str, Any]]:
+    """What a linter reports of a contract's three tables (§2.10, 0.3,
+    F-594): "**What a linter reports.** In a contract that lists
+    ``health.v2``, a linter reports ``value`` and ``disagrees`` as errors.
+    ... The core has no code for them. So the contract still loads, with its
+    fingerprint (core §9.2). Under ``health.v1``, ``not_used`` draws no core
+    lint. A linter MAY warn of it. It is what an author writes who leaves
+    ``uses`` unmoved." zk2py takes the MAY: ``not_used`` is a warning, the
+    one an author writes by leaving ``uses`` at ``health.v1`` (F-594's own
+    reason). One row per kind whose declaration is invalid; the contract's
+    load, its codes and fingerprint, are core §9.2's."""
+    out: list[dict[str, Any]] = []
+    for kind, d in contract_tables(canonical).items():
+        if d.invalid is None:
+            continue
+        out.append({"kind": kind, "key": KEYS[kind], "reason": d.invalid,
+                    "severity": "warning" if d.invalid == NOT_USED else "error"})
+    return out
+
+
 @dataclass(frozen=True)
 class Table:
     """An instance's table of one kind (§2.10 "An instance's table"): "the

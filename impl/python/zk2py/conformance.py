@@ -5320,6 +5320,43 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "After a revert on a snapshot with no entry, it reads no convergence until the next document "
                         "(§2.17)."), []))
 
+    # -- health.v2 0.3 ------------------------------------------------------------------
+    hdir = spec.parent / "impl" / "python" / "interop" / "health-v2"
+    tc = load_contract(hdir / "tc.v1.toml")
+    tc_text = (hdir / "tc.v1.toml").read_text(encoding="utf-8")
+    m = re.search(r'"health\.reasons"\s*=\s*\[[^\]]*\]', tc_text)
+    value = load_contract(hdir / "tc.v1.toml", text=tc_text.replace(m.group(0), '"health.reasons" = ["Bad Name"]')
+                          if m else tc_text)
+    v1tab = load_contract(hdir / "tc.v1.toml", text=tc_text.replace('"health.v2"', '"health.v1"'))
+    out.append(("health.v2 0.3 §2.10 (F-594): in a contract that lists health.v2, a linter reports value and "
+                "disagrees as errors, and the contract still loads with its fingerprint; under health.v1 not_used "
+                "draws no core lint, and zk2py's linter takes the MAY and warns; tc.v1 lints clean",
+                [h2.lint_contract(tc.canonical), h2.lint_contract(value.canonical), [value.valid, value.codes],
+                 h2.lint_contract(v1tab.canonical), [v1tab.valid, v1tab.codes]]
+                + missing(hv2, "- **What a linter reports.** In a contract that lists `health.v2`, a linter reports "
+                               "`value` and `disagrees` as errors. `link.v2`'s `packed_required` is one too. The core "
+                               "has no code for them. So the contract still loads, with its fingerprint (core §9.2). "
+                               "Under `health.v1`, `not_used` draws no core lint. A linter MAY warn of it."),
+                [[], [{"kind": "reason", "key": "health.reasons", "reason": "value", "severity": "error"}],
+                 [True, []],
+                 [{"kind": "reason", "key": "health.reasons", "reason": "not_used", "severity": "warning"},
+                  {"kind": "code", "key": "health.codes", "reason": "not_used", "severity": "warning"}],
+                 [True, []]]))
+    from .health_v2_live import unknown_catalog
+
+    timed = h2.Read(h2.STATUS, h2.value_of(h2.STATUS, "degraded", 2, 1_800_000_000_000))
+    untimed = h2.Read(h2.STATUS, h2.value_of(h2.STATUS, "degraded", 2))
+    gone = unknown_catalog(timed)
+    out.append(("health.v2 0.3 §2.6 (F-610): a status whose since counts from a catalog the reader does not hold is "
+                "refused whole, unknown_catalog, so it reads unknown, undecodable, never at its level; one with no "
+                "time needs no catalog and is read at its level",
+                [gone.refusal, gone.level, gone.unknown, unknown_catalog(untimed).level]
+                + missing(hv2, "- **A time it cannot date.** Core §8.6 refuses a time counted from a catalog the "
+                               "reader does not hold (`unknown_catalog`). A record that holds one is refused whole, "
+                               "as core §7.6 refuses a record for one field. So such a status is unknown, "
+                               "`undecodable`. A record with no time needs no catalog, and is read."),
+                ["unknown_catalog", None, "undecodable", "degraded"]))
+
     # -- core 0.115 and observer 0.36 ---------------------------------------------------
     out.append(("core 0.115 and observer 0.36, the answers with no rule of zk2py's to move: §4.3's record that is "
                 "gone binds the deployment (F-578), §4.2's raw body (F-572) and observer §4.1's held stamp, §8.5's "
