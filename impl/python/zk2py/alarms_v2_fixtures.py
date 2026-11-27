@@ -309,6 +309,68 @@ def transitions(path: Path) -> list[Result]:
     return out
 
 
+# -- confirmations.json (§2.7, §3) -----------------------------------------------------------
+
+NS = 1_000_000_000
+
+
+def _stamp_text(width: int, run: int, seq: int) -> str:
+    return f"{run:0{width // 4}x}/{seq}"
+
+
+def confirmations(path: Path) -> list[Result]:
+    from . import zk2c
+
+    data = _load(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["heartbeats"]):
+        o = a2.OwnerAlarms("lab", "svc")
+        for v in c["view"]:
+            width, run, seq = _stamp(v["stamp"])
+            o.put(v["slot"], {"state": v["state"]}, width, run, seq, 0)
+        payload = bytes.fromhex(c["payload"])
+        got: dict[str, Any] = {}
+        try:
+            env = zk2c.parse(payload, "put")
+        except zk2c.Refused:
+            env = None
+        if env is None or env.form != "heartbeat":
+            got["unread"] = "refused"
+        elif env.tag != c["holds_tag"]:
+            got["unread"] = "revision"
+        else:
+            assert env.width is not None and env.run is not None and env.seq is not None
+            h = o.heartbeat(env.tag, env.width, env.run, env.seq, env.record or b"", 905 * NS)
+            if "refused" in h or "read" in h:
+                got["unread"] = "refused" if "refused" in h or "refused" in h.get("read", {}) else "revision"
+            else:
+                section = "confirmed" if h["in_step"] else h["section"]
+                got["read"] = {"live": h["live"], "section": section, "confirmed": sorted(h["confirmed"])}
+        got["firing"] = o.firing_count()
+        got["judged"] = {str(v["slot"]): o.answer(v["slot"], 905 * NS) for v in c["view"]}
+        out.append(_check(f"v2 confirmations, heartbeat #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(data["snapshots"]):
+        from . import heartbeat
+
+        raw = bytes.fromhex(c["hex"])
+        page = a2.read_page(raw, c["epoch"])
+        hdr = (page["run_width"], page["run"])
+        snap_ms = heartbeat.instant_of(page["time"], c["epoch"])
+        entries = []
+        for e in page["live"]:
+            w, r = (e["run_width"], e["run"]) if "run" in e else hdr
+            conf = snap_ms if e["confirmation"] == "time" else heartbeat.instant_of(e.get("conf"), c["epoch"])
+            entries.append({"slot": e["slot"], "stamp": _stamp_text(w, r, e["seq"]), "confirmation": e["confirmation"],
+                            "confirmed_at": conf, "record": e["record"]})
+        for e in page["tombs"]:
+            w, r = (e["run_width"], e["run"]) if "run" in e else hdr
+            entries.append({"slot": e["slot"], "stamp": _stamp_text(w, r, e["seq"]), "tombstone": True})
+        got = {"size": len(raw), "run": f"{page['run']:0{page['run_width'] // 4}x}", "asof": page["asof"],
+               "coll": page["coll"], "time": snap_ms, "entries": entries}
+        out.append(_check(f"v2 confirmations, snapshot #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": schema,
     "records.json": records,
@@ -317,6 +379,7 @@ FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "slots.json": slots,
     "words.json": words,
     "transitions.json": transitions,
+    "confirmations.json": confirmations,
 }
 
 
