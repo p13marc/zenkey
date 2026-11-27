@@ -1214,9 +1214,11 @@ This is core §7.1's and §7.2's tool half; type identity and the sample's
       is not 0 MUST NOT sniff it. It shows it as a packed record, by its
       tag and the record's size in bytes. `[F: envelope/tags.json]`
     - **Tag 0** is sniffed, as any payload whose type the tool does not
-      hold is. A record of any other kind carries 0, and no packed
-      type's does: a contract that declares a packed type at the tag 0
-      is invalid (core §9.2, E051).
+      hold is. A record of any other kind carries 0, and no packed type
+      a contract writes does: one that declares such a type at the tag 0
+      is invalid (core §9.2, E051). A type a profile derives may, one in
+      16, and a tool that holds no contract sniffs its record too (core
+      §7.6).
   - **A frame** (core §7.7) is read with its frame resource's
     declaration, never as one record of its type: §7.6.
   - **A packed record's `time` fields** are read under the deployment
@@ -1422,7 +1424,8 @@ with the revision chosen in this order. `[F: envelope/tags.json]`
 - **Why the tag.** It is what the sample's own bytes say of its
   revision. A packed type's tag and a frame's check their form, and a
   heartbeat's its revision. Another form or revision still matches it 1
-  time in 16, and another packed type 1 time in 15 (core §7.5, §7.6).
+  time in 16, and another packed type 1 time in 15, or 1 in 16 for a
+  derived one (core §7.5, §7.6).
 - **A delete** carries no record, so no step reads a tag for it. Its key
   is read with any of the revisions step 1 leaves.
 

@@ -21,8 +21,10 @@ carries the tag 0, as a record of any other kind does, and sniffed it.
 
 **What changed.**
 - **§7.3, "Tag 0".** A record of any other kind carries 0, and no
-  packed type's does: a contract that declares one at 0 is invalid. The
-  sniff itself is unchanged.
+  packed type a contract writes does: a contract that declares one at 0
+  is invalid. A type a profile derives may (core §7.6, zk2py's F-619),
+  and a tool that holds no contract sniffs its record. The sniff itself
+  is unchanged.
 - **§7.5, "Why the tag".** Another packed type matches a type's tag 1
   time in 15, where every tag matched 1 time in 16: a packed type's tag
   is from 1 to 15.

@@ -28,6 +28,14 @@ adopter's contract has no one to notice.
 - **§7.6, "What the checks catch".** Another type or revision matches a
   type's tag 1 time in 15, where it said 16: a type's tag is now from 1
   to 15.
+- **A derived type may be 0** (§7.6, cascade 7; zk2py's round 126,
+  F-619). A type a profile derives from the declaration, as `config.v2`'s
+  `Record` and `Set<T>` (`config.v2` §3), has no form its author writes,
+  so its author could move no field of one at 0. E051 does not read it.
+  A tool that holds the contract reads it by its resource; one that holds
+  none sniffs it, and that residual is accepted, as a heartbeat's is. Such
+  a type matches another 1 time in 16. `config.v2`'s `derive.json` case 2
+  derives one at 0, and its contract loads.
 - **§7.5, "The heartbeat".** A new item, "Its tag may be 0". One revision
   in 16 has a heartbeat whose tag is 0. No lint refuses it. The key and
   the form tell a heartbeat from an owner heartbeat and from a record,

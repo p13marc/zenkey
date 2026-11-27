@@ -3176,6 +3176,13 @@ tag in CH's tag bits (§7.5). `[F: packed/vectors.json]`
     does not move it, since names are left out.
   - **The derivation stands.** One that skipped 0 would move the tags of
     the types already published, and every record written under them.
+  - **A derived type may be 0.** A type a profile derives from the
+    contract's declaration, as `config.v2`'s `Record` and each `Set<T>`
+    (`config.v2` §3), has no form its author writes: the derivation
+    fixes it, and one in 16 has the tag 0. E051 does not read it. A tool
+    that holds the contract reads it by its resource, as §7.5's
+    heartbeat is read by its key. One that holds none sniffs it
+    (observer §7.3), and that residual is accepted.
 
 **Writing.** An implementation that writes a record MUST write the bits
 above for its value, then the pad. `[F: packed/vectors.json]` An
@@ -3205,8 +3212,9 @@ this order:
   `[F: packed/vectors.json]`
 
 **What the checks catch.** A reader that holds another revision of a
-type, or another type, still matches its tag 1 time in 15: a type's tag
-is from 1 to 15.
+type, or another type, still matches its tag 1 time in 15: a type a
+contract writes has a tag from 1 to 15. A derived type's is from 0 to
+15, so it matches 1 time in 16.
 - **The length** refuses most of those. A type with no optional field and
   no marker has one length, so a record of another length is refused.
 - **Optional fields and markers** weaken it. The record's length then
@@ -4219,7 +4227,7 @@ not. An implementation MUST report, for each fixture, exactly the codes
 | E048 | a `frame` value outside §7.7's table: `records` not from 1 to 256; `step_ms` not from 1 to 2^32 − 1, given with `records` 1, or absent with `records` above 1; `jitter_ms` without `step_ms`, or above `step_ms` / 2; `keyframe_every` not from 1 to 65,536; a deadband's `delta` not a decimal string above 0, or its `max_records` not from 1 to 65,536 | per key; per deadband member |
 | E049 | a deadband naming no field of the record type, or a field that is not an `int`, `fixed` or `counter` (§7.7) | per deadband entry |
 | E050 | timing a frame resource cannot keep (`timing.v1` §2.3): a `timing.deadline_ms` below its span; a deadband beside a `timing.deadline_ms`, unless its `max_records` × the frame's interval is at most the deadline, an unstated interval never; a `timing.lifespan_ms` | per condition: the deadline once, each deadband once, the lifespan once |
-| E051 | a packed type whose layout tag is 0 (§7.6), the tag a record of any other kind carries (§7.5) | per type |
+| E051 | a packed type whose layout tag is 0 (§7.6), the tag a record of any other kind carries (§7.5); a type a profile derives aside | per type |
 | W101 | two resolved resources under one token whose templates overlap, with different types (the payload type, or an operation's request and response) | per pair |
 | W102 | an operation's request type has a top-level field named like a template parameter | per resource |
 | W103 | `encoding` or `attachment_encoding` written on a resource where no JSON Schema type takes it, judged on resolved types only (cascade 6) | per field (a defaulted one is silent) |
@@ -4263,7 +4271,8 @@ because of these rules:
    - E051 reads a type with none of E038 to E045, in a file without
      E028. Only such a type has a layout form whose JCS bytes every
      implementation agrees on (§9.6). It reads every type the file
-     defines, whether a resource names it or not, as E038 to E045 do.
+     defines, whether a resource names it or not, as E038 to E045 do,
+     but a type a profile derives (§7.6).
    `[F: contracts/e038-packed-shape, e042-packed-duplicate, e045-packed-extension, e051-packed-tag]`
 8. **On a frame resource,** E046 alone where `frame` cannot be.
    - E047 and E049 read the record type, so they wait for one that

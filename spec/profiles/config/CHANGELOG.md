@@ -7,6 +7,23 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `config.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## config.v2 0.6 — 2026-11-28: editorial: a derived type may have the layout tag 0, which E051 does not read, no rule changed (#1152)
+
+Core 0.117 makes a packed type at the layout tag 0 a lint error, E051.
+zk2py's round 126 found a gap in it (F-619). A derived type (`Record`,
+each `Set<T>`) takes the tag its derivation gives, the tag 0 one time in
+16. Its author can move no field of it. `derive.json`'s case 2 derives
+such a `Record`.
+
+**Changed: §3, "The derived types".** One sentence: one in 16 has the
+tag 0, and E051 does not read it (core §7.6, §9.2).
+
+**Deliberately not changed.**
+- **The derivation.** One that skipped 0 would move every derived tag
+  already written.
+- **No case.** `derive.json` holds the case already. Its contract loads.
+- **The header** is still written against core 0.99.
+
 ## config.v2 0.5 — 2026-11-08: editorial: the change event's key ends in its occurrence chunk, no rule changed (#980 C2c)
 
 Core 0.103 has an owner key each occurrence by its run and seq, and
