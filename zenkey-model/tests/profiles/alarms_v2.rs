@@ -1301,9 +1301,7 @@ fn major_json(m: Option<Major>) -> Value {
 }
 
 /// `freshness.v2`'s verdict over a slot's observations, as a case states
-/// it judged. A fresh verdict's reason is written `fresh` there, which is
-/// no reason of `freshness`: its own is `within_horizon`, and no answer
-/// reads it.
+/// it judged, by `freshness`'s own tokens (its `judgements.json`).
 fn freshness_judged(v: &Value) -> Option<freshness::Judged> {
     use freshness::{Reason as R, Verdict as V};
     if v.is_null() {
@@ -1314,25 +1312,22 @@ fn freshness_judged(v: &Value) -> Option<freshness::Judged> {
         .into_iter()
         .find(|x| x.as_str() == token(&v["verdict"]))
         .unwrap_or_else(|| panic!("freshness verdict {}", v["verdict"]));
-    let reason = if verdict == V::Fresh && v["reason"] == "fresh" {
-        R::WithinHorizon
-    } else {
-        [
-            R::BeyondHorizon,
-            R::NoDelivery,
-            R::ListenedTooShort,
-            R::Silent,
-            R::NoStamp,
-            R::ClockUntrusted,
-            R::ClockDisagrees,
-            R::NearHorizon,
-            R::NoObservation,
-            R::LastKnown,
-        ]
-        .into_iter()
-        .find(|x| x.as_str() == token(&v["reason"]))
-        .unwrap_or_else(|| panic!("freshness reason {}", v["reason"]))
-    };
+    let reason = [
+        R::WithinHorizon,
+        R::BeyondHorizon,
+        R::NoDelivery,
+        R::ListenedTooShort,
+        R::Silent,
+        R::NoStamp,
+        R::ClockUntrusted,
+        R::ClockDisagrees,
+        R::NearHorizon,
+        R::NoObservation,
+        R::LastKnown,
+    ]
+    .into_iter()
+    .find(|x| x.as_str() == token(&v["reason"]))
+    .unwrap_or_else(|| panic!("freshness reason {}", v["reason"]));
     Some(freshness::Judged { verdict, reason })
 }
 
