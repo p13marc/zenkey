@@ -145,6 +145,17 @@ desired: the question could not be asked — exit 2, the reserved non-verdict (1
 
 ```
 
+Each target parameter takes one binding: a `--param` repeated is
+refused, never its last kept (review-bot on #1174).
+
+```console
+$ zenctl desired lab/worker --across-face --role task --author lab/author --param system=self.system --param system=self.service --contracts ../zenkey/tests/contracts/worker.v2.toml
+? 2
+Error: --across-face: --param system given twice: each target parameter takes one binding
+desired: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
+
+```
+
 The word is about one target and one role.
 
 ```console

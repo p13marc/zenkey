@@ -44,7 +44,7 @@ Options:
           Across a face, the deployment's word that the role is listed unbound: the kill switch (desired.v1 §2.12), answered before any report
 
       --param <NAME=SELF>
-          Across a face, a target parameter's binding, `NAME=self.system` or `NAME=self.service`, repeatable, as the target's descriptor would list it (core R2). Omitted, each is bound as the author's declaration in --contracts orders its target parameters, the first `self.system` and the second `self.service` (desired.v1 §2.2); a declaration of one target parameter needs it, since which of the two it binds is the deployment's (exit 2 without)
+          Across a face, a target parameter's binding, `NAME=self.system` or `NAME=self.service`, repeatable, as the target's descriptor would list it (core R2). Omitted, each is bound as the author's declaration in --contracts orders its target parameters, the first `self.system` and the second `self.service` (desired.v1 §2.2); a declaration of one target parameter needs it, since which of the two it binds is the deployment's (exit 2 without). Given at all, it replaces that derivation: name every parameter. Each name once (exit 2 twice)
 
       --face-policy <FILE>
           With --face, the `link.v2` face policy the target sits across (as #988 L4's verbs): the session runs the face's `[transport]` (`link.v2` §2.16), a key the --zenoh-config file states winning, and every read waits at least the face's `reply_timeout_ms`, whatever --timeout says (core §8.1, observer §7.5). A `link.v1` policy states none of that and is refused, exit 2

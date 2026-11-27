@@ -795,10 +795,39 @@ impl FaceWord {
 
 /// The bindings the author's declaration orders for `role`'s target
 /// parameters (§2.2): empty where `offline` does not show one declaration.
+/// Every revision in `offline` that requires `role` is read, and they must
+/// agree: several that order its parameters differently are refused, never
+/// the set's first taken (review-bot on #1174).
 fn declared_params(role: &str, offline: &ContractSet) -> Result<BTreeMap<String, String>, String> {
-    let Some(req) = offline.iter().find_map(|r| r.contract().requires.get(role)) else {
-        return Ok(BTreeMap::new());
-    };
+    let mut found: Vec<(String, BTreeMap<String, String>)> = Vec::new();
+    for rev in offline.iter() {
+        let Some(req) = rev.contract().requires.get(role) else {
+            continue;
+        };
+        let got = declared_params_of(req, offline)?;
+        if !got.is_empty() && !found.iter().any(|(_, f)| f == &got) {
+            found.push((rev.contract().iface.to_string(), got));
+        }
+    }
+    match found.len() {
+        0 => Ok(BTreeMap::new()),
+        1 => Ok(found.remove(0).1),
+        _ => Err(format!(
+            "--contracts holds several revisions that require role {role} and order its target              parameters differently ({}): say each with --param NAME=self.system or              NAME=self.service",
+            found
+                .iter()
+                .map(|(i, _)| i.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// [`declared_params`] for one requirement.
+fn declared_params_of(
+    req: &zenkey_model::contract::Requirement,
+    offline: &ContractSet,
+) -> Result<BTreeMap<String, String>, String> {
     let none = Contracts::new();
     let Some((author, _)) = author_contract(
         None,

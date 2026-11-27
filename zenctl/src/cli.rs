@@ -4087,7 +4087,8 @@ pub(crate) struct DesiredArgs {
     /// in --contracts orders its target parameters, the first `self.system`
     /// and the second `self.service` (desired.v1 §2.2); a declaration of one
     /// target parameter needs it, since which of the two it binds is the
-    /// deployment's (exit 2 without).
+    /// deployment's (exit 2 without). Given at all, it replaces that
+    /// derivation: name every parameter. Each name once (exit 2 twice).
     #[arg(long = "param", value_name = "NAME=SELF", value_parser = param_arg,
           requires = "author")]
     pub(crate) params: Vec<(String, String)>,

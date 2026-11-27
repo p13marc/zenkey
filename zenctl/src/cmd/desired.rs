@@ -146,6 +146,14 @@ fn face_word(
              revision that declares role {role} and its author's (observer §7.5)"
         ));
     }
-    zenkey_fleet::DesiredFaceWord::of_contracts(role, author, params.into_iter().collect(), offline)
+    let mut given = std::collections::BTreeMap::new();
+    for (name, value) in params {
+        if given.insert(name.clone(), value).is_some() {
+            return Err(crate::exit::unaskable!(
+                "--across-face: --param {name} given twice: each target parameter takes one binding"
+            ));
+        }
+    }
+    zenkey_fleet::DesiredFaceWord::of_contracts(role, author, given, offline)
         .map_err(|why| crate::exit::unaskable!("--across-face: {why}"))
 }
