@@ -57,6 +57,11 @@ mod health_v2;
 #[path = "profiles/alarms_v2.rs"]
 mod alarms_v2;
 
+/// `redundancy.v2`'s runners (`redundancy/conformance/v2/`, #987's N1),
+/// beside them.
+#[path = "profiles/redundancy_v2.rs"]
+mod redundancy_v2;
+
 /// The fixtures this crate runs, as (profile directory, file name).
 const KNOWN: &[(&str, &str)] = &[
     ("hostid", "vectors.json"),
@@ -144,6 +149,9 @@ const KNOWN: &[(&str, &str)] = &[
     ("redundancy", "lifecycle.json"),
     ("redundancy", "conclusions.json"),
     ("redundancy", "polls.json"),
+    ("redundancy", "v2/declarations.json"),
+    ("redundancy", "v2/descriptors.json"),
+    ("redundancy", "v2/fences.json"),
     ("timing", "declarations.json"),
     ("timing", "deadlines.json"),
     ("timing", "lifespans.json"),
@@ -1912,7 +1920,7 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
 /// One inline revision: its resources, or `{uses, resources}` (0.11: a
 /// revision that uses `freshness.v2` has a heartbeat; link.v2 0.7: one that
 /// uses `redundancy.v1` governs its interface, which a device may not
-/// implement).
+/// implement, and since 0.28 one that uses `redundancy.v2`).
 fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
     match rev.get("resources") {
         Some(rs) => {
@@ -1926,7 +1934,8 @@ fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
             if uses(zenkey_model::freshness::PROFILE_V2) {
                 d.heartbeats.insert(iface.to_owned());
             }
-            if uses(zenkey_model::redundancy::PROFILE) {
+            // link.v2 0.28: either major of redundancy governs it.
+            if redundancy::Major::ALL.iter().any(|m| uses(m.profile())) {
                 d.governed.insert(iface.to_owned());
             }
             let mut resources = link_resources(rs);

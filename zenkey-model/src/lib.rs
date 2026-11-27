@@ -122,8 +122,12 @@
 //!   the election's decision over one read and the heal's over two, one
 //!   candidate's pure two-phase state machine (claim, stand by, take over,
 //!   step down), and §5's four questions of an address and an instance
-//!   (`spec/profiles/redundancy/v1.md`, #841). The reads, the watch, the
-//!   timers, the lock and the acts in core §8.2's order are the runtime's.
+//!   (`spec/profiles/redundancy/v1.md`, #841); and `redundancy.v2`'s
+//!   (`v2.md`, #987): its declaration, either major read, a descriptor's
+//!   run, the follower's fence by `meta.zid` or by run with its hold for
+//!   one read, the draw, and an address's governance from both majors. The
+//!   reads, the watch, the timers, the lock and the acts in core §8.2's
+//!   order are the runtime's.
 //! - [`timing`]: `timing.v1`'s vocabulary, the declaration read from a
 //!   resolved resource (a stream's period, deadline and lifespan), a
 //!   reader's deadline tracker for one provider and resource as a pure state

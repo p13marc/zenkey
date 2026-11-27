@@ -1139,8 +1139,9 @@ pub enum Code {
     /// another face's `devices` (v2 §2.1, §2.5).
     DeviceListed,
     /// A device that implements `archive.v1`, or an interface a revision
-    /// given of which uses `redundancy.v1`: each needs presence on its
-    /// peers' side of the face (v2 §2.5, core §8.1).
+    /// given of which uses `redundancy.v1` or `redundancy.v2`: each needs
+    /// presence on its peers' side of the face (v2 §2.5, 0.28; core §8.1,
+    /// `redundancy.v2` §2.13).
     PresenceRequired,
     /// On a device face, a template of a device's interface that declares
     /// `epoch`: its member tokens cross the face at each transport, and the
@@ -3011,8 +3012,9 @@ pub struct Deployment {
     /// deployment gives it: a link.v2 plan then refuses a crossing revision
     /// it does not list (v2 §2.18).
     pub catalog: Option<crate::catalog::Catalog>,
-    /// The interface ids a revision given of which uses `redundancy.v1`:
-    /// a device implementing one is `presence_required` (v2 §2.5).
+    /// The interface ids a revision given of which uses either major of
+    /// `redundancy` ([`crate::redundancy::is_governed`]): a device
+    /// implementing one is `presence_required` (v2 §2.5, 0.28).
     pub governed: BTreeSet<String>,
     /// The principals the deployment binds by a usrpwd user name (core
     /// §11.1): a face the near router opens binds none of them, so a

@@ -234,7 +234,32 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   probe's wildcards and the MUST never to ask one that would run an
   operation, `[Sc: §12]`; text 0.5, F-226: §12 step 9, the MUST's
   offline half; text 0.6, #935: inline history out, no rule changed;
-  text 0.7: round 88's F-352 and F-353 rewritten in the scenarios),
+  text 0.7: round 88's F-352 and F-353 rewritten in the scenarios;
+  `redundancy.v2` text 0.1, #987's N1: `Major` (`of(uses)`, v2 where
+  listed, else v1), `is_governed` for either major (so `link`'s
+  `presence_required` and the runtime's gate read both),
+  `v2::declaration`/`declaration_of` (`Invalid::Majors` before v1's
+  reasons, `ExplicitStream` after; v1's `declaration` kept as v1 alone
+  reads, `[v1, v2]` governed), `either_declaration_of`, `Revision` and
+  `governance(revisions)` (an address's, the major taking no part),
+  `read_descriptor` (the run, the entry, the mark), `draw_again`, and
+  `lint_contract` → `Warning` (`value`, `disagrees`, v2's
+  `explicit_stream`; `zk2 contract lint` prints them and keeps its exit,
+  zenkey-build makes each a `cargo:warning`); `Fence<T>` in
+  `redundancy/fence.rs` is arbitration's `Incumbents` moved
+  (`arbitration::Incumbents` = `Fence<()>`, `Holding` re-exported, its
+  `of_token` still arbitration's): `hear`/`stood`, `describe(addr,
+  instance, Described {major, run, zid})`, `judge(addr, &Sample {stamp,
+  timestamp_id}, ended)` → `Fenced::{Accepted, Discarded(Discard), Pending}`
+  (a v1 incumbent by zid: `no_stamp`, `unattributed`, `not_incumbent`;
+  else by run: `no_run`, `not_incumbent`, `unattributed`), `offer(addr,
+  sample, Member, item)` and `read_ended(addr, descriptors)` →
+  `Outcome<T> {accepted, discarded, held, superseded, asks_read}` (one
+  read at a time, one held value per state member, a descriptor deciding
+  the held samples whose run it states, a presence event none), and v1's
+  `described`/`accepts`/`undescribed` unchanged; `collection::per_key_in`
+  stays v1's; `tests/profiles/redundancy_v2.rs` runs the three
+  `conformance/v2/` files as written, never blessed),
   `timing.v1`'s (`timing`, #908 MA: the vocabulary,
   `period_ms`, `deadline_ms` and `lifespan_ms`, the interim row published
   unchanged by core 0.53; `declaration`/`declaration_of` over a resolved
