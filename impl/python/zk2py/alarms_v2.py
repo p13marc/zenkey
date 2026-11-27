@@ -1706,3 +1706,120 @@ def from_v1(timestamp_ms: int, epoch: int | None = None) -> int | None:
     epoch."""
     at = timestamp_ms - timestamp_ms % 1000
     return at if coded(at, epoch) else None
+
+
+# -- §2.1, §2.11, §2.13 to §2.15 and §5, what a reader concludes ------------------------------------
+
+V1 = "alarms.v1"
+
+
+def major_of(interfaces: Any) -> str | None:
+    """§2.1 "A reader MUST read a service's alarms by the major its
+    descriptor lists, and by this text where it lists both"; §2.14 step 2:
+    "One that holds ``alarms.v1`` and not ``alarms.v2`` is read by
+    ``alarms.v1``'s. One that holds neither: not asked, ``not_listed``."
+    None for neither."""
+    names = set(interfaces or ())
+    if IFACE in names:
+        return IFACE
+    if V1 in names:
+        return V1
+    return None
+
+
+def judge(r: Any, question: str | None = None, horizon: Any = None) -> Any:
+    """§2.14 "v1 §2.14's six steps hold, read over this major's records":
+    :func:`zk2py.alarms.judge` over a :class:`zk2py.alarms.Reading` whose
+    ``descriptor`` ``lists`` says the descriptor lists ``alarms.v2`` (or,
+    for an owner read by v1's text, ``alarms.v1``), with step 5's one answer
+    more: "The alarm's record was ``rebound`` (§2.6): **no**, ``rebound``."
+    ``latest`` is then ``rebound``; "A record ``replaced`` or ``dropped``
+    leaves the reader holding nothing of its alarm", so ``latest`` None.
+    "Is this firing alarm past its horizon" answers ``rebound`` "beside a
+    resolved record: not asked, ``not_firing``". Step 6 is freshness.v2's
+    at 900 s, its observations as :mod:`zk2py.freshness` reads them."""
+    from . import alarms as v1
+
+    q = v1.Q_FIRING if question is None else question
+    h = v1.HORIZON if horizon is None else horizon
+    if r.latest == REBOUND:
+        probe = v1.Reading(**{**r.__dict__, "latest": RESOLVED})
+        a = v1.judge(probe, q, h)
+        if (a.answer, a.reason) == (v1.NO, RESOLVED):
+            return v1.Answer(v1.NO, REBOUND, "its slot was retaken by another identity under the same run (§2.6)")
+        return a
+    return v1.judge(r, q, h)
+
+
+@dataclass(frozen=True)
+class Read2:
+    """The reader's latest collection read of ``alarms.v2/state/alarms/**``
+    (§2.15 "Established"): whether one was made; whether it ran to its final
+    reply with no error reply; whether it drew a complete snapshot of the
+    alarms (every page); and the snapshot's run, as its digits, or None."""
+
+    made: bool = True
+    complete: bool = True
+    snapshot: bool = True
+    run: Any = None
+
+
+def established(presence: str, descriptor: dict[str, Any] | None, face: dict[str, Any] | None,
+                read: Read2 | None, lost: bool = False, gap: bool = False, runs: Any = None) -> Any:
+    """§2.15 "The order", the first that answers:
+    1. v1 §2.14's steps 1 and 2, the descriptor read as §2.14 reads it;
+    2. the read: none made, ``no_seed``; one that ended at its timeout or
+       with an error reply, ``seed_incomplete``;
+    3. since the read, when the reader subscribes: a delivery lost,
+       ``window_lost``; a gap in the owner's presence, ``owner_gap`` (not
+       asked across a face);
+    4. the snapshot: no page of it, or a page missing,
+       ``snapshot_incomplete``; its run one that no present descriptor
+       states, where one states a run, ``snapshot_run``;
+    5. otherwise ``snapshot``: established.
+
+    ``descriptor`` is ``{"lists": bool}``, whether it lists ``alarms.v2``
+    (v1's shape); ``runs`` the runs the owner's present descriptors state,
+    as digits (None or empty where none states one). "Across a face the
+    deployment's word stands for the descriptor, and no run is compared."
+    """
+    from . import alarms as v1
+
+    if presence == "absent":
+        return v1.Verdict(v1.NOT_ASKED, "absent")
+    if presence == "incomplete":
+        return v1.Verdict(v1.UNOBSERVABLE, "presence_incomplete")
+    across = presence == "across_face"
+    if across:
+        if not (face or {}).get("reachable"):
+            return v1.Verdict(v1.UNOBSERVABLE, "face_closed")
+    elif presence == "present":
+        if descriptor is None:
+            return v1.Verdict(v1.UNOBSERVABLE, "no_descriptor")
+        if not descriptor.get("lists"):
+            return v1.Verdict(v1.NOT_ASKED, "not_listed")
+    else:
+        raise ValueError(f"presence {presence!r}")
+    if read is None or not read.made:
+        return v1.Verdict(v1.UNOBSERVABLE, "no_seed")
+    if not read.complete:
+        return v1.Verdict(v1.UNOBSERVABLE, "seed_incomplete")
+    if lost:
+        return v1.Verdict(v1.UNOBSERVABLE, "window_lost")
+    if gap and not across:
+        return v1.Verdict(v1.UNOBSERVABLE, "owner_gap")
+    if not read.snapshot:
+        return v1.Verdict(v1.UNOBSERVABLE, "snapshot_incomplete")
+    if not across and runs and read.run not in set(runs):
+        return v1.Verdict(v1.UNOBSERVABLE, "snapshot_run")
+    return v1.Verdict(v1.ESTABLISHED, "snapshot")
+
+
+def any_firing(at_least: str, owners: Any, scope_whole: bool = True) -> dict[str, Any]:
+    """§2.15 "Anything firing at or above a severity is v1's, over the
+    owners so established. An unnamed alarm counts. A firing alarm whose
+    severity is the escape is v1's 'yes without a severity'": owners of
+    either major, one set (§2.17)."""
+    from . import alarms as v1
+
+    return v1.any_firing(at_least, owners, scope_whole)
