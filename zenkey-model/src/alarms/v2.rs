@@ -1824,6 +1824,13 @@ impl<I: Clone + Eq> Slots<I> {
         }
     }
 
+    /// The instance holds nothing on `slot` any more: a put of it that
+    /// did not go out, or a resolved record a new instance does not hold
+    /// (§2.9). The slot is free.
+    pub fn forget(&mut self, slot: u8) {
+        self.held.remove(&slot);
+    }
+
     /// A new instance under `bound`, with the record its previous instance
     /// left, by slot (§2.9); empty with no source. For each slot, what the
     /// new instance does, and it holds what it put and nothing else.
