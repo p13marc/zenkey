@@ -684,7 +684,7 @@ fn state_of(v: &Value) -> State {
 fn alarms_v2_slots() {
     let doc = read_json(&dir().join("slots.json"));
     let cases = doc["cases"].as_array().expect("cases");
-    assert_eq!(cases.len(), 15, "slots.json's cases");
+    assert_eq!(cases.len(), 16, "slots.json's cases");
     let (mut events, mut seen) = (0, BTreeSet::new());
     for case in cases {
         let note = &case["note"];
@@ -784,7 +784,7 @@ fn alarms_v2_slots() {
     );
 
     let views = doc["views"].as_array().expect("views");
-    assert_eq!(views.len(), 8, "views");
+    assert_eq!(views.len(), 9, "views");
     for case in views {
         let note = &case["note"];
         let held: Vec<Seen> = case["held"]
@@ -801,7 +801,12 @@ fn alarms_v2_slots() {
                 alert_key: alert_key(&h["alert_key"]),
             })
             .collect();
-        let taken = v2::taken(&held, run(&case["present_run"]));
+        // No run stated, as across a face: no slot is taken.
+        let present = match &case["present_run"] {
+            Value::Null => None,
+            r => Some(run(r)),
+        };
+        let taken = v2::taken(&held, present);
         let got = json!({
             "takes": taken
                 .takes

@@ -684,10 +684,10 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   labels), ByWords}`. Slots: `Slots<I>` (`new(bound)`, `raise` →
   `Raise::{Put, Firing, Refused}`, `resolve` → `Resolve`, `slot_of`,
   `held`, `restart(left, bound)` → `Adoption::{Left, Free, Resolved,
-  Adopted}`, an identity the record holds on two slots adopted on the
-  lowest, which the text does not say), `taken(seen, present_run)` →
-  `Taken { takes, double }` (it needs a run; the text says nothing of a
-  reader with none, as across a face) and `one_slot_each`. Words:
+  Adopted}`, an identity the record holds firing on two slots adopted
+  on the lowest, §2.9), `taken(seen, present: Option<Run>)` → `Taken {
+  takes, double }` (no slot taken with no run stated, as across a face,
+  §2.6) and `one_slot_each`. Words:
   `Words` (`from_json`, `decode`, `derive`), `words_taken(record, words)`
   → `How::{Strict, Sanitized}` or `NotTaken`, `words_derive`. Reading:
   `Held { record, run, alert_key }` (`same_identity`), `Track::apply(Sample)`
@@ -696,7 +696,7 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   step), `acknowledged`, `adopted_at`; `Seed::of(replies, epoch)` (both
   collections by index, `snapshot(stated)`); `Reading`, `firing`,
   `stale_firing`; `owner_set(presence, read, since)` (§2.15's order).
-  `tests/profiles/alarms_v2.rs` runs the ten `v2/` files as written, 475
+  `tests/profiles/alarms_v2.rs` runs the ten `v2/` files as written, 477
   cases, none blessed, all passing, and `alarms_v2_standard_contract`
   holds `alarms.v2.toml` to the constants.
   `spec/profiles/.history/alarms.v2/` holds revision 2.0.

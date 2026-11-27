@@ -166,6 +166,10 @@ the design, which the maintainer saw and did not overrule.
   - Revision 2.0 is `sha256:2292477c…2cb7`, its heartbeat's tag 7. The
     draft's first layout was `sha256:eb4dc4f7…44b9`, never published.
 - **A slot's words stay** until other words are put there.
+- **One identity firing on two slots** of a restart's record is adopted
+  on the lowest of them, and nothing is put on the others (§2.9).
+- **A slot is taken only under the present run** (§2.6). A reader with
+  no run stated, as across a face, takes no slot.
 
 **What deliberately did not change.**
 - **The identity:** v1's alert key, byte for byte, over the same words.
@@ -177,7 +181,9 @@ the design, which the maintainer saw and did not overrule.
 - **Observer** is unchanged.
 
 **Evidence.** [`conformance/v2/`](conformance/v2/) holds ten files,
-475 cases, and its `README.md` says what each pins.
+477 cases, and its `README.md` says what each pins. Two of
+`slots.json`'s, the last case and the last view, were written by hand
+from the two choices just above, and computed once.
 - **Computed twice.** One script read the text into code and wrote the
   files. A second, written from the finished text, computed each
   expectation again from the files' inputs: it parses each heartbeat
