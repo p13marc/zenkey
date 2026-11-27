@@ -329,8 +329,14 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   status's and the checks' snapshots share a run and an asof, and since
   Q2 it takes the mark again (`AS_OF_TAKES`, 4) while an entry of that
   run under the queryable's root shows above it: a put recorded between
-  the mark and the store read. `tests/profile_health_v2.rs` runs
-  `scenarios-v2.md` §1 to §5 and §9 (ten tests; `lab/svc` and
+  the mark and the store read; a `desired.v2` resource's GET, which the
+  store keeps for its author before answering (J4), takes the mark and
+  the map again after it (the `take` closure), so both hold.
+  `tests/profile_health_v2.rs` runs `scenarios-v2.md` §1 to §5 and §9,
+  and `under_a_catalog_every_time_counts_from_its_epoch` (no scenario
+  gives an owner a catalog: a status's `since`, a check's and a fault's
+  `at` and a snapshot's time count from the catalog's epoch, its
+  descriptor naming it) (eleven tests; `lab/svc` and
   `lab/ahead` on a `FileRunStore` for the 12- and 16-byte figures, a
   32-bit run's put being 14), `tests/common`'s `Beat` gained `len`,
   `tests/contracts/health/` holds §9's `tc.v1` and the earlier revision
