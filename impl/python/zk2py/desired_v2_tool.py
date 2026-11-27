@@ -10,10 +10,12 @@ keeps. Per role:
 2. the major (§2.18, "A tool reads both, per role: the report by its type
    identity, and the author's version by its revision's major"): the
    author's revision, named by its descriptor or held offline. With no
-   revision of the author's in hand the text names no way to tell; zk2py
-   reads the role as this major's when its target's contract has a report
-   resource whose ``desired.report`` names it. A ``desired.v1`` role is read
-   by :mod:`zk2py.desired_tool`;
+   revision of the author's in hand, 0.2's rule (F-603): "A role a
+   ``desired.report`` names is this major's. It is ``desired.v1``'s where
+   its packed report drew no reply and a ``desired.v1.Report`` names its
+   slice by ``key``. Any other role is ``desired.v1``'s"
+   (:func:`role_major`). A ``desired.v1`` role is read by
+   :mod:`zk2py.desired_tool`;
 3. its report, "found as §2.10 says. No slice is needed to find it"
    (:func:`zk2py.desired_v2.find_report`, on S4's GET of the report key);
 4. the slice from the author's contract, the revision its descriptor names
@@ -91,6 +93,44 @@ def _author_major(session: zenoh.Session, iface: str, a_entry: Any, offline: dic
         return canon, ds.AUTHOR_CONTRACT
     held = by_iface.get(iface) or []
     return (held[0], ds.OFFLINE_CONTRACT) if held else (None, "")
+
+
+def role_major(revision_uses: Any, names_it: bool, packed_replied: bool, v1_claims: bool) -> str:
+    """§2.18, "A tool reads both, per role": the major a role is read by.
+    ``revision_uses`` is the ``uses`` of the author's revision in hand, or
+    None with none in hand. 0.2 (F-603): "With no revision of the author's
+    in hand, a tool reads the role by the report it finds. A role a
+    ``desired.report`` names is this major's. It is ``desired.v1``'s where
+    its packed report drew no reply and a ``desired.v1.Report`` names its
+    slice by ``key``. Any other role is ``desired.v1``'s." Until 0.2 zk2py
+    read a role a ``desired.report`` names as this major's, whatever a
+    ``desired.v1.Report`` claimed."""
+    if revision_uses is not None:
+        return d2.PROFILE if d2.PROFILE in revision_uses else ds.PROFILE
+    if not names_it:
+        return ds.PROFILE
+    return ds.PROFILE if not packed_replied and v1_claims else d2.PROFILE
+
+
+def _v1_claims(session: zenoh.Session, target: str, t_iface: str, t_canon: dict[str, Any], iface: str,
+               req: dict[str, Any], timeout: float) -> bool:
+    """Whether a ``desired.v1.Report`` of the target names the role's slice
+    by ``key``: v1 §2.10's ``which_report`` over the target's v1 report
+    resources, among the candidates v1 §2.17 takes from the target's
+    requirement and binding, the one way a tool with no revision of the
+    author's has to name a v1 slice."""
+    rr = (t_canon.get("requires") or {}).get(str(req.get("role"))) or {}
+    requirement = {"resources": rr.get("resources"), "bindings": req.get("bindings"),
+                   "params": req.get("params") or {}, "optional": req.get("optional"), "unread": False}
+    taken = ds.take_slice(target, iface, requirement, None, [])
+    if not taken.candidates:
+        return False
+    replies: list[tuple[str, bytes]] = []
+    for res in dt._report_resources(t_canon):
+        sel = f"zk2/{target}/{t_iface}/{res['token']}/{dt._template_selector(res['template'])}"
+        st = live.get_state(session, sel, timeout)
+        replies += [(x.key, x.payload) for x in st.replies if not x.deleted]
+    return ds.which_report(replies, taken.candidates).found == ds.FOUND_ONE
 
 
 def _report_resources(canonical: dict[str, Any]) -> list[d2.ReportResource]:
@@ -178,7 +218,15 @@ def _read_role(session: zenoh.Session, target: str, doc: dict[str, Any], req: di
         a_doc = dt._descriptor(session, author, a_inst, timeout) if a_inst is not None else None
         a_entry = dt._entry(a_doc, iface)
     a_canon, how = _author_major(session, iface, a_entry, offline, by_iface, timeout)
-    major_v2 = d2.PROFILE in (a_canon.get("uses") or ()) if a_canon is not None else names_it
+    packed_replied = v1_claims = False
+    if a_canon is None and names_it:
+        for r in resources:
+            if d2.names_role(r, name):
+                st = live.get_state(session, d2.report_key(target, t_iface, r, name), timeout)
+                packed_replied = packed_replied or any(not x.deleted and x.raw for x in st.replies)
+        v1_claims = not packed_replied and _v1_claims(session, target, t_iface, t_canon, iface, req, timeout)
+    major_v2 = role_major(None if a_canon is None else (a_canon.get("uses") or ()), names_it, packed_replied,
+                          v1_claims) == d2.PROFILE
     if not major_v2:
         # §2.18: "a desired.v1 author's versions by v1 §2.6": v1's tool
         got = dt.read(session, target, name, contracts=contracts, timeout=timeout)

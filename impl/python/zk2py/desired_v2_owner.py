@@ -9,7 +9,7 @@ zk2py processes against each other (#609, round 118)::
         [--desired-presence-watch] [--desired-reread-ms <ms>] [--desired-hold]
         [--desired-across] [--desired-reply-timeout-ms <ms>] [--desired-watch] [--desired-no-move]
         [--desired-catalog <file>] [--desired-owner-heartbeat] [--desired-contract <file>]
-        [--desired-archive <system>/<service>] [--desired-worker <file>]
+        [--desired-archive <system>/<service>] [--desired-worker <file>] [--desired-word-alone]
         <system>/<service>
 
 Standard output: ``connected <endpoint>``, then ``ready
@@ -107,9 +107,11 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
         ls = target.last_seed
         if ls is None:
             return "desired seeds 0 none"
+        # v2.md §2.18 (0.2): the author's revision its descriptors name, in
+        # the reference's words, before ``because``
         why = f" because {ls['why']}" if ls.get("why") else ""
         return (f"desired seeds {target.seeds} answered={ls['answered']} author={ls['author']} "
-                f"archive={ls['archive']}{why}")
+                f"archive={ls['archive']} revision={ls.get('revision', 'not-read')}{why}")
     if cmd in ("watch", "reads"):
         return f"desired {cmd} " + _dump(target.watch_says())
     return f"refused {line}: unknown command"
@@ -139,6 +141,9 @@ def main(argv: list[str] | None = None) -> int:
                                              "its file (scenarios-v2 §11's worker.v2, both)")
     ap.add_argument("--desired-archive", help="<system>/<service>: the target's last-known, read when a seed draws "
                                               "nothing and a complete presence read shows its author absent (v1 §2.9)")
+    ap.add_argument("--desired-word-alone", action="store_true",
+                    help="the target reads its author's revision by the deployment's word alone, never its "
+                         "descriptor: a target built before desired.v2 (v2.md §2.18, scenarios-v2.md §16)")
     ap.add_argument("--desired-catalog", help="core §8.6's catalog: the author states its id; the target reads groups by it")
     ap.add_argument("--desired-owner-heartbeat", action="store_true",
                     help="the author confirms its interface by owner heartbeats (freshness.v2 §2.4); needs a catalog")
@@ -166,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
                             reply_timeout_ms=args.desired_reply_timeout_ms, watch=args.desired_watch,
                             moves=not args.desired_no_move, watched=args.desired_watched,
                             run_record=args.desired_run_record, catalog=args.desired_catalog, tasking=tasking,
-                            archive=args.desired_archive,
+                            archive=args.desired_archive, word_alone=args.desired_word_alone,
                             worker=contract_file(args.desired_worker) if args.desired_worker else None)
             instance = target.start()
     except OwnerRefused as e:

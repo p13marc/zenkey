@@ -4349,7 +4349,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
         + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
         + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
-        + _round123_readings(root) + _round124_readings(root)
+        + _round123_readings(root) + _round124_readings(root) + _round125_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4474,13 +4474,14 @@ def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 m.restart()
         return hit
 
-    out.append(("answer 2 (v2.md §2.10): a revert on a snapshot with no entry that fails is written with no observed "
-                "version, failed, apply, baseline, none in force, and the reader's own check finds observed_outcome "
-                "(F-577); no case of order.json's 67 ended such a revert otherwise than done, and one of its 69 does "
-                "since 0.2 (round 125)",
+    out.append(("answer 2 (v2.md §2.10): a revert on a snapshot with no entry that fails was written with no observed "
+                "version, failed, apply, baseline, none in force, and the reader's own check found observed_outcome "
+                "(F-577); no case of order.json's 67 ended such a revert otherwise than done; at 0.2 (round 125) such "
+                "a revert keeps the observed version it had, the reverted document's with its revision, and reads "
+                "with no finding, as order.json's case 68 of 69 pins and zk2py now writes",
                 [failed, d2.consistency(failed), sum(1 for c in order if ends_no_entry_otherwise(c)), len(order)],
-                [{"source": "baseline", "outcome": "failed", "last_known": False, "in_force": "none", "code": "apply"},
-                 ["observed_outcome"], 1, 69]))
+                [{"source": "baseline", "outcome": "failed", "last_known": False, "in_force": "none",
+                  "observed_run16": 7, "observed_seq": 5, "revision": 1, "code": "apply"}, [], 1, 69]))
     out.append(("answer 3 (v2.md §2.5, \"The stamp it sends\"): while a snapshot with no entry is acted on, and after "
                 "it, zk2py's target sends no held stamp; with a version it sends that version's",
                 [during, t.stamp_to_send(), (lambda m: (m.receive(put(7, 5, {"revision": 1})),
@@ -4532,16 +4533,19 @@ def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
     got["order: an asof equal to the held version's seq is older, where the text reverts"] = failing(
         lambda path: me._desired_v2_order(path, AsofAtSeqOlder), base / "order.json")
 
-    class FailedKeepsObserved(T):
+    # 0.2 (F-577, round 125): zk2py's target keeps the observed version
+    # after a failed revert on a snapshot with no entry, so the changed
+    # reader is 0.1's, which gives it none.
+    class FailedKeepsNone(T):
         def finish(self, f: Any) -> str:
-            h, prev = self.current, self.observed
+            h = self.current
             word = super().finish(f)
-            if h.no_entry is not None and self.outcome == d2.FAILED and self.observed is None:
-                self.observed = prev
+            if h.no_entry is not None and self.outcome == d2.FAILED:
+                self.observed = None
             return word
 
-    got["order: a failed revert on a snapshot with no entry keeps the version it held as observed"] = failing(
-        lambda path: me._desired_v2_order(path, FailedKeepsObserved), base / "order.json")
+    got["order: a failed revert on a snapshot with no entry keeps no observed version (0.1)"] = failing(
+        lambda path: me._desired_v2_order(path, FailedKeepsNone), base / "order.json")
 
     class NotReadMoves(W):
         def heartbeat(self, run: Any, seq: int, section: Any, read: bool = True, key: str = "") -> str:
@@ -4580,24 +4584,32 @@ def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
     got["declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param"] = failing(
         lambda path: me._desired_v2_declarations(path, two_reports_skipped), base / "declarations.json")
 
-    def any_kind_names(r: Any, role: str) -> bool:
-        if not r.holds_key or r.named is None:
+    # 0.2 (F-580, round 125): zk2py names a role by a resource of any kind
+    # that holds the key, so the changed reader is 0.1's §0, a state alone.
+    def state_alone_names(r: Any, role: str) -> bool:
+        if not r.holds_key or r.token not in ("state", "@state") or r.named is None:
             return False
         return r.named[0] == d2.PARAM or r.named[1] == role
 
-    got["slices: a resource of another kind that holds desired.report names the role"] = failing(
-        lambda path: me._desired_v2_slices(path, any_kind_names), base / "slices.json")
+    got["slices: a state resource alone names the role (0.1's §0)"] = failing(
+        lambda path: me._desired_v2_slices(path, state_alone_names), base / "slices.json")
     out.append(("conformance/v2/, what its files tell apart (F-579): a reader changed in one place fails order.json's "
-                "case 26 for a version at a remembered asof, and no case for each of the other seven",
+                "case 26 for a version at a remembered asof, and no case for each of the other seven; at 0.2 (round "
+                "125) six of the seven have their cases, each failing its changed reader: order.json's case 67 (results "
+                "134 and 135) and case 68 (136), watch.json's 25 and 26, declarations.json's report resources 34 to 37 "
+                "(results 46 to 49) and slices.json's case 16; the seventh, a digest moved while no version is held, "
+                "passes every file, and the entry says it cannot occur; the readers of F-577 and F-580 are 0.1's, "
+                "since zk2py moved",
                 got,
                 {"order: a version at a remembered asof is the same version": [26],
-                 "order: an asof equal to the held version's seq is older, where the text reverts": [],
-                 "order: a failed revert on a snapshot with no entry keeps the version it held as observed": [],
-                 "watch: a heartbeat not read moves the sequence": [],
-                 "watch: a seq exactly 2^23 after the last read one's is read": [],
+                 "order: an asof equal to the held version's seq is older, where the text reverts": [134, 135],
+                 "order: a failed revert on a snapshot with no entry keeps no observed version (0.1)": [136, 137],
+                 "watch: a heartbeat not read moves the sequence": [25],
+                 "watch: a seq exactly 2^23 after the last read one's is read": [26],
                  "watch: it moves what it expects while it holds no version": [],
-                 "declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param": [],
-                 "slices: a resource of another kind that holds desired.report names the role": []}))
+                 "declarations: two_reports skipped after not_state, not_a_role, not_a_param or rest_param":
+                     [46, 47, 48, 49],
+                 "slices: a state resource alone names the role (0.1's §0)": [16]}))
     out.append(("desired.v2 0.1's entry, its evidence: seven files, 293 cases (reports 22 writes, 57 reads, 12 places "
                 "and 6 words; order 67; watch 25; declarations 12 and 34; slices 16; conclusions 39; schema 3); 0.2's "
                 "entry adds order's 2, watch's 2, declarations' 4 report resources and slices' 1, as the files hold "
@@ -5162,6 +5174,170 @@ def _round122_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + missing(llog, "Case 51 is case 0's router on `zenoh-1.10.2`. Its plan is case 0's but for its "
                                 "`binding`, and each principal is narrowed over the same nine. 52 cases."),
                 [53, [stock, two], ["/binding"], "zenoh-1.10.2", True, []]))
+    return out
+
+
+def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """desired.v2 0.2, health.v2 0.3, link.v2 0.26, freshness.v2 0.13, core
+    0.115 and observer 0.36 (#609, round 125; #986): each text at its
+    version, and each answer to F-569 to F-611 that moves zk2py, as zk2py's
+    code now gives it: a report resource of any kind (F-580), a linter's
+    errors (F-583, F-594), a failed act's place and line (F-592), a role's
+    major with no revision in hand (F-603), a record whose time no catalog
+    in hand dates (F-610), and a read on the near side that draws no reply
+    (F-574). No session is opened."""
+    import re
+
+    from . import desired as v1d, desired_v2 as d2, freshness_v2 as f2, health_v2 as h2
+    from .contract import load_contract
+    from .desired_v2_live import CONTRACTS, LINE_DRIVE
+    from .desired_v2_tool import role_major
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    def at(rel: str) -> str | None:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", flat(rel))
+        return m.group(1) if m else None
+
+    core = flat("core.md")
+    core_at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
+    dv2, hv2, fv2, lv2, obs = (flat("profiles/desired/v2.md"), flat("profiles/health/v2.md"),
+                               flat("profiles/freshness/v2.md"), flat("profiles/link/v2.md"), flat("observer.md"))
+    out: list[tuple[str, Any, Any]] = []
+    # core may be renumbered 0.116 at its merge: the walk is keyed by the header
+    out.append(("round 125's texts at their versions or later, each with its entry: desired.v2 0.2, health.v2 0.3, "
+                "link.v2 0.26, freshness.v2 0.13, observer 0.36, and core 0.115 by its header",
+                [_at_least(at("profiles/desired/v2.md"), "0.2"), _at_least(at("profiles/health/v2.md"), "0.3"),
+                 _at_least(at("profiles/link/v2.md"), "0.26"), _at_least(at("profiles/freshness/v2.md"), "0.13"),
+                 _at_least(at("observer.md"), "0.36"),
+                 core_at is not None and _at_least(core_at.group(1), "0.115")]
+                + missing(flat("profiles/desired/CHANGELOG.md"), "## desired.v2 0.2 — 2026-11-27")
+                + missing(flat("profiles/health/CHANGELOG.md"), "## health.v2 0.3 — 2026-11-27")
+                + missing(flat("profiles/link/CHANGELOG.md"), "## link.v2 0.26 — 2026-11-27")
+                + missing(flat("profiles/freshness/CHANGELOG.md"), "## `v2.md` 0.13 — 2026-11-27")
+                + missing(flat("observer-CHANGELOG.md"), "## 0.36 — 2026-11-27")
+                + missing(flat("CHANGELOG.md"), "zk2py's rounds 116 to 123: a run's record that is gone"),
+                [True] * 6))
+
+    # -- desired.v2 0.2 -----------------------------------------------------------------
+    def res(token: str, value: Any = "task", template: str = "desired/task", report: bool = True) -> Any:
+        return d2.ReportResource(token, template, {d2.REPORT_KEY: value}, report)
+
+    state, stream = res("state"), res("stream", template="desired/log")
+    both = [state, stream]
+    out.append(("desired.v2 0.2 §0 and §2.10 (F-580): a stream that holds desired.report is a report resource, its "
+                "declaration not_state; it still names its role, so the state beside it draws two_reports, and a "
+                "tool finds the role's report unreadable, two_reports; a stream alone names its role and is invalid, "
+                "so a tool reads none (its reasons beside)",
+                [list(d2.declare_report(state, {"task"}, both).reasons),
+                 list(d2.declare_report(stream, {"task"}, both).reasons),
+                 [d2.find_report("lab/worker", "worker.v2", both, {"task"}, "task", []).found,
+                  d2.find_report("lab/worker", "worker.v2", both, {"task"}, "task", []).why],
+                 list(d2.find_report("lab/worker", "worker.v2", [stream], {"task"}, "task", []).reasons)]
+                + missing(dv2, "- **Report resource:** a resource of a target's contract whose resolved annotations "
+                               "hold `desired.report`, of any kind (§2.10). Its declaration is invalid unless it is "
+                               "`state` or `@state`.",
+                          "- **Of any kind.** A resource of another kind that holds the key is a report resource. "
+                          "Its declaration is `not_state`. It still names its role, to `two_reports` and to a "
+                          "tool's finding (below)."),
+                [["two_reports"], ["not_state", "two_reports"], ["unreadable", "two_reports"],
+                 ["not_state"]]))
+    base = (CONTRACTS / "tasking.v2.toml").read_text(encoding="utf-8")
+    v1_horizon = base.replace('uses  = ["desired.v2", "freshness.v2"]', 'uses  = ["desired.v2", "freshness.v1"]') \
+        .replace('"freshness.ttl_s" = 0', '"freshness.ttl_s" = 600')
+    good = load_contract(CONTRACTS / "tasking.v2.toml")
+    bad = load_contract(CONTRACTS / "tasking.v2.toml", text=v1_horizon)
+    worker = load_contract(CONTRACTS / "worker.v2.toml")
+    w_bad = load_contract(CONTRACTS / "worker.v2.toml", text=(CONTRACTS / "worker.v2.toml").read_text(
+        encoding="utf-8").replace('"desired.report"   = "task"', '"desired.report"   = "nobody"'))
+    out.append(("desired.v2 0.2 §2.2 and §2.10 (F-583): a linter reports each reason of an invalid declaration as an "
+                "error, and the contract still loads, with its fingerprint: a horizon of 600 under freshness.v1 is "
+                "horizon_v1, an error; a report naming no requirement is not_a_role, an error; each contract is "
+                "valid to core §9.2, with no code and a fingerprint; the scenarios' two lint clean",
+                [d2.lint_contract(bad.canonical), [r for r in d2.lint_contract(w_bad.canonical) if r["as"] == "report"],
+                 [bad.valid, bad.codes, bad.fingerprint.startswith("sha256:")],
+                 [w_bad.valid, w_bad.codes, w_bad.fingerprint.startswith("sha256:")],
+                 [r.get("severity") for c in (good, worker) for r in d2.lint_contract(c.canonical)]]
+                + missing(dv2, "- **What a linter reports.** A linter reports each reason of an invalid declaration "
+                               "as an error, where v1 §2.2 says warn. `link.v2`'s `packed_required` is one too. The "
+                               "core has no code for it. So the contract still loads, with its fingerprint (core "
+                               "§9.2)."),
+                [[{"resource": "state/tasks/{system}/{service}", "as": "desired", "declaration": "invalid",
+                   "reasons": ["horizon_v1"], "severity": "error"}],
+                 [{"resource": "state/desired/task", "as": "report", "declaration": "invalid",
+                   "reasons": ["not_a_role"], "severity": "error"}],
+                 [True, [], True], [True, [], True], [None, None]]))
+    ann = next(r["annotations"] for r in worker.canonical["resources"] if r["template"] == "desired/task")
+    t = d2.TargetRole(tuple(ann[d2.POINTERS_KEY]), tuple(ann[d2.DETAILS_KEY]))
+    t.receive(d2.Sample(v1d.OWNER, False, d2.Version.of(16, 1, 2),
+                        v1d.Payload.of_bytes(b'{"mode":"run","rate_hz":20,"revision":5}', True), 5))
+    t.finish(d2.Finish(d2.FAILED, "apply", "/mode", LINE_DRIVE))
+    sc = flat("profiles/desired/scenarios-v2.md")
+    out.append(("desired.v2 scenarios-v2.md §4 Expected 5 (F-592): the scenarios' drive fails after the rate and "
+                "before the mode, so zk2py's act points at /mode, index 1, its line the drive's, which worker.v2's "
+                "table does not hold: out_of_range; the record is the reference's 14 bytes of round 119",
+                [t.report(), d2.write_report(t.report()).hex()]
+                + missing(sc, "- **A failed act** points at `/mode`, index 1, where its drive stopped. Its line is "
+                              "the drive's, which the table does not hold: `out_of_range` (§2.10).",
+                          "The report is `source` `desired`, `outcome` `failed`, the observed version `s5`, `code` "
+                          "`apply`, `pointer` 1 and `detail` `out_of_range`, and `in_force` `none`."),
+                [{"source": "desired", "outcome": "failed", "last_known": False, "in_force": "none",
+                  "observed_run16": 1, "observed_seq": 2, "revision": 5, "code": "apply", "pointer": 1,
+                  "detail": "out_of_range"}, "588000a000005000000050c80ffc"]))
+    out.append(("desired.v2 0.2 §2.18 (F-603): a role's major, with no revision of the author's in hand, by the report "
+                "a tool finds: this major's where a desired.report names it; desired.v1's where its packed report "
+                "drew no reply and a desired.v1.Report claims its slice; desired.v1's where none names it; with a "
+                "revision in hand, by its uses alone",
+                [role_major(None, True, True, False), role_major(None, True, True, True),
+                 role_major(None, True, False, False), role_major(None, True, False, True),
+                 role_major(None, False, False, False), role_major(["desired.v1"], True, True, False),
+                 role_major(["desired.v2", "freshness.v2"], False, False, True)]
+                + missing(dv2, "- **With no revision of the author's in hand,** a tool reads the role by the report it "
+                               "finds. A role a `desired.report` names is this major's. It is `desired.v1`'s where "
+                               "its packed report drew no reply and a `desired.v1.Report` names its slice by `key`. "
+                               "Any other role is `desired.v1`'s."),
+                ["desired.v2", "desired.v2", "desired.v2", "desired.v1", "desired.v1", "desired.v1", "desired.v2"]))
+    out.append(("desired.v2 0.2's rules and statements zk2py already met, read where they are stated: §2.5's stamp "
+                "around a snapshot with no entry (F-581), §2.6 step 4's equal at a reverted asof (F-582), §2.17's "
+                "first answer with no slice (F-586), §2.18's start refusal and stop (F-589), the revision read "
+                "from the descriptor (F-590), \"Targets first\" through routers that timestamp (F-588), and what "
+                "a tool loses after a revert on a snapshot with no entry (F-585)",
+                missing(dv2, "- **A snapshot with no entry** it admitted is no version (§2.6). The target sends none "
+                             "while that revert runs. It sends none after it either, ended or failed.",
+                        "At a snapshot's asof it reverted on, equal is older too (§2.8).",
+                        "- possibly incomplete: **unobservable**, `author_presence_incomplete`;",
+                        "A target given such an author's revision at its start MUST refuse to start, as v1 §2.1 "
+                        "refuses `two_documents`.",
+                        "While the descriptor names it, a target MUST NOT act on a version of that author's.",
+                        "It is the one the author's descriptor names for the version's run. Where no descriptor "
+                        "reaches the target, it is the deployment's word.",
+                        "- **So a deployment MUST NOT bind** such a target to such an author where a router between "
+                        "the two timestamps.",
+                        "After a revert on a snapshot with no entry, it reads no convergence until the next document "
+                        "(§2.17)."), []))
+
+    # -- core 0.115 and observer 0.36 ---------------------------------------------------
+    out.append(("core 0.115 and observer 0.36, the answers with no rule of zk2py's to move: §4.3's record that is "
+                "gone binds the deployment (F-578), §4.2's raw body (F-572) and observer §4.1's held stamp, §8.5's "
+                "QUIC exception (F-608), §8.6's time from an unheld epoch (F-610), and §0's zenoh's own crates "
+                "(F-607)",
+                missing(core, "A deployment MUST NOT start an owner on a record's path where that owner's record was "
+                              "lost, nor on a record restored from an earlier state.",
+                        "The rule binds the held stamp a reader sends of its own. The user's is no reader's: the "
+                        "tool holds nothing for the member, and merges nothing.",
+                        "- **One exception** is a 1.10.1 router's QUIC link of mixed reliability. Its best-effort "
+                        "companion runs this end's configured size, whatever the other end's (Appendix B).",
+                        "What a reader does with a packed record that holds such a time is its profile's to say.")
+                + missing(obs, "- A held stamp that is the payload its GET carried, on its one concrete key, is the "
+                               "owner's answer. The tool shows it as unchanged: the member's last mutation is that "
+                               "stamp. It never shows a value.",
+                          "owner's rules, the grants a deployment compiles (core §11) and zenoh's facts (core "
+                          "Appendix B) stay in the core.")
+                + missing(lv2, "- **Per mode, the mode read alone decides.**"), []))
     return out
 
 
