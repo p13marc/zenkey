@@ -6,6 +6,22 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `desired --across-face` (#986's J5)
+
+`desired.v1` 0.14 §2.14, §2.17 step 2; `desired.v2` 0.1 §2.5, §2.14;
+observer §7.5. `desired` reads one target across a constrained face, as
+`watch`, `health` and `alarms` read an owner there. Six flags are new on
+`desired`: `--across-face`, `--author`, `--unbound`, `--param`,
+`--face-policy` and `--face`. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| a target across a face: no `--across-face`; a presence read that drew nothing, so every question not asked, `target_absent`, or unobservable | `desired <SYSTEM/SERVICE> --across-face --role ROLE --author SYSTEM/SERVICE`: the deployment's word for the target's presence and its descriptor, the role bound to that author; `--unbound` the kill switch, answered before any report | `--role` and the target are needed; one of `--author` and `--unbound` too, else exit 2 before any session |
+| the revisions a reading reads: the ones the descriptors name, retrieved | across a face, the ones `--contracts` holds: the one declaring the role, for the report, and the author's, for the slice | with no contract, exit 2; with no revision of the author's interface, a `desired.v2` role has no slice (unobservable, `author_not_read`) |
+| the slice's parameters: the descriptor's `requires` entry | across a face, as the author's declaration in hand orders its target parameters, the first `self.system`, the second `self.service`; `--param NAME=self.system` states one | a declaration of one target parameter needs `--param`, which is the deployment's choice (desired.v1 §2.2): exit 2 without, naming it |
+| no presence read is skipped | across a face none is read, the target's nor its author's: `presence` is absent, `across_face` is `true`, the author's `presence` is `across_face` | `asked` holds the report's key and the slice, and nothing under `@zk` |
+| every read waits `--timeout` | with `--face-policy FILE --face NAME`, the session runs the face's `[transport]`, and every read waits at least the face's `reply_timeout_ms`, whatever `--timeout` says | a `link.v1` policy is refused, exit 2, as on the other verbs |
+
 ## Unreleased (`main`, zk2) — `check face --format json` carries the plan's warnings (#1173)
 
 `link.v1` §2.3. No flag is new, and no exit code changed.

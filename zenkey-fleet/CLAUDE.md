@@ -293,8 +293,16 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `desired-report` passes it only as the baseline's record (§2.12; the
   live `desired_v2_s9_last_known_…`'s `lab/spare`). Not done: a
   `desired.v1.Report` on a `freshness.v2` resource is still aged by its
-  Zenoh timestamp alone, and no `--across-face` word reaches `zenctl
-  desired`.
+  Zenoh timestamp alone. Since #986's J5 `zenctl desired --across-face` gives the
+  engine its word: `FaceWord::of_contracts(role, author, params,
+  offline)`, bound or the kill switch, `author_across` set (neither
+  presence read), and each target parameter bound as the author's
+  declaration in hand orders it (`declared_params`: the first
+  `self.system`, the second `self.service`; one target parameter is the
+  deployment's choice, an `Err` naming it; nothing derived where
+  `offline` shows no one declaration); `bus::desired`'s
+  `a_tools_word_binds_as_the_authors_declaration_orders` reads it through
+  `across_face` under both majors.
   `redundancy.v1` (#841, RC) runs through all four layers too.
   `bus::redundancy` makes two presence reads of the scope's `@zk/**` a
   grace apart (2 s) on a session with no liveliness subscriber, `cut_off`

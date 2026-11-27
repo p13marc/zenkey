@@ -31,12 +31,18 @@
 //! Under desired.v2 the window is the only way: a version is a run and a
 //! seq, with no time for `--clocks-synced` to age (v2 §2.17).
 //!
-//! **No `--across-face`.** Across a constrained face neither presence nor
-//! the descriptor crosses, so the deployment's word must say the role, its
-//! binding and its author, and `--contracts` must hold both contracts. The
-//! engine takes that word ([`zenkey_fleet::DesiredFaceWord`]); this verb
-//! does not yet, for want of a deployment that reads desired state across a
-//! face.
+//! **`--across-face`** (#986's J5). Across a constrained face neither
+//! presence nor the descriptor crosses, so the deployment's word says the
+//! role (`--role`), its binding (`--author`, or `--unbound`, the kill
+//! switch) and its parameters (`--param`, else the author's declaration's
+//! order), and `--contracts` holds the revisions: the one declaring the
+//! role and the author's, the slice's. The engine takes that word
+//! ([`zenkey_fleet::DesiredFaceWord`]) and reads no presence, the target's
+//! nor its author's; the report and the slice are one GET each. With
+//! `--face-policy` and `--face` the session runs the face's transport, and
+//! every read waits at least the face's `reply_timeout_ms` (core §8.1,
+//! observer §7.5), a floor no `--timeout` lowers: a reply that crosses after
+//! a shorter wait crosses for nothing.
 
 use anyhow::Result;
 use zenkey_fleet::{DesiredSpec, Judgement};
@@ -54,18 +60,34 @@ pub async fn run(cli: DesiredArgs) -> Result<()> {
         role,
         for_secs,
         clocks_synced,
+        across_face,
+        author,
+        unbound,
+        params,
+        face_policy,
+        face,
         contracts,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
+    let dep = ASKING.ask(zk2::across(dep, face_policy.as_deref(), face.as_deref()));
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
     let window = for_secs.map(|s| ASKING.ask(super::positive_secs("--for", s)));
-    let mut spec = DesiredSpec::new(dep.timeout());
+    // Across a face's policy, its reply timeout is every read's floor (core
+    // §8.1, observer §7.5), whatever --timeout says.
+    let timeout = dep
+        .far()
+        .map_or(dep.timeout(), |f| f.at_least(dep.timeout()));
+    let mut spec = DesiredSpec::new(timeout);
     // desired.v2 §2.17 step 4: the epoch a report under freshness.v2 is
     // dated under (core §8.6), from `--catalog`.
     spec.catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
     spec.window = window;
     spec.clocks_synced = clocks_synced;
+    if across_face {
+        let role = role.as_deref().unwrap_or_default();
+        spec.face = Some(ASKING.ask(face_word(role, author, unbound, params, &offline)));
+    }
     spec.role = role;
     let session = ASKING.ask(dep.session().await);
     let store = zk2::store(&dep, &offline);
@@ -98,4 +120,32 @@ pub async fn run(cli: DesiredArgs) -> Result<()> {
         _ => {}
     }
     crate::exit::verdict(&judgement)
+}
+
+/// The deployment's word for one role across a face (`--across-face`).
+/// Refused, exit 2: no word on the binding, no contract in hand, and a
+/// declaration of one target parameter with no `--param`
+/// ([`zenkey_fleet::DesiredFaceWord::of_contracts`]).
+fn face_word(
+    role: &str,
+    author: Option<zenkey_model::grammar::Addr>,
+    unbound: bool,
+    params: Vec<(String, String)>,
+    offline: &zenkey_fleet::ContractSet,
+) -> Result<zenkey_fleet::DesiredFaceWord> {
+    if author.is_none() && !unbound {
+        return Err(crate::exit::unaskable!(
+            "--across-face: no descriptor crosses a face, so the deployment's word names the \
+             role's binding: --author SYSTEM/SERVICE, or --unbound for the kill switch \
+             (desired.v1 §2.3, §2.12)"
+        ));
+    }
+    if offline.is_empty() {
+        return Err(crate::exit::unaskable!(
+            "--across-face: no descriptor crosses a face, so --contracts must hold the target's \
+             revision that declares role {role} and its author's (observer §7.5)"
+        ));
+    }
+    zenkey_fleet::DesiredFaceWord::of_contracts(role, author, params.into_iter().collect(), offline)
+        .map_err(|why| crate::exit::unaskable!("--across-face: {why}"))
 }

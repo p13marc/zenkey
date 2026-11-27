@@ -1357,6 +1357,18 @@ pub(crate) enum Command {
     /// `desired.report` of its target's contract names it, unless only a
     /// desired.v1.Report claims it.
     ///
+    /// Across a constrained face (--across-face; desired.v1 §2.14, §2.17
+    /// step 2; desired.v2 §2.14), where presence and descriptors do not
+    /// cross, the deployment's word stands for both: the target and --role,
+    /// bound to --author, or unbound, the kill switch (--unbound), its
+    /// parameters as the author's declaration in --contracts orders them
+    /// (or --param); the revisions are the ones --contracts holds, the
+    /// role's declaring contract and the author's. Nothing of presence is
+    /// read; the target's report and the author's slice are one GET each,
+    /// each waiting at least the face's reply_timeout_ms with --face-policy
+    /// and --face (observer §7.5). A report that did not cross answers
+    /// unobservable, nothing_crossed.
+    ///
     /// --format json is one document: `report` ("desired"), `namespace`,
     /// `target` and `role` when asked, `presence` (`selector`, `complete`,
     /// `services`), `window_s`, `readings`, `clock`, `asked`, `judgement`,
@@ -4049,6 +4061,47 @@ pub(crate) struct DesiredArgs {
     /// unobservable age.
     #[arg(long)]
     pub(crate) clocks_synced: bool,
+    /// The target sits across a constrained face (spec §8.5; desired.v1
+    /// §2.14, §2.17 step 2; desired.v2 §2.14), where presence and
+    /// descriptors do not cross: the deployment's word that it serves
+    /// --role, bound to --author or, with --unbound, the kill switch. No
+    /// presence is read, the target's nor its author's, and the revisions
+    /// are the ones --contracts holds: the one declaring the role, and the
+    /// author's, which gives the slice (observer §7.5). The target's report
+    /// and the author's slice are each one GET. Needs the target and
+    /// --role, and one of --author and --unbound (exit 2 without).
+    #[arg(long, requires_all = ["target", "role"])]
+    pub(crate) across_face: bool,
+    /// Across a face, the role's author, `<system>/<service>`, as the
+    /// target's binding names it (desired.v1 §2.3).
+    #[arg(long, value_name = "SYSTEM/SERVICE", value_parser = addr_arg,
+          requires = "across_face", conflicts_with = "unbound")]
+    pub(crate) author: Option<zenkey_model::grammar::Addr>,
+    /// Across a face, the deployment's word that the role is listed unbound:
+    /// the kill switch (desired.v1 §2.12), answered before any report.
+    #[arg(long, requires = "across_face")]
+    pub(crate) unbound: bool,
+    /// Across a face, a target parameter's binding, `NAME=self.system` or
+    /// `NAME=self.service`, repeatable, as the target's descriptor would
+    /// list it (core R2). Omitted, each is bound as the author's declaration
+    /// in --contracts orders its target parameters, the first `self.system`
+    /// and the second `self.service` (desired.v1 §2.2); a declaration of one
+    /// target parameter needs it, since which of the two it binds is the
+    /// deployment's (exit 2 without).
+    #[arg(long = "param", value_name = "NAME=SELF", value_parser = param_arg,
+          requires = "author")]
+    pub(crate) params: Vec<(String, String)>,
+    /// With --face, the `link.v2` face policy the target sits across (as
+    /// #988 L4's verbs): the session runs the face's `[transport]`
+    /// (`link.v2` §2.16), a key the --zenoh-config file states winning, and
+    /// every read waits at least the face's `reply_timeout_ms`, whatever
+    /// --timeout says (core §8.1, observer §7.5). A `link.v1` policy states
+    /// none of that and is refused, exit 2.
+    #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
+    pub(crate) face_policy: Option<PathBuf>,
+    /// The face of --face-policy, by its name (`[face.<name>]`).
+    #[arg(long = "face", value_name = "NAME", requires = "face_policy")]
+    pub(crate) face: Option<String>,
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
