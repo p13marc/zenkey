@@ -32,7 +32,12 @@
 //! declarations) and health.v2's (its §2.10, a service's own word tables),
 //! whose findings are errors. The contract still loads, so its fingerprint
 //! is printed after a profile's errors (desired.v2 §2.2, core §9.2), and
-//! the exit is 1.
+//! the exit is 1. It also warns of a governed interface's invalid
+//! declaration, of either major of `redundancy` (`redundancy.v1` §2.2,
+//! `redundancy.v2` §2.2): `value`, `disagrees`, and `explicit_stream` under
+//! `redundancy.v2`. A runtime refuses to start such an interface, and the
+//! core has no code for any of them, so they are warnings, and the exit is
+//! not moved by them.
 //!
 //! Exit codes follow zenctl's contract: 0 asked and clean, 1 asked and a
 //! finding (an invalid contract, a review or breaking change, a history
@@ -125,12 +130,18 @@ fn lint(files: &[&str]) -> ExitCode {
                         .chain(&zenkey_model::alarms::v2::lint_contract(&c))
                         .map(ToString::to_string),
                 );
-                if !findings.is_empty() {
+                // redundancy.v1 §2.2, redundancy.v2 §2.2: a linter SHOULD
+                // warn of an invalid declaration; it moves no exit.
+                let warnings = zenkey_model::redundancy::lint_contract(&c);
+                if !findings.is_empty() || !warnings.is_empty() {
                     eprintln!("{f}:");
                     for x in &findings {
                         eprintln!("  {x}");
                     }
-                    bad = true;
+                    for w in &warnings {
+                        eprintln!("  {w}");
+                    }
+                    bad |= !findings.is_empty();
                 }
                 // A profile's error leaves the contract loaded, with its
                 // fingerprint (desired.v2 §2.2: the core has no code for
