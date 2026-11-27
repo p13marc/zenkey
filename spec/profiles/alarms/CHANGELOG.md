@@ -7,6 +7,73 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `alarms.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## alarms.v2 0.2 — 2026-11-28: zk2py's round 124: an alarm ages at the horizon of the revision its owner names, and a reader with no run stated answers each entry by its slot, no keyword changed (#984)
+
+zk2py's round 124 filed four findings against 0.1. #1170 resolved F-612
+and F-615, an index line and a README. This entry answers the other
+two, F-613 and F-614.
+
+**F-613, an ambiguity: a 4-s copy aged at 900 s.**
+- **What was read.** The scenarios' Conventions let a runner run §2
+  and §6 on a copy of the standard contract with `freshness.ttl_s = 4`.
+  §2.14 said step 6 is `freshness.v2`'s "at 900 s".
+- **What was measured.** Given the copy, the reference's `zenctl
+  alarms` judged A **yes**, `firing`, 7 s after its bit cleared.
+  zk2py's S, aging by the copy, judged it **unobservable**, `stale`. In
+  the slow tier, at 900 s, both judged A `stale`.
+- **The reading taken.** 900 s is the standard revision's figure, never
+  a constant. §2.7 holds v1 §2.7, which judges "at the contract's
+  horizon", and the Conventions say "The horizon is the contract's". So
+  a reader ages an alarm at the `freshness.ttl_s` of the revision its
+  owner's descriptor names (core §3.3), across a face the one the
+  deployment's word names (§2.11). The copy's 4 s is the copy's.
+- **Now.** §2.7 says so in a new item, "The horizon is the revision's":
+  every 900 s and 450 s of the text is the standard revision's. §2.14's
+  step 6 names the revision. The Conventions say every reader reads the
+  copy's horizon, and that on the copy the heartbeat's tag is the
+  copy's. `[Sc: §2, §6]`
+- **Not taken:** 900 s as a constant. A reader on the copy could then
+  judge nothing stale in a fast tier, and §6 would run only at the full
+  horizon. It would also break v1 §2.7, which this major keeps.
+- **The reference moves** (the code half): its tool ages a v2 alarm at
+  a fixed 900 s. zk2py already ages by the revision.
+
+**F-614, a contradiction: a far reader that takes no slot.**
+- **What was read.** §2.6 said "a reader with no run stated, as across
+  a face, takes no slot". `slots.json`'s last view, written by hand
+  from it, takes none, B's single slot included. Read as "holds
+  nothing", a far reader's alarms would each be step 5's none,
+  `not_held`, so **no**, and "anything firing" **no** for an owner whose
+  snapshot lists firing entries. §2.15's table and `conclusions.json`'s
+  cases across a face answer a firing entry **yes**.
+- **What was measured.** Across a face that grants the GET, zk2py's
+  reader and `zenctl alarms --across-face granted` each judge the
+  owner's alarms established, each firing entry **yes**, `firing`, by
+  its slot, and "anything firing" **yes**, 2.
+- **The reading taken,** #984's default kept: a slot is taken only under
+  the present run. Taking chooses between one identity's slots, which a
+  reference and §5's fourth question read. It moves no slot's answer:
+  a reader answers each record it holds by its slot (§2.14). With no run
+  stated, a reader takes no slot, compares no identity across slots, and
+  answers each entry by its slot.
+- **Now.** §2.6's item is two, each with its fixture. §2.15's table says
+  a far reader's firing entry is answered by its slot.
+- **No fixture moves.** `slots.json`'s last view and `conclusions.json`'s
+  cases across a face stand, now under one reading.
+- **No code moves.** The reference answers each slot by its own reading
+  (`zenkey-fleet`'s `slot_reading`), and its model's `taken` feeds §5's
+  fourth question alone. zk2py does the same.
+
+**What deliberately did not change.**
+- **§5's fourth question across a face.** With no run stated, no two
+  slots of a present run name one key. So an established far owner
+  reads **yes**, as the reference answers it. Neither finding asked of
+  it.
+- **Written against** core 0.115 and `freshness.v2` 0.12, still.
+
+**Not verified.** No implementation has run the Conventions as now
+worded. The reference's tool has not run on the copy since it moves.
+
 ## alarms.v2 0.1 — 2026-11-27: a new major: an alarm in a slot, a transition in one packed record, words by table, a resolve with no delete, and "nothing fires" from one snapshot (#984)
 
 **Half of what #984 set out to remove is already gone, and that is said
