@@ -4330,7 +4330,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round98_readings(root) + _round99_readings(root) + _round100_readings(root) \
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
         + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
-        + _round120_readings(root)
+        + _round120_readings(root) + _round121_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -4356,12 +4356,13 @@ def _round118_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out: list[tuple[str, Any, Any]] = []
     core_at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
+    l2_at = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", l2)
     out.append(("desired.v2 at text 0.1, written against core 0.112, with link.v2 at 0.23: each header says so; the "
-                "core at 0.112 or later (0.113, round 120)",
+                "core at 0.112 or later (0.113, round 120), link.v2 at 0.23 or later (0.24, round 121)",
                 missing(v2, "| **Text version** | 0.1 ([`CHANGELOG.md`](CHANGELOG.md)) |",
                         "| **Written against** | core 0.112 ([`../../core.md`](../../core.md)) |")
-                + [core_at is not None and _at_least(core_at.group(1), "0.112")]
-                + missing(l2, "| **Text version** | 0.23 ("), [True]))
+                + [core_at is not None and _at_least(core_at.group(1), "0.112"),
+                   l2_at is not None and _at_least(l2_at.group(1), "0.23")], [True, True]))
     out.append(("core 0.112 and link.v2 0.23: a desired resource is per key, and floored, only where its contract "
                 "does not use desired.v2; one of desired.v2 with a snapshot key has no floor",
                 missing(core, "- a desired resource of a contract that does not use `desired.v2`;",
@@ -4839,13 +4840,14 @@ def _round119_readings(root: Path) -> list[tuple[str, Any, Any]]:
     flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
     sc, v2, l2 = flat("profiles/desired/scenarios-v2.md"), flat("profiles/desired/v2.md"), flat("profiles/link/v2.md")
     out: list[tuple[str, Any, Any]] = []
-    out.append(("scenarios-v2.md's intro at round 119: the reference runs the runtime's sections, §1 to §8 and §10 "
-                "to §15, and no implementation runs §9; round 118's sentence is gone",
+    out.append(("scenarios-v2.md's intro at round 119: the reference ran the runtime's sections, §1 to §8 and §10 "
+                "to §15, and no implementation ran §9; round 118's sentence is gone, and round 119's since round 121 "
+                "(_round121_readings)",
                 [q in sc for q in ("**The reference runs the runtime's.** §1 to §8 and §10 to §15 are tests of "
                                    "`zenkey`",
                                    "§9 is to run as a test of `zenctl`, and no implementation runs it yet.",
                                    "**No implementation runs them yet.**")],
-                [True, True, False]))
+                [False, False, False]))
     out.append(("link.v2 §2.11 and desired.v2 §2.8, §2.14: the three sentences the floor of a desired.v2 desired "
                 "resource is read from",
                 [q in t for t, q in ((l2, "- a template whose first chunk is a parameter, which has no snapshot key "
@@ -4879,6 +4881,70 @@ def _round119_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  link._per_key({"template": "{vehicle}/plan", "annotations": {"desired.target_param": "vehicle"}},
                                ["desired.v2"])],
                 [[], floor, floor, floor, True, False]))
+    return out
+
+
+def _round121_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """link.v2 0.24, editorial (#609, round 121; #986 J4): its header and
+    entry; v2/plan.json's case 50 read against §2.11 and against cases 31
+    and 49, as zk2py's plan gives it; and ``scenarios-v2.md``'s intro,
+    which now names §9 as a test of ``zenctl``. No rule moved, and no
+    session is opened."""
+    import re
+
+    from . import link, link_v2
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+    l2, llog, sc = flat("profiles/link/v2.md"), flat("profiles/link/CHANGELOG.md"), flat(
+        "profiles/desired/scenarios-v2.md")
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    out: list[tuple[str, Any, Any]] = []
+    l2_at = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", l2)
+    out.append(("link.v2 at text 0.24, still written against core 0.108, with its entry: case 50 added, no rule "
+                "and no other case changed, 51 cases",
+                [l2_at.group(1) if l2_at else None]
+                + missing(l2, "| **Written against** | core 0.108 ([`../../core.md`](../../core.md)) |")
+                + missing(llog, "## link.v2 0.24 — 2026-11-27: editorial: `v2/plan.json`'s case 50",
+                          "- **No rule** of this text, and no other case.", "the fifty others byte for byte. 51 cases."),
+                ["0.24"]))
+    plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    c31, c49, c50 = plan[31], plan[49], plan[50]
+
+    def differs(a: Any, b: Any, path: str = "") -> list[str]:
+        if isinstance(a, dict) and isinstance(b, dict):
+            return [d for k in sorted(set(a) | set(b)) for d in
+                    (differs(a.get(k), b.get(k), f"{path}/{k}") if k in a and k in b else [f"{path}/{k}"])]
+        if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+            return [d for i, (x, y) in enumerate(zip(a, b)) for d in differs(x, y, f"{path}[{i}]")]
+        return [] if a == b else [path]
+
+    res50 = c50["interfaces"]["plan.v1"]["resources"][0]
+    got50 = link_v2.plan(c50["policy"], c50["implements"], _link_interfaces(c50), c50.get("catalog"),
+                         users=c50.get("users"))
+    out.append(("link.v2 0.24's case 50 against §2.11 (zk2py agrees): case 49 with its one template moved to "
+                "{vehicle}/plan, whose first chunk is a parameter and which has no snapshot key, so the list's last "
+                "item floors it whatever its revision uses; it differs from case 49 by the template, the note and the "
+                "windows alone, its plan is case 31's byte for byte, the owner's window floored at the face's "
+                "max_outage_s; zk2py's plan gives it; zk2py's per-key test says no, its floor test yes",
+                [differs(c49, c50), c50["expect"] == c31["expect"], c50["policy"] == c31["policy"],
+                 c50["expect"]["faces"][0]["windows"], got50 == c50["expect"],
+                 link._per_key(res50, ["desired.v2"]), link.keeps_floor(res50, ["desired.v2"])]
+                + missing(l2, "- a template whose first chunk is a parameter, which has no snapshot key (core §4.2).",
+                          "- **A `desired.v2` desired resource has no floor,** unless its template's first chunk is a "
+                          "parameter."),
+                [["/expect/faces[0]/windows", "/interfaces/plan.v1/resources[0]/template", "/note"], True, True,
+                 [{"min_s": 86400, "service": "lab/radio-a"}], True, False, True]))
+    out.append(("scenarios-v2.md's intro at round 121: the reference runs every section, §9 as a test of zenctl with "
+                "T being `zenctl desired`; round 119's \"no implementation runs it yet\" is gone",
+                [q in sc for q in ("**The reference runs them.** §1 to §8 and §10 to §15 are tests of `zenkey`",
+                                   "§9 is a test of `zenctl` (`zenctl/tests/live_zk2.rs`, `desired_v2_s9_…`), T being "
+                                   "`zenctl desired`.",
+                                   "no implementation runs it yet")],
+                [True, True, False]))
     return out
 
 
@@ -7483,7 +7549,8 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  60, 1074, 1074, 294, 30, []]))
     out.append(("link.v2 0.22 §2.9, \"A collection the revisions disagree on is read `host`\" (F-551's answer, the "
                 "plan's half), and its evidence (F-573): §2.16's warning it bears on cites `[F: v2/plan.json]`, and "
-                "no case of v2/plan.json's 49, 50 since link.v2 0.23's case 49 (round 118), draws exposure_disagrees, "
+                "no case of v2/plan.json's 49, 50 since link.v2 0.23's case 49 (round 118) and 51 since 0.24's case "
+                "50 (round 121), draws exposure_disagrees, "
                 "so none holds such a collection: a plan "
                 "that counted it `link`, for the horizon or for the longest put, passes the file whole; link.v1's "
                 "plan.json draws the code, in cases that weigh no owner heartbeat",
@@ -7495,7 +7562,7 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "heartbeat is above `batch_bytes` (`block_over_batch`). `[F: v2/plan.json]`")
                 + missing(llog, "- **Now:** the plan reads it `host`, for the horizon and for the longest put. Both "
                                 "implementations do."),
-                [50, [], True]))
+                [51, [], True]))
 
     # -- scope/faces.json's four cases, v2/transport.json's five, carries.json's three ------
     faces = _load_json(root / "scope" / "faces.json")["cases"]
@@ -8919,7 +8986,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     crossing = [(i, f) for i, c in enumerate(plan2) for f in faces(c) if any(e.startswith(HB) for e in evidence(f))]
     v1_cases = sorted({i for i, _ in crossing if plan2[i]["expect"]["transport"] is None})
     out.append(("link.v2 0.19's entry, its evidence: v2/plan.json held 48 cases then, 49 since link.v2 0.22's case "
-                "48 (round 117) and 50 since 0.23's case 49 (round 118); fourteen faces let a heartbeat cross, in the twelve cases the entry names and in "
+                "48 (round 117), 50 since 0.23's case 49 (round 118) and 51 since 0.24's case 50 (round 121); fourteen faces let a heartbeat cross, in the twelve cases the entry names and in "
                 "cases 46 and 47, and case 48's one more; each under a link.v2 policy "
                 "denies the host key by name, nothing under heartbeats/link, and lists the link key as evidence; "
                 "case 10, a link.v1 policy, denies both classes' and lists none; case 6 draws horizon_under_face at "
@@ -8931,7 +8998,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                 for x in f["findings"])]]
                 + missing(llog, "**Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8, 9, 10, 12, 19, "
                                 "20, 22, 23, 44 and 45."),
-                [50, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48], 14, [10],
+                [51, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48], 14, [10],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/host/**",), True)],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/**",), False)], [6]]))
     c46 = plan2[46]
@@ -9583,7 +9650,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
         return next((n for n, word in enumerate(("RF", "SF7", "SF9", "SF12", "SBD")) if word in mm.group(1)), None)
 
     out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases then, 48 since "
-                "0.19 (round 113), 49 since 0.22 (round 117) and 50 since 0.23 (round 118), v2/transport.json 27 then and 32 since 0.22; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
+                "0.19 (round 113), 49 since 0.22 (round 117), 50 since 0.23 (round 118) and 51 since 0.24 (round 121), v2/transport.json 27 then and 32 since 0.22; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
                 "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
                 "where case 5 at 240,000 ms does: §2.16's inequality pinned on both sides; transport.json's cases "
                 "24 to 26 state a null among the eight keys, the lease and twice routing/interests/timeout, drawing "
@@ -9593,7 +9660,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  lease_of(case(5)), draws(case(5)), with_null,
                  [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
                 + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
-                [50, 32, True, False, False, True, 240_001, False, 240_000, True,
+                [51, 32, True, False, False, True, 240_001, False, 240_000, True,
                  {24: ["transport/link/tx/lease"], 25: ["routing/interests/timeout"],
                   26: ["routing/interests/timeout"]},
                  [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
@@ -9601,10 +9668,10 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     modem = [i for i, c in enumerate(plan) if "zm-1.10.2-r1" in c["policy"] and "modem.v3" in c["policy"]]
     out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
                 "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
-                "then SBD, in that order, of 46 then, 48 since 0.19, 49 since 0.22 and 50 since 0.23",
+                "then SBD, in that order, of 46 then, 48 since 0.19, 49 since 0.22, 50 since 0.23 and 51 since 0.24",
                 ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
                  [medium(plan[i]["note"]) for i in modem], len(plan)],
-                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 50]))
+                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 51]))
     zm = repo / "examples" / "zk2" / "zenoh-modem"
     zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
     # link.md's notes are block quotes: their lines' "> " is no word of theirs.
@@ -9871,10 +9938,10 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("link.v2 0.17's evidence as zk2py counts it: keep_alive_not_suppressed is drawn by 6, 15 and 19, "
                 "above their intervals as before, and by the eleven the entry names, each at its interval; "
                 "v2/plan.json held 45 cases then, 46 since 0.18, 48 since 0.19 (round 113), 49 since 0.22 (round "
-                "117) and 50 since 0.23 (round 118)",
+                "117), 50 since 0.23 (round 118) and 51 since 0.24 (round 121)",
                 [len(plan), [i for i, c in enumerate(plan) if draws(c)]]
                 + missing(log, "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
-                [50, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
+                [51, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
     # review-bot's note 5 on #1121: stamps() reads a shape the text does not
     # name as stamping. No spec case hits it; zk2py's own cases pin it.
     shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731
