@@ -709,6 +709,9 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   step), `acknowledged`, `adopted_at`; `Seed::of(replies, epoch)` (both
   collections by index, `snapshot(stated)`); `Reading`, `firing`,
   `stale_firing`; `owner_set(presence, read, since)` (§2.15's order).
+  `Reading::freshness` is judged by the reader at the horizon of the
+  revision the owner names (text 0.2, F-613: the fleet's `V2Revision`),
+  `TTL` being the standard revision's 900 s, never a constant.
   `tests/profiles/alarms_v2.rs` runs the ten `v2/` files as written, 477
   cases, none blessed, all passing, and `alarms_v2_standard_contract`
   holds `alarms.v2.toml` to the constants.

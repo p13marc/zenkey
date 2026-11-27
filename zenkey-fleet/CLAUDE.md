@@ -979,3 +979,20 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `state/alarms/{slot}`). `model::alarms::v2`'s tests are session-free;
   `report-fixtures`' `alarms_v2_report` is zenctl's render snapshot.
   Not done: the doctor's `alarm-key`/`alarm-stale` read v1's keys only.
+  **The horizon is the revision's** (text 0.2, F-613, #984): `V2Revision`
+  (a revision's heartbeat `Layout` and the `freshness.ttl_s` of
+  `state/alarms/{slot}`; `standard()` the embedded one, 900 s) rides in
+  `V2Words` (`revisions`, per owner; `word_revision`, the deployment's
+  word), and `Slots::revision` is what `slot_reading` ages at, never
+  `am::horizon()`. `words_v2` takes it from the `alarms.v2` fingerprint the
+  owner's descriptors name: the standard one is not retrieved, another is
+  held offline or retrieved with the tables' revisions, several give the
+  soonest (`V2Revision::soonest`), and one not in hand falls back to the
+  standard (the text names nothing else); the word is the `alarms.v2`
+  revision held offline. Each owner's v2 view is made with its revision's
+  layout (`alarms_views(&self.v2, owner)`, the heartbeat's tag being the
+  revision's, core §7.5), and `v2_words` swaps a view read by another
+  revision for an empty one, which the refresh's complete read then
+  re-reads. `an_alarm_ages_at_the_horizon_of_its_owners_revision` is the
+  session-free test; zenctl's `alarms_v2_s6_*_at_the_copys_horizon` the
+  live one.

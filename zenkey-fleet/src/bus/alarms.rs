@@ -88,7 +88,7 @@ use crate::bus::presence::Scope;
 use crate::bus::stall::{StallSeen, StallWatch};
 use crate::model::alarms::{
     AlarmBook, AlarmSample, AlarmScope, ArchivedAlarm, BookSpec, SeedRead, SlotRead, SlotSample,
-    V2Words,
+    V2Revision, V2Words,
 };
 use crate::model::catalog::{Catalog, Observed};
 use crate::report::{AlarmLoss, AlarmTransition, AlarmVia};
@@ -415,6 +415,15 @@ pub async fn get_v2(
 /// never another revision's; its epoch, the one its records' `at` is read
 /// under. The revisions held offline are the deployment's word for an
 /// owner with no descriptor in hand, as across a face.
+///
+/// **And its `alarms.v2` revision** (§2.7, text 0.2, F-613): the one its
+/// descriptors name for `alarms.v2`, its alarms' horizon and its
+/// heartbeat's layout. The standard revision is this reader's own, and is
+/// not retrieved; another is held offline or retrieved by fingerprint.
+/// Where they name several, the one whose alarms age soonest. Where none
+/// they name is in hand, the text names no other, and the standard
+/// revision's is read. The deployment's word is the `alarms.v2` revision
+/// held offline, the one whose alarms age soonest where several are.
 pub(crate) async fn words_v2(
     session: &Session,
     spec: &AlarmSpec,
@@ -428,12 +437,19 @@ pub(crate) async fn words_v2(
         .map(|r| m2::table_of(r.contract()))
         .collect();
     let probe = |a: &zenkey_model::grammar::Addr| format!("zk2/{a}/alarms.v2/state/alarms/0");
+    let standard = V2Revision::standard();
     let mut out = V2Words {
         word: m2::instance_table(held.iter().map(Option::as_deref))
             .table()
             .map(<[m2::Rule]>::to_vec),
         default_epoch: crate::bus::query::EntryEpochs::of_catalogs(&spec.catalogs)
             .of("zk2/_/_/alarms.v2/state/alarms/0"),
+        word_revision: V2Revision::soonest(
+            spec.contracts
+                .iter()
+                .filter(|r| *r.iface() == standard.layout.iface)
+                .map(|r| V2Revision::of(r.contract())),
+        ),
         ..V2Words::default()
     };
     let Some(o) = presence else {
@@ -441,6 +457,11 @@ pub(crate) async fn words_v2(
     };
     let catalog = Catalog::new(o);
     let mut named: std::collections::BTreeMap<
+        zenkey_model::grammar::Addr,
+        BTreeSet<(IfaceId, zenkey_model::canonical::Fingerprint)>,
+    > = Default::default();
+    // Each owner's `alarms.v2` revisions, as its descriptors name them.
+    let mut own: std::collections::BTreeMap<
         zenkey_model::grammar::Addr,
         BTreeSet<(IfaceId, zenkey_model::canonical::Fingerprint)>,
     > = Default::default();
@@ -461,6 +482,7 @@ pub(crate) async fn words_v2(
                 continue;
             };
             if e.iface == m2::IFACE {
+                own.entry(a.clone()).or_default().insert((i, f));
                 continue;
             }
             revisions.insert((i, f));
@@ -470,21 +492,34 @@ pub(crate) async fn words_v2(
     store.seed(&spec.contracts);
     let wanted: Vec<_> = named
         .values()
+        .chain(own.values())
         .flatten()
+        .filter(|(_, f)| *f != standard.layout.fingerprint)
         .cloned()
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
     let got = store.fetch_all(session, &wanted).await;
-    let tables: std::collections::BTreeMap<_, Option<Vec<m2::Rule>>> = wanted
+    let in_hand: std::collections::BTreeMap<_, _> = wanted
         .into_iter()
         .zip(got)
-        .filter_map(|(w, g)| {
-            let g = g.ok()?;
-            let table = m2::table_of(g.revision()?.contract());
-            Some((w, table))
-        })
+        .filter_map(|(w, g)| Some((w, g.ok()?.revision()?.clone())))
         .collect();
+    let tables: std::collections::BTreeMap<_, Option<Vec<m2::Rule>>> = in_hand
+        .iter()
+        .map(|(w, r)| (w.clone(), m2::table_of(r.contract())))
+        .collect();
+    for (a, fingerprints) in own {
+        let revision = V2Revision::soonest(fingerprints.iter().filter_map(|w| {
+            if w.1 == standard.layout.fingerprint {
+                Some(standard.clone())
+            } else {
+                in_hand.get(w).map(|r| V2Revision::of(r.contract()))
+            }
+        }));
+        out.revisions
+            .insert(a, revision.unwrap_or_else(|| standard.clone()));
+    }
     for (a, revisions) in named {
         let of: Vec<Option<&[m2::Rule]>> = revisions
             .iter()

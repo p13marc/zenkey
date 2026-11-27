@@ -102,7 +102,7 @@ pub const ALL: &str = "zk2/*/*/alarms.v1/state/alarms/*";
 pub const ALL_V2: &str = "zk2/*/*/alarms.v2/state/alarms/*";
 
 mod v2;
-pub use v2::{SlotRead, SlotSample, V2Words};
+pub use v2::{SlotRead, SlotSample, V2Revision, V2Words};
 
 // ─── the scope ──────────────────────────────────────────────────────────────
 
@@ -682,13 +682,14 @@ fn alarms_class() -> zenkey_model::heartbeat::Class {
 
 /// One owner's views: its alarms', following its one collection, and its
 /// `alarms.v2` records' (#984's S3), whichever major it implements: an
-/// owner heartbeat's group of either is read.
-fn alarms_views() -> Views<Instant> {
+/// owner heartbeat's group of either is read. The `alarms.v2` view is read
+/// by the revision `v2` reads `owner` by (`alarms.v2` §2.7).
+fn alarms_views(v2: &v2::Slots, owner: &Addr) -> Views<Instant> {
     let mut v = View::new(alarms_layout().clone());
     v.follow_resource(zenkey::alarms::ALARMS);
     let mut views = Views::new();
     views.insert(v);
-    views.insert(v2::view());
+    views.insert(v2::view(v2.revision(owner)));
     views
 }
 
@@ -1064,10 +1065,11 @@ impl AlarmBook {
                 Some(Ok(stamp)) => Some(stamp),
                 _ => None,
             };
+            let owner = entry.owner.clone();
             let view = alarms_of_mut(
                 self.views
-                    .entry(entry.owner.clone())
-                    .or_insert_with(alarms_views),
+                    .entry(owner.clone())
+                    .or_insert_with(|| alarms_views(&self.v2, &owner)),
             );
             if s.delete {
                 view.delete(&s.key, inband, s.at);
@@ -1117,13 +1119,20 @@ impl AlarmBook {
             return None;
         }
         if iface == v2::layout().iface {
-            let views = self.views.entry(owner).or_insert_with(alarms_views);
+            let views = self
+                .views
+                .entry(owner.clone())
+                .or_insert_with(|| alarms_views(&self.v2, &owner));
             return Some(v2::view_of_mut(views).apply(tag, stamp, body, at));
         }
         if iface != alarms_layout().iface {
             return None;
         }
-        let view = alarms_of_mut(self.views.entry(owner.clone()).or_insert_with(alarms_views));
+        let view = alarms_of_mut(
+            self.views
+                .entry(owner.clone())
+                .or_insert_with(|| alarms_views(&self.v2, &owner)),
+        );
         let applied = view.apply(tag, stamp, body, at);
         // §2.15 (text 0.11): a heartbeat read is in step when its alarms'
         // section confirmed, its digest and live count the view's; one of
@@ -1165,7 +1174,10 @@ impl AlarmBook {
             return None;
         }
         let named = self.named_catalog(&owner, stamp.run);
-        let views = self.views.entry(owner.clone()).or_insert_with(alarms_views);
+        let views = self
+            .views
+            .entry(owner.clone())
+            .or_insert_with(|| alarms_views(&self.v2, &owner));
         let applied = views.apply_owner(
             class,
             tag,
@@ -1271,7 +1283,11 @@ impl AlarmBook {
                 }
             }
             for (owner, keys) in live {
-                let view = alarms_of_mut(self.views.entry(owner).or_insert_with(alarms_views));
+                let view = alarms_of_mut(
+                    self.views
+                        .entry(owner.clone())
+                        .or_insert_with(|| alarms_views(&self.v2, &owner)),
+                );
                 view.reread(
                     alarms_index(),
                     keys.iter().map(|(k, s)| (k.as_str(), *s)),
