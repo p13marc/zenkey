@@ -3,6 +3,42 @@
 Amendments to [`v1.md`](v1.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.7 — 2026-11-28: §2.5's outcome 6 reads either major of redundancy (#987)
+
+`redundancy.v2` follows the incumbent by its runs, where `redundancy.v1`
+reads its stamps' id. A consumer that holds a revision listing
+`redundancy.v2` read outcome 6 by v1's stamp, which a v2 candidate's
+session does not set. So it counted every sample `not_incumbent`, and the
+address was never eligible.
+
+**Changed: §2.5, outcome 6.**
+- **Governed** is the revision held listing `redundancy.v1` or
+  `redundancy.v2`, read by the major it lists (`redundancy.v2` §2.2).
+- **Under `redundancy.v2`** a sample is `not_incumbent` when its run is
+  not one of the incumbent's (`redundancy.v2` §2.10).
+- **An unattributed sample**, whose run no descriptor the consumer holds
+  states, is `not_incumbent`. `redundancy.v2` §2.10 holds one for a read
+  of the descriptors. An arbiter does not wait for it: the address fails
+  toward a lower priority for one read's round trip.
+- **Learning the incumbent** is unchanged: the watch, a read at start and
+  each holder's descriptor. Under `redundancy.v2` the consumer reads its
+  runs where it read its `meta.zid`.
+
+**Changed: §2.12.** The tool's view reads outcome 6 by the one major
+every revision it holds lists.
+
+**Changed: the header.** "Uses" names both majors. Written against core
+0.118, where it said 0.83. The index's row follows.
+
+**Scenarios.** §11 runs again under `redundancy.v2`, on `steer.v1` minor
+2: no candidate's session stamps, and `X` puts each sample in an
+envelope under `C_s2`'s run.
+
+**Not changed.** No contract that loads today reads differently: a
+revision listing `redundancy.v1` is read as before. `arbitrations.json`
+is unchanged: its `incumbent: false` is the fence's word, whichever major
+gave it. No other outcome, and no other rule, moved.
+
 ## 0.6 — 2026-11-01: §2.2, a frame is never a role's stream (#981)
 
 Core 0.83 defines frames (its §7.7): a stream whose put carries several
