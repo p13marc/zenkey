@@ -7,6 +7,43 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.29 — 2026-11-28: editorial: `v2/plan.json`'s case 54, a collection two revisions disagree on, read `host` for the horizon and the longest put, no keyword changed (#975)
+
+zk2py's round 117 filed F-573: none of the plan's cases drew
+`exposure_disagrees`, so none held a collection the revisions disagree
+on. §2.9 reads such a collection `host`, and 0.22's entry says both
+implementations do. A plan that counted it `link`, for
+`horizon_under_face` or for `block_over_batch`, passed the file whole.
+
+**The case.** Case 54 is case 48's face and deployment, with a second
+revision of `quiet.v1`. In it `note` reads `link`, is packed and has a
+30-s horizon. The first revision reads it `host`, at 60 s.
+- **Read `host`,** as §2.9 says: the revisions disagree
+  (`exposure_disagrees`, `at` `quiet.v1/state/note`), and its horizon is
+  the least of theirs, 30 s (`link.v1` §2.3). It does not cross, so
+  `quiet.v1`'s heartbeat is still denied by name, and the `link` owner
+  heartbeat holds no group for it. The plan is case 48's, with that one
+  warning.
+- **Counted `link`,** it would fail twice. `quiet.v1`'s group would add
+  14 + 8 + 1 + 33 bits to case 48's 1,211. That is 1,267 bits, 167
+  bytes with the envelope, above the 160-byte batch
+  (`block_over_batch`). The `link` key's horizon would be 30 s, below
+  the face's `horizon_s` of 60 (`horizon_under_face`).
+- **How it was made.** By reading this text and the reference's merge of
+  revisions (`zenkey-model/src/link.rs`, `merge`, `owner_heartbeat_groups`),
+  with case 48's plan by hand. It was not derived by the reference, and
+  was inserted as text. 55 cases.
+
+**What changed in the text.** §2.9's item on a collection the revisions
+disagree on cites `v2/plan.json`.
+
+**What deliberately did not change.**
+- **No rule.** The case pins what §2.9 already says. No keyword moved.
+- **Written against** core 0.108, still.
+
+**Not verified.** Neither implementation has run case 54. The reference's
+`link_v2_plan` reads every case, with no count to move.
+
 ## link.v2 0.27 — 2026-11-28: §0 and §2.9: `link.v1` 0.21's `owner_heartbeat_denied` is no link.v2 plan's, no keyword changed (#1145)
 
 `link.v1` 0.21 warns of a listed service whose owner heartbeats the
