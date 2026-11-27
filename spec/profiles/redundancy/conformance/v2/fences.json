@@ -1,5 +1,5 @@
 {
-  "description": "redundancy.v2 §2.10, §2.17. `samples`: a follower's state and one sample -> what the rule decides. follower.holders are the instances it holds as holding the interface's token, its incumbent the lowest by v1 §2.3's order, none when empty; follower.instances gives, for each instance whose descriptor it read, the major of redundancy its revision uses, every run its descriptors stated (`runs`, as core §3.3 spells a run: 4 or 8 lowercase hexadecimal digits, two spellings two runs), and for a redundancy.v1 revision its meta.zid where read. sample.form is one of core §7.5's: mutation, delete (the attachment), value, error, event, frame, heartbeat, owner_heartbeat, snapshot, held_stamp, with its bytes in hex; an event gives its key's occurrence chunk (`chunk`, core §1.2); none is a sample with no envelope; `stamp` is its Zenoh timestamp's id where it carries one. read_ended says whether a read of the address's descriptors, asked after the sample arrived, has ended, follower.instances being what the follower holds then. expect.run is the sample's run by v2.md §2.10's table (an envelope's, an attachment's, a snapshot's header's, an event's chunk's), null for none. expect.decision is accept, discard or pending, with reason: incumbent (accepted), no_incumbent, no_run, not_incumbent, unattributed (discarded, or pending while no such read has ended), and for a redundancy.v1 incumbent (§2.17, v1 §2.10, by meta.zid compared by value) no_stamp, unattributed where its meta.zid is not held, not_incumbent. The steps, first that holds: no holder; a v1 incumbent; no run; the incumbent's run; another instance's run; unattributed. `sequences`: a follower of redundancy.v2 incumbents, its start (holders, and each instance's runs), and steps in arrival order: a sample ({id, key, kind: state, stream, event or heartbeat, run, seq}, its run null for no envelope), a token held or withdrawn, a descriptor's put heard (or one descriptor read), or the outstanding read's end with the descriptors it read. expect gives for each step, in arrival order: accepted, discarded ({id, reason}), held, superseded (a state member's held value replaced, or a new one not kept: within one run the higher seq is kept, across two the later arrival), and asks_read. The follower asks a read when it holds a sample and none is outstanding, decides each held sample when a descriptor states its run, and at a read's end decides every held one, discarding as unattributed only those that arrived before that read was asked; it then asks the next read if any is still held. It holds a stream's samples, which a follower MAY drop instead. `draws`: a candidate's own run and the runs it read in other instances' descriptors of its address -> whether it draws again (§2.10, a SHOULD): its run, by width and value, among them. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed.",
+  "description": "redundancy.v2 §2.10, §2.17. `samples`: a follower's state and one sample -> what the rule decides. follower.holders are the instances it holds as holding the interface's token, its incumbent the lowest by v1 §2.3's order, none when empty; follower.instances gives, for each instance whose descriptor it read, the major of redundancy its revision uses, every run its descriptors stated (`runs`, as core §3.3 spells a run: 4 or 8 lowercase hexadecimal digits, two spellings two runs), and for a redundancy.v1 revision its meta.zid where read. sample.form is one of core §7.5's: mutation, delete (the attachment), value, error, event, frame, heartbeat, owner_heartbeat, snapshot, held_stamp, with its bytes in hex; an event gives its key's occurrence chunk (`chunk`, core §1.2); none is a sample with no envelope; `stamp` is its Zenoh timestamp's id where it carries one. read_ended says whether a read of the address's descriptors, asked after the sample arrived, has ended, follower.instances being what the follower holds then. expect.run is the sample's run by v2.md §2.10's table (an envelope's, an attachment's, a snapshot's header's, an event's chunk's), null for none. expect.decision is accept, discard or pending, with reason: incumbent (accepted), no_incumbent, no_run, not_incumbent, unattributed (discarded, or pending while no such read has ended), and for a redundancy.v1 incumbent (§2.17, v1 §2.10, by meta.zid compared by value) no_stamp, unattributed where its meta.zid is not held, not_incumbent, checked in that order. The steps, first that holds: no holder; a v1 incumbent; no run; the incumbent's run; another instance's run; unattributed. `sequences`: a follower of redundancy.v2 incumbents, its start (holders, and each instance's runs), and steps in arrival order: a sample ({id, key, kind: state, stream, event or heartbeat, run, seq}, its run null for no envelope), a token held or withdrawn, a descriptor's put heard (or one descriptor read), or the outstanding read's end with the descriptors it read. expect gives for each step, in arrival order: accepted, discarded ({id, reason}), held, superseded (a state member's held value replaced, or a new one not kept: within one run the higher seq is kept, the held one at an equal seq, across two the later arrival), and asks_read. The follower asks a read when it holds a sample and none is outstanding, decides each held sample when a descriptor states its run, and at a read's end decides every held one, discarding as unattributed only those that arrived before that read was asked; it then asks the next read if any is still held. It holds a stream's samples, which a follower MAY drop instead. `draws`: a candidate's own run and the runs it read in other instances' descriptors of its address -> whether it draws again (§2.10, a SHOULD): its run, by width and value, among them. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed.",
   "draws": [
     {
       "expect": {
@@ -1576,6 +1576,32 @@
         "bytes": "10fabc5f2c0000036131",
         "form": "mutation",
         "stamp": "5dc74d1d5ba904a5061dc14cd4d9d11c"
+      }
+    },
+    {
+      "expect": {
+        "decision": "discard",
+        "reason": "no_stamp",
+        "run": "fabc5f2c"
+      },
+      "follower": {
+        "holders": [
+          "000000000000000a"
+        ],
+        "instances": {
+          "000000000000000a": {
+            "major": 1,
+            "runs": [
+              "fabc5f2c"
+            ]
+          }
+        }
+      },
+      "note": "a redundancy.v1 incumbent whose meta.zid is not held, and an unstamped sample: no_stamp comes first (§2.10, step 2). Written by hand",
+      "read_ended": false,
+      "sample": {
+        "bytes": "10fabc5f2c0000036131",
+        "form": "mutation"
       }
     }
   ],

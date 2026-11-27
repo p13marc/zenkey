@@ -84,7 +84,18 @@ ZenSight's two singletons move in a later chunk of #987.
   the next.
 - **A member's one held value** is the one core §4.3's consumer rule
   would keep: the higher seq within one run, the later arrival across
-  two.
+  two. At an equal seq within one run the held value is kept. Every
+  other sample is held alone, two heartbeats on one key included.
+- **A token decides no held sample.** A held sample is decided by a
+  descriptor or at a read's end, against the holders as they stand then.
+- **A `redundancy.v1` incumbent** is the rule's step 2, after no
+  incumbent and before `no_run`. So a stamped v1 sample with no envelope
+  is read by its stamp. Inside the step, `no_stamp` comes before an
+  unheld `meta.zid`, `unattributed`, as v1 §2.10 lists them.
+- **An incumbent whose major is not known,** its descriptor not held
+  yet, is read by run.
+- **The descriptor's entry read** is the first of `interfaces` that is
+  not an object, or whose `iface` is the governed interface's.
 - **A heartbeat rides `freshness.v2`'s keys,** not the interface's. A
   follower fences the heartbeat that covers the governed interface, and
   the interface's group in an owner heartbeat.
@@ -102,11 +113,13 @@ ZenSight's two singletons move in a later chunk of #987.
 **Evidence.** [`conformance/v2/`](conformance/v2/) holds three files.
 - `declarations.json`: 38 contracts and 16 addresses.
 - `descriptors.json`: 29 descriptors.
-- `fences.json`: 48 samples, 13 sequences and 8 draws.
+- `fences.json`: 49 samples, 13 sequences and 8 draws. The 49th, a v1
+  incumbent with no `meta.zid` held and an unstamped sample, was written
+  by hand and computed by both scripts.
 - **Computed twice.** One script read the text into code and wrote the
   files. A second, written from the finished text, computed every
   expectation again from the inputs. They share no code, and agree on
-  all 152 cases. Both are the drafter's, kept out of the repository. No
+  all 153 cases. Both are the drafter's, kept out of the repository. No
   file was blessed.
 - [`scenarios-v2.md`](scenarios-v2.md) holds 15 sections: v1's twelve,
   restated where a fence, a stamp or an answer changes, and §13 to §15.
