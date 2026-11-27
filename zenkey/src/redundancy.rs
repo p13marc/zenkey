@@ -1,6 +1,17 @@
-//! `redundancy.v1` in the runtime: one instance serves a governed
-//! interface, the others stand by to take over
-//! (`spec/profiles/redundancy/v1.md`, #841).
+//! `redundancy.v1` and `redundancy.v2` in the runtime: one instance serves
+//! a governed interface, the others stand by to take over
+//! (`spec/profiles/redundancy/v1.md`, #841; `v2.md`, #987's N2).
+//!
+//! **Either major.** The election is one text, which both majors share
+//! (v2 §2.3 to §2.9 restate v1's by reference), so one candidate elects an
+//! interface of either. What differs is each interface's own revision's:
+//! a `redundancy.v1` candidate's session stamps every write (v1 §2.10,
+//! F-467), and its state is a per-key resource (core §4.2); a
+//! `redundancy.v2` candidate's session runs as any owner's, its writes
+//! carry the in-band stamp alone, its state is answered by snapshot (v2
+//! §2.6), and it draws a new run before it serves when a lower id's
+//! descriptor states its own (v2 §2.10). A follower of either is the
+//! consumer's ([`crate::follow`]).
 //!
 //! The candidate's half of the profile. The declaration, how ids compare,
 //! the election over one read, the heal over two and the state machine
@@ -26,7 +37,7 @@
 //!
 //! | Rule | Here |
 //! |---|---|
-//! | §2.2 the declaration; an invalid one refused at start, nothing declared | [`crate::ServiceBuilder::start`] reads each implemented contract with [`zenkey_model::redundancy::declaration_of`]: invalid is [`Error::NotExposed`] naming the reasons, before step 1; governed without [`crate::ServiceBuilder::redundancy`] the same |
+//! | §2.2 the declaration; an invalid one refused at start, nothing declared | [`crate::ServiceBuilder::start`] reads each implemented contract with [`zenkey_model::redundancy::either_declaration_of`], as a reader of both majors (v2 §2.2): invalid is [`Error::NotExposed`] naming the reasons, `majors` and `explicit_stream` among them, before step 1; governed without [`crate::ServiceBuilder::redundancy`] the same |
 //! | §2.3 the claim set, the incumbent, ids compared | each read parsed into [`zenkey_model::redundancy::Read`]: instance tokens and the interface's tokens at any revision, the descriptors of the ids below its own |
 //! | §2.4 a standby holds its instance token, exposes nothing of the interface, writes none of its keys | every publisher, state, operation and `unavailable` queryable and member token of a governed interface is declared only while it serves (`gate`); a write while it stands by is [`Error::Standby`], nothing published; the descriptor marks it `"standby": true` |
 //! | §2.4 a call finds no standby | its operation queryables are declared only while it serves ([`crate::operation::OperationServer::is_declared`]) |
@@ -37,7 +48,9 @@
 //! | §2.8 a withdrawal heard live is a read, never a vacancy | the watch's withdrawal, once no other holder is heard, is the [`Elector`](zenkey_model::redundancy::Elector)'s event; its read waits 0.1 s for the burst |
 //! | §2.9 the heal: two reads a grace apart; the higher steps down in reverse order | [`RedundancyStartup::grace`], 2 s; writes stop, then the tokens, the resources, the descriptor put marked; the interface's state forgotten |
 //! | §2.9 a candidate's own re-mint is no appearance (0.2, F-209) | [`crate::Service::new_epoch`] tells every elector before the new tokens, and re-mints a serving interface's token make-before-break |
-//! | §2.10 every sample stamped with its own id; `meta.zid` | the service's session, its HLC on: one whose timestamping is off is refused at [`crate::ServiceBuilder::redundancy`] (F-467), since its unstamped puts would carry their router's id; `meta.zid` as every descriptor states it |
+//! | §2.10 every sample stamped with its own id; `meta.zid` | `redundancy.v1`'s alone: the service's session, its HLC on. One whose timestamping is off is refused at [`crate::ServiceBuilder::redundancy`] when a `redundancy.v1` interface is implemented already, and at [`crate::ServiceBuilder::start`] otherwise (F-467), since its unstamped puts would carry their router's id; `meta.zid` as every descriptor states it |
+//! | v2 §2.10 no session stamp; a run no other states | a `redundancy.v2` candidate's session runs as any owner's (core §8.2), so its puts carry no Zenoh timestamp; each campaign's read of the lower ids' descriptors compares their runs with its own, and a match takes a new run ([`crate::Service::new_run`]'s), its descriptor put stating it, before the election decides |
+//! | v2 §2.6 answered by snapshot | a `redundancy.v2` interface's states are no per-key resource (core §4.2) |
 //! | §2.11 `external`: serve only with the lock, never by ids, step down when it is lost; refuse or stand by without it | [`Lock`], asked at the start, every [`RedundancyStartup::lock_period`], and on [`Redundancy::lock_changed`]; [`RedundancyStartup::refuse_without_lock`] |
 //! | §2.14 a governed interface never tokenless | refused at start, `tokenless` |
 //!
@@ -100,7 +113,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use zenkey_model::grammar::{Addr, Fp16, IfaceId, InstanceId, ZkKey, alive_key, instance_key};
-use zenkey_model::redundancy::{self as model, Event, Listing, Read, Seen, Step};
+use zenkey_model::redundancy::{self as model, Event, Listing, Major, Read, Seen, Step};
+use zenkey_model::wire::Run;
 use zenoh::liveliness::LivelinessToken;
 use zenoh::sample::{Sample, SampleKind};
 
@@ -111,7 +125,7 @@ use crate::error::{Error, Result, zenoh};
 use crate::gate::Gate;
 use crate::presence;
 use crate::service::{Served, Service};
-use crate::state::Store;
+use crate::state::{Minter, Store};
 
 /// How often a candidate without a watch session reads its address, by
 /// default (the module doc's poll).
@@ -480,14 +494,6 @@ impl Redundancy {
         startup: RedundancyStartup,
     ) -> Result<Self> {
         let claim = builder_session.zid();
-        if !crate::state::timestamping(builder_session) {
-            return Err(Error::Contract(
-                "redundancy.v1 §2.10: a candidate's session stamps every write, so that each \
-                 sample carries its own id (core §8.2's exception), and this service's session \
-                 runs without timestamping: open it with `timestamping/enabled` true (F-467)"
-                    .to_owned(),
-            ));
-        }
         if startup.reader.zid() == claim {
             return Err(Error::Contract(
                 "redundancy.v1 §2.5 step 1: the reader is the service's own session, which \
@@ -668,7 +674,7 @@ impl Redundancy {
         let addr = svc.address().clone();
         let own = svc.instance().clone();
         let selector = format!("zk2/{}/{}/@zk/**", addr.system, addr.service);
-        for (iface, election, gate, fp16) in governed {
+        for (iface, election, gate, fp16, major) in governed {
             let mut elector = model::Elector::new(own.clone(), election);
             let step = elector.start();
             debug_assert_eq!(step, Step::Claim);
@@ -719,6 +725,8 @@ impl Redundancy {
             let d = Arc::new(Driver {
                 iface: iface.clone(),
                 election,
+                major,
+                minter: Arc::clone(svc.minter()),
                 gate,
                 fp16,
                 addr: addr.clone(),
@@ -872,6 +880,24 @@ fn watch_event(addr: &Addr, iface: &IfaceId, s: &Sample) -> Option<Ev> {
     }
 }
 
+/// `redundancy.v1` §2.10 (core §8.2's exception, F-467): a candidate of a
+/// `redundancy.v1` interface needs its session to stamp every write, so
+/// that each sample carries its own id. Refused when `session` runs
+/// without timestamping and `governs_v1`. A `redundancy.v2` candidate's
+/// session runs as any owner's (v2 §2.10), so it is never refused here.
+pub(crate) fn stamps_for_v1(session: &zenoh::Session, governs_v1: bool) -> Result<()> {
+    if governs_v1 && !crate::state::timestamping(session) {
+        return Err(Error::Contract(
+            "redundancy.v1 §2.10: a candidate's session stamps every write, so that each \
+             sample carries its own id (core §8.2's exception), and this service's session \
+             runs without timestamping: open it with `timestamping/enabled` true (F-467); a \
+             redundancy.v2 candidate needs no stamp (redundancy.v2 §2.10)"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 /// A task aborted when its handle drops: the poll, with its election.
 struct AbortOnDrop(Option<tokio::task::JoinHandle<()>>);
 
@@ -887,6 +913,11 @@ impl Drop for AbortOnDrop {
 pub(crate) struct Driver {
     iface: IfaceId,
     election: Election,
+    /// The major of the profile its revision uses: what it stamps, how its
+    /// state is answered, and whether it draws again (v2 §2.10).
+    major: Major,
+    /// The service's minter: its run, and a new one drawn (v2 §2.10).
+    minter: Arc<Minter>,
     gate: Arc<Gate>,
     fp16: Fp16,
     addr: Addr,
@@ -1225,13 +1256,32 @@ impl Driver {
                 _ => {}
             }
         }
+        let mut runs = Vec::new();
         for (id, seen) in &mut by_id {
             if *id == own {
                 seen.descriptor = Listing::Listed {
                     standby: self.gate.is_marked(),
                 };
             } else if model::lower(id, &own) {
-                seen.descriptor = self.listing(id).await;
+                let (listing, run) = self.listing(id).await;
+                seen.descriptor = listing;
+                runs.extend(run);
+            }
+        }
+        // v2 §2.10: its own run read in a lower id's descriptor, a new
+        // one, its descriptor put stating it, before the election decides
+        // (and so before it serves). Drawn again while it still is one.
+        if self.major == Major::V2 {
+            let mut drawn = 0;
+            while model::draw_again(self.minter.run(), runs.iter().copied()) && drawn < 4 {
+                let run = self.minter.new_run();
+                drawn += 1;
+                tracing::info!(
+                    iface = %self.iface,
+                    run = %run,
+                    "redundancy.v2 §2.10: its run is stated in a lower id's descriptor, so it \
+                     drew a new one"
+                );
             }
         }
         {
@@ -1251,18 +1301,21 @@ impl Driver {
         }
     }
 
-    /// What `id`'s descriptor says of the interface (§2.3).
-    async fn listing(&self, id: &InstanceId) -> Listing {
+    /// What `id`'s descriptor says of the interface (§2.3), and the run it
+    /// states (v2 §2.10).
+    async fn listing(&self, id: &InstanceId) -> (Listing, Option<Run>) {
         let st = &self.startup;
         match presence::descriptor(&st.reader, &self.addr, id, st.timeout).await {
             Ok(presence::Found::Descriptor(d, _)) => {
                 let want = self.iface.to_string();
-                match d.interfaces.iter().find(|e| e.iface == want) {
+                let run = d.stated_run();
+                let listing = match d.interfaces.iter().find(|e| e.iface == want) {
                     Some(e) => Listing::Listed { standby: e.standby },
                     None => Listing::NotListed,
-                }
+                };
+                (listing, run)
             }
-            _ => Listing::Unread,
+            _ => (Listing::Unread, None),
         }
     }
 
@@ -1312,7 +1365,7 @@ impl Driver {
                 Err(undo) => Error::Zenoh(format!("{e}; and undoing it: {undo}")),
             });
         }
-        tracing::info!(iface = %self.iface, instance = %own, "redundancy.v1: took over (§2.6)");
+        tracing::info!(iface = %self.iface, instance = %own, "{}: took over (§2.6)", self.major);
         Ok(())
     }
 
@@ -1349,17 +1402,18 @@ impl Driver {
             Err(e) => keep(Err(e)),
             Ok(()) => keep(self.served.publish()),
         }
-        tracing::info!(iface = %self.iface, "redundancy.v1: stepped down (§2.9)");
+        tracing::info!(iface = %self.iface, "{}: stepped down (§2.9)", self.major);
         first
     }
 }
 
 /// A governed interface as [`Redundancy::start`] elects it: its id, its
-/// election, its gate, and its token's `fp16`.
-pub(crate) type Governed = (IfaceId, Election, Arc<Gate>, Fp16);
+/// election, its gate, its token's `fp16`, and the major its revision uses.
+pub(crate) type Governed = (IfaceId, Election, Arc<Gate>, Fp16, Major);
 
 /// The governed interfaces of `impls`, their elections, refusing what
-/// §2.2 and §2.14 refuse (before step 1: nothing is declared).
+/// §2.2 and §2.14 refuse (before step 1: nothing is declared), each read
+/// as a reader of both majors reads it (v2 §2.2).
 pub(crate) fn elections(
     impls: &[crate::service::ImplState],
     tokenless: &BTreeSet<IfaceId>,
@@ -1369,10 +1423,11 @@ pub(crate) fn elections(
     let mut refused = Vec::new();
     for s in impls {
         let iface = s.imp.iface();
-        match model::declaration_of(s.imp.contract(), tokenless.contains(iface)) {
+        let major = Major::of(&s.imp.contract().uses).unwrap_or(Major::V1);
+        match model::either_declaration_of(s.imp.contract(), tokenless.contains(iface)) {
             model::Declaration::NotGoverned => {}
             model::Declaration::Invalid(why) => refused.push(format!(
-                "{iface}'s redundancy.v1 declaration is invalid: {} (redundancy.v1 §2.2, §2.14)",
+                "{iface}'s {major} declaration is invalid: {} ({major} §2.2, §2.14)",
                 why.iter()
                     .map(|w| format!("{} ({})", w.as_str(), w.says()))
                     .collect::<Vec<_>>()
@@ -1385,11 +1440,12 @@ pub(crate) fn elections(
                         e,
                         Arc::clone(g),
                         s.imp.fingerprint().hex().fp16(),
+                        major,
                     ));
                 }
                 _ => refused.push(format!(
-                    "{iface} is governed by redundancy.v1, and this service takes part in no \
-                     election: call ServiceBuilder::redundancy (redundancy.v1 §2.5)"
+                    "{iface} is governed by {major}, and this service takes part in no \
+                     election: call ServiceBuilder::redundancy ({major} §2.5)"
                 )),
             },
         }
@@ -1400,7 +1456,7 @@ pub(crate) fn elections(
     if configured && out.is_empty() {
         return Err(Error::NotExposed(
             "ServiceBuilder::redundancy was called, and no interface this service implements is \
-             governed by redundancy.v1 (§2.2)"
+             governed by redundancy.v1 or redundancy.v2 (§2.2)"
                 .to_owned(),
         ));
     }
