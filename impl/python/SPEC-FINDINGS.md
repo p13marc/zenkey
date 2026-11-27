@@ -32558,3 +32558,38 @@ another.
   are not on this branch; F-616 and F-617.
 
   F-365 stays open as #965's.
+
+### The mend: F-616 and F-617 answered
+
+The mend read 6950cb8c, one spec commit on round 125's: `freshness.v2`
+§2.5 and `desired.v2` §2.18, each with its entry, no version moved, 298
+rules still.
+
+| Finding | Holds | The answer, quoted |
+|---|---|---|
+| F-616 | yes | §2.5: "a tokenless owner's. So it is read as one. A slow owner's read is not this one: zenoh ends it with a `Timeout` error reply, the querier's or a router's, and it fails (below)." "A read that ends in zenoh's `Timeout` error reply, its owner answering too late, is an error reply, and fails. It waits for the next read, never for a guess." "A read that draws no reply at all, and no error reply either, is no failure." **Resolved.** |
+| F-617 | yes | §2.18: "A target whose own session timestamps stamps each put it receives with its own. Either way the target acts on it." "where a router between the two, or the target's own session, timestamps." **Resolved.** |
+
+- **zk2py moves for F-616:** `failed_by_error` reads every error reply
+  as a failure, zenoh's `Timeout` among them. Each group is then
+  `unknown_catalog` until a read answers, asked again no sooner than
+  zk2py's bound.
+- **§2.5's second bound** ("Past a second bound it may drop the put
+  unread") binds a subscriber that holds puts. zk2py holds none: it
+  refuses before it knows, so neither bound reaches it.
+- **The walk:** four readings re-keyed to the new sentences, and the
+  answer to F-574 reads `Timeout` as a failure. `just py-conformance`
+  **8152 of 8152**.
+- **The probe again** (`owner_heartbeat_live --slow`): beside an owner
+  6 s and 30 s late, zk2py's subscriber reads every group
+  `unknown_catalog`, nothing confirmed, and asks again each 2 s at most
+  (8 reads over 20 s, 13 over 40 s); `zenctl watch --catalog` prints no
+  row and counts no heartbeat. **The two agree.** At 2.5 s late the
+  reference's read, which waits about 5 s, draws the descriptor, and
+  zk2py's of 1 s does not: each follows §2.5. `--silent`: 6 of 6, both
+  reading through the catalog.
+
+**Open after the mend:** F-437 to F-441; F-573; F-612 to F-615, round
+124's, not on this branch. F-616 and F-617 are resolved.
+
+  F-365 stays open as #965's.

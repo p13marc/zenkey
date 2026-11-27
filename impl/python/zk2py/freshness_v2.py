@@ -898,9 +898,10 @@ class Naming:
     - ``provisioned`` (0.13, F-574): "the catalog it was provisioned", the
       one "its deployment names for that owner", which a read on the near
       side takes "where no descriptor answers": "a read that draws no reply
-      cannot be told from a face: a tokenless owner's, or a slow one's. So
-      it is read as one." "A read that draws no reply is no failure. The
-      deployment's word stands for it." Such a read names it for its run,
+      cannot be told from a face: a tokenless owner's. So it is read as
+      one." "A read that draws no reply at all, and no error reply either,
+      is no failure. The deployment's word stands for it." Such a read
+      names it for its run,
       and the start read's silence names it for every run no descriptor
       has answered for. None where the subscriber holds no such word: its
       silence then names nothing, as before.
@@ -916,10 +917,10 @@ class Naming:
       that states no ``catalog`` is an answer: its owner names none (core
       §8.6), and the run is not asked again. "A read that fails names no
       catalog: one that ends in an error reply, and one whose descriptors
-      all state another run." zenoh's own ``Timeout``, which a GET its
-      owner answers too late draws (round 125, measured), is read as no
-      reply: the text names that owner, "a slow one's", among the reads
-      that draw none.
+      all state another run." "A read that ends in zenoh's ``Timeout``
+      error reply, its owner answering too late, is an error reply, and
+      fails." (F-616: zk2py read that one as no reply in round 125's first
+      writing, by the bullet that named "a slow one's".)
     - :meth:`begin` marks a read that asks for no run, the one a subscriber
       makes at its start. It reads every instance's descriptor, so while it
       is under way it covers every run: :meth:`due` asks for none, and a
@@ -1045,10 +1046,12 @@ def descriptor_read(session: Any, address: str, timeout: float = 1.0) -> tuple[l
 
 def failed_by_error(errors: Iterable[bytes]) -> bool:
     """§2.5 (0.13): "A read that fails ... one that ends in an error
-    reply". zenoh's own ``Timeout`` is no owner's reply: a slow owner's
-    read draws it, and the text reads that read as one that "draws no
-    reply" (round 125). Any other error reply fails the read."""
-    return any(e != TIMEOUT_PAYLOAD for e in errors)
+    reply", and "A read that ends in zenoh's ``Timeout`` error reply, its
+    owner answering too late, is an error reply, and fails. It waits for
+    the next read, never for a guess." So any error reply fails the read,
+    zenoh's own ``Timeout`` among them (F-616, answered). "A read that
+    draws no reply at all, and no error reply either, is no failure.\""""
+    return any(True for _ in errors)
 
 
 def descriptor_catalog(session: Any, address: str, timeout: float = 1.0) -> str | None:

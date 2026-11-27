@@ -5304,8 +5304,9 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("desired.v2 0.2's rules and statements zk2py already met, read where they are stated: §2.5's stamp "
                 "around a snapshot with no entry (F-581), §2.6 step 4's equal at a reverted asof (F-582), §2.17's "
                 "first answer with no slice (F-586), §2.18's start refusal and stop (F-589), the revision read "
-                "from the descriptor (F-590), \"Targets first\" through routers that timestamp (F-588), and what "
-                "a tool loses after a revert on a snapshot with no entry (F-585)",
+                "from the descriptor (F-590), \"Targets first\" through routers that timestamp (F-588) and, since "
+                "the mend, through the target's own session (F-617), and what a tool loses after a revert on a "
+                "snapshot with no entry (F-585)",
                 missing(dv2, "- **A snapshot with no entry** it admitted is no version (§2.6). The target sends none "
                              "while that revert runs. It sends none after it either, ended or failed.",
                         "At a snapshot's asof it reverted on, equal is older too (§2.8).",
@@ -5315,8 +5316,11 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
                         "While the descriptor names it, a target MUST NOT act on a version of that author's.",
                         "It is the one the author's descriptor names for the version's run. Where no descriptor "
                         "reaches the target, it is the deployment's word.",
+                        # the mend of round 125 (F-617): the target's own session beside a router
                         "- **So a deployment MUST NOT bind** such a target to such an author where a router between "
-                        "the two timestamps.",
+                        "the two, or the target's own session, timestamps.",
+                        "A target whose own session timestamps stamps each put it receives with its own. Either way "
+                        "the target acts on it.",
                         "After a revert on a snapshot with no entry, it reads no convergence until the next document "
                         "(§2.17)."), []))
 
@@ -5376,8 +5380,9 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "word, the catalog the subscriber was provisioned, for every run no descriptor named; a read that "
                 "ends in an error reply fails, each group unknown_catalog until an answer; a descriptor's catalog "
                 "stands over the word; a subscriber given no word, or several catalogs and none named for the owner, "
-                "reads nothing through silence; zenoh's own Timeout is read as no reply (a slow owner's), any other "
-                "error reply fails",
+                "reads nothing through silence; zenoh's own Timeout, a slow owner's read, is an error reply and "
+                "fails, as any other does (F-616, answered in the mend of round 125: round 125's first writing read "
+                "it as no reply)",
                 [naming("aabbccdd", [(None, [], False)]), naming("aabbccdd", [(None, [], True)]),
                  naming("aabbccdd", [(None, [{"run": "0007", "catalog": "11223344"}], False), ("0007", [], False)],
                         "0007"),
@@ -5386,12 +5391,18 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
                   f2.failed_by_error([b"Timeout", b"denied"])],
                  f2.Provider.__init__.__defaults__ is not None]
                 + missing(fv2, "- **On the near side,** a read that draws no reply cannot be told from a face: a "
-                               "tokenless owner's, or a slow one's. So it is read as one.",
+                               "tokenless owner's. So it is read as one. A slow owner's read is not this one: zenoh "
+                               "ends it with a `Timeout` error reply, the querier's or a router's, and it fails "
+                               "(below).",
                           "- **A read that fails** names no catalog: one that ends in an error reply, and one whose "
                           "descriptors all state another run.",
-                          "- A read that draws no reply is no failure. The deployment's word stands for it (above)."),
+                          "- A read that draws no reply at all, and no error reply either, is no failure. The "
+                          "deployment's word stands for it (above).",
+                          "- A read that ends in zenoh's `Timeout` error reply, its owner answering too late, is an "
+                          "error reply, and fails. It waits for the next read, never for a guess.")
+                + [x for x in ("or a slow one's. So it is read as one.",) if x in fv2],
                 [["aabbccdd"], [None], ["11223344", False, "11223344"], [None], [None, True, "aabbccdd"],
-                 [False, False, True, True], True]))
+                 [True, False, True, True], True]))
 
     # -- core 0.115 and observer 0.36 ---------------------------------------------------
     out.append(("core 0.115 and observer 0.36, the answers with no rule of zk2py's to move: §4.3's record that is "
@@ -8096,7 +8107,12 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  [t[5] for t in way(False, off)], [t[5] for t in way(True, off)]]
                 + missing(fv, "- Either is sound. Neither reads an index through a catalog the owner was not said to "
                               "name: core §8.6 allows no guess.",
-                          "- **What it holds is bounded.** Past its bound, a subscriber reads a put the first way."),
+                          # the mend of round 125: a second bound, past which a put may be dropped; zk2py holds
+                          # no put, so neither bound reaches it
+                          "- **What it holds is bounded.** Past its bound, a subscriber reads a put the first way, "
+                          "in its turn behind those it holds. Past a second bound it may drop the put unread. Its "
+                          "key then reads the gap at the next put it reads, so what the put would have confirmed "
+                          "goes stale, never fresh."),
                 [[(["unknown_catalog", "unknown_catalog"], False, [], None, None, []),
                   (["read", "read"], False, [], 200, 200, [])],
                  [(["read", "read"], False, [], 100, 100, []), (["read", "read"], False, [], 200, 200, [])],
@@ -8293,11 +8309,13 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "alone decides",
                 missing(s25, "- **Where no descriptor answers,** the subscriber takes the deployment's word: the "
                              "catalog it was provisioned (core §8.6, R7).",
+                        # the mend of round 125 (F-616): a slow owner's read fails
                         "- **On the near side,** a read that draws no reply cannot be told from a face: a tokenless "
-                        "owner's, or a slow one's. So it is read as one.",
+                        "owner's. So it is read as one.",
                         "- **Several catalogs.** The deployment's word is one catalog per owner, or a successor of "
                         "it (R7). A subscriber given several takes the one its deployment names for that owner.",
-                        "- A read that draws no reply is no failure. The deployment's word stands for it (above).",
+                        "- A read that draws no reply at all, and no error reply either, is no failure. The "
+                        "deployment's word stands for it (above).",
                         "Until an answer comes, each group is `unknown_catalog`.",
                         "Of several catalogs given, its tools take the last as the one named.")
                 + [x for x in ("as across a constrained face, the subscriber", "the deployment's word is the last.")

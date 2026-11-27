@@ -1034,16 +1034,31 @@ def run_silent(slow_ms: int | None = None, window: float = 9.0) -> int:
                 print(f"NOTE {len(early)} owner heartbeats heard while zk2py's start read was out, each group "
                       f"{sorted({g.get('refused', 'read') for h in early for g in _groups(h)})}: \"Before it "
                       f"knows\", it refuses", flush=True)
-            check("zk2py's subscriber, holding the one catalog and given no word as such (0.13 §2.5: \"a read that "
-                  "draws no reply cannot be told from a face: a tokenless owner's, or a slow one's. So it is read as "
-                  "one\"): every owner heartbeat after its start read a read one, every group read through the "
-                  "catalog it holds, the members confirmed",
-                  len(h0) >= 6 and all("refused" not in g for h in h0 for g in _groups(h))
-                  and any(sub.last_conf for sub in p0.subs.values()),
-                  f"{len(h0)} read, {p0.naming.silences} silent reads, {p0.naming.errors} failed")
-            check("and the word stands for each run it read silent: one read at the start, one at the first put of "
-                  "the run, and none after", p0.naming.reads <= 1 and p0.naming.started == 1,
-                  f"{p0.naming.reads} reads for a run, {p0.naming.started} at the start, over {len(h0)} puts")
+            if slow_ms is None:
+                check("zk2py's subscriber, holding the one catalog and given no word as such (0.13 §2.5: \"a read "
+                      "that draws no reply cannot be told from a face: a tokenless owner's. So it is read as one\"): "
+                      "every owner heartbeat after its start read a read one, every group read through the catalog "
+                      "it holds, the members confirmed",
+                      len(h0) >= 6 and all("refused" not in g for h in h0 for g in _groups(h))
+                      and any(sub.last_conf for sub in p0.subs.values()),
+                      f"{len(h0)} read, {p0.naming.silences} silent reads, {p0.naming.errors} failed")
+                check("and the word stands for each run it read silent: one read at the start, one at the first put "
+                      "of the run, and none after", p0.naming.reads <= 1 and p0.naming.started == 1,
+                      f"{p0.naming.reads} reads for a run, {p0.naming.started} at the start, over {len(h0)} puts")
+            else:
+                # the mend of round 125 (F-616, answered): "A read that ends in
+                # zenoh's `Timeout` error reply, its owner answering too late,
+                # is an error reply, and fails. It waits for the next read,
+                # never for a guess."
+                check("zk2py's subscriber beside an owner whose descriptor answers too late (0.13 §2.5, as the mend "
+                      "words it: a `Timeout` error reply fails): every owner heartbeat a read one, every group "
+                      "unknown_catalog, nothing confirmed by one",
+                      len(h0) >= 6 and all(g.get("refused") == "unknown_catalog" for h in h0 for g in _groups(h))
+                      and not any(sub.last_conf for sub in p0.subs.values()) and p0.naming.errors >= 1,
+                      f"{len(h0)} read, {p0.naming.silences} silent reads, {p0.naming.errors} failed")
+                check(f"and it asks again later, not at every put: one read each {again:g} s after a failure at most",
+                      1 <= p0.naming.reads <= int(window / again) + 2 and p0.naming.reads < len(h0),
+                      f"{p0.naming.reads} reads for a run over {len(h0)} puts in {window:g} s")
 
             hw = [h for h in pw.answers("link") if "read" in h.answer]
             check("zk2py's subscriber given the deployment's word as across a face reads every group through it, "
@@ -1065,12 +1080,18 @@ def run_silent(slow_ms: int | None = None, window: float = 9.0) -> int:
                     check("the reference's consumer beside the same owner reads its groups through the catalog it "
                           "was given: confirmation rows, as zk2py's subscriber now does", len(confirmed) >= 3,
                           f"{len(confirmed)} rows confirm status")
+                elif slow_ms > 5000:
+                    # past the reference's own wait of about 5 s (round 125): both reads fail
+                    check(f"the reference's consumer beside an owner {slow_ms} ms late reads no group either: no "
+                          "confirmation row, no heartbeat counted, as zk2py's subscriber reads each unknown_catalog "
+                          "(F-616 answered: the two agree)",
+                          not confirmed and not w.summary().get("heartbeats"),
+                          f"{len(confirmed)} rows, {w.summary().get('heartbeats')} heartbeats")
                 else:
-                    # measured, never judged: the text reads a slow owner's read two ways (F-616)
-                    print(f"NOTE beside an owner {slow_ms} ms late, the reference's consumer confirms status in "
-                          f"{len(confirmed)} rows and counts {w.summary().get('heartbeats')} heartbeats, where "
-                          f"zk2py's subscriber read every group after its start read through the catalog it holds "
-                          "(F-616)", flush=True)
+                    # within the reference's wait: its read draws the descriptor, zk2py's at 1 s does not
+                    print(f"NOTE beside an owner {slow_ms} ms late, within the reference's own wait of about 5 s, "
+                          f"its consumer confirms status in {len(confirmed)} rows; zk2py's read, of 1 s, failed: "
+                          "the two reads wait differently, and each follows §2.5", flush=True)
     finally:
         for p in providers:
             p.close()
