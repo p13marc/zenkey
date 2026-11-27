@@ -1390,7 +1390,8 @@ class ConfigOwner:
                  floor_s: int = 10, apply_after_s: float = 1.0, persist: bool = True,
                  device: SimDevice | None = None, events_at: list[int] | None = None,
                  desired_key: str | None = None, contracts: list[Any] | None = None,
-                 fed: tuple[str, str] | None = None, remint: str = "restart", **owner_kw: Any):
+                 fed: tuple[str, str] | None = None, remint: str = "restart", fed_major: int = 1,
+                 **owner_kw: Any):
         from .contract import load_contract
         from .owner import Owner
 
@@ -1425,10 +1426,14 @@ class ConfigOwner:
         #: on in this run named (a refused one counts for none)
         self.fed = fed
         self.role: Any = None
+        #: the major the feed reads its author by (``desired.v2`` §2.16,
+        #: §2.18; round 121): 1, a stamp and a reply per key; 2, the in-band
+        #: version, a snapshot, and a conditional re-read
+        self.fed_major = fed_major
         if fed is not None:
-            from . import desired
+            from . import desired, desired_v2
 
-            self.role = desired.TargetRole(fed[0])
+            self.role = desired_v2.TargetRole() if fed_major == 2 else desired.TargetRole(fed[0])
         self._fed_running = False
         self._named: dict[str, set[str]] = {}
         #: what each seed found, and the acts the feed started (a test's)
@@ -1652,6 +1657,13 @@ class ConfigOwner:
         read = zk2c.read_sample(sample)
         if read.refused:
             return  # observer §7.3 (0.14): undecodable, never a document
+        if self.fed_major == 2:
+            # desired.v2 §2.4: "Its version is its in-band stamp"; "No envelope
+            # ... ignores it (unstamped)": the role reads a None version so
+            self._fed_receive2(self._fed_sample2(sample.kind == zenoh.SampleKind.DELETE,
+                                                 read.stamp if read.enveloped else None,
+                                                 read.record if read.record is not None else b""))
+            return
         self._fed_receive(sample.kind == zenoh.SampleKind.DELETE, None if ts is None else str(ts),
                           read.record if read.record is not None else b"")
 
@@ -1666,11 +1678,81 @@ class ConfigOwner:
             if word in (desired.ACT, desired.REVERT):
                 self._fed_act()
 
+    @staticmethod
+    def _fed_sample2(deleted: bool, ib: Any, payload: bytes) -> Any:
+        from . import desired, desired_v2 as d2
+
+        ver = None if ib is None else d2.Version.of(ib.width, ib.run, ib.seq)
+        if deleted:
+            return d2.Sample(desired.OWNER, True, ver)
+        return d2.Sample(desired.OWNER, False, ver, desired.Payload.of_bytes(payload, True), desired.revision_of(payload))
+
+    def _fed_receive2(self, s: Any) -> None:
+        from . import desired_v2 as d2
+
+        with self.cv:
+            if self._stop.is_set():
+                return
+            word = self.role.receive(s)
+            if word in (d2.ACT, d2.REVERT):
+                self._fed_act()
+
+    def _fed_seed2(self) -> int:
+        """desired.v2 §2.5: a member read of the slice's one concrete key,
+        conditional while the role holds a version. Answered unchanged, it
+        judges nothing; whole, it judges the entry, or a snapshot with no
+        entry by §2.8. Returns how many answers it drew."""
+        from . import desired_v2 as d2, live, seed_held, zk2c
+
+        s = self.owner.session
+        if s is None or self._stop.is_set():
+            return 0
+        with self.cv:
+            sent = self.role.ask()
+        st = live.get_state(s, self.fed[0], held=None if sent is None else zk2c.InBand(sent.run.width,
+                                                                                       sent.run.value, sent.seq))
+        key = self.fed[0]
+        mine = [r for r in st.replies if r.key == key and r.refusal is None]
+        no_entry = [h for h in st.snapshots if h.key == key and h.done
+                    and not any(p["live"] or p["tombs"] for p in h.pages.values())]
+        unchanged = [h for h in st.held if h[2] == seed_held.UNCHANGED]
+        n = len(mine) + len(no_entry) + len(unchanged)
+        self.seeds.append(n)
+        if unchanged and sent is not None:
+            with self.cv:
+                self.role.unchanged(sent)
+            return n
+        with self.cv:
+            self.role.asked = None
+        for r in mine:
+            self._fed_receive2(self._fed_sample2(r.deleted, r.inband, r.payload))
+        if no_entry and not mine:
+            h = no_entry[0]
+            with self.cv:
+                if not self._stop.is_set():
+                    word = self.role.receive_no_entry(d2.NoEntry(d2.Run(h.header["run_width"], h.header["run"]),
+                                                                 h.header["asof"]))
+                    if word in (d2.ACT, d2.REVERT):
+                        self._fed_act()
+        return n
+
+    def _fed_finish(self, how: str, refusal: dict[str, Any] | None) -> str:
+        """The running act's end, told the role in its major's terms. Under
+        desired.v2 the owner's report is its own (§2.16): the role's packed
+        report is never put, and carries the code alone."""
+        from . import desired, desired_v2 as d2
+
+        if self.fed_major == 2:
+            return self.role.finish(d2.Finish(how, (refusal or {}).get("code")))
+        return self.role.finish(desired.Finish(how, refusal))
+
     def _fed_seed(self) -> int:
         """S4's GET of the slice (desired.v1 §2.5), each reply judged in the
         order received. Returns how many replies it drew."""
         from . import live
 
+        if self.fed_major == 2:
+            return self._fed_seed2()
         s = self.owner.session
         if s is None or self._stop.is_set():
             return 0
@@ -1764,7 +1846,7 @@ class ConfigOwner:
         if not isinstance(doc, dict) or not is_integer(doc.get("revision")) or not isinstance(doc.get("values"), dict):
             self.fed_acts.append(("invalid", None))
             self._fed_running = False
-            word = self.role.finish(desired.Finish(desired.REFUSED, {"code": "invalid_request"}))
+            word = self._fed_finish(desired.REFUSED, {"code": "invalid_request"})
             if word in (desired.ACT, desired.REVERT):
                 self._fed_act()
             return
@@ -1813,7 +1895,7 @@ class ConfigOwner:
             self._named = {}
         how = {"converged": desired.DONE, "reverted": desired.DONE, "refused": desired.REFUSED,
                "failed": desired.FAILED}[outcome]
-        word = self.role.finish(desired.Finish(how, refusal))
+        word = self._fed_finish(how, refusal)
         if word in (desired.ACT, desired.REVERT):
             self._fed_act()
 

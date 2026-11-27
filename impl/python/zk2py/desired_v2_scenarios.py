@@ -1,8 +1,11 @@
-"""desired.v2 ``scenarios-v2.md`` §1 to §8, §10 and §13 to §15 (text 0.1), live,
-in each pairing of the two implementations (#609, rounds 118 and 119)::
+"""desired.v2 ``scenarios-v2.md`` §1 to §15 (text 0.1), live, in each pairing of
+the two implementations (#609, rounds 118, 119 and 121)::
 
     python -m zk2py.desired_v2_scenarios [--author zk2py|rust] [--target zk2py|rust]
-        [--only 1|2|3|4|5|6|7|8|10|13|14|14-no-move|14-ohb|15]...
+        [--only 1|2|3|4|5|6|7|8|9|10|11|12|13|14|14-no-move|14-ohb|15|majors]...
+
+§9, §11, §12 and ``majors`` (both majors side by side, read by the
+reference's ``zenctl``) are :mod:`zk2py.desired_v2_s9`'s (round 121).
 
 Each party is a process: zk2py's own (``python -m zk2py.desired_v2_owner``)
 or the reference's owner example, a black box run from
@@ -561,7 +564,8 @@ class Bus:
                   *(["--desired-reply-timeout-ms", str(reply_timeout_ms)] if reply_timeout_ms is not None else []),
                   *(["--desired-watch"] if watch else []), *([] if moves else ["--desired-no-move"]),
                   *(["--desired-watched"] if watched else []),
-                  *(["--desired-catalog", str(catalog)] if catalog else [])]
+                  *(["--desired-catalog", str(catalog)] if catalog else []),
+                  *(["--desired-archive", archive] if archive else [])]
         else:
             f = ["--desired-v2", *(["--desired-unbound"] if unbound else ["--desired-target", AUTHOR, "--desired-watch"])]
             f += [*(["--desired-reread-ms", str(reread_ms)] if reread_ms is not None else []),
@@ -1014,9 +1018,6 @@ def _archived(archive: ArchiveBox, version: str | None) -> bool:
 
 def section7(rp: Report) -> None:
     sec = "§7 last-known from an archive, the author absent" + f" [{pairing()}, the reference's archive]"
-    if TARGET_IMPL == "zk2py":
-        rp.cannot(sec, "zk2py's desired.v2 target reads no archive")
-        return
     bus = Bus()
     try:
         archive = bus.archive()
@@ -1055,9 +1056,6 @@ def section7(rp: Report) -> None:
 def section10(rp: Report) -> None:
     sec = ("§10 last-known confirmed by its author; a present author's silence"
            + f" [{pairing()}, the reference's archive]")
-    if TARGET_IMPL == "zk2py":
-        rp.cannot(sec, "zk2py's desired.v2 target reads no archive")
-        return
     bus = Bus(cut=True)
     try:
         archive = bus.archive(on=2)
@@ -1479,7 +1477,20 @@ def section15(rp: Report) -> None:
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
             "7": section7, "8": section8, "10": section10,
             "13": section13, "14": section14, "14-no-move": lambda rp: section14(rp, moves=False),
-            "14-ohb": lambda rp: section14(rp, ohb=True), "15": section15}
+            "14-ohb": lambda rp: section14(rp, ohb=True), "15": section15,
+            # round 121: §9 with the reference's zenctl as T, §11 and §12 (zk2py.desired_v2_s9)
+            "9": lambda rp: _s9().section9(rp), "11": lambda rp: _s9().section11(rp),
+            "12": lambda rp: _s9().section12(rp), "majors": lambda rp: _s9().section_majors(rp)}
+
+
+def _s9() -> Any:
+    """``zk2py.desired_v2_s9``, reading this module's pairing and bus: run as
+    ``python -m``, this module is ``__main__``, and the package's import of
+    it would be a second copy holding the default pairing."""
+    from . import desired_v2_s9
+
+    desired_v2_s9.sc = sys.modules[__name__]
+    return desired_v2_s9
 
 
 def main(argv: list[str] | None = None) -> int:

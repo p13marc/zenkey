@@ -1,0 +1,22 @@
+# desired-v2/configs.v1.toml: scenarios-v2.md §12 (#609, round 121), "As
+# v1's, the author's contract listing desired.v2": interop/desired's
+# configs.v1 in a revision whose uses moved from desired.v1 to desired.v2
+# (desired.v2 §2.18, "An author moves by a revision of its contract"), at
+# minor 2. Its one state has no horizon, so it forms no collection. It must
+# load with no finding at all.
+[interface]
+name    = "configs"
+major   = 1
+minor   = 2
+uses    = ["desired.v2", "freshness.v2"]
+summary = "a config.v1 server's desired configuration, one document per target"
+
+[schemas]
+jsonschema = ["../config/schemas/desired.json"]
+
+[resources."configs/{system}/{service}"]
+kind        = "state"
+type        = "json:DesiredConfig"
+params      = { system = "string", service = "string" }
+cardinality = 16
+annotations = { "desired.target_param" = ["system", "service"], "freshness.ttl_s" = 0 }
