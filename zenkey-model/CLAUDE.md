@@ -552,7 +552,8 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `AuthorReading` and `converged`. `collection::per_key_in` leaves out a
   desired resource of a revision that uses `desired.v2` (core 0.112),
   which narrows `link::tombstone_only` (link.v2 0.23; `v2/plan.json`'s
-  case 49). `tests/profiles/desired_v2.rs`, a module of `profiles.rs`,
+  case 49; case 50, at a template whose first chunk is a parameter, keeps
+  its floor, link.v2 0.24). `tests/profiles/desired_v2.rs`, a module of `profiles.rs`,
   runs the seven `v2/` fixtures as written, 293 cases, none blessed and
   no runner able to: `watch.json` drives a `Watch` beside a real
   `Target`. It also loads the scenarios' `tasking.v2` and `worker.v2`

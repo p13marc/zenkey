@@ -958,7 +958,9 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   names the three keys v2 adds; `link.v2` 0.23 narrows §2.11's list the
   same way, and `v2/plan.json`'s case 49 (case 31's state, its revision
   using `desired.v2`: no floor; 50 cases) was derived by the reference
-  into a copy, read by hand and inserted as text. No keyword of the core
+  into a copy, read by hand and inserted as text, and `link.v2` 0.24
+  adds case 50 (case 49's state at `{vehicle}/plan`, a template with no
+  snapshot key, so its floor stays; 51 cases), derived and read the same way. No keyword of the core
   moved: 295 rules. The fixtures (293 cases) were computed twice by two
   scripts of the drafter's that share no code
   (`/srv/dev/scratch/zenkey/py/986-j2/{a_gen,a_core,a_packed,b_check}.py`),

@@ -7,6 +7,26 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.24 — 2026-11-27: editorial: `v2/plan.json`'s case 50, a `desired.v2` desired resource at a leading parameter keeps its floor, no rule changed (#986)
+
+0.23 took a `desired.v2` desired resource off §2.11's floor, "unless its
+template's first chunk is a parameter". Only the no-floor side had a
+case, case 49.
+
+**Added: `v2/plan.json`'s case 50.** It is case 49's state moved to
+`{vehicle}/plan`. That template has no snapshot key (core §4.2), so the
+resource keeps its floor by the list's second item, whatever its
+revision uses.
+- **Expected:** case 31's plan, the owner's window floored at the face's
+  outage. It differs from case 49's plan by `windows` alone.
+- **Derived by the reference into a copy, then read by hand** against
+  cases 31 and 49, and inserted as text, the fifty others byte for byte.
+  51 cases.
+
+**Deliberately not changed.**
+- **No rule** of this text, and no other case.
+- **The header** is still written against core 0.108.
+
 ## link.v2 0.23 — 2026-11-22: §2.11's floor no longer lists a desired resource of a contract that uses `desired.v2`, no keyword changed (#986)
 
 `desired.v2` text 0.1 answers a desired resource by snapshot
