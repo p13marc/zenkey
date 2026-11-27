@@ -130,8 +130,10 @@ class Refused(ValueError):
 KEY_WITH_RULE, KEY_MISSING = "key_with_rule", "key_missing"
 #: §2.4: an owner MUST NOT write "``labels`` or an ``argument`` other than
 #: ``not_available`` under a ``rule`` of ``not_available``". The text names
-#: no token for either: zk2py's.
-LABELS_BY_WORDS, ARGUMENT_BY_WORDS = "labels_by_words", "argument_by_words"
+#: no token. zk2py's first writing had two of its own; records.json's
+#: description names one for both, ``by_words_fields``.
+BY_WORDS_FIELDS = "by_words_fields"
+LABELS_BY_WORDS = ARGUMENT_BY_WORDS = BY_WORDS_FIELDS
 
 
 def by_words(value: dict[str, Any]) -> bool:

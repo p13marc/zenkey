@@ -639,6 +639,14 @@ def _health_v2(directory: Path) -> list[Result]:
     return health_v2_fixtures.run(directory)
 
 
+def _alarms_v2(directory: Path) -> list[Result]:
+    """``conformance/v2/`` (alarms.v2 text 0.1, round 124), every file, an
+    unknown one failing: :mod:`zk2py.alarms_v2_fixtures`."""
+    from . import alarms_v2_fixtures
+
+    return alarms_v2_fixtures.run(directory)
+
+
 def _health_rollups(path: Path) -> list[Result]:
     """health.v1 §2.2, §5: judged readings -> a tool's roll-up."""
     from . import health
@@ -2216,7 +2224,8 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "link": {"exposure.json": _link_exposure, "plan.json": _link_plan, "lints.json": _link_lints, "v2": _link_v2,
              "contracts": _link_contracts},
     "alarms": {"keys.json": _alarms_keys, "documents.json": _alarms_documents,
-               "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions},
+               "transitions.json": _alarms_transitions, "conclusions.json": _alarms_conclusions,
+               "v2": _alarms_v2},
     "telemetry": {"schema.json": _telemetry_schema, "declarations.json": _telemetry_declarations,
                   "samples.json": _telemetry_samples, "continuity.json": _telemetry_continuity,
                   "v2": _telemetry_v2, "contracts": _telemetry_contracts},
