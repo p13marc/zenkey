@@ -1,0 +1,98 @@
+{
+  "across_face": true,
+  "asked": [
+    "zk2/h-3fa9c2d41b7e/rf0/worker.v2/state/desired/task",
+    "zk2/fleet/desired/tasking.v2/state/tasks/h-3fa9c2d41b7e/rf0"
+  ],
+  "clock": "none",
+  "judgement": {
+    "answer": "not_established",
+    "reason": "1 role(s) converged on their authors' current documents, none refused"
+  },
+  "namespace": "",
+  "notes": [
+    {
+      "cite": "desired.v1 §2.14, §2.17",
+      "text": "across a constrained face: presence and the descriptor do not cross, and the deployment's word stands for the target's descriptor; the contracts are the ones held offline"
+    },
+    {
+      "cite": "desired.v1 §2.17",
+      "text": "one reading, S4's GET of the targets' reports and of each slice from its author: \"not yet\" is no verdict, and no target is found behind without a window (--for)"
+    },
+    {
+      "cite": "desired.v2 §2.10, §2.17, §2.18",
+      "text": "a role whose author's revision uses desired.v2 is read by it: its report found by `desired.report`, a refusal's place and line read with the target's contract, and each version its put's in-band stamp, shown <run>/<seq>; a version has no time, so only the window finds a target behind, never a clock"
+    },
+    {
+      "cite": "freshness.v1 §2.6",
+      "text": "no clock was trusted, so a report whose resource declares a horizon has an unobservable age (--clocks-synced)"
+    }
+  ],
+  "readings": 1,
+  "report": "desired",
+  "role": "task",
+  "rows": [
+    {
+      "answers": {
+        "converged": {
+          "answer": "yes",
+          "reason": "converged",
+          "says": "its report's observed 0000/1 is its author fleet/desired's current version, converged"
+        },
+        "in_force": {
+          "answer": "yes",
+          "reason": "desired",
+          "says": "0000/1 is wholly in force"
+        },
+        "last_known": {
+          "answer": "no",
+          "reason": "current",
+          "says": "what it acted on, 0000/1, is its author's own"
+        },
+        "refused": {
+          "answer": "no",
+          "reason": "converged",
+          "says": "its last act, on 0000/1, converged"
+        }
+      },
+      "author": {
+        "address": "fleet/desired",
+        "current": "entry",
+        "presence": "across_face",
+        "stamp": "0000/1"
+      },
+      "interface": "tasking.v2",
+      "listing": "bound",
+      "profile": "desired.v2",
+      "report": {
+        "document": {
+          "in_force": {
+            "revision": 2,
+            "version": "0000/1"
+          },
+          "last_known": false,
+          "observed": {
+            "revision": 2,
+            "version": "0000/1"
+          },
+          "outcome": "converged",
+          "source": "desired"
+        },
+        "freshness": {
+          "reason": "no_horizon",
+          "says": "no freshness.ttl_s, so freshness is not asked",
+          "verdict": "not_asked"
+        },
+        "inband": "0000/15",
+        "key": "zk2/h-3fa9c2d41b7e/rf0/worker.v2/state/desired/task"
+      },
+      "resource": "state/tasks/{system}/{service}",
+      "role": "task",
+      "row": "desired",
+      "slice": "zk2/fleet/desired/tasking.v2/state/tasks/h-3fa9c2d41b7e/rf0",
+      "slice_from": "offline_contract",
+      "target": "h-3fa9c2d41b7e/rf0"
+    }
+  ],
+  "target": "h-3fa9c2d41b7e/rf0"
+}

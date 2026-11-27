@@ -1,0 +1,243 @@
+{
+  "any_firing": {
+    "answer": "no",
+    "at_least": "warning",
+    "established": 1,
+    "firing": 0,
+    "not_asked": 0,
+    "reason": "none_firing",
+    "says": "no alarm at or above the severity fires",
+    "unobservable": 0
+  },
+  "asked": [
+    "zk2/h-3fa9c2d41b7e/rf0/alarms.v1/state/alarms/*",
+    "zk2/h-3fa9c2d41b7e/rf0/alarms.v2/state/**"
+  ],
+  "clock": "deployment_word",
+  "face": {
+    "reachable": true
+  },
+  "judgement": {
+    "answer": "not_established",
+    "reason": "no alarm at or above the severity fires (none_firing)"
+  },
+  "namespace": "",
+  "notes": [
+    {
+      "cite": "alarms.v1 §2.11",
+      "text": "across a constrained face: presence and descriptors do not cross, and the deployment's word stands for them — the face lets this reader GET the alarms"
+    },
+    {
+      "cite": "alarms.v1 §2.15",
+      "text": "one GET of the owners' alarms (S4); the owners in scope are those presence finds, those an earlier reading knew, and those an archive's keys name"
+    },
+    {
+      "cite": "freshness.v1 §2.6",
+      "text": "a reply's stamp is aged against this host's clock, on the deployment's word that it and the owners' agree (--clocks-synced)"
+    }
+  ],
+  "report": "alarms",
+  "rows": [
+    {
+      "address": "h-3fa9c2d41b7e/rf0",
+      "alarms": 4,
+      "known_by": [
+        "earlier",
+        "word"
+      ],
+      "one_slot_each": {
+        "answer": "yes",
+        "reason": "one_slot_each",
+        "says": "no two slots of its present run name one alert key"
+      },
+      "profile": "alarms.v2",
+      "reason": "snapshot",
+      "row": "owner",
+      "says": "its owner answered one complete snapshot of its alarms",
+      "verdict": "established"
+    },
+    {
+      "alarm": {
+        "alert_key": "335f24192ff5d0d4",
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e"
+      },
+      "firing": {
+        "answer": "no",
+        "reason": "resolved",
+        "says": "its owner put it resolved"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/alarms.v2/state/alarms/0",
+      "latest": {
+        "at_s": 1795812684,
+        "latest": "resolved",
+        "record": {
+          "argument": 865,
+          "at": 1795812684000,
+          "rule": 0,
+          "severity": "warning",
+          "state": "resolved"
+        },
+        "via": "get"
+      },
+      "profile": "alarms.v2",
+      "rederives": {
+        "answer": "not_asked",
+        "reason": "table",
+        "says": "the slot's record names a table's rule, which its table names"
+      },
+      "row": "alarm",
+      "severity": "warning",
+      "slot": 0,
+      "stale": {
+        "answer": "unobservable",
+        "reason": "across_face",
+        "says": "its owner is across a constrained face, where presence does not cross"
+      },
+      "words": {
+        "argument": "46.5",
+        "by": "table",
+        "category": "sensor_health",
+        "index": 0,
+        "rule": "hot",
+        "summary": "Temperature 46.5 C"
+      }
+    },
+    {
+      "alarm": {
+        "alert_key": "a0ab92ecd3df0fd3",
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e"
+      },
+      "firing": {
+        "answer": "no",
+        "reason": "resolved",
+        "says": "its owner put it resolved"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/alarms.v2/state/alarms/1",
+      "latest": {
+        "at_s": 1795812714,
+        "latest": "resolved",
+        "record": {
+          "argument": "not_available",
+          "at": 1795812714000,
+          "rule": 1,
+          "severity": "warning",
+          "state": "resolved"
+        },
+        "via": "get"
+      },
+      "profile": "alarms.v2",
+      "rederives": {
+        "answer": "not_asked",
+        "reason": "table",
+        "says": "the slot's record names a table's rule, which its table names"
+      },
+      "row": "alarm",
+      "severity": "warning",
+      "slot": 1,
+      "stale": {
+        "answer": "unobservable",
+        "reason": "across_face",
+        "says": "its owner is across a constrained face, where presence does not cross"
+      },
+      "words": {
+        "by": "table",
+        "index": 1,
+        "rule": "battery_low",
+        "summary": "Battery low"
+      }
+    },
+    {
+      "alarm": {
+        "alert_key": "48d08ce92f831220",
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e"
+      },
+      "firing": {
+        "answer": "no",
+        "reason": "resolved",
+        "says": "its owner put it resolved"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/alarms.v2/state/alarms/2",
+      "latest": {
+        "at_s": 1795812744,
+        "latest": "resolved",
+        "record": {
+          "argument": "not_available",
+          "at": 1795812744000,
+          "rule": 2,
+          "severity": "info",
+          "state": "resolved"
+        },
+        "via": "get"
+      },
+      "profile": "alarms.v2",
+      "rederives": {
+        "answer": "not_asked",
+        "reason": "table",
+        "says": "the slot's record names a table's rule, which its table names"
+      },
+      "row": "alarm",
+      "severity": "info",
+      "slot": 2,
+      "stale": {
+        "answer": "unobservable",
+        "reason": "across_face",
+        "says": "its owner is across a constrained face, where presence does not cross"
+      },
+      "words": {
+        "by": "table",
+        "index": 2,
+        "rule": "link_degraded",
+        "summary": "Link margin low"
+      }
+    },
+    {
+      "alarm": {
+        "alert_key": "abb089906038056a",
+        "service": "rf0",
+        "system": "h-3fa9c2d41b7e"
+      },
+      "firing": {
+        "answer": "no",
+        "reason": "resolved",
+        "says": "its owner put it resolved"
+      },
+      "key": "zk2/h-3fa9c2d41b7e/rf0/alarms.v2/state/alarms/3",
+      "latest": {
+        "at_s": 1795812564,
+        "latest": "resolved",
+        "record": {
+          "argument": "not_available",
+          "at": 1795812564000,
+          "rule": 3,
+          "severity": "critical",
+          "state": "resolved"
+        },
+        "via": "get"
+      },
+      "profile": "alarms.v2",
+      "rederives": {
+        "answer": "not_asked",
+        "reason": "table",
+        "says": "the slot's record names a table's rule, which its table names"
+      },
+      "row": "alarm",
+      "severity": "critical",
+      "slot": 3,
+      "stale": {
+        "answer": "unobservable",
+        "reason": "across_face",
+        "says": "its owner is across a constrained face, where presence does not cross"
+      },
+      "words": {
+        "by": "table",
+        "index": 3,
+        "rule": "door_open",
+        "summary": "Enclosure door open"
+      }
+    }
+  ],
+  "selector": "zk2/h-3fa9c2d41b7e/rf0/alarms.v2/state/alarms/*"
+}

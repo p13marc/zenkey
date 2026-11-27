@@ -1,0 +1,283 @@
+{
+ "run": "zk2c-w2-v2-lean-1",
+ "medium": "rf-zk2c",
+ "stack": "lean",
+ "loss": 0.05,
+ "windows": [
+  {
+   "window": "steady",
+   "seconds": 2100.0,
+   "ab": {
+    "tx_sdus": 236,
+    "tx_bytes": 16350,
+    "rx_sdus_far": 222,
+    "rx_bytes_far": 15502,
+    "relay_sdus": 236,
+    "relay_bytes": 16350,
+    "relay_dropped": 14,
+    "kinds": {
+     "other": 236
+    },
+    "kind_bytes": {
+     "other": 16350
+    },
+    "kind_airtime_s": {
+     "other": 54.5
+    },
+    "other_sizes": {
+     "39": 90,
+     "40": 12,
+     "58": 26,
+     "59": 3,
+     "77": 35,
+     "114": 70
+    },
+    "tx_layers": {
+     "compress/compressed_total": 26,
+     "compress/stored_total": 210,
+     "compress/bytes_saved_total": 0,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 54.5,
+    "links_opened": 0,
+    "keepalives_lost": 0,
+    "per_day": {
+     "sdus": 9710,
+     "bytes": 672686,
+     "airtime_s": 2242.3,
+     "airtime_pct": 2.595,
+     "keepalives": 0,
+     "by_kind": {
+      "other": {
+       "sdus": 9710,
+       "bytes": 672686,
+       "airtime_s": 2242.3
+      }
+     }
+    }
+   },
+   "ba": {
+    "tx_sdus": 41,
+    "tx_bytes": 1368,
+    "rx_sdus_far": 39,
+    "rx_bytes_far": 1334,
+    "relay_sdus": 41,
+    "relay_bytes": 1368,
+    "relay_dropped": 2,
+    "kinds": {
+     "keep-alive": 31,
+     "other": 10
+    },
+    "kind_bytes": {
+     "keep-alive": 527,
+     "other": 841
+    },
+    "kind_airtime_s": {
+     "keep-alive": 1.757,
+     "other": 2.803
+    },
+    "other_sizes": {
+     "23": 3,
+     "108": 3,
+     "112": 4
+    },
+    "tx_layers": {
+     "compress/compressed_total": 7,
+     "compress/stored_total": 34,
+     "compress/bytes_saved_total": 28,
+     "aead/auth_failures_total": 0,
+     "aead/replays_total": 0
+    },
+    "airtime_s": 4.56,
+    "keepalives_lost": 2,
+    "per_day": {
+     "sdus": 1687,
+     "bytes": 56283,
+     "airtime_s": 187.6,
+     "airtime_pct": 0.217,
+     "keepalives": 1275,
+     "by_kind": {
+      "keep-alive": {
+       "sdus": 1275,
+       "bytes": 21682,
+       "airtime_s": 72.3
+      },
+      "other": {
+       "sdus": 411,
+       "bytes": 34601,
+       "airtime_s": 115.3
+      }
+     }
+    }
+   },
+   "far_samples": {
+    "events/oper_change": 35,
+    "stream/frames/sample": 67,
+    "stream/heartbeat/alarms.v2": 5,
+    "stream/heartbeat/health.v1": 68,
+    "stream/heartbeat/rfcfg.v1": 65
+   },
+   "far_payload_bytes": {
+    "events/oper_change": {
+     "42": 35
+    },
+    "stream/frames/sample": {
+     "91": 67
+    },
+    "stream/heartbeat/alarms.v2": {
+     "17": 5
+    },
+    "stream/heartbeat/health.v1": {
+     "16": 68
+    },
+    "stream/heartbeat/rfcfg.v1": {
+     "16": 65
+    }
+   },
+   "heartbeats": {
+    "placed": {
+     "keys": {
+      "stream/heartbeat/alarms.v2": {
+       "received": 5,
+       "lost": 0,
+       "period_s": 427.52,
+       "alone": 5,
+       "shared": 0,
+       "payload_bytes": {
+        "17": 5
+       },
+       "sdu_bytes": {
+        "40": 5
+       },
+       "shared_with": {}
+      },
+      "stream/heartbeat/health.v1": {
+       "received": 68,
+       "lost": 6,
+       "period_s": 28.5,
+       "alone": 43,
+       "shared": 25,
+       "payload_bytes": {
+        "16": 68
+       },
+       "sdu_bytes": {
+        "39": 45,
+        "58": 26,
+        "59": 3
+       },
+       "shared_with": {
+        "stream/heartbeat/rfcfg.v1": 25
+       }
+      },
+      "stream/heartbeat/rfcfg.v1": {
+       "received": 65,
+       "lost": 9,
+       "period_s": 28.5,
+       "alone": 40,
+       "shared": 25,
+       "payload_bytes": {
+        "16": 65
+       },
+       "sdu_bytes": {
+        "39": 45,
+        "58": 23,
+        "59": 2
+       },
+       "shared_with": {
+        "stream/heartbeat/health.v1": 25
+       }
+      }
+     },
+     "sdus": 124.0,
+     "bytes": 5395.0,
+     "lost_unplaced": 4,
+     "airtime_s": 17.983,
+     "per_day": {
+      "puts": 6295,
+      "sdus": 5102,
+      "bytes": 221966,
+      "airtime_s": 739.9
+     }
+    }
+   }
+  }
+ ],
+ "w2": {
+  "daily_counts": {
+   "health": 4,
+   "event": 15,
+   "alarm_raise": 5,
+   "alarm_resolve": 5,
+   "config": 5,
+   "alarm_refresh": 0,
+   "desired_change": 0,
+   "probe_desired": 0,
+   "probe_alarms": 0
+  },
+  "reconnects_per_day": 4,
+  "decoded": false,
+  "reconnect": {
+   "ab": {
+    "cut_s": 245.0,
+    "after_s": 90.0,
+    "during_cut": {
+     "sdus": 26,
+     "bytes": 1730,
+     "airtime_s": 5.767
+    },
+    "after_restore": {
+     "sdus": 9,
+     "bytes": 1127,
+     "airtime_s": 3.757
+    },
+    "net_excess": {
+     "sdus": -2.6,
+     "bytes": 248.8,
+     "airtime_s": 0.8
+    }
+   },
+   "ba": {
+    "cut_s": 245.0,
+    "after_s": 90.0,
+    "during_cut": {
+     "sdus": 9,
+     "bytes": 276,
+     "airtime_s": 0.92
+    },
+    "after_restore": {
+     "sdus": 11,
+     "bytes": 1147,
+     "airtime_s": 3.823
+    },
+    "net_excess": {
+     "sdus": 13.5,
+     "bytes": 1204.8,
+     "airtime_s": 4.0
+    }
+   }
+  },
+  "per_day": {
+   "ab": {
+    "steady": {
+     "sdus": 9710,
+     "bytes": 672686
+    },
+    "total": {
+     "sdus": 9710,
+     "bytes": 672686
+    }
+   },
+   "ba": {
+    "steady": {
+     "sdus": 1687,
+     "bytes": 56283
+    },
+    "total": {
+     "sdus": 1687,
+     "bytes": 56283
+    }
+   }
+  }
+ }
+}

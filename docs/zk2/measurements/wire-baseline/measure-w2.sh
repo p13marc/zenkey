@@ -40,6 +40,14 @@
 #   `…/freshness.v2/stream/heartbeats/host`. Without it the reader declares
 #   no class key, nothing asks router A for one, and no owner heartbeat
 #   crosses.
+# V2=1 (#986's J5 and #984's S4, with ZK2C=1; off by default, so the recorded runs
+# reproduce): w2-drive.py's --v2. The device's desired target and its alarms run on
+# desired.v2 and alarms.v2, nothing else changed: its alarms by contracts/w2rules.v1.toml's
+# table, each re-read a conditional read waiting rf0's 15-s reply timeout, the author on a
+# 16-bit run with RUN_FILE=1. The far readers read alarms.v2's standard contract and
+# worker.v2. DESIRED_TTL=<s> gives author and target "tasking.v2, watched" at that horizon
+# (desired.v2 §2.5): the author's heartbeat, B->A, in place of the target's 300-s period.
+# Its revision of tasking.v2 is LOGS/tasking.v2.toml, which the host's probe reads.
 # WATCH=1 (the honesty run of the same): w2-drive.py's --watch, the host's
 # `zenctl watch` on health.v1's status, with the catalog and with none, and
 # `zenctl health --across-face crosses` before and inside the cut.
@@ -80,14 +88,29 @@ if [[ ${ZK2C:-0} == 1 && ${OWNER_HEARTBEAT:-0} == 1 ]]; then
     "$REPO/spec/profiles/config/conformance/contracts/rfcfg.v1.toml" >"$LOGS/catalog.json"
   CATALOG=(--catalog "$LOGS/catalog.json")
 fi
+ALARMS_TOML=$REPO/spec/profiles/alarms/alarms.v1.toml
+WORKER_TOML=$REPO/zenkey/tests/contracts/worker.v1.toml
+if [[ ${ZK2C:-0} == 1 && ${V2:-0} == 1 ]]; then
+  ALARMS_TOML=$REPO/spec/profiles/alarms/alarms.v2.toml
+  WORKER_TOML=$REPO/zenkey/tests/contracts/worker.v2.toml
+  TASKING_TOML=$REPO/zenkey/tests/contracts/tasking.v2.toml
+  if [[ ${DESIRED_TTL:-0} != 0 ]]; then
+    # "tasking.v2, watched": the file with that horizon, as the owner example makes it.
+    cp "$REPO/zenkey/tests/contracts/tasking.json" "$LOGS/"
+    sed "s/\"freshness.ttl_s\" = 0 }/\"freshness.ttl_s\" = $DESIRED_TTL }/" \
+      "$REPO/zenkey/tests/contracts/tasking.v2.toml" >"$LOGS/tasking.v2.toml"
+    grep -q "\"freshness.ttl_s\" = $DESIRED_TTL }" "$LOGS/tasking.v2.toml"
+    TASKING_TOML=$LOGS/tasking.v2.toml
+  fi
+fi
 if [[ ${ZK2C:-0} == 1 ]]; then
   # name, contract, selector (empty: the interface's whole scope)
   for spec in "frames|$CONTRACTS/gendev.v1.toml|zk2/$DEV/gendev.v1/stream/frames/sample" \
               "events|$CONTRACTS/gendev.v1.toml|zk2/$DEV/gendev.v1/events/**" \
               "health|$REPO/spec/profiles/health/health.v1.toml|" \
-              "alarms|$REPO/spec/profiles/alarms/alarms.v1.toml|" \
+              "alarms|$ALARMS_TOML|" \
               "rfcfg|$REPO/spec/profiles/config/conformance/contracts/rfcfg.v1.toml|" \
-              "worker|$REPO/zenkey/tests/contracts/worker.v1.toml|"; do
+              "worker|$WORKER_TOML|"; do
     IFS='|' read -r name contract sel <<<"$spec"
     # The reader's command line is a string for `bash -c`: each word that is a path or a
     # selector goes in quoted (%q), so a directory with a space in it stays one word, and a
@@ -103,6 +126,9 @@ if [[ ${ZK2C:-0} == 1 ]]; then
   [[ ${RUN_FILE:-0} == 1 ]] && ZK2C_ARGS+=(--run-files)
   [[ ${OWNER_HEARTBEAT:-0} == 1 ]] && ZK2C_ARGS+=("${CATALOG[@]}" --owner-heartbeat)
   [[ ${WATCH:-0} == 1 ]] && ZK2C_ARGS+=(--watch --health-contract "$REPO/spec/profiles/health/health.v1.toml")
+  [[ ${V2:-0} == 1 ]] && ZK2C_ARGS+=(--v2 --rules "$HERE/contracts/w2rules.v1.toml" \
+    --desired-ttl "${DESIRED_TTL:-0}" --tasking "$TASKING_TOML" --worker "$WORKER_TOML" \
+    --alarms-contract "$ALARMS_TOML")
 else
   $W start far bash -c "$BIN/zenctl echo 'zk2/**' --no-decode --format ndjson -c tcp/127.0.0.1:$((BASE + 2)) \
     | python3 -I -u $HERE/stamp.py $LOGS/far.jsonl"

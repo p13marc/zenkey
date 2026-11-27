@@ -226,6 +226,10 @@ def element(key, kind):
                          ("/alarms.v1/", "alarms"), ("/config.v1/", "config"),
                          ("/rfcfg.v1/", "config"),
                          ("/worker.v1/", "desired"), ("/tasking.v1/", "desired"),
+                         # The v2 profiles (#986's J5, #984's S4): desired.v2's interfaces
+                         # and alarms.v2's. The author's heartbeat is freshness.v2's, B->A.
+                         ("/worker.v2/", "desired"), ("/tasking.v2/", "desired"),
+                         ("/alarms.v2/", "alarms"),
                          ("@zk/", "presence"), ("/@adv/", "advanced")):
         if needle in k:
             return name
@@ -249,8 +253,10 @@ def decode(rows, t0=None, t1=None, dump=False, listing=None, pushes=None):
     """Each element's bytes, messages and share of SDUs per direction in [t0, t1).
 
     With `listing` (a list), every message in the window is appended to it:
-    {t, dir, element, kind, key, bytes, sdus}, its bytes and SDUs its share of
-    the SDUs that carried it.
+    {t, dir, element, kind, key, bytes, sdus, own, sdu}, its bytes and SDUs its
+    share of the SDUs that carried it, `own` its own bytes (with its frame's
+    header and extensions when it is the frame's first message), `sdu` the
+    bytes of the SDU that carried it, or of its first fragment's.
 
     With `pushes` (a list), every put and delete of the capture is appended to
     it as it was written, whatever the window: {t, dir, element, key, payload
@@ -276,7 +282,8 @@ def decode(rows, t0=None, t1=None, dump=False, listing=None, pushes=None):
             sdus[d][el] += share * n / weight
             if listing is not None and count:
                 listing.append({"t": t, "dir": d, "element": el, "kind": kind, "key": key,
-                                "bytes": total * n / weight, "sdus": share * n / weight})
+                                "bytes": total * n / weight, "sdus": share * n / weight,
+                                "own": n, "sdu": total})
 
     def messages(d, r):
         """Decode network messages up to the next transport message; return [(element, bytes)]."""
@@ -360,6 +367,7 @@ def decode(rows, t0=None, t1=None, dump=False, listing=None, pushes=None):
                                 for item, p in zip(listing[-len(got):], got):
                                     item["bytes"] = n * p[1] / weight
                                     item["sdus"] = k * p[1] / weight
+                                    item["sdu"] = spans[0][0]
                     parts = None
                     break
                 else:
