@@ -933,6 +933,44 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   cannot hold `not_used`" does not hold for one that lists `health.v1`,
   which loads with a `health.<key>` (no E020, no W105) and is
   `not_used` in `tables.json`.
+- **`alarms.v2`** (#984 S1, text 0.1, `experimental`, written against
+  core 0.115) sits beside `alarms.v1` in `spec/profiles/alarms/`:
+  `v2.md`, `scenarios-v2.md` (§1–§12, the owner's and the readers'
+  chunks to run), `alarms.v2.toml` (revision 2.0, `sha256:2292477c…2cb7`,
+  heartbeat tag 7, published in `.history/alarms.v2/` by the code half
+  with the fingerprint the text states), the packed `alarms.v2.json`
+  (`Alarm`, tag 11, artifact `fe59e748…`; `rule` before `at`, since the
+  other order hashes to tag 0, a JSON payload's) and
+  `schemas/alarms.v2.json` (`alarms.v2.Words`, `a3515ad4…`), and
+  `conformance/v2/{schema,records,tables,keys,slots,words,transitions,
+  confirmations,acks,conclusions}.json` (475 cases, computed twice
+  outside the repo, never blessed), with the one `CHANGELOG.md`, its
+  entries headed `alarms.v2 0.N`. It restates `alarms.v1` 0.14 by
+  reference and replaces §2.2 (a slot, 0 to 255, the key's last chunk;
+  the identity's own slot, else the lowest that does not fire), §2.4
+  (the packed record; words by the table or on `words/{slot}`), §2.5 (a
+  resolve is one put, no delete; `at` in whole seconds, +1 step), §2.6
+  (by identity: `rebound`, `replaced`, `dropped`), §2.8, §2.9 (adoption
+  on slots, by name) and §2.15 (one complete snapshot: `snapshot`,
+  `snapshot_incomplete`, `snapshot_run`), and adds §2.17 (one major per
+  instance, readers first). Its vocabulary is `alarms.rules` (§4), a
+  list of at most 255 rules written as TOML tables of an array (an
+  inline table spans no line in TOML 1.0), with eight findings; a
+  linter's errors only where the contract lists `alarms.v2`, since under
+  `alarms.v1` the table loads with W105 and is `not_used`. `key` is a
+  64-bit `counter` (E028) and a table's strings printable ASCII (E027).
+  Core 0.115 names it in Appendix D's `alarms` row, read by major, with
+  `contracts/{ok-alarms-v2-rules,w105-alarms-rules,
+  w105-alarms-v2-vocabulary}`, and in §8.1's tokenless list; no rule
+  changed (297). The code half ran every case as written, and all 475
+  pass (`zenkey-model/tests/profiles/alarms_v2.rs`). It corrected three
+  things in place: §4's example (no TOML 1.0), §4's `not_used` sentence
+  (as zk2py's F-593 has health.v2's, still open there), and
+  `conclusions.json`'s freshness reason, which writes `freshness`'s own
+  `within_horizon`. The text leaves two choices open: a restart whose
+  record holds one identity firing on two slots (the model adopts the
+  lowest), and which of two slots a reader takes where no run is
+  stated, as across a face (the model's `taken` needs one).
 - **`freshness.v1`** is `experimental` since #978's F5 (a status entry in
   `freshness/CHANGELOG.md`, text still 0.5): the adopters' contracts and
   `nav.v2` moved to `freshness.v2`, each a `uses_changed` revision in

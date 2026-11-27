@@ -71,6 +71,14 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
   runtime (`Health::tables`). `tests/health_v2.rs` generates the
   scenarios' `tc.v1` and fails on a table that is no list of names, one
   with a name twice and two lists that differ.
+- **alarms.v2** (#984 S1): `table_lints` runs `alarms::v2::lint_contract`
+  too: an invalid `alarms.rules` in a contract that lists `alarms.v2`
+  (§4's findings, `not_used` aside) is a lint error naming the resource
+  and the key, and nothing is generated. Under `alarms.v1` the table is
+  core W105, a warning, and the build goes on. No codegen moved: the
+  table is an annotation the runtime reads. `tests/alarms_v2.rs`
+  generates §4's example contract and fails on `rule_name`,
+  `placeholder`, `labels_width`, `host_label`, `value` and `disagrees`.
 - **desired.v2** (#986 J2): `generate` runs
   `desired::v2::lint_contract` on every contract, a finding a lint error
   (an invalid declaration of a desired resource, `horizon_v1` among its
