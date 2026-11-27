@@ -41,6 +41,6 @@ protox = "0.10"
 serde_json_canonicalizer = "0.4"
 # Packed records' fixed point (core §7.6): exact decimal arithmetic with no
 # bound on a declaration's digits. Already in the tree through der-parser.
-num-bigint = "0.5"
+num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"

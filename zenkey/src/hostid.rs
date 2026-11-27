@@ -41,8 +41,8 @@ use std::os::unix::fs::{DirBuilderExt, FileTypeExt, OpenOptionsExt, PermissionsE
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use rand::TryRngCore;
-use rand::rngs::OsRng;
+use rand::TryRng;
+use rand::rngs::SysRng;
 use zenkey_model::grammar::{Addr, Name};
 use zenkey_model::hostid as derivation;
 
@@ -707,7 +707,7 @@ fn make_dirs(dir: &Path) -> io::Result<()> {
 /// `n` bytes from the operating system's CSPRNG, as lowercase hex.
 fn random_hex(n: usize) -> io::Result<String> {
     let mut bytes = vec![0u8; n];
-    OsRng.try_fill_bytes(&mut bytes).map_err(|e| {
+    SysRng.try_fill_bytes(&mut bytes).map_err(|e| {
         e.raw_os_error().map_or_else(
             || io::Error::other("the random source failed"),
             io::Error::from_raw_os_error,
