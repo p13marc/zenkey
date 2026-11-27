@@ -5273,11 +5273,11 @@ def _round124_readings(root: Path) -> list[tuple[str, Any, Any]]:
     layout_line = re.search(r"\.history/ published revisions of the profiles' standard contracts \(([^)]*)\)", idx)
     out.append(("profiles/README.md at alarms.v2 0.1: its row says 0.1, experimental, used by none, core 0.115; "
                 "spec/profiles/.history holds alarms.v2 beside five others, and the layout's .history line names "
-                "every one but alarms.v2 (F-612)",
+                "every one of them, alarms.v2 included (F-612, resolved in #1170)",
                 [missing(idx, "| [`alarms.v2`](alarms/v2.md) | 0.1 | experimental | none | 0.115 |"), held,
                  None if layout_line is None else sorted(x.strip() for x in layout_line.group(1).split(","))],
                 [[], ["alarms.v1", "alarms.v2", "config.v1", "freshness.v2", "health.v1", "health.v2"],
-                 ["alarms.v1", "config.v1", "freshness.v2", "health.v1", "health.v2"]]))
+                 ["alarms.v1", "alarms.v2", "config.v1", "freshness.v2", "health.v1", "health.v2"]]))
     # The history: revision 2.0, computed zk2py's own way.
     k = load_contract(spec / "profiles" / "alarms" / "alarms.v2.toml", check_file_name=True)
     fp = "sha256:2292477cadf555dd09b07499ca048add4e48c63d60a209c13eaf543988c32cb7"

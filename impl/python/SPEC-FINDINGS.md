@@ -32037,6 +32037,9 @@ error, nor the reference's.
     sections (round 124).
 - **Proposed:** name `alarms.v2` in the layout line, and replace the
   sentence with who runs each profile.
+- **Status: resolved in #1170,** as proposed: the layout line names `alarms.v2`, and the sentence
+  now says the reference and zk2py run both profiles, with no adopter's
+  mapping or shipped service using either yet.
 
 ### F-613 · ambiguity · `scenarios-v2.md`, Conventions, against `v2.md` §2.7 and §2.14: a 4 s copy that a reader ages at 900 s
 
@@ -32102,6 +32105,8 @@ error, nor the reference's.
 - The same README says "Each of the 475 cases was changed once". 475 is
   right: 477 less the two written by hand, which "were computed once".
   That is worth saying in place, since the entry gives 477.
+- **Status: resolved in #1170:** the README says the reference's model and
+  zk2py run every case as written.
 
 ### Live: the two pairings
 
