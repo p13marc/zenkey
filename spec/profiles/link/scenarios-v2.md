@@ -11,7 +11,7 @@ section, named after it. [`scenarios.md`](scenarios.md)'s sections are
 **Conventions.**
 - **Section numbers** in parentheses (§2.16) are v2.md's rules. Core
   sections say "core", and `link.v1`'s say so.
-- **The bus.** N is the near router, zenoh 1.10.1, with `usrpwd`
+- **The bus.** N is the near router, zenoh 1.10.2, with `usrpwd`
   authentication, as `link.v1`'s scenarios run it. It listens on
   `tcp/127.0.0.1:<port>`, the near side, and on
   `unixsock-stream/<path>`, the face.
@@ -24,7 +24,7 @@ section, named after it. [`scenarios.md`](scenarios.md)'s sections are
   profile  = "link.v2"
   system   = "lab"
   services = ["radio-a"]
-  binding  = "zenoh-1.10.1"
+  binding  = "zenoh-1.10.2"
 
   [transport]
   lease_ms             = 2000
