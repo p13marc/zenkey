@@ -11602,11 +11602,17 @@ async fn desired_v2_s9_converged_refused_failed_and_behind_for_a_tool() {
     );
     let run = bus.zenctl(&conform("lab/author", "tasking.v2")).await;
     let doc = run.json();
-    assert_eq!(
-        conform_case(&doc, "desired-author", "state/tasks/{system}/{service}")["verdict"]["answer"],
-        "not_established",
-        "{run}"
-    );
+    // S1 and S2 by the in-band stamp alone: a `desired.v2` desired
+    // resource is off core §4.3's table (core 0.112), so its author sets no
+    // Zenoh timestamp and none is asked of it (zk2py round 121 found both
+    // cases failing it).
+    for case in ["desired-author", "state-stamp", "state-get"] {
+        assert_eq!(
+            conform_case(&doc, case, "state/tasks/{system}/{service}")["verdict"]["answer"],
+            "not_established",
+            "{case}: {run}"
+        );
+    }
 
     // 2. v3 names the worker's endpoint: refused, reach, v2 still in
     //    force; the place is index 3 and the line index 1 of worker.v2's
