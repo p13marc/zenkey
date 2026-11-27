@@ -791,3 +791,74 @@ def growth(earlier: list[Any], later: list[Any]) -> str:
         if a["name"] != b["name"] or a.get("labels") != b.get("labels"):
             return MOVED
     return KEPT
+
+
+# -- §2.2, §2.12 and §4, the keys --------------------------------------------------------------
+
+TOKEN = "state"
+
+
+def alert_key(rule: str, labels: dict[str, str] | None) -> dict[str, Any]:
+    """An alarm's alert key over its words (§0: "v1 §2.2's and §2.3's
+    recipe over that rule's name and those labels as text. It is 64 bits,
+    written as 16 hexadecimal digits"), as digits and as the integer a
+    record's ``key`` carries (§3)."""
+    from . import alarms as v1
+
+    k = v1.derive(rule, labels).key
+    return {"alert_key": k, "key": key_int(k)}
+
+
+def slot_key(system: str, service: str, slot: int, prefix: str = ALARMS) -> str | None:
+    """§2.2: ``zk2/<system>/<service>/alarms.v2/state/alarms/<slot>``, the
+    slot "written in decimal with no leading zero, as core §2.2 writes a
+    ``uint``"; ``words/<slot>`` beside it. None where the system or the
+    service is no name, or the slot no ``uint``."""
+    from . import keys
+    from .lexical import is_plain_chunk
+
+    if not (is_plain_chunk(system) and is_plain_chunk(service)) or not _is_int(slot) or slot < 0:
+        return None
+    key = f"zk2/{system}/{service}/{IFACE}/{TOKEN}/{prefix}/{slot}"
+    return key if keys.parse(key) is not None else None
+
+
+def parse_slot_chunk(chunk: str, bound: int = CARDINALITY) -> int | None:
+    """A key's last chunk read as a slot: decimal, no leading zero, "below
+    the instance's bound: 256, or the cardinality its descriptor states"
+    (§2.2). "A member whose last chunk is no such number is on no slot":
+    None."""
+    import re
+
+    if re.fullmatch(r"0|[1-9][0-9]*", chunk) is None:
+        return None
+    v = int(chunk)
+    return v if v < bound else None
+
+
+def slot_of(key: str, bound: int = CARDINALITY, prefix: str = ALARMS) -> dict[str, Any] | None:
+    """The owner and the slot a key of ``prefix`` names, or None: another
+    major, token or template, or a last chunk on no slot."""
+    from . import keys
+
+    p = keys.parse(key)
+    if p is None or p["form"] != "data" or p["iface"] != IFACE or p["token"] != TOKEN:
+        return None
+    if len(p["resource"]) != 2 or p["resource"][0] != prefix:
+        return None
+    slot = parse_slot_chunk(p["resource"][1], bound)
+    if slot is None:
+        return None
+    return {"system": p["system"], "service": p["service"], "slot": slot}
+
+
+def collection_of(system: str, service: str) -> str | None:
+    """§2.12 "A reference names no key": "A reader finds the alarm by a
+    collection read of its owner's
+    ``zk2/<system>/<service>/alarms.v2/state/alarms/**``". None where the
+    reference's system or service is no name."""
+    from .lexical import is_plain_chunk
+
+    if not (is_plain_chunk(system) and is_plain_chunk(service)):
+        return None
+    return f"zk2/{system}/{service}/{IFACE}/{TOKEN}/{ALARMS}/**"
