@@ -13,6 +13,35 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.36 — 2026-11-27: editorial: what a tool shows of a held stamp that answers a body its user gave it, and zenoh's facts named by no release, no keyword rule changed (#609, #986, #1165)
+
+zk2py's round 116 found a tool's raw GET read two ways (F-572), and its
+round 122 found §0 naming a release where it meant the core's appendix
+(F-607). Core 0.115 answers the core's half of each
+([`CHANGELOG.md`](CHANGELOG.md)).
+
+**Answered: F-572, an ambiguity. A tool whose GET carries a body its user
+gave it.**
+- **Before.** Core §4.2 says a held stamp answers only the GET that
+  carried it. It also says a reader that holds nothing sends none. A raw
+  tool that sends the member's held stamp as its user's body holds
+  nothing, and its GET carried that stamp.
+- **Now.** Core §4.2's rule on what a reader sends binds the stamp a
+  reader sends of its own. A user's body is no reader's. §4.1 says what
+  the tool shows: a held stamp that is its GET's own payload, on its one
+  key, as unchanged, the member's last mutation being that stamp. Any
+  other is `held`, no answer.
+- **What moves.** The reference's `zenctl get --body` shows a held stamp
+  that answers its own body as "no answer here: held". It moves (#986's
+  code half). zk2py has no raw tool that sends a body.
+
+**Answered: F-607's observer half.** "The facts of zenoh 1.10.1 (core
+Appendix B)" now reads "zenoh's facts (core Appendix B)". The appendix
+holds 1.10.2's and 1.10.1's.
+
+**Deliberately not changed.** No keyword rule, no fixture. The header is
+still written against core 0.108.
+
 ## 0.35 — 2026-11-21: editorial: §7.5's scope with a `link.v1` policy, a GET and a `host` collection pinned or said, and what a tool given no catalog hears, no keyword rule changed (#609, #1110)
 
 zk2py's round 113 read 0.34 cold, and filed F-556, F-558 and F-559
