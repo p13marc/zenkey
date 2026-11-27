@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.117** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.118** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -1459,8 +1459,9 @@ time a profile reads (the table below).
     It starts such an owner with none, and the owner draws 32-bit runs.
   - **A 32-bit run** is drawn at random. An owner draws one when it keeps
     no record, when its counter is spent at 0xFFFF, and when it is a
-    candidate of a governed interface
-    ([`redundancy.v1`](profiles/redundancy/v1.md)). It draws again while
+    candidate of a governed interface, under either major of the profile
+    ([`redundancy.v1`](profiles/redundancy/v1.md),
+    [`redundancy.v2`](profiles/redundancy/v2.md)). It draws again while
     the run equals one it used.
   - **A new run** is taken by each new instance (§1.5). Within an
     instance, an owner takes a new run before its seq would wrap (below).
@@ -3674,10 +3675,12 @@ An owner MUST bring itself up in this order, so that alive ⇒ callable:
   whether or not the owner implements it (§4.4): the set is the
   deployment's configuration, and naming the archive in it is an error.
   `[Sc: presence.md §2]` And it refuses one whose tokenless set names an
-  interface it implements whose contract uses `redundancy.v1`: that
-  interface's incumbent is the instance holding its token
-  ([`redundancy.v1`](profiles/redundancy/v1.md) §2.14).
+  interface it implements whose contract uses `redundancy.v1` or
+  `redundancy.v2`. That interface's incumbent is the instance holding its
+  token ([`redundancy.v1`](profiles/redundancy/v1.md) §2.14, which
+  [`redundancy.v2`](profiles/redundancy/v2.md) keeps).
   `[Sc: profiles/redundancy/scenarios.md §11]`
+  `[Sc: profiles/redundancy/scenarios-v2.md §11]`
 - **A standby** (§6) exposes none of an interface's resources,
   required ones included, and its descriptor says so (§3.3): step 2 does
   not refuse it. It validates at its start what it will expose once it
@@ -3716,9 +3719,9 @@ the owner sets where its session would add one anyway.
 - **The owner's session** SHOULD run with timestamping disabled, zenoh's
   default for a client and a peer (§4.1). A session with it enabled stamps
   every put and delete it is not given a timestamp for. `[Sc: state.md §1]`
-  - **The exception** is a candidate of a governed interface:
-    [`redundancy.v1`](profiles/redundancy/v1.md) §2.10 asks it to enable
-    timestamping.
+  - **The exception** is a candidate of an interface whose contract uses
+    [`redundancy.v1`](profiles/redundancy/v1.md): its §2.10 asks it to
+    enable timestamping.
     - **Whatever its clock.** A candidate's session stamps every write
       while its clock is ahead too, so the guard holds every state write
       (§4.3, "A candidate's"). Without it, its puts carry its router's
@@ -3726,6 +3729,8 @@ the owner sets where its session would add one anyway.
       them (`redundancy.v1` §2.10).
     - **The reference** refuses a candidate whose session runs without
       timestamping, at `ServiceBuilder::redundancy`, before its claim.
+  - **No exception under `redundancy.v2`.** Its candidate's session runs
+    as any owner's ([`redundancy.v2`](profiles/redundancy/v2.md) §2.10).
 - **A router on a constrained face.** A deployment SHOULD run a router
   that forwards puts onto a constrained face (§8.5) with timestamping
   disabled. A router with it enabled stamps every unstamped put it routes,

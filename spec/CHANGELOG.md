@@ -3,6 +3,59 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.118 — 2026-11-28: a candidate of either major of `redundancy` draws a 32-bit run and is refused a tokenless interface; only `redundancy.v1`'s session stamps, no keyword changed (#987)
+
+`redundancy.v2` text 0.1 restates `redundancy.v1` without the session's
+HLC ([`profiles/redundancy/CHANGELOG.md`](profiles/redundancy/CHANGELOG.md)).
+Its candidate fences by run, which every envelope carries already. Three
+sentences of this text named a governed interface, which now means
+either major. Two now read both, and one stays `redundancy.v1`'s.
+
+**What changed.**
+- **§4.3, "A 32-bit run".** An owner draws one when it is a candidate of
+  a governed interface "under either major of the profile", citing both
+  texts. A `redundancy.v2` follower tells candidates apart by their
+  runs, and two candidates' counters would give them alike.
+- **§8.2, step 2.** It refuses an owner whose tokenless set names an
+  interface it implements whose contract uses `redundancy.v1` or
+  `redundancy.v2`. The incumbent of either is the holder of its token.
+  `redundancy.v2`'s scenarios §11 is cited beside v1's.
+- **§8.2, "Session posture", the exception** is a candidate of an
+  interface whose contract uses `redundancy.v1`, where it said "a
+  governed interface". A new item beside it, "No exception under
+  `redundancy.v2`", says that major's candidate's session runs as any
+  owner's.
+
+**What deliberately did not change.**
+- **§4.3's table** keeps its row "Every put of a `redundancy.v1`
+  candidate". A `redundancy.v2` candidate's puts carry no Zenoh
+  timestamp, so they are not on it.
+- **§4.2's list of per-key resources** keeps "every state of an
+  interface whose contract uses `redundancy.v1`". A `redundancy.v2`
+  contract falls outside it as written, and its state is answered by
+  snapshot. So does `link.v2` §2.11's list.
+- **§4.3, "A candidate's"** under the clock guard, and the line on a
+  `desired.v2` desired resource under the table, name `redundancy.v1`
+  alone already.
+- **Other sentences that name `redundancy.v1`** for what a profile of
+  exclusivity does are left: §3.3's `standby`, §6, §8.1's tokenless set
+  and first hop, §10 and Appendix D. Each stays true of v1, and
+  `redundancy.v2` states the same of itself.
+  - §8.1's first hop keeps its MUST NOT for `redundancy.v1`.
+    `redundancy.v2` §2.13 states its own, and `link.v2` 0.28's
+    `presence_required` reads both majors.
+  - Appendix D's `redundancy` row serves both majors: W105 reads it for
+    a contract that lists either, as the reference does today.
+- **No keyword.** The three sentences state no MUST or SHOULD. 298 rules.
+- **Observer** stays 0.37.
+- **No fixture moved.** No contract in `conformance/` uses
+  `redundancy.v2`.
+
+**Not verified.** No implementation has read this entry's wording. The
+reference still refuses a candidate whose session runs without
+timestamping, whichever major its contract uses: its change is #987's
+runtime work.
+
 ## 0.117 — 2026-11-28: §9.2's E051, a packed type whose layout tag is 0; §7.5 accepts a heartbeat's tag 0, and says why (#1152)
 
 alarms.v2's `Alarm` record, as first drafted, hashed to the tag 0 (#984).
