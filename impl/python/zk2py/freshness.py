@@ -530,6 +530,12 @@ class Subscriber:
         #: read: health.v1 0.9's clock question)
         self.views: dict[tuple[str, str], Any] = {}
         self.beats: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = {}
+        #: round 123: the revision each followed interface is read by, its
+        #: owner heartbeats' readers by address, and each owner heartbeat
+        #: heard: (arrival, class, the reader's answer, its time)
+        self._canonical: dict[tuple[str, str], dict[str, Any]] = {}
+        self._owner_readers: dict[str, Any] = {}
+        self.owner_beats: dict[str, list[tuple[int, str, dict[str, Any], Any]]] = {}
 
     def follow(self, address: str, canonical: dict[str, Any], fingerprint: str) -> None:
         """Follow ``address``'s heartbeats covering the revision given
@@ -555,9 +561,80 @@ class Subscriber:
                 return
             self.views[k] = freshness_v2.View(lo, [c.resource for c in lo.collections], address)
             self.beats[k] = []
+            self._canonical[k] = canonical
         hb = heartbeat.heartbeat_key(*address.split("/"), lo.interface)
         self.subs.append(self.session.declare_subscriber(
             hb, zenoh.handlers.Callback(lambda smp, k=k: self._beat(k, smp))))
+
+    def follow_owner_heartbeats(self, address: str, held: Any, named: str | None) -> None:
+        """Follow ``address``'s owner heartbeats too (``freshness.v2`` §2.4,
+        §2.5 "An owner heartbeat"; round 123): a subscriber on each class
+        key, each put read in §2.5's three steps by a
+        :class:`zk2py.freshness_v2.Reader` over the views :meth:`follow`
+        made, the catalogs ``held`` and the id ``named`` the owner's
+        descriptor states. A group's section confirms its members as a
+        heartbeat's does. Each read owner heartbeat of the ``host`` class is
+        kept with the interface's heartbeats, its ``time`` beside it, for a
+        clock question that counts it (``health.v2`` §2.5 "Which heartbeats
+        count"), as ``owner_heartbeat`` with the class."""
+        import zenoh
+
+        from . import freshness_v2
+
+        with self.lock:
+            reader = freshness_v2.Reader(held, named)
+            for (addr, iface), view in self.views.items():
+                if addr == address:
+                    lo = view.layout
+                    canonical = self._canonical.get((addr, iface))
+                    if canonical is not None:
+                        reader.follow(canonical, lo.fingerprint, view=view)
+            self._owner_readers[address] = reader
+        for cls in freshness_v2.CLASSES:
+            key = freshness_v2.owner_heartbeat_key(*address.split("/"), cls)
+            self.subs.append(self.session.declare_subscriber(
+                key, zenoh.handlers.Callback(lambda smp, cls=cls: self._owner_beat(address, cls, smp))))
+
+    def _owner_beat(self, address: str, cls: str, sample: Any) -> None:
+        arrival, utc = time.monotonic_ns(), time.time_ns()
+        from . import owner_heartbeat as oh
+
+        payload = sample.payload.to_bytes()
+        with self.lock:
+            reader = self._owner_readers[address]
+            answer = reader.owner_heartbeat_put(cls, payload, arrival, zk2c.envelope_encoding(sample.encoding))
+            time_ = None
+            if "read" in answer:
+                time_ = oh.read(payload, "stream").body.time
+            for g in answer.get("read", {}).get("groups", []):
+                iface = g.get("iface")
+                k = (address, iface)
+                if iface is None or k not in self.beats:
+                    continue
+                entry = {"read": {"sections": g.get("sections", {})}, "owner_heartbeat": cls, "group": g}
+                if cls == "host":
+                    entry["time"] = time_
+                    self.beats[k].append((arrival, entry))
+                for sec in (g.get("sections") or {}).values():
+                    if not isinstance(sec, dict):
+                        continue
+                    for key in sec["confirmed"]:
+                        got = self.deliveries.get(key)
+                        last = next((x for x in reversed(got or []) if x.kind == "put"), None)
+                        if last is None:
+                            continue
+                        self._record(key, Received("put", arrival, utc, last.payload, last.encoding, None, None,
+                                                   None, last.inband, last.refusal, confirmation=True))
+            if "read" in answer and cls == "host":
+                # "whatever became of its groups": a read host owner heartbeat
+                # counts for the clock question of each interface followed,
+                # one with no group of its own included
+                named = {g.get("iface") for g in answer["read"]["groups"]}
+                for (addr, iface), beats in self.beats.items():
+                    if addr == address and iface not in named:
+                        beats.append((arrival, {"owner_heartbeat": cls, "time": time_, "read": {"sections": {}},
+                                                "no_group": True}))
+            self.owner_beats.setdefault(address, []).append((arrival, cls, answer, time_))
 
     def _view_of(self, key: str) -> Any:
         chunks = key.split("/")

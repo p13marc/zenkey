@@ -1,7 +1,8 @@
-"""``health.v2`` on a bus (text 0.1, #609 round 120): zk2py's owner and its
-reader, over :class:`zk2py.owner.Owner` and :mod:`zk2py.freshness`'s
-subscriber. The reference's runtime does not serve ``health.v2`` at
-08f3600a, so both parties of a run are zk2py's.
+"""``health.v2`` on a bus (text 0.1 and 0.2, #609 rounds 120 and 123): zk2py's
+owner and its reader, over :class:`zk2py.owner.Owner` and
+:mod:`zk2py.freshness`'s subscriber. Round 120 ran the two against each
+other; round 123 runs each against the reference's
+(:mod:`zk2py.health_v2_pairings`).
 
 **The owner** (:class:`HealthV2Owner`, §2.2, §2.3, §2.5, §2.10): the status
 "before step 4, then on every change", packed, its word written from the
@@ -218,7 +219,10 @@ class Listener:
     0 (core §7.6): each record's ``since`` and ``at`` is read under it."""
 
     def __init__(self, session: Any, address: str, selectors: list[str] | None = None, trust: Any = None,
-                 epoch: int = 0):
+                 epoch: int = 0, catalogs: Any = None, named: str | None = None):
+        """``catalogs``: the catalogs the reader holds, and ``named`` the id
+        the owner's descriptor states; given, it follows the owner's owner
+        heartbeats too (``freshness.v2`` §2.4; round 123)."""
         import zenoh
 
         self.address = address
@@ -229,6 +233,8 @@ class Listener:
         self.sub = fr.Subscriber(session, sel, trust) if sel else fr.Subscriber(session, [], trust)
         c = standard()
         self.sub.follow(address, c.canonical, c.fingerprint)
+        if catalogs is not None:
+            self.sub.follow_owner_heartbeats(address, catalogs, named)
         self._subs = [session.declare_subscriber(s, zenoh.handlers.Callback(self._heard)) for s in sel]
         time.sleep(0.2)
 
@@ -291,9 +297,34 @@ def _freshness(observations: list[Any]) -> tuple[str, str]:
     return v.verdict, v.reason
 
 
+def unknown_catalog(r: h2.Read | None) -> h2.Read | None:
+    """Core §8.6, "Never a guess": a record whose ``since`` or ``at`` counts
+    from a catalog the reader holds neither of, nor a successor of, is read
+    as refused, ``unknown_catalog`` (round 123, F-610): its time cannot be
+    read, and v2 §2.6 reads a refused record unknown, "never at a level read
+    from its bits". A record with no time needs no epoch, and stands."""
+    if r is None or r.refused or r.at_ms is None:
+        return r
+    return h2.Read(r.name, None, "unknown_catalog", "its time counts from a catalog this reader does not hold")
+
+
+def epoch_of(named: str | None, catalogs: Any) -> tuple[int | None, str | None]:
+    """The epoch a reader holding ``catalogs`` reads an owner naming the
+    catalog ``named`` under (core §8.6): 0 where it names none; the held
+    catalog's, or a successor's whose ``lineage`` holds it; else none,
+    with the refusal ``unknown_catalog``."""
+    if named is None:
+        return 0, None
+    for c in catalogs:
+        if c.id == named or named in [x[0] if isinstance(x, (list, tuple)) else x
+                                       for x in (getattr(c, "lineage", None) or [])]:
+            return c.epoch, None
+    return None, "unknown_catalog"
+
+
 def read_near(tool: Any, address: str, *, listener: Listener | None = None, trust: Any = None, get: bool = True,
               timeout: float = 1.0, held: dict[str, Any] | None = None,
-              epoch: int | None = None) -> tuple[h2.Reading, dict[str, Any]]:
+              epoch: int | None = None, catalogs: Any = None) -> tuple[h2.Reading, dict[str, Any]]:
     """One reading of ``address`` on the near side, for §2.11: presence, the
     descriptor's ``interfaces`` (never the interface token), the status as
     ``listener`` saw it and as a GET over ``health.v2/state/**`` answered
@@ -301,9 +332,13 @@ def read_near(tool: Any, address: str, *, listener: Listener | None = None, trus
     under its snapshot's tag. ``held`` maps a fingerprint to a revision the
     reader holds, for the instance's tables. ``epoch`` is the deployment
     epoch the reader holds: the listener's where one is given and none is
-    stated, else 0. The records' times and the snapshot's are read under it. Returns the reading and what
-    was read: ``joined`` (:class:`zk2py.health_v2.Joined`), ``tables``,
-    ``descriptor``."""
+    stated, else 0. The records' times and the snapshot's are read under it.
+    ``catalogs`` (round 123): the catalogs the reader holds, the epoch then
+    read from the one the descriptor names (core §8.6), and where it holds
+    none of it every timed record refused ``unknown_catalog`` and no
+    confirmation dated (:func:`unknown_catalog`). Returns the reading and
+    what was read: ``joined`` (:class:`zk2py.health_v2.Joined`), ``tables``,
+    ``descriptor``, ``catalog`` (the refusal, or None)."""
     from . import live
     from . import seed_snapshot as ss
 
@@ -325,6 +360,11 @@ def read_near(tool: Any, address: str, *, listener: Listener | None = None, trus
             interfaces = [e.get("iface") for e in doc.get("interfaces") or []]
             named = [e.get("contract") for e in doc.get("interfaces") or [] if e.get("contract")]
     info["tables"] = {k: h2.instance_table(k, named, held or {}) for k in h2.KINDS}
+    info["catalog"] = None
+    if catalogs is not None:
+        e, why = epoch_of((info.get("descriptor") or {}).get("catalog"), catalogs)
+        info["catalog"] = why
+        epoch = 0 if e is None else e
     status_key = f"zk2/{address}/{IFACE}/state/status"
     observations: list[Any] = []
     record: h2.Read | None = None
@@ -341,10 +381,19 @@ def read_near(tool: Any, address: str, *, listener: Listener | None = None, trus
         for snap in st.snapshots:
             pages[snap.key == status_key] += [snap.pages[i] for i in sorted(snap.pages)]
         joined = h2.late_joiner(h2.held(pages[True]), h2.held(pages[False]), epoch)
+        if info["catalog"] is not None:
+            import dataclasses
+
+            joined = dataclasses.replace(joined, status=unknown_catalog(joined.status),
+                                         checks={k: unknown_catalog(c) for k, c in joined.checks.items()})
         info["joined"] = joined
         info["snapshots"] = (h2.held(pages[True]), h2.held(pages[False]))
         mine = [x for x in st.replies if x.key == status_key]
         got = fr.reading_of(mine[-1], epoch, bool(st.complete_for(status_key))) if mine else fr.GetReading(None)
+        if info["catalog"] is not None and got.snapshot:
+            import dataclasses
+
+            got = dataclasses.replace(got, confirmed_ns=None)    # no confirmation dated: no epoch to date it
         observations.append(got.observation(trust or fr.ClockTrust(word=True)))
         if joined.status is not None:
             record = joined.status

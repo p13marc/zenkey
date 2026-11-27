@@ -2963,10 +2963,18 @@ class Owner:
         e["record"] = h.payload.hex()
         return False, e
 
+    #: A test owner's (``health.v2`` scenarios §7, ``lab/two``): a function
+    #: of (collection, header, members) giving the asof of that collection's
+    #: snapshot in place of the answer's one, so that one GET's snapshots
+    #: are not one instant. None for every owner but such a test owner.
+    snapshot_asof: Any = None
+
     def _pages(self, col: Collection, header: dict[str, Any], members: list[tuple[str, str, _Held]]) -> list[bytes]:
         """The snapshot's pages, cut "by §7.5's paging rule, under its page
         size" (:func:`zk2py.snapshot.cut`): each member its id, its key and
         what the owner holds of it."""
+        if self.snapshot_asof is not None:
+            header = {**header, "asof": self.snapshot_asof(col, header, members)}
         snap: dict[str, Any] = {"tag": col.tag, **header, "coll": col.index, "live": [], "tombs": []}
         for entry_id, key, h in members:
             got = self._entry(col, header, entry_id, key, h)
