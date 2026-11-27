@@ -217,7 +217,7 @@ fn stamp_of(sample: &Value) -> Option<Stamp> {
 #[test]
 fn redundancy_v2_fence_samples() {
     let doc = read_json(&dir().join("fences.json"));
-    for case in cases(&doc, "samples", 48) {
+    for case in cases(&doc, "samples", 49) {
         let follower_of = &case["follower"];
         let mut instances = Vec::new();
         for (i, k) in follower_of["instances"].as_object().expect("instances") {

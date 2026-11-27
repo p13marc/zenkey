@@ -1077,17 +1077,18 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   `freshness.v2` 0.14 and `link.v2` 0.28 cite either major, and
   `v2/plan.json`'s case 54 (case 25's device on a `redundancy.v2`
   revision, `presence_required`; 55 cases) was written by reading the
-  text. The fixtures (152 cases: 38 contracts and 16 addresses, 29
-  descriptors, 48 samples, 13 sequences, 8 draws) were computed twice by
+  text. The fixtures (153 cases: 38 contracts and 16 addresses, 29
+  descriptors, 49 samples, 13 sequences, 8 draws) were computed twice by
   two scripts of the drafter's (`/srv/dev/scratch/zenkey/py/987-n1/`),
   never blessed. The model ran every case as written
   (`zenkey-model/tests/profiles/redundancy_v2.rs`, a runner per file, none
   able to bless) and all pass, case 54 too, no case, sentence or count
-  moved. What the text leaves to an implementer: the fixture orders a v1
-  incumbent's `no_stamp` before its `meta.zid` not held, and no case has
-  both; a held member's newer value within one run is a strictly higher
-  seq; a presence event decides no held sample (`fences.json`'s
-  sequences say so, §2.10 does not); and a linter's `value` and
+  moved. Six answers only the fixtures gave are in 0.1's text since
+  (`a5299e3a`): §2.10's step 2, a v1 incumbent decided by its stamp
+  before `no_run`, `no_stamp` before an unheld `meta.zid` (sample 49,
+  written by hand), an incumbent of unknown major read by run, a held
+  member kept at an equal seq and every other sample held alone, a token
+  deciding no held sample, and the entry read. A linter's `value` and
   `disagrees`, v1 §2.2's SHOULD, were warned of by no linter before N1.
 
 **zk2py rounds 116 to 123, answered (#609, #986, #1165).** Core 0.116
