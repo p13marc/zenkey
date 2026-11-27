@@ -1,5 +1,9 @@
-//! `health.v1` (#721, PF): how well each service serves, as `zenctl health`
-//! reads it (`spec/profiles/health/v1.md`).
+//! `health.v1` (#721, PF) and `health.v2` (#986's Q2): how well each
+//! service serves, as `zenctl health` reads it (`spec/profiles/health/v1.md`,
+//! `v2.md`). The verdicts, the reasons and the roll-up are one set for both
+//! majors (v2 §2.12); a row names the major it was read by
+//! ([`HealthRow::profile`]), and a `health.v2` row its words as the tables
+//! in hand name them ([`WordSeen`], v2 §2.10).
 //!
 //! **The profile's own vocabulary, then the judgement shape.** Each service
 //! row carries §5's four questions in the tokens the profile's fixtures
@@ -120,6 +124,42 @@ pub struct HealthReadingVerdict {
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<HealthLevel>,
+    /// Under `health.v2`, whether the reading's two snapshots were one
+    /// instant (v2 §2.2): only then is a break reported from it alone.
+    /// Absent under `health.v1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_instant: Option<bool>,
+}
+
+/// A `health.v2` word (a status's reason, a check's detail, a fault's
+/// code) as this reader read it (v2 §2.10, §5): shown by its name where a
+/// table in hand names its number, as its number where none does, 0 as no
+/// word, and `out_of_range` as a word no table names — never a name, and
+/// never no word.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WordSeen {
+    /// The number the record carries, 0 to 63.
+    pub number: u8,
+    /// `none` (0), `profile` (1 to 31, this text's table names it),
+    /// `service` (32 to 62, the instance's own table as held names it),
+    /// `number` (no table in hand names it) or `out_of_range` (63).
+    pub read: &'static str,
+    /// The name, for `profile` and `service`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl WordSeen {
+    /// The word for a person: its name, `#<number>` where no table in hand
+    /// names it, `no word`, or `a word no table names`.
+    pub fn words(&self) -> String {
+        match (self.read, &self.name) {
+            (_, Some(n)) => n.clone(),
+            ("none", _) => "no word".to_owned(),
+            ("out_of_range", _) => "a word no table names".to_owned(),
+            _ => format!("#{}", self.number),
+        }
+    }
 }
 
 /// How a status reached this reader.
@@ -138,11 +178,23 @@ pub enum StatusVia {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StatusSeen {
     pub level: LevelRead,
-    /// Why the level is what it is, as the owner wrote it.
+    /// Why the level is what it is, as the owner wrote it; under
+    /// `health.v2`, the word's name, or its number where no table in hand
+    /// names it, empty for no word or a word no table names ([`word`]).
+    ///
+    /// [`word`]: StatusSeen::word
     pub reason: String,
     /// When the level last changed, on the owner's clock: shown, never
-    /// aged by (§2.3).
-    pub since_ns: u64,
+    /// aged by (§2.3). `health.v1`'s nanoseconds; absent under `health.v2`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_ns: Option<u64>,
+    /// `health.v2`'s reason as read (v2 §2.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub word: Option<WordSeen>,
+    /// `health.v2`'s `since`, whole seconds since the Unix epoch; absent
+    /// where the record carries none, never the epoch (v2 §5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_s: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stamp: Option<Stamp>,
     pub via: StatusVia,
@@ -155,8 +207,16 @@ pub struct CheckSeen {
     /// Its name: the `{check}` chunk of its key.
     pub check: String,
     pub level: LevelRead,
+    /// As the owner wrote it; under `health.v2`, as [`StatusSeen::reason`].
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub detail: String,
+    /// `health.v2`'s detail as read (v2 §2.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub word: Option<WordSeen>,
+    /// `health.v2`'s `at`, whole seconds since the Unix epoch, where the
+    /// record carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_s: Option<i64>,
 }
 
 /// An archive's status for an owner presence shows absent: last-known,
@@ -168,7 +228,15 @@ pub struct LastKnownStatus {
     pub archive: String,
     pub level: LevelRead,
     pub reason: String,
-    pub since_ns: u64,
+    /// As [`StatusSeen::since_ns`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_ns: Option<u64>,
+    /// As [`StatusSeen::word`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub word: Option<WordSeen>,
+    /// As [`StatusSeen::since_s`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since_s: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stamp: Option<Stamp>,
     /// Whether the archive's alignment confirmed the value (core §4.4).
@@ -179,12 +247,25 @@ pub struct LastKnownStatus {
 /// written.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FaultSeen {
+    /// As the owner wrote it; under `health.v2`, as [`StatusSeen::reason`].
     pub code: String,
-    /// `profile`, `application` or `malformed` (§2.10).
+    /// `profile`, `application` or `malformed` (§2.10); under `health.v2`,
+    /// how its word was read ([`WordSeen::read`]).
     pub class: &'static str,
     pub level: LevelRead,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub detail: String,
+    /// `health.v2`'s code as read (v2 §2.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub word: Option<WordSeen>,
+    /// `health.v2`'s `argument`: the code's own number, or
+    /// `not_available` (v2 §2.3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argument: Option<serde_json::Value>,
+    /// `health.v2`'s `at`, whole seconds since the Unix epoch, where the
+    /// record carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_s: Option<i64>,
 }
 
 /// One service's health, by its readings.
@@ -192,6 +273,13 @@ pub struct FaultSeen {
 pub struct HealthRow {
     /// `<system>/<service>`.
     pub address: String,
+    /// The major the row was read by, `health.v1` or `health.v2`: the one
+    /// its descriptor lists, `health.v2` where it lists both (v2 §2.11);
+    /// across a face, the deployment's word. Absent where none was: an
+    /// absent service, or one whose descriptor lists neither or was not
+    /// read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<&'static str>,
     /// "Is this service healthy?", by the last reading.
     pub verdict: HealthVerdict,
     /// Its reason class (§2.11): the fixtures' token.
@@ -400,12 +488,14 @@ mod tests {
             _ => None,
         };
         HealthRow {
+            profile: None,
             address: address.into(),
             verdict,
             reason: reason.into(),
             level,
             says: "s".into(),
             readings: vec![HealthReadingVerdict {
+                one_instant: None,
                 verdict,
                 reason: reason.into(),
                 level,
@@ -451,9 +541,11 @@ mod tests {
         let mut liar = row("lab/liar", HealthVerdict::Unhealthy, "inconsistent");
         liar.agrees = answer(HealthAnswerToken::No, "inconsistent");
         liar.status = Some(StatusSeen {
+            word: None,
+            since_s: None,
             level: LevelRead::Token("ok"),
             reason: "serving".into(),
-            since_ns: 7,
+            since_ns: Some(7),
             stamp: Some(Stamp {
                 time: "2026-10-10T00:00:00.000000000Z".into(),
                 clock: "ab12".into(),
@@ -462,11 +554,15 @@ mod tests {
         });
         liar.checks = vec![
             CheckSeen {
+                word: None,
+                at_s: None,
                 check: "disk".into(),
                 level: LevelRead::Token("failed"),
                 detail: "full".into(),
             },
             CheckSeen {
+                word: None,
+                at_s: None,
                 check: "net".into(),
                 level: LevelRead::Unlisted(9),
                 detail: String::new(),
@@ -475,10 +571,12 @@ mod tests {
         let mut gone = row("lab/svc", HealthVerdict::NotAsked, "absent");
         gone.agrees = answer(HealthAnswerToken::NotAsked, "absent");
         gone.last_known = Some(LastKnownStatus {
+            word: None,
+            since_s: None,
             archive: "lab/archive".into(),
             level: LevelRead::Token("degraded"),
             reason: "upstream lost".into(),
-            since_ns: 5,
+            since_ns: Some(5),
             stamp: None,
             confirmed: true,
         });
@@ -486,6 +584,9 @@ mod tests {
         ahead.clock_ahead = answer(HealthAnswerToken::Yes, "clock_ahead");
         ahead.faults = 2;
         ahead.last_fault = Some(FaultSeen {
+            word: None,
+            argument: None,
+            at_s: None,
             code: "clock_ahead".into(),
             class: "profile",
             level: LevelRead::Token("failed"),

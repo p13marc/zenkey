@@ -624,6 +624,7 @@ const _: () = {
                 clocks_synced: false,
                 face: None,
                 catalogs: Default::default(),
+                contracts: Default::default(),
             },
             |_| {},
         ));

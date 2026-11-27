@@ -59,7 +59,7 @@ Commands:
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
   why          Explain why a key or a service is silent, rung by rung
   doctor       Judge a zk2 deployment against the core: one verdict per check
-  health       Read every service's health.v1, or one's: healthy, unhealthy, stale
+  health       Read every service's health.v1 or health.v2, or one's: healthy, unhealthy, stale
   alarms       Read the alarms.v1 alarms a selector reaches: is anything firing?
   telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
   timing       Read timing.v1 streams: deadline met, period kept, a sample expired
@@ -135,7 +135,7 @@ Commands:
   check        Exit-coded assertions: 0 clean, 1 a finding, 2 no verdict
   why          Explain why a key or a service is silent, rung by rung
   doctor       Judge a zk2 deployment against the core: one verdict per check
-  health       Read every service's health.v1, or one's: healthy, unhealthy, stale
+  health       Read every service's health.v1 or health.v2, or one's: healthy, unhealthy, stale
   alarms       Read the alarms.v1 alarms a selector reaches: is anything firing?
   telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
   timing       Read timing.v1 streams: deadline met, period kept, a sample expired

@@ -1078,22 +1078,29 @@ pub(crate) enum Command {
     /// (default warning), 2 no verdict: a check left unobservable, an empty
     /// scope, or a run that could not start.
     Doctor(DoctorArgs),
-    /// Read every service's health.v1, or one's: healthy, unhealthy, stale.
+    /// Read every service's health.v1 or health.v2, or one's: healthy, unhealthy, stale.
     ///
-    /// health.v1's reader (spec/profiles/health/v1.md §2.11), through a
-    /// session in the deployment's namespace: presence and each descriptor —
-    /// a service implements health.v1 when its descriptor lists it, token or
-    /// not (§2.7) — then two readings, each one GET of the owners'
-    /// health.v1/state/** that answers a status and its checks together
-    /// (§2.4), after a window's subscription to every status and to the
-    /// faults. Per service, §5's questions: is it healthy (healthy;
-    /// unhealthy at its level, by its status or a current check worse than
-    /// it; stale, which is never FAILED and never down); does its status
-    /// agree with its checks (a break seen in both readings is the finding);
-    /// is its clock ahead (a clock_ahead fault no heartbeat with its time
-    /// known followed);
-    /// and the roll-up, the worst established level with every verdict
-    /// counted apart. An absent service is not asked — presence's word, not
+    /// health.v1's and health.v2's reader (spec/profiles/health/v1.md
+    /// §2.11, v2.md §2.11), through a session in the deployment's
+    /// namespace: presence and each descriptor — a service implements a
+    /// major when its descriptor lists it, token or not (§2.7), and is read
+    /// by health.v2 where it lists both (v2 §2.12) — then two readings, each
+    /// two GETs, of the owners' health.v2/state/** and health.v1/state/**,
+    /// each of which answers a status and its checks together (§2.4), after
+    /// a window's subscription to every status and to the faults. Per
+    /// service, §5's questions: is it healthy (healthy; unhealthy at its
+    /// level, by its status or a current check worse than it; stale, which
+    /// is never FAILED and never down); does its status agree with its
+    /// checks (a break seen in both readings is the finding, and under
+    /// health.v2 one seen in one reading whose two snapshots are one
+    /// instant); is its clock ahead (under health.v1, a clock_ahead fault
+    /// no heartbeat with its time known followed; under health.v2, the last
+    /// heartbeat read has its time ahead, and a fault answers nothing); and
+    /// the roll-up, the worst established level over both majors, with
+    /// every verdict counted apart. A health.v2 word is shown by its name
+    /// where the tables of the revisions its owner's descriptor names name
+    /// it (--contracts, else retrieved from the bus), as its number where
+    /// none in hand does, and never as another revision's name. An absent service is not asked — presence's word, not
     /// a level — and an archive's status for it is shown last-known, never
     /// current. A status reply's age needs a trusted clock: the window
     /// measures one on the owners' live puts, or --clocks-synced takes the
@@ -3799,11 +3806,26 @@ pub(crate) struct HealthArgs {
     pub(crate) grace: f64,
     /// The service sits across a constrained face (spec §8.5), where
     /// presence and descriptors do not cross: the deployment's word that it
-    /// implements health.v1 (R7). `crosses` when the face lets its
-    /// state/status cross, `denied` when it does not — health is then
-    /// unobservable, never unhealthy or down (health.v1 §2.8).
+    /// implements health.v1, or with --iface health.v2 that major (R7).
+    /// `crosses` when the face lets its state/status cross, `denied` when
+    /// it does not — health is then unobservable, never unhealthy or down
+    /// (health.v1 §2.8).
     #[arg(long, value_enum, value_name = "STATUS", requires = "address")]
     pub(crate) across_face: Option<FaceStatus>,
+    /// Across a face, the major the deployment's word says the service
+    /// implements, since no descriptor crosses (health.v2 §2.10):
+    /// health.v1 (the default) or health.v2.
+    #[arg(long, value_enum, value_name = "IFACE", requires = "across_face")]
+    pub(crate) iface: Option<HealthIface>,
+    /// Contracts known offline, repeatable: an authoring file, a directory
+    /// of them, or a `.history` root. A health.v2 owner's words are read by
+    /// the tables (health.reasons, health.details, health.codes) of the
+    /// revisions its descriptor names, these first, one not held retrieved
+    /// from the bus (spec §8.4); never a revision it does not name. Across
+    /// a face, the tables of these alone, the deployment's word. A path
+    /// that loads nothing is refused (exit 2).
+    #[arg(long = "contracts", value_name = "PATH")]
+    pub(crate) contracts: Vec<PathBuf>,
     /// The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1`
     /// file the deployment provisions. A snapshot's confirmations are dated
     /// under the epoch of the catalog an owner's descriptor names, read
@@ -4183,6 +4205,17 @@ pub(crate) enum FaceGrant {
     Granted,
     /// It does not: every question is unobservable across it.
     Denied,
+}
+
+/// `health --iface`: the major across a face (health.v2 §2.10).
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum HealthIface {
+    /// Protobuf records with free text.
+    #[value(name = "health.v1")]
+    V1,
+    /// Packed records, their words numbers into tables.
+    #[value(name = "health.v2")]
+    V2,
 }
 
 /// `health --across-face`: whether the face lets a status cross.

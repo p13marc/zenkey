@@ -1165,6 +1165,7 @@ impl World {
         let addr: zenkey_model::grammar::Addr = addr.parse().expect("an address");
         let target = zenkey_fleet::HealthTarget::One(addr);
         let got = zenkey_fleet::bus::health::HealthGet {
+            v2: Default::default(),
             selector: target.state_selector(),
             read_at: std::time::SystemTime::now(),
             complete: true,
@@ -1172,9 +1173,11 @@ impl World {
         };
         Arc::new(zenkey_fleet::judge_health(
             &zenkey_fleet::HealthObservation {
+                tables: Default::default(),
                 namespace: String::new(),
                 target,
                 spec: zenkey_fleet::HealthSpec {
+                    contracts: Default::default(),
                     timeout: Duration::from_secs(2),
                     window: None,
                     grace: Duration::from_secs(1),

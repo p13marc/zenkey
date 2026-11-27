@@ -1,4 +1,5 @@
-`health` (#721, PF) reads `health.v1` as the profile's reader does: every
+`health` (#721, PF; #986's Q2) reads `health.v1` and `health.v2` as the
+profile's reader does, each service by the major its descriptor lists: every
 service in the namespace, or one, judged healthy, unhealthy, stale,
 unobservable or not asked, with §5's other answers and the roll-up. A
 judgement verb: exit 1 on a finding (unhealthy, stale, a break of §2.2 seen in
@@ -7,9 +8,9 @@ one is unobservable, none was asked, or the run could not start.
 
 ```console
 $ zenctl health --help
-Read every service's health.v1, or one's: healthy, unhealthy, stale.
+Read every service's health.v1 or health.v2, or one's: healthy, unhealthy, stale.
 
-health.v1's reader (spec/profiles/health/v1.md §2.11), through a session in the deployment's namespace: presence and each descriptor — a service implements health.v1 when its descriptor lists it, token or not (§2.7) — then two readings, each one GET of the owners' health.v1/state/** that answers a status and its checks together (§2.4), after a window's subscription to every status and to the faults. Per service, §5's questions: is it healthy (healthy; unhealthy at its level, by its status or a current check worse than it; stale, which is never FAILED and never down); does its status agree with its checks (a break seen in both readings is the finding); is its clock ahead (a clock_ahead fault no heartbeat with its time known followed); and the roll-up, the worst established level with every verdict counted apart. An absent service is not asked — presence's word, not a level — and an archive's status for it is shown last-known, never current. A status reply's age needs a trusted clock: the window measures one on the owners' live puts, or --clocks-synced takes the deployment's word. Exit 0 every service asked is healthy, 1 a finding (unhealthy, stale, a break, a clock ahead), 2 no verdict: a service unobservable, none asked, or a run that could not start.
+health.v1's and health.v2's reader (spec/profiles/health/v1.md §2.11, v2.md §2.11), through a session in the deployment's namespace: presence and each descriptor — a service implements a major when its descriptor lists it, token or not (§2.7), and is read by health.v2 where it lists both (v2 §2.12) — then two readings, each two GETs, of the owners' health.v2/state/** and health.v1/state/**, each of which answers a status and its checks together (§2.4), after a window's subscription to every status and to the faults. Per service, §5's questions: is it healthy (healthy; unhealthy at its level, by its status or a current check worse than it; stale, which is never FAILED and never down); does its status agree with its checks (a break seen in both readings is the finding, and under health.v2 one seen in one reading whose two snapshots are one instant); is its clock ahead (under health.v1, a clock_ahead fault no heartbeat with its time known followed; under health.v2, the last heartbeat read has its time ahead, and a fault answers nothing); and the roll-up, the worst established level over both majors, with every verdict counted apart. A health.v2 word is shown by its name where the tables of the revisions its owner's descriptor names name it (--contracts, else retrieved from the bus), as its number where none in hand does, and never as another revision's name. An absent service is not asked — presence's word, not a level — and an archive's status for it is shown last-known, never current. A status reply's age needs a trusted clock: the window measures one on the owners' live puts, or --clocks-synced takes the deployment's word. Exit 0 every service asked is healthy, 1 a finding (unhealthy, stale, a break, a clock ahead), 2 no verdict: a service unobservable, none asked, or a run that could not start.
 
 Usage: zenctl health [OPTIONS] [SYSTEM/SERVICE]
 
@@ -30,11 +31,21 @@ Options:
           [default: 2]
 
       --across-face <STATUS>
-          The service sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements health.v1 (R7). `crosses` when the face lets its state/status cross, `denied` when it does not — health is then unobservable, never unhealthy or down (health.v1 §2.8)
+          The service sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements health.v1, or with --iface health.v2 that major (R7). `crosses` when the face lets its state/status cross, `denied` when it does not — health is then unobservable, never unhealthy or down (health.v1 §2.8)
 
           Possible values:
           - crosses: The face lets `state/status` cross: its puts are the service's liveness and its health
           - denied:  The face does not: health is unobservable across it
+
+      --iface <IFACE>
+          Across a face, the major the deployment's word says the service implements, since no descriptor crosses (health.v2 §2.10): health.v1 (the default) or health.v2
+
+          Possible values:
+          - health.v1: Protobuf records with free text
+          - health.v2: Packed records, their words numbers into tables
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file, a directory of them, or a `.history` root. A health.v2 owner's words are read by the tables (health.reasons, health.details, health.codes) of the revisions its descriptor names, these first, one not held retrieved from the bus (spec §8.4); never a revision it does not name. Across a face, the tables of these alone, the deployment's word. A path that loads nothing is refused (exit 2)
 
       --catalog <PATH>
           The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions. A snapshot's confirmations are dated under the epoch of the catalog an owner's descriptor names, read through these; without one, an owner naming a catalog leaves them undated, so its members read unconfirmed by time. A file that is not a catalog is refused (exit 2)

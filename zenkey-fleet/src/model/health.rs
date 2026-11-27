@@ -1,5 +1,9 @@
-//! `health.v1` (#721, PF): one reading of one service, built from what the
-//! bus answered (`spec/profiles/health/v1.md` §0, §2.11).
+//! `health.v1` (#721, PF) and `health.v2` (#986's Q2): one reading of one
+//! service, built from what the bus answered (`spec/profiles/health/v1.md`
+//! §0, §2.11; `v2.md` §2.11). Each service is read by one major, the one
+//! its descriptor lists, `health.v2` where it lists both ([`major_of`]);
+//! the steps, the verdicts and the reasons are one set for both (v2
+//! §2.12).
 //!
 //! **Values in hand → a reading.** [`reading`] turns a GET's answer, the
 //! window's subscription and an archive's word into the
@@ -18,7 +22,8 @@
 //!   (§2.4); a GET that answered nothing for the service read none.
 //!
 //! [`agreement_over`] is §2.2's rule for a tool reporting a break across
-//! readings: only when each one shows it. The verdicts themselves are
+//! readings: only when each one shows it; under `health.v2`, also from one
+//! reading that is one instant ([`agreement_over_v2`], v2 §2.2). The verdicts themselves are
 //! `zenkey_model::health`'s, called through [`ServiceReading`]; which of them
 //! is wrong is the judges' to say ([`crate::judge::health`],
 //! [`crate::judge::doctor`], [`crate::judge::conform`]).
@@ -30,8 +35,10 @@ use zenkey_model::freshness::{
     ClockMeasure, ClockTrust, DEFAULT_DELTA, Observation, Reply, StampAge,
 };
 use zenkey_model::grammar::Addr;
+use zenkey_model::health::v2 as hv2;
 use zenkey_model::health::{
-    self as hm, Agreement, Answer, Judged, Level, Listing, Presence, Read, Reading, Reason, Verdict,
+    self as hm, Agreement, Answer, Judged, Level, Listing, Major, Presence, Read, Reading, Reason,
+    Verdict,
 };
 
 use crate::bus::health::{HealthGet, Replied, ServiceGot, StatusValue};
@@ -91,11 +98,16 @@ pub enum Got<'a> {
 }
 
 impl<'a> Got<'a> {
-    /// `addr`'s part of a GET.
+    /// `addr`'s part of a reading's `health.v1` GET.
     pub fn of(get: Option<&'a HealthGet>, addr: &Addr) -> Got<'a> {
+        Got::of_major(get, addr, Major::V1)
+    }
+
+    /// `addr`'s part of a reading's GET of `major`.
+    pub fn of_major(get: Option<&'a HealthGet>, addr: &Addr, major: Major) -> Got<'a> {
         match get {
             None => Got::NotMade,
-            Some(g) => match g.services.get(addr) {
+            Some(g) => match g.services_of(major).get(addr) {
                 Some(got) => Got::Answered { got, at: g.read_at },
                 None => Got::Silent { at: g.read_at },
             },
@@ -249,6 +261,28 @@ pub fn agreement_over(readings: &[Agreement]) -> HealthAnswer {
     }
 }
 
+/// [`agreement_over`] under `health.v2` (v2 §2.2): a break the last reading
+/// shows is reported from it alone where that reading is one instant
+/// (`one_instant[i]` for `readings[i]`, from
+/// [`hv2::Reading::is_one_instant`]); from any other reading, as v1 §2.2
+/// says, only when each reading shows it.
+pub fn agreement_over_v2(readings: &[Agreement], one_instant: &[bool]) -> HealthAnswer {
+    match (readings.last(), one_instant.last()) {
+        (Some(last), Some(true)) if last.answer == Answer::No => answer(
+            HealthAnswerToken::No,
+            Reason::Inconsistent.as_str(),
+            "a current check is worse than its fresh status in one reading that is one instant, \
+             its two snapshots under one run and one asof with no entry above it: its owner \
+             breaks health.v2 §2.2",
+        ),
+        _ => {
+            let mut a = agreement_over(readings);
+            a.says = a.says.replace("health.v1 §2.2", "health.v2 §2.2");
+            a
+        }
+    }
+}
+
 /// A §5 answer as the report spells it.
 pub fn answer(answer: HealthAnswerToken, reason: &str, says: &str) -> HealthAnswer {
     HealthAnswer {
@@ -290,39 +324,108 @@ pub fn level_token(l: Level) -> HealthLevel {
 
 /// A level as a payload carried it (§2.6).
 pub fn level_read(r: Read) -> LevelRead {
-    match r {
-        Read::Level(l) => LevelRead::Token(l.as_str()),
-        Read::Unspecified => LevelRead::Token("unspecified"),
-        Read::Undecodable => LevelRead::Token("undecodable"),
-        Read::Unlisted(n) => LevelRead::Unlisted(n),
+    level_read_of(r, Major::V1)
+}
+
+/// A level as a record of `major` carried it: under `health.v2` its
+/// `unknown` is spelled so, v1's `UNSPECIFIED` (v2 §0, §2.6).
+pub fn level_read_of(r: Read, major: Major) -> LevelRead {
+    match (r, major) {
+        (Read::Level(l), _) => LevelRead::Token(l.as_str()),
+        (Read::Unspecified, Major::V1) => LevelRead::Token("unspecified"),
+        (Read::Unspecified, Major::V2) => LevelRead::Token(hv2::UNKNOWN),
+        (Read::Undecodable, _) => LevelRead::Token("undecodable"),
+        (Read::Unlisted(n), _) => LevelRead::Unlisted(n),
     }
 }
 
-/// What `addr`'s descriptors say of `health.v1` (§2.7): listed by any
-/// served descriptor, with its token flag; else unread when an instance's
-/// descriptor did not read, or descriptors were not asked; else not listed.
+/// The major `addr`'s served descriptors list (v2 §2.11's step 2,
+/// §2.12): `health.v2` where any lists it, `health.v1` where one lists
+/// that and none `health.v2`, `None` where none lists either or none was
+/// read.
+pub fn major_of(o: &Observed, addr: &Addr) -> Option<Major> {
+    let mut found = None;
+    for ((a, _), read) in o.descriptors.iter().flatten() {
+        if a != addr {
+            continue;
+        }
+        if let Some(d) = read.descriptor() {
+            match Major::of(d.interfaces.iter().map(|e| e.iface.as_str())) {
+                Some(Major::V2) => return Some(Major::V2),
+                Some(Major::V1) => found = Some(Major::V1),
+                None => {}
+            }
+        }
+    }
+    found
+}
+
+/// What `addr`'s descriptors say of `health.v1` or `health.v2` (§2.7, v2
+/// §2.7): listed by any served descriptor, with the token flag of the
+/// major read ([`major_of`]); else unread when an instance's descriptor
+/// did not read, or descriptors were not asked; else not listed.
 pub fn listing(o: &Observed, addr: &Addr) -> Listing {
     let Some(descriptors) = &o.descriptors else {
         return Listing::Unread;
     };
-    let mut unread = false;
-    for ((a, _), read) in descriptors {
-        if a != addr {
-            continue;
-        }
-        match read.descriptor() {
-            Some(d) => {
-                if let Some(e) = d.interfaces.iter().find(|e| e.iface == hm::IFACE) {
-                    return Listing::Listed { token: e.token };
-                }
-            }
-            None => unread = true,
-        }
+    if let Some(major) = major_of(o, addr) {
+        let token = descriptors
+            .iter()
+            .filter(|((a, _), _)| a == addr)
+            .filter_map(|(_, read)| read.descriptor())
+            .find_map(|d| d.interfaces.iter().find(|e| e.iface == major.iface()))
+            .is_none_or(|e| e.token);
+        return Listing::Listed { token };
     }
+    let unread = descriptors
+        .iter()
+        .any(|((a, _), read)| a == addr && read.descriptor().is_none());
     if unread {
         Listing::Unread
     } else {
         Listing::NotListed
+    }
+}
+
+/// An instance's tables (v2 §2.10) from the revisions its descriptors name
+/// that `held` holds: never a revision they do not name.
+pub fn instance_tables<'a>(
+    o: &Observed,
+    addr: &Addr,
+    held: impl Fn(&str, &str) -> Option<&'a zenkey_model::contract::Contract>,
+) -> hv2::InstanceTables {
+    let tables: Vec<hv2::Tables> = o
+        .descriptors
+        .iter()
+        .flatten()
+        .filter(|((a, _), _)| a == addr)
+        .filter_map(|(_, read)| read.descriptor())
+        .flat_map(|d| d.interfaces.iter())
+        .filter_map(|e| held(&e.iface, &e.contract))
+        .map(hv2::Tables::of)
+        .collect();
+    hv2::Tables::of_instance(&tables)
+}
+
+/// A `health.v2` word as the report shows it (v2 §2.10, §5): its number,
+/// how this reader read it, and its name where a table in hand names it.
+pub fn word_seen(
+    kind: hv2::Kind,
+    word: hv2::Word,
+    tables: Option<&hv2::InstanceTables>,
+) -> crate::report::WordSeen {
+    let own = tables.and_then(|t| t.own(kind));
+    let (read, name) = match hv2::read_word(kind, word, own) {
+        hv2::Named::None => ("none", None),
+        hv2::Named::Profile(n) => ("profile", Some(n.to_owned())),
+        hv2::Named::Service(n) => ("service", Some(n.to_owned())),
+        hv2::Named::Number(_) => ("number", None),
+        hv2::Named::OutOfRange => ("out_of_range", None),
+    };
+    crate::report::WordSeen {
+        number: word.code(),
+        read,
+        name,
     }
 }
 

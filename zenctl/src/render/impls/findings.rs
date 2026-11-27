@@ -469,7 +469,8 @@ impl Render for zenkey_fleet::ConformReport {
     }
 }
 
-/// `health.v1` (#721, PF): one row per service, each verdict its own mark
+/// `health.v1` (#721, PF) and `health.v2` (#986's Q2): one row per service,
+/// read by its major, each verdict its own mark
 /// and word — `✓ healthy`, `✗ unhealthy`, `⚠ stale`, `? unobservable`, `—
 /// not asked` — and its own `verdict` token in a `service` row, so a script
 /// branches on the profile's token and never on the prose. §5's other
@@ -540,11 +541,23 @@ impl Render for zenkey_fleet::HealthReport {
                 )),
             ]);
             let mut detail = Vec::new();
+            // A `health.v2` word by its name, its number, or what it is:
+            // never another revision's name (health.v2 §2.10, §5).
+            let said = |text: &str, word: Option<&zenkey_fleet::report::WordSeen>| match word {
+                None => format!("{text:?}"),
+                Some(w) => match &w.name {
+                    Some(n) => format!("{n} ({})", w.number),
+                    None => format!("({})", w.words()),
+                },
+            };
+            if s.profile == Some("health.v2") {
+                detail.push("    read under health.v2".to_owned());
+            }
             if let Some(st) = &s.status {
                 detail.push(format!(
-                    "    status {} {:?} — {}{}",
+                    "    status {} {} — {}{}",
                     level_read_word(&st.level),
-                    st.reason,
+                    said(&st.reason, st.word.as_ref()),
                     match st.via {
                         StatusVia::Get => "its owner's reply",
                         StatusVia::Subscription => "the last put heard",
@@ -559,12 +572,17 @@ impl Render for zenkey_fleet::HealthReport {
                 let checks: Vec<String> = s
                     .checks
                     .iter()
-                    .map(|c| {
-                        if c.detail.is_empty() {
+                    .map(|c| match &c.word {
+                        Some(w) if w.read != "none" => format!(
+                            "{} {} {}",
+                            c.check,
+                            level_read_word(&c.level),
+                            said(&c.detail, Some(w))
+                        ),
+                        _ if c.detail.is_empty() => {
                             format!("{} {}", c.check, level_read_word(&c.level))
-                        } else {
-                            format!("{} {} {:?}", c.check, level_read_word(&c.level), c.detail)
                         }
+                        _ => format!("{} {} {:?}", c.check, level_read_word(&c.level), c.detail),
                     })
                     .collect();
                 detail.push(format!("    checks {}", checks.join(", ")));
@@ -586,23 +604,34 @@ impl Render for zenkey_fleet::HealthReport {
                     s.faults,
                     s.last_fault
                         .as_ref()
-                        .map(|f| format!(
-                            ", the last {} ({}) {}{}",
-                            f.code,
-                            f.class,
-                            level_read_word(&f.level),
-                            if f.detail.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" {:?}", f.detail)
-                            }
-                        ))
+                        .map(|f| match &f.word {
+                            Some(w) => format!(
+                                ", the last {} {}{} — an occurrence",
+                                said(&f.code, Some(w)),
+                                level_read_word(&f.level),
+                                f.argument
+                                    .as_ref()
+                                    .map(|a| format!(", argument {a}"))
+                                    .unwrap_or_default()
+                            ),
+                            None => format!(
+                                ", the last {} ({}) {}{}",
+                                f.code,
+                                f.class,
+                                level_read_word(&f.level),
+                                if f.detail.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" {:?}", f.detail)
+                                }
+                            ),
+                        })
                         .unwrap_or_default()
                 ));
             }
             if let Some(lk) = &s.last_known {
                 detail.push(format!(
-                    "    last-known at {} ({}): {} {:?} — last-known, never current",
+                    "    last-known at {} ({}): {} {} — last-known, never current",
                     lk.archive,
                     if lk.confirmed {
                         "confirmed by alignment"
@@ -610,7 +639,7 @@ impl Render for zenkey_fleet::HealthReport {
                         "not confirmed by alignment"
                     },
                     level_read_word(&lk.level),
-                    lk.reason
+                    said(&lk.reason, lk.word.as_ref())
                 ));
             }
             grid.detail(detail);
@@ -639,8 +668,9 @@ impl Render for zenkey_fleet::HealthReport {
                 notes.push(
                     Note::coverage(format!(
                         "read {ns} through `{}`: {} service(s) holding an instance token; a \
-                         service implements health.v1 when its descriptor lists it, never by its \
-                         interface token",
+                         service implements health.v1 or health.v2 when its descriptor lists it, \
+                         never by its interface token, and is read by health.v2 where it lists \
+                         both",
                         p.selector, p.services
                     ))
                     .cite("health.v1 §2.7"),

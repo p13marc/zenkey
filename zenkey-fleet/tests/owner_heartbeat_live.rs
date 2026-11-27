@@ -167,6 +167,7 @@ async fn the_health_window_reads_an_owner_heartbeats_group() {
                     clocks_synced: true,
                     face: None,
                     catalogs,
+                    contracts: Default::default(),
                 },
                 None,
                 |_| {},

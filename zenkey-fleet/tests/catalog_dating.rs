@@ -102,6 +102,7 @@ async fn modem_owner(owners: &zenoh::Session) -> (Service, String) {
 
 fn health_spec(catalogs: Catalogs) -> zenkey_fleet::HealthSpec {
     zenkey_fleet::HealthSpec {
+        contracts: Default::default(),
         timeout: T,
         window: None,
         grace: Duration::from_millis(200),
