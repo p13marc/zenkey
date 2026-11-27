@@ -86,6 +86,12 @@ fn copy(name: &str, from: &str, to: &str) -> Contract {
 
 /// A client of `ep` with its HLC on, retrying fast after a cut.
 async fn session(ep: &str) -> zenoh::Session {
+    session_stamping(ep, true).await
+}
+
+/// [`session`], its HLC on only when `stamping`: a `redundancy.v2`
+/// candidate's runs as any owner's (`redundancy.v2` §2.10).
+async fn session_stamping(ep: &str, stamping: bool) -> zenoh::Session {
     let mut c = zenoh::Config::default();
     c.insert_json5("mode", "\"client\"").unwrap();
     c.insert_json5("scouting/multicast/enabled", "false")
@@ -98,7 +104,9 @@ async fn session(ep: &str) -> zenoh::Session {
         "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
     )
     .unwrap();
-    c.insert_json5("timestamping/enabled", "true").unwrap();
+    if stamping {
+        c.insert_json5("timestamping/enabled", "true").unwrap();
+    }
     common::panic_watchdog::install();
     zenoh::open(c).await.expect("a session")
 }
@@ -125,8 +133,10 @@ impl Commander {
     /// given, a candidate of its governed interface with that id
     /// (`redundancy.v1`, §11).
     async fn start_on(ep: &str, name: &'static str, c: Contract, instance: Option<u64>) -> Self {
+        let stamping = zenkey::model::redundancy::Major::of(&c.uses)
+            != Some(zenkey::model::redundancy::Major::V2);
         let link = common::link_to(ep).await;
-        let s = session(link.endpoint()).await;
+        let s = session_stamping(link.endpoint(), stamping).await;
         let mut b = ServiceBuilder::new(&s, ServiceConfig::new(a(&format!("lab/{name}"))));
         if let Some(i) = instance {
             b.set_instance_id(InstanceId::from_u64(i));
@@ -138,8 +148,8 @@ impl Commander {
             .unwrap();
         if instance.is_some() {
             let (watch, reader) = (
-                session(link.endpoint()).await,
-                session(link.endpoint()).await,
+                session_stamping(link.endpoint(), stamping).await,
+                session_stamping(link.endpoint(), stamping).await,
             );
             b.redundancy(RedundancyStartup::new(reader).with_watch(watch))
                 .unwrap();
@@ -1360,9 +1370,27 @@ async fn s9_a_wildcard_bindings_order() {
 /// `redundancy.v1` §2.10; text 0.2, F-270).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s11_a_governed_commanders_standby() {
+    s11_run("steer-governed.v1").await;
+}
+
+/// §11 under `redundancy.v2` (text 0.7, #987's N2): `steer.v1` minor 2,
+/// the commanders' sessions without timestamping, and `X`'s samples each in
+/// an envelope under `C_s2`'s run, a standby's: `not_incumbent` by run
+/// (`redundancy.v2` §2.10).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s11_a_governed_commanders_standby_under_redundancy_v2() {
+    s11_run("steer-governed-run.v1").await;
+}
+
+/// §11 on `revision`, `steer.v1` governed by either major: under
+/// `redundancy.v2`, `X` puts each sample in an envelope under `C_s2`'s
+/// run; under `redundancy.v1`, raw, stamped by its own HLC.
+async fn s11_run(revision: &str) {
     let (_r1, ep) = router(None).await;
     let s = Tool::new(&ep).await;
-    let governed = contract("steer-governed.v1");
+    let governed = contract(revision);
+    let v2 = zenkey::model::redundancy::Major::of(&governed.uses)
+        == Some(zenkey::model::redundancy::Major::V2);
     // The commanders first: C_t, then C_s1, which serves (the lower id),
     // then C_s2, which stands by.
     let _t = Commander::start_on(&ep, "teleop", governed.clone(), Some(0x0b)).await;
@@ -1403,19 +1431,40 @@ async fn s11_a_governed_commanders_standby() {
         })
         .await;
     }
-    // 1. The standby puts raw samples on safety's key, its own stamps.
+    // 1. The standby puts raw samples on safety's key, its own stamps;
+    //    under redundancy.v2 each in an envelope under its own run, which
+    //    its descriptor states while it stands by.
     let raw = s2.session.clone();
+    let s2_run = s2.svc.as_ref().unwrap().minter().run();
     let raw_on = Arc::new(AtomicBool::new(true));
     let on = Arc::clone(&raw_on);
     let raw_task = tokio::spawn(async move {
         let mut tick = tokio::time::interval(PERIOD);
-        let mut n = 0u64;
+        let mut n = 0u32;
         while on.load(Ordering::SeqCst) {
             tick.tick().await;
-            let _ = raw
-                .put(cmd_key("safety"), format!("standby {n}"))
-                .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
-                .await;
+            let text = format!("standby {n}");
+            let _ = if v2 {
+                let stamp = zenkey::model::wire::Stamp {
+                    run: s2_run,
+                    seq: zenkey::model::wire::Seq::new(n).unwrap(),
+                };
+                raw.put(
+                    cmd_key("safety"),
+                    zenkey::model::wire::Envelope::mutation(
+                        zenkey::model::wire::Tag::NONE,
+                        stamp,
+                        text.as_bytes(),
+                    )
+                    .write(),
+                )
+                .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+                .await
+            } else {
+                raw.put(cmd_key("safety"), text)
+                    .encoding(zenoh::bytes::Encoding::TEXT_PLAIN)
+                    .await
+            };
             n += 1;
         }
     });
