@@ -1540,6 +1540,191 @@ fn telemetry_continuity_case(
     )
 }
 
+/// The same two cases of a service whose descriptor lists `alarms.v2`
+/// (#984's S3), read as that text says (§2.1), from one collection read of
+/// its `alarms.v2/state/**` through the fleet's book, its subject
+/// `state/alarms/{slot}`:
+/// - `alarm-key`: "do this slot's words derive its record's key?" (§2.4,
+///   §5) for each slot by words, no a finding (`mismatch`), and "does this
+///   owner hold each identity on one slot?" (§2.2, §5), no a finding; a slot
+///   named by its owner's table derives its key by that table (§4), and an
+///   unnamed one is not compared;
+/// - `alarm-document`: each slot's record reads (§2.4, §3: core §7.6's
+///   reading, then `key_with_rule` and `key_missing`), and so do the words
+///   of a slot by words.
+///
+/// A pass needs the owner's alarms established, by one complete snapshot
+/// (§2.15); a complete snapshot with no entry is the owner's word that it
+/// holds none, and leaves nothing to check: not asked.
+fn alarm_cases_v2(
+    obs: &ConformObservation,
+    read: &std::result::Result<
+        (
+            crate::model::alarms::SlotRead,
+            crate::model::alarms::V2Words,
+        ),
+        String,
+    >,
+) -> [ConformCase; 2] {
+    use crate::model::alarms::{AlarmBook, AlarmScope, BookSpec};
+    use crate::report::{AlarmAnswerToken, AlarmLatest, AlarmNamedBy};
+    use zenkey_model::alarms::{Answer, SetVerdict};
+    const S: &str = "state/alarms/{slot}";
+    let both = |f: fn(CaseId, &str, String) -> ConformCase, why: String| {
+        [
+            f(CaseId::AlarmKey, S, why.clone()),
+            f(CaseId::AlarmDocument, S, why),
+        ]
+    };
+    let unseen: fn(CaseId, &str, String) -> ConformCase =
+        |c, s, w| ConformCase::unobservable(c, s, w);
+    let not: fn(CaseId, &str, String) -> ConformCase = |c, s, w| ConformCase::not_asked(c, s, w);
+    let (o, (read, words)) = match (&obs.presence, read) {
+        (Err(e), _) => return both(unseen, format!("the presence read could not be made: {e}")),
+        (_, Err(e)) => {
+            return both(
+                unseen,
+                format!("the collection read of its alarms.v2 records could not be made: {e}"),
+            );
+        }
+        (Ok(o), Ok(r)) => (o, r),
+    };
+    let (now, wall) = (std::time::Instant::now(), std::time::SystemTime::now());
+    let mut book = AlarmBook::new(
+        AlarmScope::of(&obs.address),
+        BookSpec::new(obs.spec.timeout),
+    );
+    book.presence_read(o, now);
+    book.v2_words(words.clone());
+    book.seed_v2(read.clone(), now, wall);
+    let set = book.owner_set(&obs.address, now);
+    if set.verdict != SetVerdict::Established {
+        return both(
+            unseen,
+            format!(
+                "its alarms are not established: {} ({}; alarms.v2 §2.15)",
+                set.reason.says(),
+                set.reason.as_str()
+            ),
+        );
+    }
+    let rows: Vec<_> = book
+        .v2_rows(now, wall)
+        .into_iter()
+        .filter(|r| r.slot.is_some() && r.latest.is_some())
+        .collect();
+    if rows.is_empty() {
+        return both(
+            not,
+            "its complete snapshot holds no record: its word that it holds none, and nothing to \
+             check (alarms.v2 §2.15)"
+                .to_owned(),
+        );
+    }
+    let first = |v: &[String]| {
+        let shown: Vec<&str> = v.iter().take(3).map(String::as_str).collect();
+        if v.len() > 3 {
+            format!("{} and {} more", shown.join("; "), v.len() - 3)
+        } else {
+            shown.join("; ")
+        }
+    };
+    let slot = |r: &crate::report::AlarmRow| r.slot.map_or_else(String::new, |s| s.to_string());
+    let (mut mismatched, mut sanitized, mut broken) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut derived, mut records) = (0usize, 0usize);
+    for r in &rows {
+        match (r.rederives.answer, r.rederives.reason.as_str()) {
+            (AlarmAnswerToken::No, _) => mismatched.push(format!("slot {}", slot(r))),
+            (AlarmAnswerToken::Yes, "sanitized") => sanitized.push(format!("slot {}", slot(r))),
+            (AlarmAnswerToken::Yes, _) => derived += 1,
+            (_, "unreadable") => broken.push(format!(
+                "slot {}: its words do not read as alarms.v2.Words",
+                slot(r)
+            )),
+            _ if r
+                .words
+                .as_ref()
+                .is_some_and(|w| w.by == AlarmNamedBy::Table) =>
+            {
+                derived += 1
+            }
+            _ => {}
+        }
+        match r.latest.as_ref().map(|l| (l.latest, l.invalid.clone())) {
+            Some((AlarmLatest::Undecodable, why)) => {
+                broken.push(format!("slot {}: {}", slot(r), why.unwrap_or_default()));
+            }
+            Some((AlarmLatest::Firing | AlarmLatest::Resolved, _)) => records += 1,
+            _ => {}
+        }
+    }
+    let one = book.one_slot_each(&obs.address);
+    let key = if !mismatched.is_empty() {
+        ConformCase::failed(
+            CaseId::AlarmKey,
+            S,
+            format!(
+                "{} slot(s) whose words do not derive their record's key: {} — another alarm's \
+                 words, a finding while it lasts (alarms.v2 §2.4)",
+                mismatched.len(),
+                first(&mismatched)
+            ),
+        )
+    } else if one == Answer::No {
+        ConformCase::failed(
+            CaseId::AlarmKey,
+            S,
+            "two slots of its present run name one alert key: a break of alarms.v2 §2.2",
+        )
+    } else if derived + sanitized.len() == 0 {
+        ConformCase::unobservable(
+            CaseId::AlarmKey,
+            S,
+            "no slot's identity could be read: each record is unnamed by the table this reader \
+             holds, or its words were not read (alarms.v2 §2.4)",
+        )
+    } else {
+        ConformCase::passed(
+            CaseId::AlarmKey,
+            S,
+            if sanitized.is_empty() {
+                format!(
+                    "{derived} slot(s), each its record's identity, by its owner's table or its \
+                     words, and no identity on two slots (alarms.v2 §2.2, §2.4)"
+                )
+            } else {
+                format!(
+                    "{derived} slot(s) by the strict recipe or the table, and {} whose words \
+                     derive its key only through the sanitizing step: {}",
+                    sanitized.len(),
+                    first(&sanitized)
+                )
+            },
+        )
+    };
+    let document = if !broken.is_empty() {
+        ConformCase::failed(
+            CaseId::AlarmDocument,
+            S,
+            format!(
+                "{} record(s) or words not an owner's: {} (alarms.v2 §2.4, §3)",
+                broken.len(),
+                first(&broken)
+            ),
+        )
+    } else {
+        ConformCase::passed(
+            CaseId::AlarmDocument,
+            S,
+            format!(
+                "{records} record(s), each a packed Alarm that reads, its key as its rule says \
+                 (alarms.v2 §2.4, §3)"
+            ),
+        )
+    };
+    [key, document]
+}
+
 /// The `alarms.v1` cases (#800, AC): `alarm-key` (§2.2, §2.3) and
 /// `alarm-document` (§2.4), from one S4 GET of the service's alarms, read
 /// when its descriptor lists `alarms.v1` (§2.13); its subject the resource.
@@ -1550,6 +1735,9 @@ fn alarm_cases(obs: &ConformObservation) -> [ConformCase; 2] {
     use crate::model::alarms::{AlarmBook, AlarmScope, BookSpec};
     use zenkey_model::alarms::{Answer, Gravity, Presence, Reason};
     const S: &str = "state/alarms/{alert_key}";
+    if let Some(read) = &obs.alarms_v2 {
+        return alarm_cases_v2(obs, read);
+    }
     let both = |f: fn(CaseId, &str, String) -> ConformCase, why: String| {
         [
             f(CaseId::AlarmKey, S, why.clone()),
@@ -4507,6 +4695,7 @@ mod tests {
             health: None,
             config: None,
             alarms: None,
+            alarms_v2: None,
             telemetry: None,
             timing: None,
             desired: None,

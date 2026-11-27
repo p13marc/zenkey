@@ -201,14 +201,14 @@ async fn alarms_date_a_modem_owners_confirmation() {
             .await
             .alarms
             .iter()
-            .any(|r| r.alarm.alert_key == key)
+            .any(|r| r.alarm.as_ref().is_some_and(|a| a.alert_key == key))
     })
     .await;
     let report = read(true).await;
     let row = report
         .alarms
         .iter()
-        .find(|r| r.alarm.alert_key == key)
+        .find(|r| r.alarm.as_ref().is_some_and(|a| a.alert_key == key))
         .expect("its row");
     let stamp = row
         .latest
@@ -225,7 +225,7 @@ async fn alarms_date_a_modem_owners_confirmation() {
     let row = report
         .alarms
         .iter()
-        .find(|r| r.alarm.alert_key == key)
+        .find(|r| r.alarm.as_ref().is_some_and(|a| a.alert_key == key))
         .expect("its row");
     assert_eq!(
         row.latest.as_ref().and_then(|l| l.stamp.as_ref()),

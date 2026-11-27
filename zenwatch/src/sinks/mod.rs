@@ -479,11 +479,11 @@ mod tests {
         alert.notification.presence = None;
         alert.notification.alert = Some(AlarmTransition {
             key: "zk2/h1/netlink/alarms.v1/state/alarms/a659f813308ad1da".into(),
-            alarm: zenkey_model::alarms::AlarmRef {
+            alarm: Some(zenkey_model::alarms::AlarmRef {
                 system: "h1".into(),
                 service: "netlink".into(),
                 alert_key: "a659f813308ad1da".into(),
-            },
+            }),
             change: zenkey_fleet::report::AlarmChange::Escalated,
             firing: zenkey_fleet::report::AlarmAnswer {
                 answer: zenkey_fleet::report::AlarmAnswerToken::Yes,
@@ -495,6 +495,11 @@ mod tests {
             stamp: None,
             via: Some(zenkey_fleet::report::AlarmVia::Subscription),
             lost: None,
+            profile: None,
+            slot: None,
+            words: None,
+            record: None,
+            displaced: None,
         });
         let j = serde_json::to_value(&alert).unwrap();
         assert_eq!(j["notification"]["kind"], "alert");

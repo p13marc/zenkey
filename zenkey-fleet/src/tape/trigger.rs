@@ -1009,7 +1009,7 @@ mod tests {
         );
         let e = Condition::parse("alert-firing zk2/lab/svc/health.v1/**").unwrap_err();
         assert!(
-            e.is_unaskable() && e.to_string().contains("no alarms.v1 key"),
+            e.is_unaskable() && e.to_string().contains("no alarms key"),
             "{e}"
         );
     }

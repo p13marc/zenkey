@@ -858,7 +858,7 @@ impl AlarmRule {
             };
             let t = AlarmTransition {
                 key: key.clone(),
-                alarm,
+                alarm: Some(alarm),
                 change: AlarmChange::Judged,
                 firing: answer_of(judged),
                 severity: said.severity.as_deref().and_then(Severity::parse),
@@ -866,6 +866,11 @@ impl AlarmRule {
                 stamp: None,
                 via: None,
                 lost: None,
+                profile: None,
+                slot: None,
+                words: None,
+                record: None,
+                displaced: None,
             };
             out.extend(self.judge(&t, book, read, at));
         }
@@ -887,13 +892,18 @@ impl AlarmRule {
             let t = AlarmTransition {
                 stamp: book.seen(&key).and_then(|s| s.stamp),
                 key,
-                alarm,
+                alarm: Some(alarm),
                 change: AlarmChange::Judged,
                 firing: answer_of(r.firing()),
                 severity: r.severity,
                 document: None,
                 via: None,
                 lost: None,
+                profile: None,
+                slot: None,
+                words: None,
+                record: None,
+                displaced: None,
             };
             out.extend(self.judge(&t, book, true, at));
         }
@@ -909,10 +919,9 @@ impl AlarmRule {
         severity: Option<String>,
         at: &str,
     ) -> RuleNotice {
-        let a = &t.alarm;
+        let (system, service, alert_key) = reference_words(t);
         let mut lines = vec![format!(
-            "alarm: system {} · service {} · alert key {} (alarms.v1 §2.12)",
-            a.system, a.service, a.alert_key
+            "alarm: system {system} · service {service} · alert key {alert_key} (alarms.v1 §2.12)"
         )];
         if let Some(d) = &document {
             lines.push(format!("alarm rule: {}", d.rule));
@@ -947,7 +956,7 @@ impl AlarmRule {
             severity,
             lines,
             key: Some(t.key.clone()),
-            address: Some(format!("{}/{}", a.system, a.service)),
+            address: Some(format!("{system}/{service}")),
             at: at.to_string(),
             presence: None,
             assume: false,
@@ -1054,6 +1063,22 @@ impl AlarmRule {
     }
 }
 
+/// A transition's reference as a notice spells it: its owner's system and
+/// service, and its alert key; an unnamed `alarms.v2` alarm, which matches
+/// no reference, by its slot (`alarms.v2` §2.16).
+fn reference_words(t: &AlarmTransition) -> (String, String, String) {
+    match &t.alarm {
+        Some(a) => (a.system.clone(), a.service.clone(), a.alert_key.clone()),
+        None => {
+            let mut c = t.key.split('/').skip(1);
+            let system = c.next().unwrap_or_default().to_owned();
+            let service = c.next().unwrap_or_default().to_owned();
+            let slot = t.slot.map_or_else(String::new, |s| s.to_string());
+            (system, service, format!("(unnamed, slot {slot})"))
+        }
+    }
+}
+
 /// What a key's notice says: the alarm, what happened to it, its summary,
 /// and §5's first answer with its reason.
 fn evidence(
@@ -1063,7 +1088,7 @@ fn evidence(
     doc: Option<&Alarm>,
     severity: Option<&str>,
 ) -> String {
-    let a = &t.alarm;
+    let (system, service, alert_key) = reference_words(t);
     let what = match state {
         CondState::Firing => {
             let sev = severity.unwrap_or("an unknown severity");
@@ -1094,10 +1119,7 @@ fn evidence(
     };
     let summary = doc.map(|d| format!(" — {}", d.summary)).unwrap_or_default();
     format!(
-        "alarm {} of {}/{} {what}{summary}: {} ({}, {}; alarms.v1 §2.14)",
-        a.alert_key,
-        a.system,
-        a.service,
+        "alarm {alert_key} of {system}/{service} {what}{summary}: {} ({}, {}; alarms.v1 §2.14)",
         t.firing.says,
         t.firing.answer.as_str(),
         t.firing.reason

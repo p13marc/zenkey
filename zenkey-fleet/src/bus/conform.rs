@@ -343,6 +343,19 @@ pub struct ConformObservation {
     /// `alarms.v1/state/alarms/*`, when a descriptor of it lists
     /// `alarms.v1` (§2.13); `None` otherwise.
     pub alarms: Option<std::result::Result<crate::model::alarms::SeedRead, String>>,
+    /// The service's `alarms.v2` alarms (#984's S3), when a descriptor of
+    /// it lists `alarms.v2`, read as that text says (§2.1): one collection
+    /// read of its `alarms.v2/state/**`, and its table and epoch from the
+    /// revisions its descriptors name. `None` otherwise.
+    pub alarms_v2: Option<
+        std::result::Result<
+            (
+                crate::model::alarms::SlotRead,
+                crate::model::alarms::V2Words,
+            ),
+            String,
+        >,
+    >,
     /// The service's metric members of the interface (#819, TC), read over
     /// the same window by `telemetry.v1`'s reader: each sample's
     /// conformance, and each pair's continuity with presence. `None` when
@@ -559,7 +572,8 @@ pub async fn observe(
         if !matches!(
             book.presence_of(&address),
             zenkey_model::alarms::Presence::Present(zenkey_model::alarms::Listing::Listed { .. })
-        ) {
+        ) || book.major_of(&address) == Some(zenkey_model::alarms::Major::V2)
+        {
             return None;
         }
         let scope = crate::model::alarms::AlarmScope::of(&address);
@@ -567,6 +581,30 @@ pub async fn observe(
         // through the catalogs given, 0 where it names none (#1087).
         let epochs = crate::bus::query::EntryEpochs::observed(catalogs, o);
         Some(crate::bus::alarms::get(session, scope.alarms_selector(), t, &epochs).await)
+    };
+    let alarms_v2 = async {
+        let Ok(o) = &presence else {
+            return None;
+        };
+        let mut book = crate::model::alarms::AlarmBook::new(
+            crate::model::alarms::AlarmScope::of(&address),
+            crate::model::alarms::BookSpec::new(t),
+        );
+        book.presence_read(o, std::time::Instant::now());
+        if book.major_of(&address) != Some(zenkey_model::alarms::Major::V2) {
+            return None;
+        }
+        let scope = crate::model::alarms::AlarmScope::of(&address);
+        let epochs = crate::bus::query::EntryEpochs::observed(catalogs, o);
+        let mut aspec = crate::bus::alarms::AlarmSpec::new(t);
+        aspec.catalogs = catalogs.clone();
+        aspec.contracts = offline.clone();
+        let words = crate::bus::alarms::words_v2(session, &aspec, Some(o), &epochs).await;
+        Some(
+            crate::bus::alarms::get_v2(session, &scope.v2_get_selector(), t)
+                .await
+                .map(|read| (read, words)),
+        )
     };
     let telemetry = async {
         if presence.is_err() {
@@ -622,11 +660,12 @@ pub async fn observe(
         presence.clone(),
         admin,
     );
-    let (mut obs, health, config, alarms, telemetry, timing) =
-        tokio::join!(suite, health, config, alarms, telemetry, timing);
+    let (mut obs, health, config, alarms, alarms_v2, telemetry, timing) =
+        tokio::join!(suite, health, config, alarms, alarms_v2, telemetry, timing);
     obs.health = health;
     obs.config = config;
     obs.alarms = alarms;
+    obs.alarms_v2 = alarms_v2;
     obs.telemetry = telemetry;
     obs.timing = timing;
     // desired.v1 (#840, DD): a revision that declares a requirement or
@@ -696,6 +735,7 @@ async fn suite(
         health: None,
         config: None,
         alarms: None,
+        alarms_v2: None,
         telemetry: None,
         timing: None,
         desired: None,

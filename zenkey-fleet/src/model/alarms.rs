@@ -47,6 +47,17 @@
 //!   (unobservable, never ok), and `judged` when a key's answer moves with
 //!   no sample ([`AlarmBook::sweep`]). What a notifier routes.
 //!
+//! **Both majors** (#984's S3, `alarms.v2` §2.1, §2.17): each owner is read
+//! by the major its descriptors list ([`AlarmBook::major_of`]: `alarms.v2`
+//! where any lists it), across a face by the deployment's word, and the
+//! scope names owners, not a major ([`AlarmScope`]): a selector of either
+//! major's alarms reaches both. An `alarms.v2` owner's slots are the child
+//! module `v2`'s: each slot read by identity through the model's
+//! `Track`, a collection read through its `Seed`, "nothing fires" from one
+//! complete snapshot, and the words by the owner's table or its slot's
+//! `words/<slot>`. The owners, the presence, the losses and the views are
+//! shared, so "is anything firing?" is one answer over both.
+//!
 //! **Bounded.** At most [`MAX_KEYS`] keys are held; a key past it is
 //! refused and counted, and the scope's answer can then never be *no*. A
 //! key deleted, or dropped by its owner's answer, is forgotten
@@ -56,9 +67,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant, SystemTime};
 
 use zenkey_model::alarms::{
-    self as am, Alarm, AlarmRef, Answer, AnyFiring, Invalid, Judged, Latest, Listing, OwnerAlarms,
-    Payload, Presence, Reading, Reason, ScopeRead, Seed, SetJudged, SetVerdict, Severity, Track,
-    Window,
+    self as am, Alarm, AlarmRef, Answer, AnyFiring, Invalid, Judged, Latest, Listing, Major,
+    OwnerAlarms, Payload, Presence, Reading, Reason, ScopeRead, Seed, SetJudged, SetVerdict,
+    Severity, Track, Window,
 };
 use zenkey_model::freshness::{
     Applied, ClockMeasure, GroupRead, Last, Observation, OwnerApplied, Reply, StampAge, View,
@@ -86,6 +97,13 @@ pub const FORGET_AFTER: Duration = Duration::from_secs(1800);
 /// Every alarm of every service, base-relative.
 pub const ALL: &str = "zk2/*/*/alarms.v1/state/alarms/*";
 
+/// Every `alarms.v2` record of every service, base-relative (`alarms.v2`
+/// §2.2).
+pub const ALL_V2: &str = "zk2/*/*/alarms.v2/state/alarms/*";
+
+mod v2;
+pub use v2::{SlotRead, SlotSample, V2Words};
+
 // ─── the scope ──────────────────────────────────────────────────────────────
 
 /// The alarms a selector reaches (§2.15): a base-relative key expression,
@@ -99,6 +117,11 @@ pub struct AlarmScope {
     alarms: String,
     system: Option<String>,
     service: Option<String>,
+    /// The selector reaches `alarms.v1` keys, `alarms.v2` keys: either or
+    /// both. Each narrows its own major's keys; an owner is in scope by its
+    /// address whichever major its keys are of (`alarms.v2` §2.17).
+    spells_v1: bool,
+    spells_v2: bool,
 }
 
 /// A chunk usable as a literal position of a narrower selector.
@@ -123,7 +146,9 @@ impl AlarmScope {
     }
 
     /// A selector, refused when it is not a key expression, is not
-    /// base-relative (`zk2/…`), or reaches no `alarms.v1` key.
+    /// base-relative (`zk2/…`), or reaches no key of either major's
+    /// template (`zk2/*/*/alarms.v1/state/alarms/*`,
+    /// `zk2/*/*/alarms.v2/state/alarms/*`).
     pub fn parse(selector: &str) -> std::result::Result<AlarmScope, String> {
         let ke = OwnedKeyExpr::try_from(selector.to_owned())
             .map_err(|e| format!("{selector:?} is not a key expression: {e}"))?;
@@ -136,16 +161,20 @@ impl AlarmScope {
             ));
         }
         let template = KeyExpr::try_from(ALL).expect("the template is a key expression");
-        if !ke.intersects(&template) {
+        let template_v2 = KeyExpr::try_from(ALL_V2).expect("the template is a key expression");
+        let (spells_v1, spells_v2) = (ke.intersects(&template), ke.intersects(&template_v2));
+        if !spells_v1 && !spells_v2 {
             return Err(format!(
-                "{selector:?} reaches no alarms.v1 key \
-                 (zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>)"
+                "{selector:?} reaches no alarms key \
+                 (zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>, or \
+                 zk2/<system>/<service>/alarms.v2/state/alarms/<slot>)"
             ));
         }
         let system = literal(chunks.get(1));
         let service = system.as_ref().and_then(|_| literal(chunks.get(2)));
-        let alert_key = (chunks.len() == 7 && chunks[3..6] == ["alarms.v1", "state", "alarms"])
-            .then(|| chunks[6].to_owned());
+        let alert_key =
+            (spells_v1 && chunks.len() == 7 && chunks[3..6] == ["alarms.v1", "state", "alarms"])
+                .then(|| chunks[6].to_owned());
         let alarms = format!(
             "zk2/{}/{}/alarms.v1/state/alarms/{}",
             system.as_deref().unwrap_or("*"),
@@ -158,7 +187,75 @@ impl AlarmScope {
             alarms,
             system,
             service,
+            spells_v1,
+            spells_v2,
         })
+    }
+
+    /// The major the selector spells: `alarms.v2` where it reaches that
+    /// major's keys and no `alarms.v1` key, else `alarms.v1`. Across a face,
+    /// where no descriptor crosses, it is the deployment's word for the
+    /// owner's major (`alarms.v2` §2.11).
+    pub fn spelled(&self) -> Major {
+        if self.spells_v2 && !self.spells_v1 {
+            Major::V2
+        } else {
+            Major::V1
+        }
+    }
+
+    fn owner_chunks(&self) -> (&str, &str) {
+        (
+            self.system.as_deref().unwrap_or("*"),
+            self.service.as_deref().unwrap_or("*"),
+        )
+    }
+
+    /// What is subscribed to of the `alarms.v2` owners in scope: their
+    /// records and their words,
+    /// `zk2/<system>/<service>/alarms.v2/state/*/*` (`alarms.v2` §2.2,
+    /// §2.4).
+    pub fn v2_selector(&self) -> String {
+        let (system, service) = self.owner_chunks();
+        format!("zk2/{system}/{service}/alarms.v2/state/*/*")
+    }
+
+    /// The collection read of the `alarms.v2` owners in scope, their
+    /// records' snapshot and their words' (`alarms.v2` §2.12, §3,
+    /// collections 0 and 1): `zk2/<system>/<service>/alarms.v2/state/**`.
+    pub fn v2_get_selector(&self) -> String {
+        let (system, service) = self.owner_chunks();
+        format!("zk2/{system}/{service}/alarms.v2/state/**")
+    }
+
+    /// The `alarms.v2` records of the owners in scope, as an archive is
+    /// asked for them: `zk2/<system>/<service>/alarms.v2/state/alarms/*`.
+    pub fn v2_alarms_selector(&self) -> String {
+        let (system, service) = self.owner_chunks();
+        format!("zk2/{system}/{service}/alarms.v2/state/alarms/*")
+    }
+
+    /// The heartbeats covering `alarms.v2` of the owners in scope
+    /// (`alarms.v2` §2.7):
+    /// `zk2/<system>/<service>/freshness.v2/stream/heartbeat/alarms.v2`.
+    pub fn heartbeat_v2_selector(&self) -> String {
+        let (system, service) = self.owner_chunks();
+        zenkey_model::heartbeat::key(system, service, &v2::layout().iface)
+    }
+
+    /// Whether the record on `slot` of `addr` is in scope: its owner is,
+    /// and a selector that spells `alarms.v2` reaches its key.
+    pub fn selects_slot(&self, addr: &Addr, slot: u8) -> bool {
+        if !self.selects_owner(addr) {
+            return false;
+        }
+        !self.spells_v2
+            || zenkey_model::alarms::v2::alarm_key(
+                addr.system.as_str(),
+                addr.service.as_str(),
+                slot,
+            )
+            .is_ok_and(|k| self.selects_key(k.as_str()))
     }
 
     /// The selector as given.
@@ -225,13 +322,28 @@ impl AlarmScope {
             .unwrap_or_else(Scope::all)
     }
 
-    /// Whether `addr`'s alarms are in scope.
+    /// Whether `addr`'s alarms are in scope, either major's: a scope names
+    /// owners, not a major (`alarms.v2` §2.17).
     pub fn selects_owner(&self, addr: &Addr) -> bool {
-        KeyExpr::try_from(format!(
-            "zk2/{}/{}/alarms.v1/state/alarms/*",
-            addr.system, addr.service
-        ))
-        .is_ok_and(|k| self.ke.intersects(&k))
+        ["alarms.v1", "alarms.v2"].into_iter().any(|major| {
+            KeyExpr::try_from(format!(
+                "zk2/{}/{}/{major}/state/alarms/*",
+                addr.system, addr.service
+            ))
+            .is_ok_and(|k| self.ke.intersects(&k))
+        })
+    }
+
+    /// Whether the `alarms.v1` key `key` is in scope: a selector that
+    /// spells `alarms.v1` reaches it, or, one spelling `alarms.v2` alone,
+    /// its owner is in scope (`alarms.v2` §2.17).
+    fn selects_v1_key(&self, key: &str) -> bool {
+        if self.spells_v1 {
+            return self.selects_key(key);
+        }
+        AlarmRef::from_key(key)
+            .and_then(|r| format!("{}/{}", r.system, r.service).parse::<Addr>().ok())
+            .is_some_and(|a| self.selects_owner(&a))
     }
 
     /// Whether the key `key` is in scope.
@@ -265,6 +377,10 @@ pub struct BookSpec {
     /// the deployment's word stands for the descriptor: whether the face
     /// lets this reader GET the alarms. `None`: no face.
     pub face: Option<bool>,
+    /// Across a face, the deployment's word for the owner's major
+    /// (`alarms.v2` §2.11); `None`: the major the selector spells
+    /// ([`AlarmScope::spelled`]).
+    pub face_major: Option<Major>,
 }
 
 impl BookSpec {
@@ -275,6 +391,7 @@ impl BookSpec {
             routers: zenkey_model::budget::Routers::default(),
             clocks_synced: false,
             face: None,
+            face_major: None,
         }
     }
 
@@ -374,6 +491,9 @@ pub struct ArchivedAlarm {
     pub value: Option<Vec<u8>>,
     pub stamp: Option<Timestamp>,
     pub confirmed: bool,
+    /// CH's tag, when it came in an envelope: an `alarms.v2` record is read
+    /// under it (core §7.6).
+    pub tag: Option<zenkey_model::wire::Tag>,
 }
 
 // ─── the book ───────────────────────────────────────────────────────────────
@@ -381,7 +501,15 @@ pub struct ArchivedAlarm {
 /// What one descriptor of an instance says of `alarms.v1` (§2.13).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InstanceSeen {
+    /// The major the descriptor is read by (`alarms.v2` §2.1, §2.14 step
+    /// 2: `Major::of`), `None` where it lists neither.
+    major: Option<Major>,
+    /// Its entry of that major, with its token; `NotListed` where it lists
+    /// neither, `Unread` where it could not be read.
     listing: Listing,
+    /// The run it states, read (core §3.3): what an `alarms.v2` snapshot's
+    /// run is compared with (§2.15).
+    stated: Option<zenkey_model::wire::Run>,
     /// Its `meta.zid`, by value; `None` when it carries none.
     zid: Option<String>,
     /// The run it states (core §3.3), as the descriptor spells it; `None`
@@ -523,6 +651,10 @@ pub struct AlarmBook {
     /// The GET in flight: each owner's members it answered with a value,
     /// with their in-band stamps, for the views' re-read.
     pending_live: BTreeMap<Addr, Vec<(String, Option<zenkey_model::wire::Stamp>)>>,
+    /// `alarms.v2`'s half (#984's S3): each owner's slots, the alarms
+    /// another identity displaced, each owner's latest collection read, its
+    /// table, its epoch, and its archived records ([`v2`]).
+    v2: v2::Slots,
 }
 
 /// alarms.v1's layout for its heartbeat: the embedded standard revision's
@@ -548,12 +680,15 @@ fn alarms_class() -> zenkey_model::heartbeat::Class {
     alarms_layout().collections[alarms_index()].class
 }
 
-/// One owner's views: its alarms', following its one collection.
+/// One owner's views: its alarms', following its one collection, and its
+/// `alarms.v2` records' (#984's S3), whichever major it implements: an
+/// owner heartbeat's group of either is read.
 fn alarms_views() -> Views<Instant> {
     let mut v = View::new(alarms_layout().clone());
     v.follow_resource(zenkey::alarms::ALARMS);
     let mut views = Views::new();
     views.insert(v);
+    views.insert(v2::view());
     views
 }
 
@@ -606,6 +741,7 @@ impl AlarmBook {
             catalogs: Vec::new(),
             beats: BTreeMap::new(),
             pending_live: BTreeMap::new(),
+            v2: v2::Slots::default(),
         }
     }
 
@@ -736,22 +872,29 @@ impl AlarmBook {
                     .and_then(|ds| ds.get(&(addr.clone(), instance.clone())))
                     .map(|read| match read.descriptor() {
                         Some(d) => {
-                            let entry = d.interfaces.iter().find(|e| e.iface == am::IFACE);
+                            let major = Major::of(d.interfaces.iter().map(|e| e.iface.as_str()));
+                            let entry = major
+                                .and_then(|m| d.interfaces.iter().find(|e| e.iface == m.iface()));
                             InstanceSeen {
+                                major,
                                 listing: entry.map_or(Listing::NotListed, |e| Listing::Listed {
                                     token: e.token,
                                 }),
+                                stated: d.stated_run(),
                                 zid: d.meta.get("zid").and_then(|v| v.as_str()).map(zid_value),
                                 run: d.run.clone(),
                                 heartbeats: entry.is_some_and(|e| {
-                                    e.contract.strip_prefix("sha256:")
-                                        == Some(zenkey::alarms::FINGERPRINT)
+                                    e.iface == am::IFACE
+                                        && e.contract.strip_prefix("sha256:")
+                                            == Some(zenkey::alarms::FINGERPRINT)
                                 }),
                                 catalog: d.stated_catalog(),
                             }
                         }
                         None => InstanceSeen {
+                            major: None,
                             listing: Listing::Unread,
+                            stated: None,
                             zid: None,
                             run: None,
                             heartbeats: false,
@@ -853,7 +996,7 @@ impl AlarmBook {
         s: AlarmSample,
         envelope: crate::model::inband::Envelope,
     ) -> Option<AlarmTransition> {
-        if !self.scope.selects_key(&s.key) {
+        if !self.scope.selects_v1_key(&s.key) {
             return None;
         }
         let alarm = AlarmRef::from_key(&s.key)?;
@@ -970,7 +1113,14 @@ impl AlarmBook {
         at: Instant,
     ) -> Option<Applied> {
         let (owner, iface) = zenkey_model::heartbeat::covered(key)?;
-        if iface != alarms_layout().iface || !self.scope.selects_owner(&owner) {
+        if !self.scope.selects_owner(&owner) {
+            return None;
+        }
+        if iface == v2::layout().iface {
+            let views = self.views.entry(owner).or_insert_with(alarms_views);
+            return Some(v2::view_of_mut(views).apply(tag, stamp, body, at));
+        }
+        if iface != alarms_layout().iface {
             return None;
         }
         let view = alarms_of_mut(self.views.entry(owner.clone()).or_insert_with(alarms_views));
@@ -1075,9 +1225,9 @@ impl AlarmBook {
     /// step with it (`freshness.v2` §2.5). The next complete GET re-reads
     /// it ([`AlarmBook::seeded`]).
     pub fn reread_due(&self) -> bool {
-        self.views
-            .values()
-            .any(|vs| !alarms_of(vs).reread_due().is_empty())
+        self.views.values().any(|vs| {
+            !alarms_of(vs).reread_due().is_empty() || !v2::view_of(vs).reread_due().is_empty()
+        })
     }
 
     /// How many heartbeats the book read, every owner's, a group read for
@@ -1086,7 +1236,7 @@ impl AlarmBook {
     pub fn heartbeats_read(&self) -> u64 {
         self.views
             .values()
-            .map(|vs| alarms_of(vs).heartbeats())
+            .map(|vs| alarms_of(vs).heartbeats() + v2::view_of(vs).heartbeats())
             .sum()
     }
 
@@ -1203,16 +1353,25 @@ impl AlarmBook {
             o.gap = Some(Break { at, healed: None });
         }
         let keys: Vec<String> = self.keys.keys().cloned().collect();
-        keys.iter()
+        let mut out: Vec<AlarmTransition> = keys
+            .iter()
             .map(|k| self.transition_of(k, AlarmChange::Lost, None, Some(loss), at, wall))
-            .collect()
+            .collect();
+        out.extend(self.lose_v2(loss, at, wall));
+        out
     }
 
     /// An archive's last-known documents (core §4.4, S6): shown, never
     /// current, and every owner their keys name known by the archive.
     pub fn archived(&mut self, found: Vec<ArchivedAlarm>) {
         for a in found {
-            if !self.scope.selects_key(&a.key) {
+            if self.v2.archived(&self.scope, &a) {
+                if let Some(owner) = v2::owner_of(&a.key).filter(|o| self.scope.selects_owner(o)) {
+                    self.owner(&owner).known.insert(KnownBy::Archive);
+                }
+                continue;
+            }
+            if !self.scope.selects_v1_key(&a.key) {
                 continue;
             }
             let Some(r) = AlarmRef::from_key(&a.key) else {
@@ -1275,6 +1434,7 @@ impl AlarmBook {
                 out.push(self.transition_of(&k, AlarmChange::Judged, None, None, now, wall));
             }
         }
+        out.extend(self.sweep_v2(now, wall));
         out
     }
 
@@ -1300,7 +1460,7 @@ impl AlarmBook {
             .cloned();
         AlarmTransition {
             key: key.to_owned(),
-            alarm: e.alarm.clone(),
+            alarm: Some(e.alarm.clone()),
             change,
             firing: answer_of(firing),
             severity: doc.as_ref().map(|d| d.severity),
@@ -1316,10 +1476,59 @@ impl AlarmBook {
             },
             via,
             lost,
+            profile: None,
+            slot: None,
+            words: None,
+            record: None,
+            displaced: None,
         }
     }
 
     // ─── reading ────────────────────────────────────────────────────────
+
+    /// The major `addr` is read by (`alarms.v2` §2.1, §2.14 step 2): across
+    /// a face, the deployment's word ([`BookSpec::face_major`], else the
+    /// major the selector spells); else `alarms.v2` where any descriptor of
+    /// it read lists it, `alarms.v1` where one lists that and none
+    /// `alarms.v2`, and `None` where every one read lists neither, which is
+    /// not asked. With no descriptor of it read, the major whose read
+    /// answered for it, `alarms.v2` first, else `alarms.v1`: its answer is
+    /// then unobservable whichever it is.
+    pub fn major_of(&self, addr: &Addr) -> Option<Major> {
+        if self.spec.face.is_some() {
+            return Some(self.spec.face_major.unwrap_or_else(|| self.scope.spelled()));
+        }
+        let read: Vec<&InstanceSeen> = self
+            .owners
+            .get(addr)
+            .into_iter()
+            .flat_map(|o| o.instances.values())
+            .flatten()
+            .filter(|s| s.listing != Listing::Unread)
+            .collect();
+        if !read.is_empty() {
+            return [Major::V2, Major::V1]
+                .into_iter()
+                .find(|m| read.iter().any(|s| s.major == Some(*m)));
+        }
+        Some(if self.v2.answered(addr) {
+            Major::V2
+        } else {
+            Major::V1
+        })
+    }
+
+    /// `addr`'s presence as `major`'s reader asks it (§2.14 steps 1 and 2):
+    /// [`AlarmBook::presence_of`], an owner listed but read by the other
+    /// major not listed for this one.
+    pub fn presence_for(&self, addr: &Addr, major: Major) -> Presence {
+        match self.presence_of(addr) {
+            Presence::Present(Listing::Listed { .. }) if self.major_of(addr) != Some(major) => {
+                Presence::Present(Listing::NotListed)
+            }
+            p => p,
+        }
+    }
 
     /// `addr`'s presence (§2.14 step 1): across a face, the deployment's
     /// word; before any read, possibly incomplete; held, with what its
@@ -1443,10 +1652,15 @@ impl AlarmBook {
         })
     }
 
-    /// Whether `addr`'s alarms are known whole (§2.15).
+    /// Whether `addr`'s alarms are known whole (§2.15), by the major it is
+    /// read by ([`AlarmBook::major_of`]): `alarms.v2`'s one complete
+    /// snapshot, or `alarms.v1`'s seed and window.
     pub fn owner_set(&self, addr: &Addr, now: Instant) -> SetJudged {
+        if self.major_of(addr) == Some(Major::V2) {
+            return self.owner_set_v2(addr);
+        }
         am::owner_set(
-            self.presence_of(addr),
+            self.presence_for(addr, Major::V1),
             self.seed_of(addr),
             self.window(addr, now),
         )
@@ -1456,7 +1670,7 @@ impl AlarmBook {
     /// does not hold.
     pub fn reading(&self, key: &str, now: Instant, wall: SystemTime) -> Option<KeyReading> {
         let e = self.keys.get(key)?;
-        let presence = self.presence_of(&e.owner);
+        let presence = self.presence_for(&e.owner, Major::V1);
         let mut observations = Vec::new();
         let healed_by = |asked: Instant| self.loss.is_none_or(|l| asked > l.at);
         if let Some(declared) = self.declared {
@@ -1630,6 +1844,8 @@ impl AlarmBook {
             invalid,
             stamp: l.stamp.as_ref().map(stamp_report),
             via: l.via,
+            record: None,
+            at_s: None,
         })
     }
 
@@ -1661,11 +1877,14 @@ impl AlarmBook {
             .owners
             .keys()
             .map(|a| {
-                let alarms = self
-                    .keys_of(a)
-                    .filter_map(|k| self.reading(k, now, wall))
-                    .map(|r| (r.firing(), r.severity))
-                    .collect();
+                let alarms = if self.major_of(a) == Some(Major::V2) {
+                    self.v2_answers(a, now, wall)
+                } else {
+                    self.keys_of(a)
+                        .filter_map(|k| self.reading(k, now, wall))
+                        .map(|r| (r.firing(), r.severity))
+                        .collect()
+                };
                 (self.owner_set(a, now), alarms)
             })
             .collect();
@@ -1674,7 +1893,7 @@ impl AlarmBook {
             .map(|(set, alarms)| OwnerAlarms { set: *set, alarms })
             .collect();
         let mut out = am::any_firing(at_least, &owners, self.scope_read());
-        if self.refused > 0 && out.answer == Answer::No {
+        if (self.refused > 0 || self.v2.refused() > 0) && out.answer == Answer::No {
             out.answer = Answer::Unobservable;
             out.reason = Reason::AlarmUnobservable;
         }
@@ -2206,7 +2425,10 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(t.change, AlarmChange::Raised);
-        assert_eq!(t.alarm.alert_key, "a659f813308ad1da");
+        assert_eq!(
+            t.alarm.as_ref().map(|a| a.alert_key.as_str()),
+            Some("a659f813308ad1da")
+        );
         assert!(
             b.sample(put(t0, 10, doc("warning", "firing", 1), AlarmVia::Get))
                 .is_none(),

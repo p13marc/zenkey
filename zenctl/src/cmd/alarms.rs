@@ -1,6 +1,9 @@
-//! `alarms` (#800, AC) — the alarms.v1 alarms a selector reaches, read as
-//! the profile's reader reads them (`spec/profiles/alarms/v1.md` §2.14,
-//! §2.15, §5).
+//! `alarms` (#800, AC; #984's S3) — the alarms a selector reaches, either
+//! major's, read as the profile's reader reads them
+//! (`spec/profiles/alarms/v1.md` §2.14, §2.15, §5; `v2.md`): each owner by
+//! the major its descriptor lists, an `alarms.v2` owner's slots named by the
+//! table of the revision its descriptor names (`--contracts`, else
+//! retrieved).
 //!
 //! The reading is the engine's ([`zenkey_fleet::run_alarms`]): presence and
 //! descriptors, S4's GET merged with a window's subscription when `--for`
@@ -43,14 +46,14 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
         face_policy,
         binding,
         across_face,
+        contracts,
         catalog,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
-    let catalogs = ASKING.ask(zk2::load_catalogs(&crate::cli::ContractArgs {
-        contracts: Vec::new(),
-        catalog,
-    }));
+    let offline = crate::cli::ContractArgs { contracts, catalog };
+    let catalogs = ASKING.ask(zk2::load_catalogs(&offline));
+    let contracts = ASKING.ask(zk2::load_contracts(&offline));
     // No scope note here, as `timing` and `telemetry` give (#950): every
     // alarms.v1 key is plain state, `zk2/<s>/<v>/alarms.v1/state/alarms/<key>`,
     // so the verbatim chunks a wildcard excludes hold no alarm.
@@ -76,6 +79,7 @@ pub async fn run(cli: AlarmsArgs) -> Result<()> {
     ));
     spec.face = across_face.map(|f| f == FaceGrant::Granted);
     spec.catalogs = catalogs;
+    spec.contracts = contracts;
     let session = ASKING.ask(dep.session().await);
     // A window follows the owners' instance tokens, on a watch session of
     // its own (#830, core §8.1, 0.37); the reads stay on `session`.

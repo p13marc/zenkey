@@ -154,11 +154,9 @@ async fn a_raise_fires_once_per_sink_a_refresh_is_nothing_an_escalation_is_news_
         let t = n.alert.as_ref().expect("the alarm's change");
         assert_eq!(t.change, AlarmChange::Raised);
         assert_eq!(t.firing.answer, AlarmAnswerToken::Yes);
-        assert_eq!(t.alarm.alert_key, A_KEY);
-        assert_eq!(
-            (t.alarm.system.as_str(), t.alarm.service.as_str()),
-            ("lab", "svc")
-        );
+        let a = t.alarm.as_ref().expect("a named alarm's reference");
+        assert_eq!(a.alert_key, A_KEY);
+        assert_eq!((a.system.as_str(), a.service.as_str()), ("lab", "svc"));
         let wire = serde_json::to_value(n).expect("serializes");
         assert_eq!(wire["alert"]["change"], "raised");
         assert_eq!(wire["alert"]["document"]["state"], "firing");

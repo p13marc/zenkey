@@ -1,8 +1,9 @@
-//! `alarms.v1` (#800, AC): `zenctl alarms`'s report.
+//! `alarms.v1` (#800, AC) and `alarms.v2` (#984's S3): `zenctl alarms`'s
+//! report.
 
 use zenkey_fleet::report::{
-    AlarmAnswer, AlarmAnswerToken, AlarmLatest, AlarmSetVerdict, AlarmVia, AlarmsReport,
-    ClockGround, DoctorSeverity, KnownBy,
+    AlarmAnswer, AlarmAnswerToken, AlarmLatest, AlarmNamedBy, AlarmRow, AlarmSetVerdict, AlarmVia,
+    AlarmWords, AlarmsReport, ClockGround, DoctorSeverity, KnownBy,
 };
 
 use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without};
@@ -27,6 +28,45 @@ fn answer_word(a: AlarmAnswerToken) -> &'static str {
 
 fn says(a: &AlarmAnswer) -> String {
     format!("{} ({}) — {}", answer_word(a.answer), a.reason, a.says)
+}
+
+/// An `alarms.v2` alarm's name as the table shows it (`alarms.v2` §5): a
+/// table's rule with its labels, its words, its alert key alone, or its
+/// numbers, as in `rule 1, labels 2`.
+fn v2_name(r: &AlarmRow, w: &AlarmWords) -> String {
+    let labels = || {
+        w.labels
+            .iter()
+            .map(|(k, v)| format!(" {k}={v}"))
+            .collect::<String>()
+    };
+    match w.by {
+        AlarmNamedBy::Table | AlarmNamedBy::Words => {
+            format!("{}{}", w.rule.as_deref().unwrap_or_default(), labels())
+        }
+        AlarmNamedBy::Key => r
+            .alarm
+            .as_ref()
+            .map(|a| a.alert_key.clone())
+            .unwrap_or_default(),
+        AlarmNamedBy::Numbers => {
+            let rule = w
+                .index
+                .map_or_else(|| "rule not_available".to_owned(), |i| format!("rule {i}"));
+            match w.codes {
+                Some(c) => format!("{rule}, labels {c}"),
+                None => rule,
+            }
+        }
+    }
+}
+
+/// An instant in whole seconds since the Unix epoch, as RFC 3339.
+fn at_words(at_s: Option<i64>) -> String {
+    match at_s.and_then(|s| u64::try_from(s).ok()) {
+        Some(s) => zenkey_fleet::rfc3339_from_unix(s),
+        None => "absent".to_owned(),
+    }
 }
 
 /// `alarms.v1` (#800, AC): §5's answers, each key's and the scope's, in the
@@ -96,7 +136,8 @@ impl Render for AlarmsReport {
                 Cell::styled(mark, st),
                 Cell::text(&o.address),
                 Cell::text(format!(
-                    "{} ({}) — {}; {} alarm(s); known by {}{}",
+                    "{}{} ({}) — {}; {} alarm(s); known by {}{}{}",
+                    o.profile.map(|p| format!("{p}: ")).unwrap_or_default(),
                     o.verdict.as_str().replace('_', " "),
                     o.reason,
                     o.says,
@@ -104,6 +145,10 @@ impl Render for AlarmsReport {
                     known.join(", "),
                     o.window_s
                         .map(|w| format!("; window {w:.1}s"))
+                        .unwrap_or_default(),
+                    o.one_slot_each
+                        .as_ref()
+                        .map(|a| format!("; one slot each: {}", says(a)))
                         .unwrap_or_default()
                 )),
             ]);
@@ -118,12 +163,29 @@ impl Render for AlarmsReport {
                 AlarmAnswerToken::NotAsked => ("—", style::UNPROVEN),
             };
             let severity = r.severity.map(|s| format!(", {s}")).unwrap_or_default();
+            let owner = r
+                .key
+                .split('/')
+                .skip(1)
+                .take(2)
+                .collect::<Vec<_>>()
+                .join("/");
+            let name = match (&r.words, &r.alarm) {
+                (Some(w), _) => {
+                    let at = r
+                        .slot
+                        .map_or_else(|| "no slot".to_owned(), |s| format!("slot {s}"));
+                    format!("{owner} {at} · {}", v2_name(r, w))
+                }
+                (None, Some(a)) => format!("{}/{} {}", a.system, a.service, a.alert_key),
+                (None, None) => match r.slot {
+                    Some(s) => format!("{owner} slot {s}"),
+                    None => owner,
+                },
+            };
             alarms.row([
                 Cell::styled(mark, st),
-                Cell::text(format!(
-                    "{}/{} {}",
-                    r.alarm.system, r.alarm.service, r.alarm.alert_key
-                )),
+                Cell::text(name),
                 Cell::text(format!(
                     "firing: {} ({}{severity}) — {}",
                     answer_word(r.firing.answer),
@@ -132,6 +194,43 @@ impl Render for AlarmsReport {
                 )),
             ]);
             let mut detail = Vec::new();
+            if let Some(w) = &r.words {
+                let mut line = format!("    {}: ", r.profile.unwrap_or("alarms.v2"));
+                line.push_str(&match w.by {
+                    AlarmNamedBy::Table => "named by its owner's table".to_owned(),
+                    AlarmNamedBy::Words => "named by its slot's words".to_owned(),
+                    AlarmNamedBy::Key => format!(
+                        "by words, shown by its alert key: its words not taken ({})",
+                        w.reason.as_deref().unwrap_or_default()
+                    ),
+                    AlarmNamedBy::Numbers => format!(
+                        "unnamed ({}), shown by its numbers: it matches no reference",
+                        w.reason.as_deref().unwrap_or_default()
+                    ),
+                });
+                if let Some(summary) = &w.summary {
+                    line.push_str(&format!(" — {summary:?}"));
+                }
+                if let Some(c) = &w.category {
+                    line.push_str(&format!(", category {c}"));
+                }
+                if let Some(a) = &w.argument {
+                    line.push_str(&format!(", argument {a}"));
+                }
+                if let Some(a) = &r.alarm {
+                    line.push_str(&format!(
+                        "; reference {} {} {}",
+                        a.system, a.service, a.alert_key
+                    ));
+                }
+                detail.push(line);
+            }
+            if let Some(d) = r.displaced {
+                detail.push(format!(
+                    "    displaced from its slot: {d} — another identity's record took it (alarms.v2 \
+                     §2.6)"
+                ));
+            }
             if let Some(l) = &r.latest {
                 let what = match l.latest {
                     AlarmLatest::Firing => "firing",
@@ -143,6 +242,11 @@ impl Render for AlarmsReport {
                     .document
                     .as_ref()
                     .map(|d| format!(" {} {:?}", d.rule, d.summary))
+                    .or_else(|| {
+                        l.record
+                            .as_ref()
+                            .map(|_| format!(", at {}", at_words(l.at_s)))
+                    })
                     .unwrap_or_default();
                 let invalid = l
                     .invalid
@@ -162,7 +266,15 @@ impl Render for AlarmsReport {
                 ));
             }
             detail.push(format!("    past its horizon: {}", says(&r.stale)));
-            detail.push(format!("    key re-derives: {}", says(&r.rederives)));
+            detail.push(format!(
+                "    {}: {}",
+                if r.profile.is_some() {
+                    "its words derive its key"
+                } else {
+                    "key re-derives"
+                },
+                says(&r.rederives)
+            ));
             if !r.problems.is_empty() {
                 detail.push(format!("    its document: {}", r.problems.join(", ")));
             }
@@ -173,10 +285,15 @@ impl Render for AlarmsReport {
                 );
             }
             if let Some(lk) = &r.last_known {
-                let doc = match (&lk.document, lk.deleted) {
-                    (Some(d), _) => format!("{} {} {:?}", d.state.as_str(), d.rule, d.summary),
-                    (None, true) => "deleted".to_owned(),
-                    (None, false) => "undecodable".to_owned(),
+                let doc = match (&lk.document, &lk.record, lk.deleted) {
+                    (Some(d), _, _) => format!("{} {} {:?}", d.state.as_str(), d.rule, d.summary),
+                    (None, Some(rec), _) => format!(
+                        "{} record, at {}",
+                        rec["state"].as_str().unwrap_or("a"),
+                        at_words(rec["at"].as_i64().map(|ms| ms.div_euclid(1000)))
+                    ),
+                    (None, None, true) => "deleted".to_owned(),
+                    (None, None, false) => "undecodable".to_owned(),
                 };
                 detail.push(format!(
                     "    last-known at {} ({}): {doc} — last-known, never current",
@@ -209,11 +326,11 @@ impl Render for AlarmsReport {
                 notes.push(
                     Note::coverage(format!(
                         "read {ns} through `{}`: {} service(s) in scope holding an instance \
-                         token, {} of them listing alarms.v1 — found by descriptor, never by \
-                         interface token",
+                         token, {} of them listing alarms.v1 or alarms.v2, each read by the major \
+                         its descriptor lists — found by descriptor, never by interface token",
                         p.selector, p.services, p.listing
                     ))
-                    .cite("alarms.v1 §2.13"),
+                    .cite("alarms.v1 §2.13, alarms.v2 §2.1"),
                 );
                 if let Some(why) = zenkey_fleet::model::catalog::incomplete_reason(
                     p.complete,

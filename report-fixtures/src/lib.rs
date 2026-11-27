@@ -1601,6 +1601,274 @@ pub fn telemetry_frames_report() -> TelemetryReport {
 /// alarm, a phantom key, an unconfirmed one past its horizon, a resolved
 /// one, and an absent owner's alarm shown last-known — over owners each
 /// counted by its verdict, the scope's answer the finding.
+/// `zenctl alarms` over both majors (#984's S3, `alarms.v2` §5): an
+/// `alarms.v2` owner, established by one complete snapshot, with A named by
+/// its table on slot 0, an alarm by words on slot 1 named by its words, one
+/// whose words are not taken on slot 2 shown by its alert key, an unnamed
+/// one on slot 3 shown by its numbers, and C `rebound` off its slot; beside
+/// an `alarms.v1` owner's A, drawn as it always was.
+pub fn alarms_v2_report() -> AlarmsReport {
+    use std::collections::BTreeMap;
+    use zenkey_model::alarms::{AlarmRef, Severity};
+    let answer = |answer, reason: &str, says: &str| AlarmAnswer {
+        answer,
+        reason: reason.into(),
+        says: says.into(),
+    };
+    let firing = || {
+        answer(
+            AlarmAnswerToken::Yes,
+            "firing",
+            "its owner says it fires, and confirmed it within 900 s",
+        )
+    };
+    let fresh = || {
+        answer(
+            AlarmAnswerToken::No,
+            "fresh",
+            "its owner confirmed it within 900 s",
+        )
+    };
+    let r = |system: &str, service: &str, key: &str| AlarmRef {
+        system: system.into(),
+        service: service.into(),
+        alert_key: key.into(),
+    };
+    let record = |rule: serde_json::Value, labels: Option<u32>, key: Option<u64>| {
+        let mut v = serde_json::json!({"state": "firing", "severity": "warning", "rule": rule,
+                                       "at": 1_794_062_759_000_i64, "argument": "not_available"});
+        if let Some(l) = labels {
+            v["labels"] = l.into();
+        }
+        if let Some(k) = key {
+            v["key"] = k.into();
+        }
+        v
+    };
+    let seen = |rec: serde_json::Value| {
+        Some(AlarmSeen {
+            latest: AlarmLatest::Firing,
+            document: None,
+            invalid: None,
+            stamp: None,
+            via: AlarmVia::Get,
+            record: Some(rec),
+            at_s: Some(1_794_062_759),
+        })
+    };
+    let words =
+        |by, rule: Option<&str>, labels: &[(&str, &str)], summary: Option<&str>| AlarmWords {
+            by,
+            rule: rule.map(Into::into),
+            index: None,
+            labels: labels
+                .iter()
+                .map(|(n, v)| ((*n).to_owned(), (*v).to_owned()))
+                .collect::<BTreeMap<_, _>>(),
+            codes: None,
+            summary: summary.map(Into::into),
+            category: None,
+            argument: None,
+            reason: None,
+        };
+    let slot = |n: u8,
+                alarm: Option<AlarmRef>,
+                w: AlarmWords,
+                rederives: AlarmAnswer,
+                rec: serde_json::Value| AlarmRow {
+        key: format!("zk2/lab/svc/alarms.v2/state/alarms/{n}"),
+        alarm,
+        profile: Some("alarms.v2"),
+        slot: Some(n),
+        words: Some(w),
+        displaced: None,
+        firing: firing(),
+        stale: fresh(),
+        rederives,
+        severity: Some(Severity::Warning),
+        latest: seen(rec),
+        problems: vec![],
+        foreign_stamp: false,
+        last_known: None,
+    };
+    let table = || {
+        answer(
+            AlarmAnswerToken::NotAsked,
+            "table",
+            "the slot's record names a table's rule, which its table names",
+        )
+    };
+    let a = slot(
+        0,
+        Some(r("lab", "svc", "a659f813308ad1da")),
+        AlarmWords {
+            index: Some(1),
+            ..words(
+                AlarmNamedBy::Table,
+                Some("link_down"),
+                &[("peer", "r2"), ("port", "eth0")],
+                Some("Link to r2 on eth0 is down"),
+            )
+        },
+        table(),
+        record(1.into(), Some(2), None),
+    );
+    let w = slot(
+        1,
+        Some(r("lab", "svc", "719d159937e54eb8")),
+        words(
+            AlarmNamedBy::Words,
+            Some("disk_full"),
+            &[("mount", "/var")],
+            Some("/var is 97% full"),
+        ),
+        answer(
+            AlarmAnswerToken::Yes,
+            "strict",
+            "the key is the document's, by the strict recipe",
+        ),
+        record("not_available".into(), None, Some(0x719d_1599_37e5_4eb8)),
+    );
+    let k = slot(
+        2,
+        Some(r("lab", "svc", "16991d91fb818ca6")),
+        AlarmWords {
+            reason: Some("no_words".into()),
+            ..words(AlarmNamedBy::Key, None, &[], None)
+        },
+        answer(
+            AlarmAnswerToken::NotAsked,
+            "no_words",
+            "no words were read on the slot",
+        ),
+        record("not_available".into(), None, Some(0x1699_1d91_fb81_8ca6)),
+    );
+    let u = slot(
+        3,
+        None,
+        AlarmWords {
+            index: Some(9),
+            codes: Some(4),
+            reason: Some("rule".into()),
+            ..words(AlarmNamedBy::Numbers, None, &[], None)
+        },
+        table(),
+        record(9.into(), Some(4), None),
+    );
+    let c = AlarmRow {
+        key: "zk2/lab/svc/alarms.v2/state/alarms/4".into(),
+        alarm: Some(r("lab", "svc", "f3ba0819e7b57762")),
+        profile: Some("alarms.v2"),
+        slot: None,
+        words: Some(AlarmWords {
+            index: Some(1),
+            ..words(
+                AlarmNamedBy::Table,
+                Some("link_down"),
+                &[("peer", "r3"), ("port", "eth1")],
+                Some("Link to r3 on eth1 is down"),
+            )
+        }),
+        displaced: Some("rebound"),
+        firing: answer(
+            AlarmAnswerToken::No,
+            "rebound",
+            "another alarm's record is on its slot under its run, so it resolved",
+        ),
+        stale: answer(AlarmAnswerToken::NotAsked, "not_firing", "it is not firing"),
+        rederives: answer(
+            AlarmAnswerToken::NotAsked,
+            "no_record",
+            "no record is held on the slot",
+        ),
+        severity: Some(Severity::Warning),
+        latest: None,
+        problems: vec![],
+        foreign_stamp: false,
+        last_known: None,
+    };
+    let old = AlarmRow {
+        key: "zk2/lab/old/alarms.v1/state/alarms/a659f813308ad1da".into(),
+        alarm: Some(r("lab", "old", "a659f813308ad1da")),
+        profile: None,
+        slot: None,
+        words: None,
+        displaced: None,
+        firing: firing(),
+        stale: fresh(),
+        rederives: answer(
+            AlarmAnswerToken::Yes,
+            "strict",
+            "the key is the document's, by the strict recipe",
+        ),
+        severity: Some(Severity::Info),
+        latest: None,
+        problems: vec![],
+        foreign_stamp: false,
+        last_known: None,
+    };
+    AlarmsReport {
+        namespace: "acme".into(),
+        selector: "zk2/lab/*/alarms.v1/state/alarms/*".into(),
+        presence: Some(AlarmsPresence {
+            selector: "zk2/lab/*/@zk/**".into(),
+            complete: true,
+            cut_off_during: false,
+            services: 2,
+            listing: 2,
+        }),
+        face: None,
+        window_s: None,
+        clock: ClockGround::DeploymentWord,
+        asked: vec![
+            "zk2/lab/*/@zk/**".into(),
+            "zk2/lab/*/alarms.v1/state/alarms/*".into(),
+            "zk2/lab/*/alarms.v2/state/**".into(),
+        ],
+        any_firing: AlarmScopeAnswer {
+            at_least: Severity::Warning,
+            answer: AlarmAnswerToken::Yes,
+            reason: "any_firing".into(),
+            says: "an alarm at or above the severity fires".into(),
+            firing: 4,
+            established: 2,
+            unobservable: 0,
+            not_asked: 0,
+        },
+        owners: vec![
+            AlarmOwnerRow {
+                address: "lab/old".into(),
+                known_by: vec![KnownBy::Presence],
+                verdict: AlarmSetVerdict::Established,
+                reason: "answered".into(),
+                says: "its owner answered a complete GET".into(),
+                alarms: 1,
+                window_s: None,
+                profile: None,
+                one_slot_each: None,
+            },
+            AlarmOwnerRow {
+                address: "lab/svc".into(),
+                known_by: vec![KnownBy::Presence],
+                verdict: AlarmSetVerdict::Established,
+                reason: "snapshot".into(),
+                says: "its owner answered one complete snapshot of its alarms".into(),
+                alarms: 5,
+                window_s: None,
+                profile: Some("alarms.v2"),
+                one_slot_each: Some(answer(
+                    AlarmAnswerToken::Yes,
+                    "one_slot_each",
+                    "no two slots of its present run name one alert key",
+                )),
+            },
+        ],
+        alarms: vec![old, a, w, k, u, c],
+        lost: 0,
+        unobservable: None,
+    }
+}
+
 pub fn alarms_report() -> AlarmsReport {
     use zenkey_model::alarms::{Alarm, AlarmRef, Severity, State};
     let answer = |answer, reason: &str, says: &str| AlarmAnswer {
@@ -1648,7 +1916,11 @@ pub fn alarms_report() -> AlarmsReport {
     };
     let row = |system: &str, service: &str, key: &str| AlarmRow {
         key: format!("zk2/{system}/{service}/alarms.v1/state/alarms/{key}"),
-        alarm: r(system, service, key),
+        alarm: Some(r(system, service, key)),
+        profile: None,
+        slot: None,
+        words: None,
+        displaced: None,
         firing: absent(),
         stale: absent(),
         rederives: absent(),
@@ -1665,6 +1937,8 @@ pub fn alarms_report() -> AlarmsReport {
             invalid: None,
             stamp: stamp(clock),
             via,
+            record: None,
+            at_s: None,
         })
     };
     let firing = AlarmRow {
@@ -1783,6 +2057,7 @@ pub fn alarms_report() -> AlarmsReport {
             deleted: false,
             stamp: stamp("d4"),
             confirmed: true,
+            record: None,
         }),
         ..row("lab", "svc", "a659f813308ad1da")
     };
@@ -1795,6 +2070,8 @@ pub fn alarms_report() -> AlarmsReport {
             says: says.into(),
             alarms: n,
             window_s: None,
+            profile: None,
+            one_slot_each: None,
         }
     };
     AlarmsReport {
