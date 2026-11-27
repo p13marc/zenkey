@@ -11413,7 +11413,7 @@ async fn alarms_v2_s6_a_hung_owner_goes_stale_at_the_copys_horizon() {
         ("given by --contracts", &given[..]),
         ("retrieved", &[&given[..2], &given[4..]].concat()[..]),
     ] {
-        let run = bus.zenctl(&args).await;
+        let run = bus.zenctl(args).await;
         let a = v2_slot_of(&run, "lab/svc", 0).expect("slot 0's row");
         assert_eq!(
             (&a["firing"]["answer"], &a["firing"]["reason"]),
