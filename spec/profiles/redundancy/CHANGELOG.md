@@ -1,8 +1,143 @@
-# `redundancy.v1` changelog
+# `redundancy` changelog
 
-Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
-what deliberately did not, and why. A breaking change is a new major, a new
-file, never an entry here ([`../README.md`](../README.md)).
+Versions of the texts of [`v1.md`](v1.md) (`redundancy.v1`) and
+[`v2.md`](v2.md) (`redundancy.v2`). Each entry records what changed, what
+deliberately did not, and why. A breaking change is a new major, a new
+file, never an entry here ([`../README.md`](../README.md)). An entry
+headed `redundancy.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
+`v1.md`'s.
+
+## redundancy.v2 0.1 — 2026-11-28: a new major: no session stamp, the fence by the incumbent's run, the state answered by snapshot (#987)
+
+`redundancy.v2` is `redundancy.v1` without the session's HLC. It is a
+new file, [`v2.md`](v2.md), and no entry of `v1.md`'s: it changes what a
+conforming candidate puts on the wire, and what its followers read. It
+restates `redundancy.v1` 0.11 by reference, and is written against core
+0.118. Its status is `experimental`: no adopter's mapping uses it yet.
+ZenSight's two singletons move in a later chunk of #987.
+
+**What it replaces.**
+- **§2.10, the stamps and the fence.** A candidate's session runs
+  without timestamping, as any owner's does, and `meta.zid` is the
+  core's SHOULD again. A follower accepts a sample only under one of
+  its incumbent's runs, as its descriptors state them. The run is read
+  from every form that carries one, a seed's snapshot and a heartbeat
+  among them. A sample no descriptor attributes is held for one read of
+  the descriptors.
+- **§2.6, the state.** A governed state of this major is answered by
+  snapshot. A follower whose incumbent changes reads it again.
+- **§2.2, the declaration.** Two reasons more: `majors` before v1's
+  four, and `explicit_stream` after them.
+- **§2.13 and §2.15.** An owner on a first hop implements no interface
+  this major governs. A tool reads governance from both majors, and
+  shows each candidate's run.
+- **§2.17, new:** both majors side by side.
+
+**Five guarantees depart from `redundancy.v1`.**
+1. **An unattributed sample is held, where v1 discarded it.** v1
+   discarded a sample stamped with an id no incumbent's descriptor
+   states. Here a follower holds a sample whose run no descriptor
+   states, until one read of the descriptors, asked after it arrived,
+   has ended. For that round trip it holds a value it has not
+   attributed.
+   - A follower that cannot read descriptors, its GET refused or cut
+     off, accepts nothing under a new run until it can.
+2. **At a takeover the follower's view is the new incumbent's.** v1's
+   follower kept the last incumbent's values until the new one put each
+   again. Here it seeds again, and a member the new incumbent's complete
+   snapshot leaves out leaves its view.
+3. **An explicit stream is refused, where v1 fenced it.** An `@stream`
+   sample carries no envelope, so no run. A governed contract of this
+   major declares none, `explicit_stream`, and its instance does not
+   start. v1 fenced one by its session's stamp.
+4. **Two candidates can share a run.** Two live candidates draw one run
+   1 time in 2^32. A follower then accepts both until the heal. Two
+   sessions' zids, 128 bits, effectively never meet. A candidate that
+   reads its own run in another's descriptor draws again, which narrows
+   it to candidates that never read each other.
+5. **A contract listing both majors is invalid to a reader of both,**
+   `majors`. Core E002 refuses it, so no contract that loads holds it.
+   v1's `declarations.json` reads one as v1's, for a reader of v1
+   alone, and still does.
+
+**What a follower gains.**
+- **A seed during a split is fenced.** Each incumbent's snapshot comes
+  under its own run, and the follower merges its incumbent's.
+- **So is a heartbeat.** Another run's is no heartbeat of its
+  incumbent's, neither a lost delivery nor a divergence.
+- **No router breaks the fence.** A router rewrites no envelope, where
+  it re-stamps or drops a Zenoh timestamp beyond its delta.
+- **No clock guard holds a candidate's write,** since none carries a
+  Zenoh timestamp.
+- **The put is 26 bytes shorter,** 17 B where `ledger.v1`'s `balance`
+  is 43 B.
+
+**Settled here, where the design left a choice.**
+- **A snapshot is attributed by its header's run,** for every entry it
+  lists. The design read an entry's own run where its flags carry one.
+  An entry's own run is its owner's earlier run (core §7.5), which a
+  follower that joined later never read in a descriptor. By the entry it
+  would discard the incumbent's own values.
+- **A held sample is decided as soon as a descriptor states its run,**
+  by a read or a put heard, and at the latest when the read ends. One
+  read runs at a time. A sample that arrives while one runs waits for
+  the next.
+- **A member's one held value** is the one core §4.3's consumer rule
+  would keep: the higher seq within one run, the later arrival across
+  two.
+- **A heartbeat rides `freshness.v2`'s keys,** not the interface's. A
+  follower fences the heartbeat that covers the governed interface, and
+  the interface's group in an owner heartbeat.
+- **`majors` reads the interface as governed** for the checks after it,
+  so a contract can draw five reasons.
+- **The first hop's MUST NOT is this text's own.** Core §8.1 names
+  `redundancy.v1` alone there. This text states the same of this major,
+  and `link.v2` 0.28's `presence_required` reads both.
+- **An address's governance** is computed from its candidates'
+  revisions as the fleet reads v1's today. A `redundancy.v1` revision
+  and a `redundancy.v2` one with one election agree.
+- **The probe MAY attribute a reply by its error's run,** where an
+  instance states no `meta.zid`.
+
+**Evidence.** [`conformance/v2/`](conformance/v2/) holds three files.
+- `declarations.json`: 38 contracts and 16 addresses.
+- `descriptors.json`: 29 descriptors.
+- `fences.json`: 48 samples, 13 sequences and 8 draws.
+- **Computed twice.** One script read the text into code and wrote the
+  files. A second, written from the finished text, computed every
+  expectation again from the inputs. They share no code, and agree on
+  all 152 cases. Both are the drafter's, kept out of the repository. No
+  file was blessed.
+- [`scenarios-v2.md`](scenarios-v2.md) holds 15 sections: v1's twelve,
+  restated where a fence, a stamp or an answer changes, and §13 to §15.
+
+**The bytes, measured again and computed.** `redundancy.v1` today, on
+the black boxes of 2026-11-27, through one router on loopback, run
+twice. Each matches the design's figure.
+- `ledger.v1`'s `balance` is a 13-B payload, stamped with its
+  candidate's own zid, on its state and its stream alike.
+- A candidate's descriptor is 340 B marked standby, and 325 B put again
+  unmarked at its takeover. Both state the same 32-bit run.
+- The takeover's first put is under that run, at seq 0.
+- A GET of the state is answered per key: one reply, the mutation's
+  bytes.
+- Computed: the put is 43 B, and 17 B without the stamp. A takeover of
+  100 members of 200 B is 25.9 KB of puts, and 23.3 KB. A follower's
+  seed of them is 28.3 KB in 100 replies, and one snapshot of 22.5 KB.
+
+**Not verified.**
+- **No implementation has run a fixture or a scenario.** The reference
+  implements none of this yet.
+- **No byte crossed a wire under this major.** The payloads measured
+  are `redundancy.v1`'s.
+- **The descriptor and sample race** was not reproduced at a run's
+  change within an instance. `scenarios-v2.md` §14 forces it with a
+  delayed subscriber.
+
+**What deliberately did not change.** The election, the heal, a
+vacancy, the standby's mark and what it holds, twin detection, the
+tokenless set, `external`, and §5's four questions are v1's, by
+reference. Eventual single writer, never a lock.
 
 ## 0.11 — 2026-11-21: editorial: a split's seed under consolidation `None`, no rule changed (#609)
 
