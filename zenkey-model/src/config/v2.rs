@@ -38,11 +38,11 @@ use super::{
     PersistPlan, REDACTED, Refusal, Schema, SetReply, SetRequest, Source, StartError, Time, Value,
 };
 use crate::authoring::{Fanout, Kind, Replies, Serving};
-use crate::contract::{Body as ContractBody, Contract, Rate};
+use crate::contract::{self, Body as ContractBody, Contract, Rate};
 use crate::envelope::{Cause, Code as ErrorCode, ErrorForm};
-use crate::grammar::KindToken;
+use crate::grammar::{IfaceId, KindToken};
 use crate::packed::{self, FieldKind, Item, Layout};
-use crate::schema::{ArtifactData, SchemaKind, TypeId};
+use crate::schema::{Artifact, ArtifactData, SchemaKind, TypeId};
 use crate::wire::{self, Envelope, Request, Run, Seq, Stamp, Tag};
 
 /// The profile's id.
@@ -966,7 +966,12 @@ impl std::error::Error for Unread {}
 
 /// A contract's packed files, `(stem, document)`.
 fn packed_files(c: &Contract) -> Vec<(&str, &Json)> {
-    c.artifacts
+    packed_files_of(&c.artifacts)
+}
+
+/// The packed files among a contract's artifacts, `(stem, document)`.
+fn packed_files_of(artifacts: &BTreeMap<String, Artifact>) -> Vec<(&str, &Json)> {
+    artifacts
         .values()
         .filter(|a| a.kind == SchemaKind::Packed)
         .filter_map(|a| match &a.data {
@@ -2845,9 +2850,21 @@ impl Resources {
     /// A loaded contract as the lint reads it.
     #[must_use]
     pub fn of(c: &Contract) -> Self {
+        Self::of_parts(&c.uses, &c.resources, &c.artifacts)
+    }
+
+    /// A contract's `uses`, resolved resources and artifacts as the lint
+    /// reads them, before the contract is whole: what the loader asks
+    /// [`derived_types`] with, for E051 (core §7.6, §9.2).
+    #[must_use]
+    pub fn of_parts(
+        uses: &[IfaceId],
+        resources: &[contract::Resource],
+        artifacts: &BTreeMap<String, Artifact>,
+    ) -> Self {
         let tref = |t: &TypeId| match t {
             TypeId::Packed { name, schema } => TypeRef::Packed {
-                stem: c.artifacts.get(schema).map(|a| a.name.clone()),
+                stem: artifacts.get(schema).map(|a| a.name.clone()),
                 name: name.clone(),
             },
             TypeId::JsonSchema { name, schema } => TypeRef::JsonSchema {
@@ -2857,9 +2874,8 @@ impl Resources {
             _ => TypeRef::Other,
         };
         Self {
-            uses: c.uses.iter().map(ToString::to_string).collect(),
-            resources: c
-                .resources
+            uses: uses.iter().map(ToString::to_string).collect(),
+            resources: resources
                 .iter()
                 .map(|r| Res {
                     template: r.template.as_str().to_owned(),
@@ -2885,7 +2901,7 @@ impl Resources {
                     },
                 })
                 .collect(),
-            packed: packed_files(c)
+            packed: packed_files_of(artifacts)
                 .into_iter()
                 .map(|(s, d)| (s.to_owned(), d.clone()))
                 .collect(),
@@ -2903,6 +2919,11 @@ impl Resources {
     /// A packed type's layout: `None` for one no listed file defines once,
     /// or whose declaration does not read.
     fn layout(&self, t: &TypeRef) -> Option<Layout> {
+        self.resolved(t).map(|(_, l)| l)
+    }
+
+    /// A packed type's file's stem and its layout, as [`Self::layout`].
+    fn resolved(&self, t: &TypeRef) -> Option<(String, Layout)> {
         let TypeRef::Packed { stem, name } = t else {
             return None;
         };
@@ -2912,7 +2933,8 @@ impl Resources {
         };
         let files = self.files();
         let r = resolve(&reference, &files)?;
-        packed::layout_in(r.doc, r.name).ok()
+        let layout = packed::layout_in(r.doc, r.name).ok()?;
+        Some((r.stem.to_owned(), layout))
     }
 }
 
@@ -3051,6 +3073,77 @@ pub fn lint(r: &Resources) -> Vec<Finding> {
 
 /// The `set` operations' template prefix, `set/<group>`.
 pub const SET_PREFIX: &str = "set/";
+
+/// The packed types this profile derives in a contract, each `(stem,
+/// name)`: the types E051 does not read (core §7.6, "A derived type may be
+/// 0"; §9.2, cascade 7; config.v2 0.6 §3, "One in 16 has the layout tag 0,
+/// and E051 does not read it: its author writes no field of it").
+///
+/// A type is derived as §3's lint tells one, "field by field": a §3
+/// resource names it in a derived role, and its layout's items are that
+/// role's derivation's. The roles: `config`'s type (`Record`); each
+/// settable group's `set/<group>`'s request (its `Set<T>`), response
+/// (`Record`) and error (`Error`); and `confirm`, `cancel`, `extend` and
+/// `persist`'s request (`Control`), response and error. A contract that
+/// does not use `config.v2`, or whose declaration is invalid, derives none;
+/// a type no such resource names, or one that differs from its
+/// derivation, is its author's, and E051 reads it.
+#[must_use]
+pub fn derived_types(r: &Resources) -> BTreeSet<(String, String)> {
+    let mut out = BTreeSet::new();
+    if !r.uses.iter().any(|u| u == PROFILE) {
+        return out;
+    }
+    let Some(ann) = r.resource(CONFIG).and_then(|c| c.annotations.get(GROUPS)) else {
+        return out;
+    };
+    let Ok(iface) = Interface::read(ann, &r.files()) else {
+        return out;
+    };
+    let d = &iface.derived;
+    let mut roles: Vec<(&TypeRef, &Layout)> = Vec::new();
+    if let Some(Res {
+        body: ResBody::Data { type_, .. },
+        ..
+    }) = r.resource(CONFIG)
+    {
+        roles.push((type_, d.record()));
+    }
+    let sets = iface
+        .groups
+        .iter()
+        .filter(|g| g.settable())
+        .filter_map(|g| Some((format!("{SET_PREFIX}{}", g.name), d.set(&g.name)?.1)));
+    let controls = CONTROLS.iter().map(|t| ((*t).to_owned(), d.control()));
+    for (template, request) in sets.chain(controls) {
+        if let Some(Res {
+            body:
+                ResBody::Operation {
+                    request: req,
+                    response,
+                    error,
+                    ..
+                },
+            ..
+        }) = r.resource(&template)
+        {
+            roles.push((req, request));
+            roles.push((response, d.record()));
+            if let Some(e) = error {
+                roles.push((e, d.error()));
+            }
+        }
+    }
+    for (t, want) in roles {
+        if let TypeRef::Packed { name, .. } = t
+            && let Some((stem, layout)) = r.resolved(t)
+            && layout.items == want.items
+        {
+            out.insert((stem, name.clone()));
+        }
+    }
+    out
+}
 
 /// [`lint`] over a loaded contract that uses `config.v2`; none for any
 /// other contract.

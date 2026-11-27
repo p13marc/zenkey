@@ -24,7 +24,7 @@
 //! An artifact's id is `sha256:<hex>` of its bytes (protobuf) or of its JCS
 //! form (JSON Schema). A type's identity is (kind, name, artifact id).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 
@@ -159,12 +159,23 @@ struct PackedFile {
     artifact: String,
 }
 
+/// A type whose layout tag is 0, in a packed file with no E028: E051's
+/// candidate (core §9.2, cascade 7), until the contract's resources say
+/// whether a profile derives it (§7.6, [`SchemaSet::report_tag_zero`]).
+struct TagZero {
+    stem: String,
+    name: String,
+    at: String,
+}
+
 /// The compiled schemas of one contract.
 pub struct SchemaSet {
     artifacts: BTreeMap<String, Artifact>,
     proto: Vec<ProtoFile>,
     json: Vec<JsonFile>,
     packed: Vec<PackedFile>,
+    /// E051's candidates, in the order the files list them.
+    tag_zero: Vec<TagZero>,
     /// Set when a listed file failed to load, so unresolved references of
     /// that kind are not reported twice.
     proto_failed: bool,
@@ -201,12 +212,15 @@ const WELL_KNOWN: &[(&str, &[&str])] = &[
 
 impl SchemaSet {
     /// Loads and compiles every listed schema file, relative to `dir`.
+    /// E051 waits for the contract's resources:
+    /// [`SchemaSet::report_tag_zero`].
     pub fn load(dir: &Path, sec: &SchemasSection, report: &mut Report) -> Self {
         let mut set = Self {
             artifacts: BTreeMap::new(),
             proto: Vec::new(),
             json: Vec::new(),
             packed: Vec::new(),
+            tag_zero: Vec::new(),
             proto_failed: false,
             json_failed: false,
             packed_failed: false,
@@ -298,19 +312,17 @@ impl SchemaSet {
             // E051 (core §9.2, cascade 7; #1152): a type whose layout tag is
             // 0, the tag a record of any other kind carries (§7.5), read in
             // every type with a layout, named by a resource or not. A file
-            // with E028 has no form every implementation hashes alike.
+            // with E028 has no form every implementation hashes alike. A
+            // type a profile derives is set aside (§7.6), which the
+            // resources tell: `report_tag_zero`.
             if unsafe_number.is_none() {
                 for (name, layout) in &read.types {
                     if layout.as_ref().is_some_and(|l| l.tag() == 0) {
-                        report.push(Diagnostic::error(
-                            "E051",
-                            format!("{at} types.{name}"),
-                            "its layout form has the tag 0, the tag of a record of any other \
-                             kind, so a tool holding no type would sniff its records (core \
-                             §7.6): swap two of its fields of different forms, move a bound, or \
-                             add a reserved code or a marker; a rename keeps the tag"
-                                .to_owned(),
-                        ));
+                        self.tag_zero.push(TagZero {
+                            stem: stem.clone(),
+                            name: name.clone(),
+                            at: format!("{at} types.{name}"),
+                        });
                     }
                 }
             }
@@ -719,6 +731,37 @@ impl SchemaSet {
     #[must_use]
     pub fn artifacts(&self) -> &BTreeMap<String, Artifact> {
         &self.artifacts
+    }
+
+    /// Whether a listed packed file, with no E028, defines a type whose
+    /// layout tag is 0: E051's candidates, before a profile's derivation
+    /// sets any aside.
+    #[must_use]
+    pub fn has_tag_zero(&self) -> bool {
+        !self.tag_zero.is_empty()
+    }
+
+    /// E051 (core §9.2, cascade 7), per type: each type of a listed packed
+    /// file with no E028 whose layout tag is 0, named by a resource or not,
+    /// "but a type a profile derives (§7.6)". `derived` holds those, each
+    /// `(stem, name)`: the contract's loader asks the profiles that derive
+    /// types (`config.v2`'s `Record` and each `Set<T>`, config.v2 §3,
+    /// [`crate::config::v2::derived_types`]).
+    pub fn report_tag_zero(&self, derived: &BTreeSet<(String, String)>, report: &mut Report) {
+        for t in &self.tag_zero {
+            if derived.contains(&(t.stem.clone(), t.name.clone())) {
+                continue;
+            }
+            report.push(Diagnostic::error(
+                "E051",
+                t.at.clone(),
+                "its layout form has the tag 0, the tag of a record of any other kind, so a \
+                 tool holding no type would sniff its records (core §7.6): swap two of its \
+                 fields of different forms, move a bound, or add a reserved code or a marker; \
+                 a rename keeps the tag"
+                    .to_owned(),
+            ));
+        }
     }
 }
 
