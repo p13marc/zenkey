@@ -5473,7 +5473,159 @@ def _round126_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + missing(index, "| [`link.v1`](link/v1.md) | 0.21 | draft | zenoh-modem | 0.32 |",
                           "| [`link.v2`](link/v2.md) | 0.27 | draft | zenoh-modem | 0.108 |"),
                 [True] * 4))
+    out += _round126_e051(root, core, flat, missing)
+    out += _round126_owner_heartbeats(root, flat, missing)
     return out
+
+
+def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple[str, Any, Any]]:
+    """Core 0.117's E051 as zk2py reads it, the survey, F-618, F-619 and
+    the frame's tag 0 (round 126)."""
+    from . import config_v2 as c2, echo_tool, packed, zk2c
+    from .contract import load_contract
+    from .packed_tag_live import survey
+
+    spec = root.parent
+    obs = flat("observer.md")
+    log = flat("CHANGELOG.md")
+    out: list[tuple[str, Any, Any]] = []
+    tag = _load_json(root / "contracts" / "schemas" / "packed" / "tag.json")
+    out.append(("core 0.117 §7.6 \"Never 0\", §9.2's E051 per type and cascade 7's clause, as zk2py reads them: "
+                "tag.json's Zero and Unnamed draw E051, Fine at 11 none; a file with E028 draws none; Grow at its "
+                "maximum of 100 has the tag 11, and at 127 had 0",
+                [[w.split(": ")[1] for _, w in packed.tag_zero(packed.lint(tag), "tag.json")],
+                 packed.lint(tag).types["Fine"].tag,
+                 load_contract(root / "contracts" / "e028-packed-tag.toml").codes,
+                 *[packed.lint({"types": {"G": {"fields": [{"name": "a", "type": "int", "minimum": 0, "maximum": m},
+                                                          packed.MARKER]}}}).types["G"].tag for m in (100, 127)]]
+                + missing(core, "- **Never 0.** A type whose tag is 0 is E051 (§9.2).",
+                          "| E051 | a packed type whose layout tag is 0 (§7.6), the tag a record of any other kind "
+                          "carries (§7.5) | per type |",
+                          "- E051 reads a type with none of E038 to E045, in a file without E028. Only such a type "
+                          "has a layout form whose JCS bytes every implementation agrees on (§9.6). It reads every "
+                          "type the file defines, whether a resource names it or not, as E038 to E045 do.",
+                          "- **Its tag may be 0.** One revision in 16 has the tag 0, which an owner heartbeat's CH "
+                          "and a record of any other kind carry too. No lint refuses it, as E051 refuses a packed "
+                          "type at 0 (§9.2).",
+                          "still matches its tag 1 time in 15: a type's tag is from 1 to 15.")
+                + missing(obs, "A record of any other kind carries 0, and no packed type's does: a contract that "
+                               "declares a packed type at the tag 0 is invalid (core §9.2, E051)."),
+                [["Unnamed", "Zero"], 11, ["E028"], 11, 0]))
+    # F-618: E044 is a reference's, and takes no type out of E051.
+    e044 = load_contract(root / "contracts" / "e044-packed-place.toml").codes
+    out.append(("F-618 (round 126): cascade 7's \"none of E038 to E045\" holds E044, a reference's finding; zk2py "
+                "reads E051 beside it, as the reference does (packed_tag_live: an explicit stream's type at the tag "
+                "0 draws E044 and E051 at both), and cascade 8's \"(E038 to E045)\" so too; E044 is per reference, "
+                "and reads only the types a resource names",
+                [e044, "| E044 | a packed type with no CH to carry its tag: an explicit stream's type, or an "
+                       "attachment (§7.1) | per reference |" in core]
+                + missing(core, "a packed declaration with no finding (E038 to E045)."),
+                [["E044", "E044"], True]))
+    # The survey, by zk2py's reading of §7.6, over the three roots it may read.
+    s = survey(spec.parent)
+    clean = [r for r in s["rows"] if r["tag"] is not None]
+    zero = sorted((r["file"].split("/")[-1], r["type"], r["e028"]) for r in clean if r["tag"] == 0)
+    stated = [(r["file"].split("/")[-1], r["at"]) for r in s["stated"] if r["tag"] == 0]
+    out.append(("core 0.117's survey, recomputed over spec/, examples/zk2/ (its .history) and "
+                "zenkey/tests/contracts/: 287 declarations with no finding of their own in 97 files, the entry's "
+                "count; at the tag 0, the two cases' types and frame/layouts.json's Tick, as the entry says; and one "
+                "the entry does not name, derive.json case 2's derived Record (F-619)",
+                [len(clean), len({r["file"] for r in clean}), zero, stated]
+                + missing(log, "287 declarations in 97 files, each published bundle's included.",
+                          "- **`frame/layouts.json`'s `Tick`** has it."),
+                [287, 97, [("layouts.json", "Tick", False), ("tag-unsafe.json", "Zero", True),
+                           ("tag.json", "Unnamed", False), ("tag.json", "Zero", False)],
+                 [("derive.json", "/cases[2]/expect/derived/Record")]]))
+    der = _load_json(spec / "profiles" / "config" / "conformance" / "v2" / "derive.json")
+    decl = c2.read_groups(der["cases"][2]["groups"], c2.Docs([("schema", der["schema"])]))
+    v2c = flat("profiles/config/v2.md")
+    # the group's bound moved, 12 to 13: the Record's tag moves with it
+    moved = {"types": {**der["schema"]["types"], "Modulation": {"fields": [
+        {**der["schema"]["types"]["Modulation"]["fields"][0], "maximum": 13}]}}}
+    out.append(("F-619 (round 126): config.v2's derive.json case 2 declares a contract group alone, whose derived "
+                "Record has the tag 0, so a contract that carries it is E051 (the reference's zk2 config derive "
+                "writes it, and zk2 contract lint refuses it: packed_tag_live); config.v2 names no E051, and the "
+                "derivation fixes the form core §7.6's fixes would change: a bound is the device's wire",
+                [decl.valid, c2.layouts(c2.derive(decl))["Record"]["tag"],
+                 c2.layouts(c2.derive(c2.read_groups(der["cases"][2]["groups"], c2.Docs([("schema", moved)]))))[
+                     "Record"]["tag"], "E051" in v2c]
+                + missing(v2c, "**The derived types** live in the contract's packed files.",
+                          "The lint compares each with its derivation, field by field, names and descriptions of "
+                          "the types aside.",
+                          "**A bound is the wire.** Moving one is a breaking revision (core §9.8).")
+                + missing(core, "An author moves it by changing the form: two fields of different forms swapped, a "
+                                "bound moved, a reserved code or a marker added."),
+                [True, 0, 10, False]))
+    # The open question: a frame's own tag at 0 (frame/layouts.json's tick-pow2).
+    lay = _load_json(root / "frame" / "layouts.json")
+    frame0 = zk2c.write("frame", 16, 0x1234, 7, 0, bytes.fromhex("0000000a00301bc080"))
+    row = echo_tool.row_of("zk2/lab/node/tick.v1/stream/tick", False, len(frame0), zk2c.ENCODING, frame0)
+    out.append(("the frame's tag 0, read (round 126's open question): frame/layouts.json's tick-pow2 has the "
+                "frame tag 0; core §7.7 reads a frame with its declaration, CH's tag against the frame's, and "
+                "observer §7.3 and §7.6 show one whose declaration a tool does not hold by its envelope, never "
+                "sniffed, whatever its tag: zk2py's echo row (and zenctl echo, packed_tag_live) shows a frame at CH "
+                "tag 0 so; core 0.117 leaves a frame's tag 0 to its own issue",
+                [[x["expect"]["tag"] for x in lay["layouts"] if x["name"] == "tick-pow2"], hex(frame0[0]),
+                 row["sniffed"], (row.get("frame") or {}).get("form")]
+                + missing(core, "- CH's tag is not the frame's (`tag`);", "A frame's tag is its declaration's (§7.7).")
+                + missing(obs, "- **A frame** (core §7.7) is read with its frame resource's declaration, never as "
+                               "one record of its type: §7.6.",
+                          "- **A frame it cannot read.** A frame whose declaration the tool does not hold is shown "
+                          "by its envelope: its run, its seq and its size. - Its body is never sniffed as a record "
+                          "(§7.3).")
+                + missing(log, "- **A frame's tag** (§7.7) is the frame form's, 0 for one declaration in 16, and no "
+                               "lint reads it."),
+                [[0], "0xa0", None, "frame"]))
+    return out
+
+
+def _round126_owner_heartbeats(root: Path, flat: Any, missing: Any) -> list[tuple[str, Any, Any]]:
+    """link.v1 0.21's owner_heartbeats and owner_heartbeat_denied, link.v2
+    0.27's none, and F-620 (round 126)."""
+    import re
+
+    from . import link
+
+    spec = root.parent
+    l1, l2 = flat("profiles/link/v1.md"), flat("profiles/link/v2.md")
+    plan1 = _load_json(spec / "profiles" / "link" / "conformance" / "plan.json")["cases"]
+    plan2 = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    c18 = plan1[18]
+    given = _link_interfaces(c18)
+
+    def warned(owner: Any) -> list[str]:
+        got = link.plan(c18["policy"], c18["implements"], given, owner_heartbeats=owner)
+        return [f["at"] for fp in got["faces"] for f in fp["findings"] if f["code"] == "owner_heartbeat_denied"]
+
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("link.v1 0.21 §2.3 and §2.9, as zk2py's plan reads them: only plan.json's case 18 gives "
+                "owner_heartbeats; case 18's deployment warns at b1, b2 alone at none, and none named is case 17's "
+                "plan; v2/plan.json's case 53 alone gives it, and link.v2 0.27 says a link.v2 plan draws none",
+                [[i for i, c in enumerate(plan1) if "owner_heartbeats" in c], warned(["b1", "b2"]), warned(["b2"]),
+                 link.plan(c18["policy"], c18["implements"], given) == plan1[17]["expect"],
+                 [i for i, c in enumerate(plan2) if "owner_heartbeats" in c]]
+                + missing(l1, "- **The deployment may say more.** It may name the listed services whose owner "
+                              "heartbeats it turns on (`freshness.v2` §2.4). The plan reads that for one warning "
+                              "alone (§2.9). Where the deployment names none, the plan reads every listed "
+                              "service's owner heartbeats as off.",
+                          "the plan warns, once for the service (`owner_heartbeat_denied`).",
+                          "- **The deployment's word, never the bus's.** A generator reads no descriptor. Where the "
+                          "deployment names none, nothing is warned.")
+                + missing(l2, "draws no `owner_heartbeat_denied`: the `link` key crosses wherever a heartbeat "
+                              "does."),
+                [[18], ["b1"], [], True, [53]]))
+    lv1 = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", l1)
+    out.append(("F-620 (round 126): link.v2's header restates link.v1 at text 0.20, while link.v1 is at 0.21 and "
+                "link.v2 0.27's §0 names 0.21's warning; the earlier entries move that line with each link.v1 rule "
+                "(\"The header restates link.v1 text 0.20\", at link.v2 0.19)",
+                [lv1.group(1) if lv1 else None, "It restates [`link.v1`](v1.md), text 0.20, by reference (§0)." in l2]
+                + missing(l2, "- §2.9's \"No owner heartbeat crosses\" is replaced, and with it the warning "
+                              "`owner_heartbeat_denied`")
+                + missing(flat("profiles/link/CHANGELOG.md"), "**The header** restates `link.v1` text 0.20, and is "
+                                                              "written against core 0.108"),
+                ["0.21", True]))
+    return out
+
 
 def _round123_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """health.v2 0.2, editorial (#609, round 123; #986 Q2): its header, its
