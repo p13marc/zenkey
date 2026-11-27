@@ -6,6 +6,14 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `check face --format json` carries the plan's warnings (#1173)
+
+`link.v1` §2.3. No flag is new, and no exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `check face --format json`, `ndjson`: the plan's warnings and refusals on stderr alone, so a script never read `owner_heartbeat_denied`, or any other face plan's warning (`interval_over_horizon`, `not_packed`, …), the plan's own (`face_policy`'s `no_arq`, `history_across_face`, …) or a refused principal | three row kinds after the verdict's: `face_warning` for each face plan's warning (`code`, `severity`, `face`, `at`: `owner_heartbeat_denied` at its service), and `warning` and `refusal` as `acl gen`'s rows spell them | none moves the verdict. The table and stderr are unchanged, and the envelope's `notes` do not repeat them. `check-face.trycmd`'s JSON case over `tests/cmd/fixtures/link/beacon.*` |
+
 ## Unreleased (`main`, zk2) — owner heartbeats behind a `link.v1` face, and a packed type at the tag 0 (#1145, #1152)
 
 `link.v1` 0.21 §2.3, §2.9; `link.v2` 0.27 §0, §2.9; core 0.117 §7.6,

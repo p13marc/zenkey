@@ -2248,6 +2248,54 @@ the windows are the ones given: whether each owner runs with its window is its c
     assert_eq!(envelope["judgement"]["answer"], "established");
     assert_eq!(envelope["comparison"]["answer"], "established");
     assert!(envelope.get("windows").is_none(), "the windows are rows");
+
+    // The plan's warnings and refusals (#1173): rows after the verdict's,
+    // and neither the table nor the notes, which `plan_notes` says them
+    // before.
+    let mut warned = fx::face_check_clean();
+    warned.warnings.push(zenkey_fleet::report::AclWarning {
+        kind: zenkey_fleet::report::AclWarningKind::FacePolicy,
+        about: Some("radio".into()),
+        text: "no_arq at arq: …".into(),
+        cite: "link.v2 §2.1".into(),
+    });
+    warned
+        .face_warnings
+        .push(zenkey_fleet::report::LinkFinding::new(
+            zenkey_model::link::Code::OwnerHeartbeatDenied,
+            Some("radio"),
+            "lab/radio-a",
+        ));
+    warned.refusals.push(zenkey_fleet::report::AclRefusal {
+        principal: "ghost".into(),
+        reason: "it runs service \"h9/tc\", which the enrollment does not declare".into(),
+        cite: "§11.1".into(),
+    });
+    assert_eq!(table(&warned), table(&fx::face_check_clean()));
+    assert_eq!(notes(&warned), notes(&fx::face_check_clean()));
+    let out = ndjson(&warned);
+    let rows: Vec<serde_json::Value> = out
+        .lines()
+        .skip(1)
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let kinds: Vec<&str> = rows.iter().map(|r| r["row"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["face", "warning", "face_warning", "refusal"]);
+    assert_eq!(
+        rows[2],
+        serde_json::json!({
+            "row": "face_warning",
+            "code": "owner_heartbeat_denied",
+            "severity": "warning",
+            "face": "radio",
+            "at": "lab/radio-a",
+        })
+    );
+    let envelope: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+    for key in ["warnings", "face_warnings", "refusals"] {
+        assert!(envelope.get(key).is_none(), "{key} are rows");
+    }
+    assert_eq!(envelope["judgement"]["answer"], "not_established");
 }
 
 /// The explanation answers per direction with the rules that decided, deny

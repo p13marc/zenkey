@@ -507,7 +507,16 @@ impl Render for FaceCheck {
     fn envelope(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut e = envelope_without(
             self,
-            &["faces", "findings", "windows", "transport", "comparison"],
+            &[
+                "faces",
+                "findings",
+                "windows",
+                "transport",
+                "comparison",
+                "warnings",
+                "face_warnings",
+                "refusals",
+            ],
         );
         // The comparison's verdict rides the envelope, its findings the rows.
         e.insert(
@@ -517,10 +526,15 @@ impl Render for FaceCheck {
         e
     }
 
-    /// Five row kinds: each face's block as read, each finding of §2.15,
+    /// Eight row kinds: each face's block as read, each finding of §2.15,
     /// §2.11 and `link.v2` §2.19, each window when windows were asked, each
     /// transport key of a `link.v2` policy, and each way the block differs
-    /// from the plan.
+    /// from the plan; then the plan's own words, which move no verdict
+    /// (#1173): each `warning` and `refusal` as `acl gen`'s rows spell them,
+    /// and each face plan's warning (`link.v1` §2.3) as a `face_warning`,
+    /// with its face and where it points. Their prose is not among the
+    /// notes: `cmd::acl::plan_notes` says it on stderr in every format,
+    /// before the report, so a note would say it twice.
     fn rows(&self, out: &mut dyn FnMut(Row)) {
         for f in &self.faces {
             out(Row::of("face", f));
@@ -536,6 +550,15 @@ impl Render for FaceCheck {
         }
         for f in &self.comparison.findings {
             out(Row::of("difference", f));
+        }
+        for w in &self.warnings {
+            out(Row::of("warning", w));
+        }
+        for f in &self.face_warnings {
+            out(Row::of("face_warning", f));
+        }
+        for r in &self.refusals {
+            out(Row::of("refusal", r));
         }
     }
 
