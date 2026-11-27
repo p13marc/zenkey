@@ -344,6 +344,7 @@ class _Loader:
         for role, req in doc.get("requires", {}).items():
             self.check_requirement(role, req)
         self.check_overlaps(resources)
+        self.check_tag_zero(resources)
 
         if self.check_file_name and self.c.path.name != f"{self.c.interface}.toml":
             self.diag("W107", f"file is not named {self.c.interface}.toml")
@@ -351,6 +352,37 @@ class _Loader:
         if self.c.valid:
             self.canonicalize(doc)
         return self.c
+
+    def check_tag_zero(self, resources: dict[str, Any]) -> None:
+        """§9.2's E051 over the schemas' candidates (core 0.117, cascade 7),
+        "but a type a profile derives (§7.6)": a type ``config.v2`` derives
+        from the declaration, as §3's lint tells one, by its resource and its
+        derivation field by field (:func:`zk2py.config_v2.derived_types`).
+        Every other candidate draws E051, per type."""
+        cands = self.schemas.tag_zero
+        if not cands:
+            return
+        derived: set[tuple[str, str]] = set()
+        if "config.v2" in {f"{u.name}.v{u.major}" for u in self.uses} and isinstance(resources.get("config"), dict):
+            from . import config_v2
+
+            stems = {a.id: a.name for a in self.schemas.packed_files}
+            named: dict[str, dict[str, tuple[str, str]]] = {}
+            for text, types in self.c.types.items():
+                for role, obj in types.items():
+                    if obj.get("kind") == PACKED and obj.get("schema") in stems:
+                        named.setdefault(text, {})[role] = (stems[obj["schema"]], obj["name"])
+            spec = resources["config"]
+            ann: dict[str, Any] = {}
+            ann.update(self.defaults.get("annotations") or {})
+            ann.update((self.defaults.get(spec.get("kind")) or {}).get("annotations") or {})
+            ann.update(spec.get("annotations") or {})
+            if "config.groups" in ann:
+                docs = config_v2.Docs([(a.name, a.data) for a in self.schemas.packed_files])
+                derived = config_v2.derived_types(ann["config.groups"], docs, named)
+        for art, name, where in cands:
+            if (art.name, name) not in derived:
+                self.diag("E051", where)
 
     def check_annotations(self, table: dict[str, Any], where: str, resource: str | None = None) -> None:
         """E020 and W105 over one table (§9.2). A key is ``<profile>.<key>``

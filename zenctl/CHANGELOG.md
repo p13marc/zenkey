@@ -6,6 +6,18 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — owner heartbeats behind a `link.v1` face, and a packed type at the tag 0 (#1145, #1152)
+
+`link.v1` 0.21 §2.3, §2.9; `link.v2` 0.27 §0, §2.9; core 0.117 §7.6,
+§9.2. One enrollment key is new. No flag is new, and no exit code
+changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| an enrollment's `[[service]]`: `address`, `implements`, `bindings`, `calls`; `owner_heartbeat` refused as an unknown field, exit 2 | `owner_heartbeat = true`: the deployment turns the service's owner heartbeats on (`freshness.v2` §2.4). It changes no grant | `false` when absent, as the runtime's `ServiceConfig::owner_heartbeat` is off unless set |
+| `acl gen --face-policy`, `check face`: nothing said of an owner that turns its owner heartbeats on behind a `link.v1` face | the face's plan warns `owner_heartbeat_denied`, `at` the service, where the enrollment turns them on for a listed service that implements an interface whose heartbeat crosses the face: no owner heartbeat crosses a `link.v1` face, and an interface they cover sends no heartbeat of its own | a note, as every plan warning is: `acl gen` still writes the block, and `check face`'s verdict stands. A `link.v2` face draws none, its `link` key crossing where a heartbeat does. `acl-gen.trycmd` and `check-face.trycmd` over `tests/cmd/fixtures/link/beacon.*` |
+| `--contracts` with a packed type whose layout tag is 0: loaded | refused as an invalid contract, `E051` at the type, as every lint error is, on every verb that loads contracts | core §9.2: 0 is the tag of a record of any other kind, so a tool holding no type would sniff its records. No published revision has one |
+
 ## Unreleased (`main`, zk2) — the answers to zk2py rounds 116 to 123 (#986, #609)
 
 Observer 0.36 §4.1, `desired.v2` 0.2 §2.10, §2.12, §2.17 step 4,

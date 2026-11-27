@@ -13,6 +13,32 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.37 — 2026-11-27: editorial: §7.3's tag 0 is no packed type's, after core 0.117's E051, no keyword rule changed (#1152)
+
+Core 0.117 makes a packed type whose layout tag is 0 a lint error, E051
+([`CHANGELOG.md`](CHANGELOG.md)). §7.3 said one packed type in 16
+carries the tag 0, as a record of any other kind does, and sniffed it.
+
+**What changed.**
+- **§7.3, "Tag 0".** A record of any other kind carries 0, and no
+  packed type a contract writes does: a contract that declares one at 0
+  is invalid. A type a profile derives may (core §7.6, zk2py's F-619),
+  and a tool that holds no contract sniffs its record. The sniff itself
+  is unchanged.
+- **§7.5, "Why the tag".** Another packed type matches a type's tag 1
+  time in 15, where every tag matched 1 time in 16: a packed type's tag
+  is from 1 to 15.
+
+**What deliberately did not change.**
+- **No rule.** A tool still sniffs a payload whose tag is 0, and still
+  refuses `tag` under a tag that is not its type's.
+- **A heartbeat** keeps its revision's tag, 0 for 1 revision in 16 (core
+  §7.5). §7.3 reads a heartbeat by its envelope's form, never as a
+  record, so the tag 0 makes it no sniffed payload.
+- **No case moved.** `envelope/tags.json` holds no packed type at the
+  tag 0.
+- **The header** is still written against core 0.108.
+
 ## 0.36 — 2026-11-27: editorial: what a tool shows of a held stamp that answers a body its user gave it, and zenoh's facts named by no release, no keyword rule changed (#609, #986, #1165)
 
 zk2py's round 116 found a tool's raw GET read two ways (F-572), and its

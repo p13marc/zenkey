@@ -616,7 +616,12 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `tests/link_face.rs`' `v2_s3_the_near_router_stamps_nothing` shows no
   timestamp onto the face from the block, and N's own without it. Since
   0.15 (#1107) `plan_faces` fills `Deployment::users` from the
-  enrollment's `user`s (`near_opens_user`, explained by `link_says`), and
+  enrollment's `user`s (`near_opens_user`, explained by `link_says`).
+  Since link.v1 0.21 (#1145) it fills `Deployment::owner_heartbeats` from
+  each service's `owner_heartbeat` (`ServiceSpec`, false when absent, no
+  grant moved), so a link.v1 face's plan warns `owner_heartbeat_denied`
+  (`model::acl`'s `an_owner_heartbeat_behind_a_link_v1_face_is_warned_of`).
+  And
   `far_json5` names the far principal's user inside `transport`
   (`auth.usrpwd.user`, its `password` and `dictionary_file` placeholders,
   both the deployment's; the block's comment says what follows unfilled,

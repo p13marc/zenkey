@@ -1,0 +1,34 @@
+# Two beacons behind one link.v1 face (link.v1 §2.3, §2.9; #1145). The
+# deployment turns lab/b1's owner heartbeats on (`owner_heartbeat`,
+# freshness.v2 §2.4): no owner heartbeat crosses a link.v1 face, and
+# beacon.v2's heartbeat, which does, is one b1 then sends no more. The
+# plan warns `owner_heartbeat_denied` at b1. lab/b2 sends heartbeats, as
+# every owner does by default, and draws nothing.
+
+[[principal]]
+user     = "b1"
+services = ["lab/b1"]
+
+[[principal]]
+user     = "b2"
+services = ["lab/b2"]
+
+[[principal]]
+user  = "ground"
+tools = ["console"]
+
+[[service]]
+address         = "lab/b1"
+implements      = ["beacon.v2", "freshness.v2"]
+owner_heartbeat = true
+
+[[service]]
+address    = "lab/b2"
+implements = ["beacon.v2", "freshness.v2"]
+
+[[tool]]
+name = "console"
+
+[tool.bindings.beacon]
+interface = "beacon.v2"
+providers = ["lab/*"]

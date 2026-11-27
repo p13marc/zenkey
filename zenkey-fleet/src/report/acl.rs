@@ -157,6 +157,14 @@ pub struct ServiceSpec {
     /// The operations it calls.
     #[serde(default)]
     pub calls: Vec<CallsSpec>,
+    /// Whether the deployment turns its owner heartbeats on
+    /// (`freshness.v2` §2.4, `zenkey::ServiceConfig::owner_heartbeat`):
+    /// read by a face policy's plan alone, which warns of a `link.v1` face
+    /// that a heartbeat of one of its interfaces crosses, since no owner
+    /// heartbeat crosses one (`link.v1` §2.3, §2.9; #1145). It changes no
+    /// grant: a consumer is granted both keys already (§11.1 Consume).
+    #[serde(default)]
+    pub owner_heartbeat: bool,
 }
 
 /// An archive (§4.4): Own on its prefix, Consume on what it records.

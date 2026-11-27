@@ -32593,3 +32593,275 @@ rules still.
 124's, not on this branch. F-616 and F-617 are resolved.
 
   F-365 stays open as #965's.
+
+## At core 0.117, observer 0.37, link.v1 0.21 and link.v2 0.27
+
+Round 126 read this tree at a5055e41 (#1145, #1152), its black boxes
+built from a5055e41. Four text versions moved: core 0.117 (E051),
+observer 0.37 (editorial), `link.v1` 0.21 (`owner_heartbeats` and
+`owner_heartbeat_denied`) and `link.v2` 0.27 (none of it). Each
+changelog entry was read first, then each hunk it names.
+
+### The entries, read against the tree
+
+zk2py diffed `spec/`, `examples/zk2/` and `zenkey/tests/contracts/`
+between 507dc65a and this tree: 19 files, `spec/CLAUDE.md` among them,
+unread.
+- **Every count an entry states holds:** `plan.json` 19 cases, `v2/plan.json`
+  54; `RULES.md`'s rule ids 86, its rules 298; `packed/vectors.json`'s
+  14 layouts inside the canonical domain; `Grow`'s form, sha256
+  `3f95fe8a…` and tag 11, its three reads at 11 with their bytes.
+- **The cases are as the entries say:** `e051-packed-tag`'s `Zero` and
+  `Unnamed` at 0 and `Fine` at 11; `e028-packed-tag`'s E028 alone.
+
+### The walk, before and after
+
+- **Re-keyed** (67a4a022): 7 readings counted the plan files' cases.
+  Each now takes the tree's. **8671 of 8673.** The two failures were the
+  new cases, zk2py's to move: `e051-packed-tag` and `plan.json`'s case
+  18.
+- **After the moves:** `just py-conformance` **8680 of 8680**, with
+  `_round126_readings`.
+
+### E051, written from the text first
+
+`packed.tag_zero` reads a linted file's clean types, and `schemas` reads
+it for a packed file with no E028 (a0de38f8). It was committed before
+the two cases were opened, and passed both, and `Grow`, on the first
+run. **None was wrong.**
+- **E044 takes no type out.** zk2py read cascade 7's "none of E038 to
+  E045" as cascade 8's "a packed declaration with no finding (E038 to
+  E045)" reads it. The reference does the same (F-618).
+- **The codec is unchanged.** A type at 0 still writes and reads, as
+  `frame/layouts.json`'s `Tick` does. Only a contract that lists one is
+  invalid.
+
+**The linters side by side** (`packed_tag_live`): all 304 contract files
+under the three roots, zk2py and `zk2 contract lint`.
+- **The errors agree on each.** E051 is drawn by `e051-packed-tag`
+  alone, twice at both.
+- **The warnings differ on one:** `e001-interface`, where zk2py adds
+  W107 beside E001. That is not this round's.
+
+### The survey
+
+Every packed document under `spec/`, `examples/zk2/` (its `.history`
+included) and `zenkey/tests/contracts/`: an object whose `types` maps
+names to records, wherever it sits in a file. Each tag is zk2py's.
+- **299 declarations, 287 with no finding of their own, in 97 files:**
+  the entry's count. zk2py reads no `zenkey/bundles/`.
+- **At the tag 0, four:** `tag.json`'s `Zero` and `Unnamed`, the case's;
+  `tag-unsafe.json`'s `Zero`, under E028; and `frame/layouts.json`'s
+  `Tick`, as the entry says. No published revision and no adopter's
+  mapping has one.
+- **One more, outside a `types` member:** `config.v2`'s `derive.json`
+  writes the derived types of each case as `expect.derived`. Of its 36,
+  case 2's `Record` has the tag 0. The entry does not name it (F-619).
+
+### The frame's tag 0, read
+
+The question: a frame's own tag is 0 for one declaration in 16, and
+nothing lints it. Does the text say what a reader does with a frame form
+at tag 0? **Yes.**
+- **The tree has one:** `frame/layouts.json`'s `tick-pow2`, frame tag 0,
+  over `Tick`, layout tag 0.
+- **A reader with the declaration** compares CH's tag with the frame's
+  (core §7.7: "CH's tag is not the frame's (`tag`)"). 0 against 0 reads.
+- **A tool without it** reads the form, never the tag. Observer §7.3: "A
+  frame (core §7.7) is read with its frame resource's declaration, never
+  as one record of its type". §7.6: "A frame whose declaration the tool
+  does not hold is shown by its envelope: its run, its seq and its size.
+  Its body is never sniffed as a record (§7.3)."
+- **So E051's hazard does not arise.** A record of any other kind travels
+  in a mutation's, an event's or a value's form, never in a frame's. §7.3's
+  "Any other payload is sniffed, unless its CH carries a tag other than
+  0" is read beside its own frame item, which takes no tag.
+- **Live, on a zenoh-python router on port 0:** a frame at CH tag 0 and
+  one at 5, whose declaration no tool holds. `zenctl echo` shows each as
+  `<zk2c frame, run 1234, seq 7, 9 bytes>`, and zk2py's echo row by its
+  envelope. A mutation at tag 0 is sniffed by both, and one at 5 shown as
+  a packed record. **Not a finding.**
+
+### `owner_heartbeat_denied`, written from the text first
+
+`link.plan` and `plan_face` take `owner_heartbeats` (06e0f761). On a
+link.v1 face, each listed service named there that implements an
+interface whose heartbeat crosses draws the warning at the service, once
+a face. `link_v2.plan` takes it too. A link.v1 policy's plan reads it,
+"finding for finding", and a link.v2 policy's draws nothing. Case 18
+and v2 case 53 passed on the first run. **None was wrong.**
+
+**The tools beside zk2py's plan** (`owner_heartbeat_tools_live`): seven
+deployments, each an enrollment whose `[[service]]` says
+`owner_heartbeat = true`, run through `zenctl acl gen --face-policy` and
+`zenctl check face`.
+
+| Deployment | zk2py | `acl gen` | `check face` |
+|---|---|---|---|
+| case 18's, both on | rf, b1 | rf, b1 | rf, b1, exit 0 |
+| b2 alone | none | none | none |
+| none named (case 17's) | none | none | none |
+| b1 written `false` | none | none | none |
+| b1 on, `freshness.v2` implied | rf, b1 | rf, b1 | rf, b1 |
+| a second face that pushes nothing | rf, b1 | rf, b1 | rf, b1 |
+| v2 case 53's link.v2 face | none | none | none |
+
+**21 of 21.** Two things about the reference's surface, not the text:
+- **Neither `--help` names the warning** or the enrollment's key.
+- **`check face` prints the warning on stderr alone.** Its `--format
+  json` document holds none of it, where `acl gen`'s notes do.
+
+### F-618 · ambiguity · core §9.2, cascades 7 and 8: "none of E038 to E045" holds E044, a reference's finding
+
+> Cascade 7: "E051 reads a type with none of E038 to E045, in a file
+> without E028. Only such a type has a layout form whose JCS bytes every
+> implementation agrees on (§9.6). It reads every type the file defines,
+> whether a resource names it or not, as E038 to E045 do."
+> Cascade 8: "E047's marker half and E049 also wait for a packed
+> declaration with no finding (E038 to E045)."
+> §9.2's row: "E044 | a packed type with no CH to carry its tag: an
+> explicit stream's type, or an attachment (§7.1) | per reference".
+
+- **The literal reading.** A type at the tag 0 that an explicit stream
+  names has E044. It has one of E038 to E045, so E051 does not read it.
+- **The last sentence says otherwise.** E038 to E045 read "every type the
+  file defines, whether a resource names it or not". E044 reads only a
+  type a resource names. The range means the declaration's lints, E038
+  to E043 and E045.
+- **Both implementations read it so** (`packed_tag_live`). `Zero`, at 0,
+  as an explicit stream's type or an attachment: E044 and E051 at both.
+  A frame resource whose type has a marker, its attachment that type:
+  E044 and E047 at both.
+- **Fix:** "none of E038 to E043 and E045", in cascade 7 and cascade 8's
+  parenthesis. Or "a type with no finding of its own (E038 to E043,
+  E045)".
+- **Changes:** one code or two for such a contract. Its validity does
+  not move, but §9.2 asks for "exactly the codes".
+
+### F-619 · gap · `config.v2` §3, against core §7.6: a derived type at the tag 0
+
+> `config.v2` §3: "**The derived types** live in the contract's packed
+> files. `zk2 config derive` writes them from the declaration as below.
+> The lint compares each with its derivation, field by field, names and
+> descriptions of the types aside."
+> §2.2: "**A bound is the wire.** Moving one is a breaking revision (core
+> §9.8)."
+> Core §7.6: "**The fix is the author's.** One layout form in 16 has the
+> tag 0. An author moves it by changing the form: two fields of different
+> forms swapped, a bound moved, a reserved code or a marker added."
+
+- **The gap.** A declaration fixes its derived types. One whose `Record`
+  or `Set<T>` has the tag 0 can be in no valid contract: E051. No
+  sentence of `config.v2` says so, or says what the author changes.
+- **The fixture has one.** `derive.json` case 2, "a contract group
+  alone", is `declared`, and its `Record` has the tag 0 (`386a58fc…`). It
+  is 1 of the file's 36 derived layouts.
+- **Measured** (`packed_tag_live`), case 2's groups in `rfcfg.v1`'s
+  contract:
+  - `zk2 config derive` writes that `Record`, exit 0, with no word;
+  - `zk2 contract lint` refuses the contract that carries it, E051, and
+    so does zk2py. Nothing else is found.
+- **Core §7.6's fixes do not apply.**
+  - **A derived type changed alone** is `config_derivation`: two fields
+    swapped, a bound moved, a reserved code or a marker added. The
+    reference's E051 message advises each of these.
+  - **The author moves the declaration instead:** a group's order or
+    class, a marker between groups, or a parameter's order, bound or
+    sensitivity. A group type takes no reserved code (§2.2). With one
+    group, a marker is `groups_value`. A bound is the device's wire.
+    Moving `modulation`'s maximum from 12 to 13 moves the `Record` to the
+    tag 10.
+- **Core 0.117's survey** names `config.v2`'s `rfcfg.v1`, but not
+  `derive.json`'s derived types.
+- **Fix:** `config.v2` §3 says that a declaration whose derived type has
+  the tag 0 makes its contract invalid (core E051), and which changes to
+  the declaration move it. `derive.json` case 2 says so, or its groups
+  move. `zk2 config derive` might warn.
+- **Changes:** whether 1 device declaration in 16 learns why its
+  contract cannot load, and what it may change without moving its
+  device's wire.
+- **Status: resolved by the mend after round 126** (46977583, no version
+  moved): core 0.117 §7.6's "A derived type may be 0", cascade 7's "but a
+  type a profile derives (§7.6)", and `config.v2` 0.6 §3's "One in 16 has
+  the layout tag 0, and E051 does not read it". Case 2's contract loads
+  in zk2py.
+
+### F-620 · index · `link.v2`'s header: it restates `link.v1` text 0.20
+
+> "| **Uses** | no other profile. It restates [`link.v1`](v1.md), text
+> 0.20, by reference (§0)."
+> §0, at 0.27: "§2.9's "No owner heartbeat crosses" is replaced, and with
+> it the warning `owner_heartbeat_denied`".
+> The entry of `link.v2` 0.19: "**The header** restates `link.v1` text
+> 0.20".
+
+- **The error.** `link.v1` is at 0.21. Its §2.3 adds the deployment's
+  input and a plan warning, and `link.v2` 0.27's §0 names that warning.
+  So `link.v2` restates 0.21.
+- **The earlier entries** kept the line in step with each rule of
+  `link.v1`'s, or said why not ("It restates `link.v1` text 0.16 still.
+  0.17 changed no rule."). The 0.27 entry says neither.
+- **Fix:** "text 0.21". Or the entry says why it stays 0.20.
+- **Status: resolved in its PR:** the header restates `link.v1` text 0.21,
+  and link.v2 0.27's entry says so.
+
+### Not run
+
+- **`zenkey/bundles/`:** outside what zk2py reads.
+- **An owner on a bus behind a link.v1 face** with its owner heartbeats
+  on, its far readers going stale: the warning is a plan's, and §2.9's
+  why is `freshness.v2`'s, run in round 125's `owner_heartbeat_live`.
+- **A `zenctl check face` with `--window`** beside the warning.
+
+### Counts at core 0.117, observer 0.37, link.v1 0.21 and link.v2 0.27
+
+620 entries.
+- **New: F-618 to F-620:** one ambiguity, F-618; one gap, F-619; one
+  index error, F-620. None is a blocker. F-619 is the one to settle
+  first: a device's declaration can derive a contract that cannot load.
+- **Resolved:** none.
+- **Open:** F-437 to F-441; F-573; F-612 to F-614; F-618 to F-620.
+
+  F-365 stays open as #965's.
+
+### The mend: F-619 answered
+
+The mend read 46977583: one spec commit on round 126's, with F-620's
+fix before it. Core 0.117, observer 0.37 and `config.v2` 0.6 set a type
+a profile derives aside from E051. No keyword moved: 298 rules.
+
+| Finding | Holds | The answer, quoted |
+|---|---|---|
+| F-619 | yes | Core §7.6: "A type a profile derives from the contract's declaration, as `config.v2`'s `Record` and each `Set<T>` (`config.v2` §3), has no form its author writes: the derivation fixes it, and one in 16 has the tag 0. E051 does not read it." Cascade 7: "but a type a profile derives (§7.6)". The row: "a type a profile derives aside". `config.v2` §3: "One in 16 has the layout tag 0, and E051 does not read it: its author writes no field of it". The odds: "A derived type's is from 0 to 15, so it matches 1 time in 16." **Resolved.** |
+| F-620 | yes | Resolved in its PR: `link.v2`'s header restates `link.v1` text 0.21. |
+
+**How zk2py tells a derived type from a written one** (c1273945): as
+§3's lint does, "The lint compares each with its derivation, field by
+field".
+- **A candidate:** each clean type at 0 of a packed file with no E028,
+  kept by the schemas.
+- **Derived:** a §3 resource names it in a derived role, and its fields
+  equal that role's derivation. The roles are `config`'s type; each
+  `set/<group>`'s request, response and error; `confirm`, `cancel`,
+  `extend` and `persist`'s. The contract lists `config.v2`, and its
+  declaration reads valid. Such a type draws no E051.
+- **Every other candidate draws E051.** That includes a copy of the
+  derived `Record` that no resource names, and a type at 0 named where
+  `Record` belongs that is no derivation.
+
+**Run** (`packed_tag_live`, 319 of 319):
+- **Case 2's contract** loads in zk2py with no code. `zk2 contract lint`
+  at a5055e41 still gives E051 on it: the reference's half is to follow.
+  That is a note, not a finding.
+- **Its three variants** draw E051 in zk2py: the `Record` under a name
+  no resource gives; `config`'s type `tag.json`'s `Zero`; the contract
+  without `config.v2` (E020 and E051).
+
+**The walk:** the readings the new sentences touch quote them, and
+F-619's reading pins the answer and zk2py's loads. `just
+py-conformance` **8680 of 8680**.
+
+**Open after the mend:** F-437 to F-441; F-573; F-612 to F-614; F-618.
+F-619 and F-620 are resolved.
+
+  F-365 stays open as #965's.

@@ -1,0 +1,14 @@
+# A beacon whose status crosses a face, confirmed by freshness.v2's
+# heartbeat (link.v1 §2.9; #1145): the heartbeat crosses where `status`
+# does, and no owner heartbeat crosses a link.v1 face.
+[interface]
+name    = "beacon"
+major   = 2
+minor   = 0
+summary = "A beacon's status, confirmed by a heartbeat"
+uses    = ["link.v1", "freshness.v2"]
+
+[resources.status]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 120 }

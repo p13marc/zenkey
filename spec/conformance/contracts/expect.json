@@ -319,6 +319,12 @@
       ],
       "fingerprint": null
     },
+    "e028-packed-tag": {
+      "codes": [
+        "E028"
+      ],
+      "fingerprint": null
+    },
     "e028-retention": {
       "codes": [
         "E028"
@@ -561,6 +567,13 @@
         "E050",
         "E050",
         "E050"
+      ],
+      "fingerprint": null
+    },
+    "e051-packed-tag": {
+      "codes": [
+        "E051",
+        "E051"
       ],
       "fingerprint": null
     },

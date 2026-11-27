@@ -387,6 +387,18 @@ fn resolve(
     resources.sort_by(|x: &Resource, y: &Resource| {
         (x.token.as_str(), x.template.as_str()).cmp(&(y.token.as_str(), y.template.as_str()))
     });
+    // E051 (core §9.2, cascade 7): every type at the tag 0 the schemas
+    // found, "but a type a profile derives (§7.6)", which only the
+    // resources tell: config.v2's, by §3's comparison.
+    if cx.schemas.has_tag_zero() {
+        let uses: Vec<IfaceId> = uses.iter().cloned().collect();
+        let derived = crate::config::v2::derived_types(&crate::config::v2::Resources::of_parts(
+            &uses,
+            &resources,
+            cx.schemas.artifacts(),
+        ));
+        cx.schemas.report_tag_zero(&derived, cx.report);
+    }
     check_shapes(file, cx.report);
     check_overlaps(&resources, cx.report);
     // Member keys carry no template (r3.3 D9b), so one interface has at most

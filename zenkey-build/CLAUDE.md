@@ -34,7 +34,12 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
   the model's helpers, never the interpreted codec. The codec is
   `zenkey::codec::Packed<T>`. `codegen-test/tests/packed.rs` runs every
   vector of `spec/conformance/packed/vectors.json` through it (`Wide64`
-  aside: E028 keeps it out of every contract).
+  aside: E028 keeps it out of every contract). A packed type whose layout
+  tag is 0 is `zenkey-model`'s E051 (core 0.117, #1152), a lint error the
+  build fails on like any other (`tests/packed_tag.rs`); `Grow` moved to
+  a maximum of 100 for it. A type config.v2 derives is set aside (core
+  §7.6, F-619): `derive.json` case 2's contract, its `Record` at 0,
+  generates.
 - **Frame resources** (#981 K3, core §7.7): a frame resource's field on
   the generated `Server` is a `zenkey::typed::FrameWriter<Packed<T>>`
   (`emit::is_frame`), each record a value of its packed type, and the

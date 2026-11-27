@@ -4,7 +4,7 @@
 //! model's, or a fixture to raise with the text it contradicts.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -287,6 +287,262 @@ fn config_v2_derived_types_are_rfcfgs() {
         "the derived types alone"
     );
     assert!(v2::lint_contract(&rfcfg()).is_empty());
+}
+
+// --- a derived type at the tag 0 (core §7.6, §9.2's E051; #1152) ---------------------
+
+/// `rfcfg.v1`'s shape with `derive.json` case 2's declaration, a contract
+/// group alone (`modulation`), and so no `set/<group>`: `config`'s type is
+/// `config_type`, and `uses` lists `uses`.
+fn modcfg_text(config_type: &str, uses: &str) -> String {
+    let mut text = format!(
+        r#"[interface]
+name  = "modcfg"
+major = 1
+minor = 0
+uses  = [{uses}]
+
+[schemas]
+packed     = ["modcfg.json"]
+jsonschema = ["config.v2.json"]
+
+[defaults.operation]
+idempotent = false
+fanout     = "forbidden"
+
+[resources.config]
+kind = "state"
+type = "packed:{config_type}"
+
+[resources.config.annotations]
+"freshness.ttl_s" = 60
+"config.groups"   = [{{ name = "modulation", class = "contract", type = "packed:Modulation" }}]
+
+[resources.change]
+kind      = "event"
+type      = "json:ConfigChangeEvent"
+rate      = "burst(600/h)"
+retention = "7d"
+"#
+    );
+    for op in v2::CONTROLS {
+        text += &format!(
+            "\n[resources.{op}]\nkind     = \"operation\"\nrequest  = \"packed:Control\"\n\
+             response = \"packed:Record\"\nerror    = \"packed:Error\"\n"
+        );
+        if op == "persist" {
+            text += "optional = true\n";
+        }
+    }
+    text
+}
+
+const BOTH: &str = r#""config.v2", "freshness.v2""#;
+
+/// `derive.json` case 2: its group type, `Modulation`, as the case's
+/// schema declares it, and its declaration's derived types' expected
+/// layouts.
+fn case2() -> (Value, Value) {
+    let doc = read_json(&dir().join("v2/derive.json"));
+    let case = &doc["cases"][2];
+    assert_eq!(
+        case["groups"],
+        json!([{"name": "modulation", "class": "contract", "type": "packed:Modulation"}]),
+        "{}",
+        case["note"]
+    );
+    (
+        doc["schema"]["types"]["Modulation"].clone(),
+        case["expect"]["layouts"].clone(),
+    )
+}
+
+/// A scratch directory holding `file` (its text `contract`), a packed file
+/// `modcfg.json` of `types`, and config.v2's standard schema.
+fn scratch(name: &str, file: &str, contract: &str, types: &Value) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("zk2-e051-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::copy(
+        profiles().join("config/config.v2.json"),
+        d.join("config.v2.json"),
+    )
+    .unwrap();
+    std::fs::write(d.join(file), contract).unwrap();
+    std::fs::write(
+        d.join("modcfg.json"),
+        serde_json::to_string_pretty(&json!({ "types": types })).unwrap(),
+    )
+    .unwrap();
+    d
+}
+
+/// `zk2 <args>`: its exit code, its stdout and its stderr.
+fn zk2(args: &[&str]) -> (Option<i32>, String, String) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_zk2"))
+        .args(args)
+        .output()
+        .expect("runs");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// Case 2's group type and the types `zk2 config derive` writes from its
+/// declaration, read by the model.
+fn case2_types() -> Value {
+    let (modulation, _) = case2();
+    let files = json!({ "types": { "Modulation": modulation } });
+    let annotation =
+        json!([{"name": "modulation", "class": "contract", "type": "packed:Modulation"}]);
+    let i = Interface::read(&annotation, &[("modcfg", &files)]).expect("case 2 is valid");
+    let mut types: Value =
+        serde_json::from_str::<Value>(&i.derived.to_text()).expect("JSON")["types"].take();
+    types["Modulation"] = modulation;
+    types
+}
+
+/// Core 0.117 §7.6, "A derived type may be 0", and config.v2 0.6 §3, "One
+/// in 16 has the layout tag 0, and E051 does not read it" (F-619):
+/// `derive.json` case 2 derives a `Record` at the tag 0. `zk2 config
+/// derive` writes it into the contract's packed file, and the contract
+/// loads with no code, `zk2 contract lint` exits 0 with no E051, and
+/// config.v2's lint has no finding.
+#[test]
+fn a_derived_record_at_the_tag_0_draws_no_e051() {
+    let (modulation, layouts) = case2();
+    let d = scratch(
+        "derived",
+        "modcfg.v1.toml",
+        &modcfg_text("Record", BOTH),
+        &json!({ "Modulation": modulation }),
+    );
+    let contract = d.join("modcfg.v1.toml").display().to_string();
+    let (code, out, err) = zk2(&["config", "derive", &contract]);
+    assert_eq!(code, Some(0), "{err}");
+    let mut types: Value = serde_json::from_str::<Value>(&out).expect("JSON")["types"].take();
+    let names: Vec<&String> = types.as_object().expect("types").keys().collect();
+    assert_eq!(
+        names,
+        ["Control", "Error", "Record"],
+        "no Set<T>: no settable group"
+    );
+    types["Modulation"] = modulation;
+    std::fs::write(
+        d.join("modcfg.json"),
+        serde_json::to_string_pretty(&json!({ "types": types })).unwrap(),
+    )
+    .unwrap();
+
+    let l = load_path(&d.join("modcfg.v1.toml"));
+    assert!(l.report.codes().is_empty(), "{}", l.report);
+    let c = l.contract.expect("it loads");
+    let record = Interface::of(&c)
+        .expect("its groups")
+        .derived
+        .record()
+        .clone();
+    assert_eq!(
+        layout_json(&record),
+        layouts["Record"],
+        "derive.json case 2's Record"
+    );
+    assert_eq!(record.tag(), 0);
+    assert_eq!(v2::lint_contract(&c), []);
+    let (code, _, err) = zk2(&["contract", "lint", &contract]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!err.contains("E051"), "{err}");
+    std::fs::remove_dir_all(d).unwrap();
+}
+
+/// E051 reads every other type at the tag 0 as before (cascade 7): the
+/// derived `Record`'s declaration in a contract that declares it freely;
+/// copied under a name no resource gives; beside a written type at 0 as
+/// `config`'s, no derivation; and in case 2's contract with `config.v2`
+/// left out of `uses`, which derives nothing (E020 for its annotation).
+#[test]
+fn a_type_at_the_tag_0_no_profile_derives_draws_e051() {
+    let types = case2_types();
+    let free = r#"[interface]
+name  = "free"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["modcfg.json"]
+
+[resources.level]
+kind = "stream"
+type = "packed:Record"
+"#;
+    let d = scratch("free", "free.v1.toml", free, &types);
+    let l = load_path(&d.join("free.v1.toml"));
+    assert_eq!(l.report.codes(), ["E051"], "{}", l.report);
+    assert!(
+        l.report.to_string().contains("types.Record"),
+        "{}",
+        l.report
+    );
+    let (code, _, err) = zk2(&[
+        "contract",
+        "lint",
+        &d.join("free.v1.toml").display().to_string(),
+    ]);
+    assert_eq!(code, Some(1), "{err}");
+    assert!(
+        err.contains("E051") && err.contains("types.Record"),
+        "{err}"
+    );
+    std::fs::remove_dir_all(d).unwrap();
+
+    let zero = read_json(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/conformance/contracts/schemas/packed/tag.json"),
+    )["types"]["Zero"]
+        .clone();
+    let mut copy = types.clone();
+    copy["Copy"] = types["Record"].clone();
+    let mut written = types.clone();
+    written["Zero"] = zero;
+    for (name, contract, types, codes, at) in [
+        (
+            "copy",
+            modcfg_text("Record", BOTH),
+            copy,
+            vec!["E051"],
+            "types.Copy",
+        ),
+        (
+            "written",
+            modcfg_text("Zero", BOTH),
+            written,
+            vec!["E051"],
+            "types.Zero",
+        ),
+        (
+            "unused",
+            modcfg_text("Record", r#""freshness.v2""#),
+            types,
+            vec!["E020", "E051"],
+            "types.Record",
+        ),
+    ] {
+        let d = scratch(name, "modcfg.v1.toml", &contract, &types);
+        let l = load_path(&d.join("modcfg.v1.toml"));
+        assert_eq!(l.report.codes(), codes, "{name}: {}", l.report);
+        let e051: Vec<String> = l
+            .report
+            .0
+            .iter()
+            .filter(|x| x.code == "E051")
+            .map(|x| x.at.clone())
+            .collect();
+        assert_eq!(e051.len(), 1, "{name}: {}", l.report);
+        assert!(e051[0].ends_with(at), "{name}: {}", l.report);
+        std::fs::remove_dir_all(d).unwrap();
+    }
 }
 
 // --- records.json -------------------------------------------------------------------

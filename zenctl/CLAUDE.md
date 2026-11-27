@@ -85,7 +85,12 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `exposure_disagrees` (F-119). Two faces naming one far principal each
   carry both plans' denies, since no zenoh rule is limited to a link
   protocol: written so, and warned (`far_of_two_faces`, a linter warning
-  with no face, never a refusal; text 0.7, F-125, #769 LH). Router to
+  with no face, never a refusal; text 0.7, F-125, #769 LH). An
+  enrollment's `[[service]]` may say `owner_heartbeat = true`; a link.v1
+  face's plan then warns `owner_heartbeat_denied` (`at` the service) where
+  one of its interfaces' heartbeats crosses, since no owner heartbeat
+  crosses a link.v1 face (text 0.21, #1145; `beacon.*` fixtures in both
+  trycmd files). Router to
   router is the policy's `router_attach`, refused. `check face
   <ROUTER-CONFIG> --face-policy …
   --enrollment … [--window ADDRESS=SECS]` is its judgement

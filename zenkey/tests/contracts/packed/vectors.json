@@ -238,13 +238,13 @@
       ]
     },
     "Grow": {
-      "description": "A record whose marker ends on a byte boundary",
+      "description": "A record whose marker ends on a byte boundary. Its range stops at 100: at 127 its layout form would have the tag 0 (E051)",
       "fields": [
         {
           "name": "a",
           "type": "int",
           "minimum": 0,
-          "maximum": 127
+          "maximum": 100
         },
         "..."
       ]

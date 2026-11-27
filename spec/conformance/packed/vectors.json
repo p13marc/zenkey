@@ -240,13 +240,13 @@
         ]
       },
       "Grow": {
-        "description": "A record whose marker ends on a byte boundary",
+        "description": "A record whose marker ends on a byte boundary. Its range stops at 100: at 127 its layout form would have the tag 0 (E051)",
         "fields": [
           {
             "name": "a",
             "type": "int",
             "minimum": 0,
-            "maximum": 127
+            "maximum": 100
           },
           "..."
         ]
@@ -901,13 +901,13 @@
             "width": 7,
             "optional": false,
             "minimum": 0,
-            "maximum": 127,
+            "maximum": 100,
             "reserved": []
           },
           "..."
         ],
-        "sha256": "ad4fed6039ff52f2ea5e3ceef3af34388f8a6caf7b169b86d839f3800c33dcf0",
-        "tag": 0,
+        "sha256": "3f95fe8a3c482df0ece1364293f59bd65b936b5e51da414626204ff9b2576f5b",
+        "tag": 11,
         "items": [
           {
             "name": "a",
@@ -2622,7 +2622,7 @@
     {
       "note": "the marker at 0 on a byte boundary",
       "type": "Grow",
-      "tag": 0,
+      "tag": 11,
       "hex": "0a",
       "expect": {
         "value": {
@@ -2633,7 +2633,7 @@
     {
       "note": "the marker at 1 at the end of the layout, a later revision's bits after it, ignored",
       "type": "Grow",
-      "tag": 0,
+      "tag": 11,
       "hex": "0bb0",
       "expect": {
         "value": {
@@ -2644,7 +2644,7 @@
     {
       "note": "the marker at 1 at the end of the layout and no bit after it: length",
       "type": "Grow",
-      "tag": 0,
+      "tag": 11,
       "hex": "0b",
       "expect": {
         "refused": "length"

@@ -911,7 +911,11 @@ def _link_plan(path: Path) -> list[Result]:
     the findings that refuse it."""
     from . import link
 
-    return [_check(f"plan: {c['note']}", link.plan(c["policy"], c["implements"], _link_interfaces(c)), c["expect"])
+    # 0.21: "A case may give owner_heartbeats, the listed services whose
+    # owner heartbeats the deployment turns on (§2.3, §2.9; 0.21): absent, it
+    # turns none on."
+    return [_check(f"plan: {c['note']}", link.plan(c["policy"], c["implements"], _link_interfaces(c),
+                                                    owner_heartbeats=c.get("owner_heartbeats")), c["expect"])
             for c in _load_json(path)["cases"]]
 
 
@@ -964,7 +968,7 @@ def _link_v2(path: Path) -> list[Result]:
                 # deployment binds by a user name" (the changelog's words;
                 # the file's description names no `users`; round 110's findings).
                 got = link_v2.plan(c["policy"], c["implements"], _link_interfaces(c), c.get("catalog"),
-                                   users=c.get("users"))
+                                   users=c.get("users"), owner_heartbeats=c.get("owner_heartbeats"))
                 if "narrow" in c:
                     pol, _ = link_v2.parse_policy(c["policy"])
                     got["narrowed"] = None if pol is None else {n: link_v2.narrowed(pol, n) for n in c["narrow"]}
@@ -4349,7 +4353,8 @@ def family_readings(root: Path) -> list[Result]:
         + _round101_readings(root) + _round102_readings(root) + _round103_readings(root) \
         + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
         + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
-        + _round123_readings(root) + _round124_readings(root) + _round125_readings(root)
+        + _round123_readings(root) + _round124_readings(root) + _round125_readings(root) \
+        + _round126_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -5166,14 +5171,14 @@ def _round122_readings(root: Path) -> list[tuple[str, Any, Any]]:
                   "wait_under_lease transport.wait_before_close_ms"], [stock, two], True, True, 6]))
     out.append(("link.v2 0.25's plan case (zk2py agrees): 51 is case 0's router on zenoh-1.10.2, its policy case 0's "
                 "but the binding, its plan case 0's but the plan's binding, and each principal narrowed over the "
-                "same nine; 52 cases, 53 since 0.26 (round 125)",
+                "same nine; 52 cases, 53 since 0.26 (round 125) and 54 since 0.27 (round 126)",
                 [len(plan), moved(plan[0]["policy"], plan[51]["policy"]),
                  differs(plan[0]["expect"], plan[51]["expect"]), plan[51]["expect"].get("binding"),
                  plan[51]["expect"]["narrowed"] == plan[0]["expect"]["narrowed"],
                  [c for c in ("contracts", "implements", "narrow") if plan[0].get(c) != plan[51].get(c)]]
                 + missing(llog, "Case 51 is case 0's router on `zenoh-1.10.2`. Its plan is case 0's but for its "
                                 "`binding`, and each principal is narrowed over the same nine. 52 cases."),
-                [53, [stock, two], ["/binding"], "zenoh-1.10.2", True, []]))
+                [54, [stock, two], ["/binding"], "zenoh-1.10.2", True, []]))
     return out
 
 
@@ -5425,6 +5430,230 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "owner's rules, the grants a deployment compiles (core §11) and zenoh's facts (core "
                           "Appendix B) stay in the core.")
                 + missing(lv2, "- **Per mode, the mode read alone decides.**"), []))
+    return out
+
+
+def _round126_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """core 0.117, observer 0.37, link.v1 0.21 and link.v2 0.27 (#609,
+    round 126; #1145, #1152): each text at its version, with its entry, and
+    the index's rows. No session is opened."""
+    import re
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    def at(rel: str) -> str | None:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", flat(rel))
+        return m.group(1) if m else None
+
+    core = flat("core.md")
+    core_at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
+    index = flat("profiles/README.md")
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("round 126's texts at their versions or later, each with its entry: core 0.117 by its header, "
+                "observer 0.37, link.v1 0.21 and link.v2 0.27, each still written against core 0.108, 0.32 and "
+                "0.108; the index's rows say 0.21 and 0.27",
+                [core_at is not None and _at_least(core_at.group(1), "0.117"), _at_least(at("observer.md"), "0.37"),
+                 _at_least(at("profiles/link/v1.md"), "0.21"), _at_least(at("profiles/link/v2.md"), "0.27")]
+                + missing(flat("CHANGELOG.md"), "## 0.117 — 2026-11-28: §9.2's E051, a packed type whose layout tag "
+                                                "is 0;")
+                + missing(flat("observer-CHANGELOG.md"), "## 0.37 — 2026-11-27: editorial: §7.3's tag 0 is no "
+                                                         "packed type's")
+                + missing(flat("profiles/link/CHANGELOG.md"), "## link.v2 0.27 — 2026-11-28:",
+                          "## 0.21 — 2026-11-28: §2.3 and §2.9: the plan warns of a service whose owner heartbeats "
+                          "the deployment turns on behind a face, `owner_heartbeat_denied`")
+                + missing(flat("observer.md"), "| **Written against** | core 0.108 ([`core.md`](core.md)) |")
+                + missing(flat("profiles/link/v1.md"), "| **Written against** | core 0.32 ([`../../core.md`]"
+                                                       "(../../core.md)) |")
+                + missing(flat("profiles/link/v2.md"), "| **Written against** | core 0.108 ([`../../core.md`]"
+                                                       "(../../core.md)) |")
+                + missing(index, "| [`link.v1`](link/v1.md) | 0.21 | draft | zenoh-modem | 0.32 |",
+                          "| [`link.v2`](link/v2.md) | 0.27 | draft | zenoh-modem | 0.108 |"),
+                [True] * 4))
+    out += _round126_e051(root, core, flat, missing)
+    out += _round126_owner_heartbeats(root, flat, missing)
+    return out
+
+
+def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple[str, Any, Any]]:
+    """Core 0.117's E051 as zk2py reads it, the survey, F-618, F-619 and
+    the frame's tag 0 (round 126)."""
+    from . import config_v2 as c2, echo_tool, packed, zk2c
+    from .contract import load_contract
+    from .packed_tag_live import survey
+
+    spec = root.parent
+    obs = flat("observer.md")
+    log = flat("CHANGELOG.md")
+    out: list[tuple[str, Any, Any]] = []
+    tag = _load_json(root / "contracts" / "schemas" / "packed" / "tag.json")
+    out.append(("core 0.117 §7.6 \"Never 0\", §9.2's E051 per type and cascade 7's clause, as zk2py reads them: "
+                "tag.json's Zero and Unnamed draw E051, Fine at 11 none; a file with E028 draws none; Grow at its "
+                "maximum of 100 has the tag 11, and at 127 had 0; since the mend after round 126 the row, the "
+                "clause, the odds and observer §7.3 set a type a profile derives aside",
+                [[w.split(": ")[1] for _, w in packed.tag_zero(packed.lint(tag), "tag.json")],
+                 packed.lint(tag).types["Fine"].tag,
+                 load_contract(root / "contracts" / "e028-packed-tag.toml").codes,
+                 *[packed.lint({"types": {"G": {"fields": [{"name": "a", "type": "int", "minimum": 0, "maximum": m},
+                                                          packed.MARKER]}}}).types["G"].tag for m in (100, 127)]]
+                + missing(core, "- **Never 0.** A type whose tag is 0 is E051 (§9.2).",
+                          "| E051 | a packed type whose layout tag is 0 (§7.6), the tag a record of any other kind "
+                          "carries (§7.5); a type a profile derives aside | per type |",
+                          "- E051 reads a type with none of E038 to E045, in a file without E028. Only such a type "
+                          "has a layout form whose JCS bytes every implementation agrees on (§9.6). It reads every "
+                          "type the file defines, whether a resource names it or not, as E038 to E045 do, but a "
+                          "type a profile derives (§7.6).",
+                          "- **Its tag may be 0.** One revision in 16 has the tag 0, which an owner heartbeat's CH "
+                          "and a record of any other kind carry too. No lint refuses it, as E051 refuses a packed "
+                          "type at 0 (§9.2).",
+                          "still matches its tag 1 time in 15: a type a contract writes has a tag from 1 to 15. A "
+                          "derived type's is from 0 to 15, so it matches 1 time in 16.")
+                + missing(obs, "A record of any other kind carries 0, and no packed type a contract writes does: one "
+                               "that declares such a type at the tag 0 is invalid (core §9.2, E051). A type a "
+                               "profile derives may, one in 16, and a tool that holds no contract sniffs its record "
+                               "too (core §7.6).",
+                          "and another packed type 1 time in 15, or 1 in 16 for a derived one (core §7.5, §7.6)."),
+                [["Unnamed", "Zero"], 11, ["E028"], 11, 0]))
+    # F-618: E044 is a reference's, and takes no type out of E051.
+    e044 = load_contract(root / "contracts" / "e044-packed-place.toml").codes
+    out.append(("F-618 (round 126): cascade 7's \"none of E038 to E045\" holds E044, a reference's finding; zk2py "
+                "reads E051 beside it, as the reference does (packed_tag_live: an explicit stream's type at the tag "
+                "0 draws E044 and E051 at both), and cascade 8's \"(E038 to E045)\" so too; E044 is per reference, "
+                "and reads only the types a resource names",
+                [e044, "| E044 | a packed type with no CH to carry its tag: an explicit stream's type, or an "
+                       "attachment (§7.1) | per reference |" in core]
+                + missing(core, "a packed declaration with no finding (E038 to E045)."),
+                [["E044", "E044"], True]))
+    # The survey, by zk2py's reading of §7.6, over the three roots it may read.
+    s = survey(spec.parent)
+    clean = [r for r in s["rows"] if r["tag"] is not None]
+    zero = sorted((r["file"].split("/")[-1], r["type"], r["e028"]) for r in clean if r["tag"] == 0)
+    stated = [(r["file"].split("/")[-1], r["at"]) for r in s["stated"] if r["tag"] == 0]
+    out.append(("core 0.117's survey, recomputed over spec/, examples/zk2/ (its .history) and "
+                "zenkey/tests/contracts/: 287 declarations with no finding of their own in 97 files, the entry's "
+                "count; at the tag 0, the two cases' types and frame/layouts.json's Tick, as the entry says; and "
+                "derive.json case 2's derived Record (F-619), which the entry names since the mend after round 126",
+                [len(clean), len({r["file"] for r in clean}), zero, stated]
+                + missing(log, "287 declarations in 97 files, each published bundle's included.",
+                          "- **`frame/layouts.json`'s `Tick`** has it.",
+                          "`config.v2`'s `derive.json` case 2 derives one at 0, and its contract loads."),
+                [287, 97, [("layouts.json", "Tick", False), ("tag-unsafe.json", "Zero", True),
+                           ("tag.json", "Unnamed", False), ("tag.json", "Zero", False)],
+                 [("derive.json", "/cases[2]/expect/derived/Record")]]))
+    der = _load_json(spec / "profiles" / "config" / "conformance" / "v2" / "derive.json")
+    decl = c2.read_groups(der["cases"][2]["groups"], c2.Docs([("schema", der["schema"])]))
+    v2c = flat("profiles/config/v2.md")
+    # the group's bound moved, 12 to 13: the Record's tag moves with it
+    moved = {"types": {**der["schema"]["types"], "Modulation": {"fields": [
+        {**der["schema"]["types"]["Modulation"]["fields"][0], "maximum": 13}]}}}
+    # F-619, resolved by core 0.117's "A derived type may be 0" and config.v2
+    # 0.6 §3 (the mend after round 126): case 2's contract, its derived types
+    # zk2py's own derivation, loads; a type at 0 no profile derives does not.
+    import tempfile
+
+    from .packed_tag_live import case2_contract
+
+    derived = {n: {"fields": f} for n, f in c2.derive(decl).items()}
+    zero = tag["types"]["Zero"]
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        loads = [load_contract(case2_contract(base, spec.parent, derived)).codes]
+        for kw in ({"extra": {"Copy": derived["Record"]}}, {"extra": {"Zero": zero}, "config_type": "Zero"},
+                   {"without_profile": True}):
+            loads.append(load_contract(case2_contract(base, spec.parent, derived, **kw)).codes)
+    out.append(("F-619, resolved (the mend after round 126): config.v2's derive.json case 2 derives a Record at the "
+                "tag 0, and moving modulation's bound to 13 moves it to 10; core §7.6 and config.v2 0.6 §3 say E051 "
+                "does not read a type a profile derives. zk2py tells one by §3's comparison: a type a §3 resource "
+                "names in a derived role and equal to its derivation field by field. Case 2's contract loads; the "
+                "Record copied under a name no resource gives, config's type a written one at 0, and the contract "
+                "without config.v2 each draw E051",
+                [decl.valid, c2.layouts(c2.derive(decl))["Record"]["tag"],
+                 c2.layouts(c2.derive(c2.read_groups(der["cases"][2]["groups"], c2.Docs([("schema", moved)]))))[
+                     "Record"]["tag"], loads]
+                + missing(v2c, "**The derived types** live in the contract's packed files.",
+                          "The lint compares each with its derivation, field by field, names and descriptions of "
+                          "the types aside. One in 16 has the layout tag 0, and E051 does not read it: its author "
+                          "writes no field of it (core §7.6, §9.2).")
+                + missing(core, "- **A derived type may be 0.** A type a profile derives from the contract's "
+                                "declaration, as `config.v2`'s `Record` and each `Set<T>` (`config.v2` §3), has no "
+                                "form its author writes: the derivation fixes it, and one in 16 has the tag 0. E051 "
+                                "does not read it.",
+                          "One that holds none sniffs it (observer §7.3), and that residual is accepted.")
+                + missing(flat("profiles/config/CHANGELOG.md"), "## config.v2 0.6 — 2026-11-28: editorial: a "
+                                                                "derived type may have the layout tag 0"),
+                [True, 0, 10, [[], ["E051"], ["E051"], ["E020", "E051"]]]))
+    # The open question: a frame's own tag at 0 (frame/layouts.json's tick-pow2).
+    lay = _load_json(root / "frame" / "layouts.json")
+    frame0 = zk2c.write("frame", 16, 0x1234, 7, 0, bytes.fromhex("0000000a00301bc080"))
+    row = echo_tool.row_of("zk2/lab/node/tick.v1/stream/tick", False, len(frame0), zk2c.ENCODING, frame0)
+    out.append(("the frame's tag 0, read (round 126's open question): frame/layouts.json's tick-pow2 has the "
+                "frame tag 0; core §7.7 reads a frame with its declaration, CH's tag against the frame's, and "
+                "observer §7.3 and §7.6 show one whose declaration a tool does not hold by its envelope, never "
+                "sniffed, whatever its tag: zk2py's echo row (and zenctl echo, packed_tag_live) shows a frame at CH "
+                "tag 0 so; core 0.117 leaves a frame's tag 0 to its own issue",
+                [[x["expect"]["tag"] for x in lay["layouts"] if x["name"] == "tick-pow2"], hex(frame0[0]),
+                 row["sniffed"], (row.get("frame") or {}).get("form")]
+                + missing(core, "- CH's tag is not the frame's (`tag`);", "A frame's tag is its declaration's (§7.7).")
+                + missing(obs, "- **A frame** (core §7.7) is read with its frame resource's declaration, never as "
+                               "one record of its type: §7.6.",
+                          "- **A frame it cannot read.** A frame whose declaration the tool does not hold is shown "
+                          "by its envelope: its run, its seq and its size. - Its body is never sniffed as a record "
+                          "(§7.3).")
+                + missing(log, "- **A frame's tag** (§7.7) is the frame form's, 0 for one declaration in 16, and no "
+                               "lint reads it."),
+                [[0], "0xa0", None, "frame"]))
+    return out
+
+
+def _round126_owner_heartbeats(root: Path, flat: Any, missing: Any) -> list[tuple[str, Any, Any]]:
+    """link.v1 0.21's owner_heartbeats and owner_heartbeat_denied, link.v2
+    0.27's none, and F-620 (round 126)."""
+    import re
+
+    from . import link
+
+    spec = root.parent
+    l1, l2 = flat("profiles/link/v1.md"), flat("profiles/link/v2.md")
+    plan1 = _load_json(spec / "profiles" / "link" / "conformance" / "plan.json")["cases"]
+    plan2 = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    c18 = plan1[18]
+    given = _link_interfaces(c18)
+
+    def warned(owner: Any) -> list[str]:
+        got = link.plan(c18["policy"], c18["implements"], given, owner_heartbeats=owner)
+        return [f["at"] for fp in got["faces"] for f in fp["findings"] if f["code"] == "owner_heartbeat_denied"]
+
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("link.v1 0.21 §2.3 and §2.9, as zk2py's plan reads them: only plan.json's case 18 gives "
+                "owner_heartbeats; case 18's deployment warns at b1, b2 alone at none, and none named is case 17's "
+                "plan; v2/plan.json's case 53 alone gives it, and link.v2 0.27 says a link.v2 plan draws none",
+                [[i for i, c in enumerate(plan1) if "owner_heartbeats" in c], warned(["b1", "b2"]), warned(["b2"]),
+                 link.plan(c18["policy"], c18["implements"], given) == plan1[17]["expect"],
+                 [i for i, c in enumerate(plan2) if "owner_heartbeats" in c]]
+                + missing(l1, "- **The deployment may say more.** It may name the listed services whose owner "
+                              "heartbeats it turns on (`freshness.v2` §2.4). The plan reads that for one warning "
+                              "alone (§2.9). Where the deployment names none, the plan reads every listed "
+                              "service's owner heartbeats as off.",
+                          "the plan warns, once for the service (`owner_heartbeat_denied`).",
+                          "- **The deployment's word, never the bus's.** A generator reads no descriptor. Where the "
+                          "deployment names none, nothing is warned.")
+                + missing(l2, "draws no `owner_heartbeat_denied`: the `link` key crosses wherever a heartbeat "
+                              "does."),
+                [[18], ["b1"], [], True, [53]]))
+    lv1 = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", l1)
+    out.append(("F-620 (round 126, resolved in its PR): link.v2's header restates link.v1 at text 0.21, as "
+                "link.v1 is, and link.v2 0.27's §0 names 0.21's warning; the earlier entries move that line with "
+                "each link.v1 rule "
+                "(\"The header restates link.v1 text 0.20\", at link.v2 0.19)",
+                [lv1.group(1) if lv1 else None, "It restates [`link.v1`](v1.md), text 0.21, by reference (§0)." in l2]
+                + missing(l2, "- §2.9's \"No owner heartbeat crosses\" is replaced, and with it the warning "
+                              "`owner_heartbeat_denied`")
+                + missing(flat("profiles/link/CHANGELOG.md"), "**The header** restates `link.v1` text 0.20, and is "
+                                                              "written against core 0.108"),
+                ["0.21", True]))
     return out
 
 
@@ -8236,8 +8465,9 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("link.v2 0.22 §2.9, \"A collection the revisions disagree on is read `host`\" (F-551's answer, the "
                 "plan's half), and its evidence (F-573): §2.16's warning it bears on cites `[F: v2/plan.json]`, and "
                 "no case of v2/plan.json's 49, 50 since link.v2 0.23's case 49 (round 118), 51 since 0.24's case "
-                "50 (round 121), 52 since 0.25's case 51 (round 122) and 53 since 0.26's case 52 (round 125, whose entry "
-                "says F-573's case is drafted in the code half), draws exposure_disagrees, "
+                "50 (round 121), 52 since 0.25's case 51 (round 122), 53 since 0.26's case 52 (round 125, whose entry "
+                "says F-573's case is drafted in the code half) and 54 since 0.27's case 53 (round 126), draws "
+                "exposure_disagrees, "
                 "so none holds such a collection: a plan "
                 "that counted it `link`, for the horizon or for the longest put, passes the file whole; link.v1's "
                 "plan.json draws the code, in cases that weigh no owner heartbeat",
@@ -8249,7 +8479,7 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "heartbeat is above `batch_bytes` (`block_over_batch`). `[F: v2/plan.json]`")
                 + missing(llog, "- **Now:** the plan reads it `host`, for the horizon and for the longest put. Both "
                                 "implementations do."),
-                [53, [], True]))
+                [54, [], True]))
 
     # -- scope/faces.json's four cases, v2/transport.json's five, carries.json's three ------
     faces = _load_json(root / "scope" / "faces.json")["cases"]
@@ -9726,8 +9956,9 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     v1_cases = sorted({i for i, _ in crossing if plan2[i]["expect"]["transport"] is None})
     out.append(("link.v2 0.19's entry, its evidence: v2/plan.json held 48 cases then, 49 since link.v2 0.22's case "
                 "48 (round 117), 50 since 0.23's case 49 (round 118), 51 since 0.24's case 50 (round 121), 52 since 0.25's "
-                "case 51 (round 122) and 53 since 0.26's case 52 (round 125); fourteen faces let a heartbeat cross, in the twelve cases the entry names and in "
-                "cases 46 and 47, and case 48's one more; each under a link.v2 policy "
+                "case 51 (round 122), 53 since 0.26's case 52 (round 125) and 54 since 0.27's case 53 (round 126); fourteen "
+                "faces let a heartbeat cross, in the twelve cases the entry names and in "
+                "cases 46 and 47, and case 48's one more, and case 53's, case 46's face (round 126); each under a link.v2 policy "
                 "denies the host key by name, nothing under heartbeats/link, and lists the link key as evidence; "
                 "case 10, a link.v1 policy, denies both classes' and lists none; case 6 draws horizon_under_face at "
                 "the link key",
@@ -9738,7 +9969,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                 for x in f["findings"])]]
                 + missing(llog, "**Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8, 9, 10, 12, 19, "
                                 "20, 22, 23, 44 and 45."),
-                [53, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48], 14, [10],
+                [54, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48, 53], 14, [10],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/host/**",), True)],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/**",), False)], [6]]))
     c46 = plan2[46]
@@ -9782,7 +10013,8 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "freshness.v2": {"revisions": [{"uses": [], "resources": [
                     {"token": "stream", "template": "heartbeat/{iface}", "annotations": {}}]}]}}
     got_10 = link.plan(policy_v1, {"n": ["a.v1", "freshness.v2"]}, given_10)
-    out.append(("link.v1 0.20's entry, its evidence: plan.json holds 18 cases, and cases 12, 14 and 17 deny the owner "
+    out.append(("link.v1 0.20's entry, its evidence: plan.json holds 18 cases, 19 since 0.21's case 18 (round 126), and cases "
+                "12, 14 and 17, and 18, case 17's face, deny the owner "
                 "heartbeat keys by zk2/*/*/freshness.v2/stream/heartbeats/**, case 17's stream deny of freshness.v2 "
                 "holding it alone; and §2.7's \"It holds it whichever revision of that contract is given\", on "
                 "zk2py's plan with the standard contract given inline at its revision 1.0, which declares no "
@@ -9791,7 +10023,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  [d["key_exprs"] for f in faces(plan1[17]) for d in f["deny"] if d["id"] == "stream:freshness.v2"],
                  [d["key_exprs"] for f in got_10.get("faces", []) for d in f["deny"] if d["id"] == "stream:freshness.v2"]]
                 + missing(l1, "It holds it whichever revision of that contract is given, and where none is."),
-                [18, [12, 14, 17], [["zk2/*/*/freshness.v2/stream/heartbeats/**"]],
+                [19, [12, 14, 17, 18], [["zk2/*/*/freshness.v2/stream/heartbeats/**"]],
                  [["zk2/*/*/freshness.v2/stream/heartbeats/**"]]]))
     # -- the texts round 113's findings quote ---------------------------------------------
     sc = (spec / "profiles" / "freshness" / "scenarios-v2.md").read_text(encoding="utf-8")
@@ -10394,7 +10626,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases then, 48 since "
                 "0.19 (round 113), 49 since 0.22 (round 117), 50 since 0.23 (round 118), 51 since 0.24 (round 121), 52 since "
-                "0.25 (round 122) and 53 since 0.26 (round 125), v2/transport.json 27 then, 32 since 0.22, 34 since 0.25 "
+                "0.25 (round 122), 53 since 0.26 (round 125) and 54 since 0.27 (round 126), v2/transport.json 27 then, 32 since 0.22, 34 since 0.25 "
                 "and 36 since 0.26; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
                 "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
                 "where case 5 at 240,000 ms does: §2.16's inequality pinned on both sides; transport.json's cases "
@@ -10405,7 +10637,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  lease_of(case(5)), draws(case(5)), with_null,
                  [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
                 + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
-                [53, 36, True, False, False, True, 240_001, False, 240_000, True,
+                [54, 36, True, False, False, True, 240_001, False, 240_000, True,
                  {24: ["transport/link/tx/lease"], 25: ["routing/interests/timeout"],
                   26: ["routing/interests/timeout"]},
                  [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
@@ -10414,10 +10646,10 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
                 "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
                 "then SBD, in that order, of 46 then, 48 since 0.19, 49 since 0.22, 50 since 0.23, 51 since 0.24, "
-                "52 since 0.25 and 53 since 0.26",
+                "52 since 0.25, 53 since 0.26 and 54 since 0.27",
                 ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
                  [medium(plan[i]["note"]) for i in modem], len(plan)],
-                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 53]))
+                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 54]))
     zm = repo / "examples" / "zk2" / "zenoh-modem"
     zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
     # link.md's notes are block quotes: their lines' "> " is no word of theirs.
@@ -10686,11 +10918,11 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("link.v2 0.17's evidence as zk2py counts it: keep_alive_not_suppressed is drawn by 6, 15 and 19, "
                 "above their intervals as before, and by the eleven the entry names, each at its interval; "
                 "v2/plan.json held 45 cases then, 46 since 0.18, 48 since 0.19 (round 113), 49 since 0.22 (round "
-                "117), 50 since 0.23 (round 118), 51 since 0.24 (round 121), 52 since 0.25 (round 122) and 53 since 0.26 "
-                "(round 125)",
+                "117), 50 since 0.23 (round 118), 51 since 0.24 (round 121), 52 since 0.25 (round 122), 53 since 0.26 "
+                "(round 125) and 54 since 0.27 (round 126)",
                 [len(plan), [i for i, c in enumerate(plan) if draws(c)]]
                 + missing(log, "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
-                [53, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
+                [54, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
     # review-bot's note 5 on #1121: stamps() reads a shape the text does not
     # name as stamping. No spec case hits it; zk2py's own cases pin it.
     shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731

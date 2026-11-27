@@ -812,7 +812,7 @@ def _catalog(doc: Any) -> Any:
 
 
 def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[str, Any],
-         catalog_doc: Any = None, users: list[str] | None = None) -> dict[str, Any]:
+         catalog_doc: Any = None, users: list[str] | None = None, owner_heartbeats: Any = None) -> dict[str, Any]:
     """``plan.json``'s ``expect``: the binding, the catalog id, the transport
     (None for a ``link.v1`` policy) and each face's plan, a link.v2 face's
     with its ``reply_timeout_ms`` and, with ``frames``, its listed frames; or
@@ -822,7 +822,10 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
     ``catalog_doc`` is the core §8.6 catalog the far side holds (§2.18), or
     None. ``users`` (0.15) is the principals the deployment binds by a user
     name, or None where no deployment says: §2.5's refusal is then not
-    asked."""
+    asked. ``owner_heartbeats`` (link.v1 0.21 §2.3) is the listed services
+    whose owner heartbeats the deployment turns on: a link.v1 policy's plan
+    reads it, as link.v1's does, and a link.v2 policy's draws nothing from it
+    (0.27 §2.9, "The deployment's word changes nothing here")."""
     policy, findings = parse_policy(policy_text)
     if policy is None:
         return {"refused": findings}
@@ -854,7 +857,8 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
         # "A link.v1 policy's plan is link.v1's, finding for finding. It
         # takes none of this section."
         return {"binding": policy.binding, "catalog": None, "transport": None,
-                "faces": [link.plan_face(v1, f.face, implements, interfaces) for f in policy.faces]}
+                "faces": [link.plan_face(v1, f.face, implements, interfaces, owner_heartbeats=owner_heartbeats)
+                          for f in policy.faces]}
     listed = sorted({i for s in [*policy.services, *devices] for i in implements[s]}, key=link._bytes)
     errors = packed_required(interfaces, listed)
     errors += near_opens_user(policy, users)

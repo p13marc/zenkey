@@ -1,5 +1,6 @@
 """The ``packed`` type kind (core §7.6, 0.75, #979 B1): a packed file's
-shape and its lints (§9.2's E038 to E045, cascade 7), each type's layout,
+shape and its lints (§9.2's E038 to E045, cascade 7, and since core 0.117
+E051, :func:`tag_zero`), each type's layout,
 layout form and tag, and its codec, a record written from its JSON reading
 and read back to it.
 
@@ -782,6 +783,29 @@ def lint(doc: Any, where: str = "") -> Linted:
         if len(out.findings) == before:
             out.types[tname] = Record(tname, fields)
     return out
+
+
+def tag_zero(linted: Linted, where: str = "") -> list[tuple[str, str]]:
+    """§9.2's E051 over one linted file, per type: "a packed type whose
+    layout tag is 0 (§7.6), the tag a record of any other kind carries
+    (§7.5)". Cascade 7 (core 0.117): "E051 reads a type with none of E038 to
+    E045, in a file without E028 ... It reads every type the file defines,
+    whether a resource names it or not, as E038 to E045 do." So it reads
+    :attr:`Linted.types`, the types with no finding of their own; the caller
+    gives it a file with no E028 alone (:mod:`zk2py.schemas`), and the
+    contract's loader sets aside each type a profile derives ("but a type a
+    profile derives (§7.6)", the mend after round 126:
+    :func:`zk2py.config_v2.derived_types`).
+
+    E044 is a reference's, never a declaration's, so it takes no type out
+    here: zk2py reads "none of E038 to E045" as cascade 8's "a packed
+    declaration with no finding (E038 to E045)" (round 126's F-618).
+
+    It is not among :func:`lint`'s findings: a type at the tag 0 still
+    writes and reads (``frame/layouts.json``'s ``Tick``), and only a
+    contract that lists one is invalid."""
+    return [("E051", f"{where}: {n}: its layout tag is 0") for n in sorted(linted.types)
+            if linted.types[n].tag == 0]
 
 
 def record(doc: Any, name: str) -> Record:

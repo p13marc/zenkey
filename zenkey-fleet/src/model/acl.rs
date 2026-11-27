@@ -2280,6 +2280,11 @@ fn plan_faces(
                 .entry(a.service.to_string())
                 .or_default()
                 .extend(s.implements.iter().cloned());
+            // The deployment's word on its owner heartbeats (link.v1 §2.3,
+            // #1145): a link.v1 plan warns where none can cross.
+            if s.owner_heartbeat {
+                dep.owner_heartbeats.insert(a.service.to_string());
+            }
         }
         // A device is named by its address (link.v2 §2.3).
         if policy.device_face(&s.address).is_some() {
@@ -2287,6 +2292,9 @@ fn plan_faces(
                 .entry(s.address.clone())
                 .or_default()
                 .extend(s.implements.iter().cloned());
+            if s.owner_heartbeat {
+                dep.owner_heartbeats.insert(s.address.clone());
+            }
         }
     }
     // Every revision given of each listed interface: the plan reads them
@@ -2559,6 +2567,13 @@ pub fn link_says(code: link::Code) -> &'static str {
         C::HistoryOnFrame => {
             "a crossing frame resource that declares history: its source info crosses with \
              every put, and its cache stays home (§2.8)"
+        }
+        C::OwnerHeartbeatDenied => {
+            "the enrollment turns this service's owner heartbeats on, and a heartbeat of an \
+             interface it implements crosses the face: no owner heartbeat crosses a link.v1 \
+             face, and an interface they cover sends no heartbeat of its own, so its far \
+             readers may hear no confirmation and read its members stale; leave the option \
+             off behind a link.v1 face, or move the face to link.v2 (§2.9)"
         }
         C::PackedRequired => {
             "a contract that lists link.v2 exposes a resource whose type is not packed: it \
@@ -6019,6 +6034,106 @@ type = { raw = "text/plain" }
                 );
             }
         }
+    }
+
+    /// An enrollment that turns a service's owner heartbeats on behind a
+    /// `link.v1` face (link.v1 0.21 §2.3, §2.9; #1145): the plan warns once
+    /// for the service whose interface's heartbeat crosses, and its block
+    /// is the one the same enrollment compiles without the option. A
+    /// link.v2 face, whose `link` owner heartbeat crosses, draws nothing.
+    #[test]
+    fn an_owner_heartbeat_behind_a_link_v1_face_is_warned_of() {
+        let enrollment = |on: bool| -> Enrollment {
+            toml::from_str(&format!(
+                r#"
+[[principal]]
+user     = "b1"
+services = ["lab/b1"]
+
+[[principal]]
+user  = "ground"
+tools = ["console"]
+
+[[service]]
+address         = "lab/b1"
+implements      = ["beacon.v2"]
+owner_heartbeat = {on}
+
+[[tool]]
+name = "console"
+
+[tool.bindings.beacon]
+interface = "beacon.v2"
+providers = ["lab/*"]
+"#
+            ))
+            .unwrap()
+        };
+        let mut set = ContractSet::default();
+        with(
+            &mut set,
+            r#"[interface]
+name = "beacon"
+major = 2
+minor = 0
+uses = ["link.v1", "freshness.v2"]
+
+[resources.status]
+kind = "state"
+type = { raw = "text/plain" }
+annotations = { "link.exposure" = "link", "freshness.ttl_s" = 120 }
+"#,
+        );
+        let face = r#"
+[face.rf]
+far          = "ground"
+attach       = "client"
+select       = { link_protocols = ["unixsock-stream"] }
+class        = "constrained"
+expose       = "link"
+interval_s   = 60
+max_outage_s = 600
+link_bps     = 2400
+"#;
+        let v1 = format!("system = \"lab\"\nservices = [\"b1\"]\n{face}batch_bytes = 1000\n");
+        let plan = |e: &Enrollment, policy: &str| {
+            plan_acl(
+                e,
+                &set,
+                &face_opts(AclPermission::Deny, link::parse(policy)),
+            )
+            .unwrap()
+        };
+        let on = plan(&enrollment(true), &v1);
+        let off = plan(&enrollment(false), &v1);
+        let codes = |p: &AclPlan| -> Vec<(String, String)> {
+            p.faces[0]
+                .findings
+                .iter()
+                .map(|f| (f.code.as_str().to_owned(), f.at.clone()))
+                .collect()
+        };
+        assert_eq!(
+            codes(&on),
+            [("owner_heartbeat_denied".to_owned(), "b1".to_owned())]
+        );
+        assert!(codes(&off).is_empty(), "{:?}", codes(&off));
+        assert_eq!(to_json5(&on), to_json5(&off), "the option changes no grant");
+        // Under link.v2 the `link` key crosses where the heartbeat does.
+        let v2 = format!(
+            "profile = \"link.v2\"\nsystem = \"lab\"\nservices = [\"b1\"]\nbinding = \"zenoh-1.10.1\"\n\n\
+             [transport]\nlease_ms = 240000\nkeep_alive = 4\nwait_before_close_ms = 240000\n\
+             sequence = \"16bit\"\nbatch_bytes = 1000\n{face}loss_ppm = 0\narq = true\n\
+             reply_timeout_ms = 60000\n"
+        );
+        let on = plan(&enrollment(true), &v2);
+        assert!(
+            !codes(&on)
+                .iter()
+                .any(|(c, _)| c == "owner_heartbeat_denied"),
+            "{:?}",
+            codes(&on)
+        );
     }
 
     /// Frames across a face (link.v1 0.13 §2.8, core §7.7): `acl gen`'s
