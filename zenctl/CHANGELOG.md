@@ -6,6 +6,18 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the answers to zk2py rounds 116 to 123 (#986, #609)
+
+Observer 0.36 §4.1, `desired.v2` 0.2 §2.10, §2.12, §2.17 step 4,
+`health.v2` 0.3 §2.6. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `get <key> --body <held stamp>`: every held stamp in a reply undecodable, "… and no answer here: held" | the reply on the GET's one concrete key that is the same held stamp is the owner's answer: shown `unchanged: …; the member's last mutation is run <run>, seq <seq>`, never a value; its row has `"unchanged": {"run", "seq"}` in place of `value`, `verdict` and `decode_error` | any other held stamp, and any on a selector with a wildcard, stays `held`. `--raw` and `--hex` show its bytes as before |
+| `desired`: a `desired.v2` report under a horizon, aged by its Zenoh timestamp, which a `freshness.v2` target's report never carries (core §4.3): its freshness unobservable | where the target's contract uses `freshness.v2`, aged by its snapshot entry's confirmation, dated under the epoch `--catalog` gives (core §8.6) | under `freshness.v1`, by its Zenoh timestamp, as before. With no catalog, still unobservable. The doctor's `desired-*` checks read the same |
+| `check conform`'s `desired-report` of a `desired.v2` target with a role unbound: that role owed no report | its report read on the member its `desired.report` names, and passed where it is the baseline's record, `000000`; any other report fails it (§2.12) | `desired` GETs an unbound role's report key too, so `asked` lists it |
+| `health`: a `health.v2` record from an owner whose catalog is not in hand, refused whole | refused only where it holds a time; one with no `since` or `at` is read (`health.v2` 0.3 §2.6) | |
+
 ## Unreleased (`main`, zk2) — `watch` waits `--timeout` for the catalog its owner names (#1146)
 
 `freshness.v2` §2.5; core §8.1, §8.5, §8.6. A reader of an owner heartbeat

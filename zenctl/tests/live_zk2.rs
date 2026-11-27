@@ -13553,6 +13553,32 @@ async fn desired_v2_s9_last_known_and_the_kill_switch_for_a_tool() {
         "{run}"
     );
     assert_eq!(run.json()["judgement"]["answer"], "not_asked", "{run}");
+    // check conform reads the unbound role's report too: the baseline's
+    // record, on the member its `desired.report` names (desired.v2 §2.10,
+    // §2.12; J4's second leftover).
+    let run = bus
+        .zenctl(&[
+            "check",
+            "conform",
+            "lab/spare",
+            "worker.v2",
+            "--for",
+            "1",
+            "--timeout",
+            "2",
+            "--format",
+            "json",
+        ])
+        .await;
+    let doc = run.json();
+    let case = conform_case(&doc, "desired-report", "service");
+    assert_eq!(case["verdict"]["answer"], "not_established", "{run}");
+    assert!(
+        case["verdict"]["reason"]
+            .as_str()
+            .is_some_and(|r| r.contains("task by zk2/lab/spare/worker.v2/state/desired/task")),
+        "the unbound role's baseline report read: {run}"
+    );
     spare.kill().await;
     w.kill().await;
     drop(archive);
@@ -15872,11 +15898,11 @@ async fn watch_waits_its_timeout_for_the_catalog_its_owner_names() {
 /// @FILE` holding a member's held stamp is a conditional read, since zenoh
 /// sends a query's payload under `zenoh/bytes` unless told otherwise, the
 /// one Encoding a held stamp rides. A real owner whose member is unchanged
-/// answers with the 6 bytes sent, and the lens shows the reply as a held
-/// stamp, its run and seq named, undecodable as `held` since the lens does
-/// not know what the GET carried: never as a snapshot whose body is cut
-/// short, and never as a record of the member's type. With another seq in
-/// the body, the same owner answers the member's snapshot.
+/// answers with the 6 bytes sent. That reply, on the GET's one concrete
+/// key, is the owner's answer (observer 0.36 §4.1, F-572): shown
+/// unchanged, the member's last mutation its stamp, never as a value, nor
+/// as a snapshot whose body is cut short, nor undecodable. With another
+/// seq in the body, the same owner answers the member's snapshot.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn get_with_a_held_stamp_as_its_body_is_answered_by_the_held_stamp() {
     use zenkey::model::wire::{HeldStamp, Seq, Stamp};
@@ -15932,21 +15958,39 @@ async fn get_with_a_held_stamp_as_its_body_is_answered_by_the_held_stamp() {
         held.len(),
         "the stamp alone: {run}"
     );
-    assert_eq!(rows[0]["verdict"], "undecodable", "{run}");
     assert_eq!(
-        rows[0]["decode_error"],
-        format!(
-            "zk2c held stamp (run {}, seq {}), unchanged only to the GET that carried it, and \
-             no answer here: held",
-            put.stamp.run.hex(),
-            put.stamp.seq.get()
-        ),
-        "a held stamp, named: {run}"
+        rows[0]["unchanged"],
+        serde_json::json!({"run": put.stamp.run.hex(), "seq": put.stamp.seq.get()}),
+        "the owner's answer, unchanged: {run}"
     );
+    for field in ["value", "verdict", "decode_error"] {
+        assert!(rows[0].get(field).is_none(), "never a value: {run}");
+    }
     let text = rows[0].to_string();
     assert!(
         !text.contains("snapshot") && !text.contains("short"),
         "never a page cut short: {run}"
+    );
+    let table = bus
+        .zenctl(&[
+            "get",
+            key,
+            "--body",
+            &body,
+            "--timeout",
+            "1",
+            "--format",
+            "table",
+        ])
+        .await;
+    assert!(
+        table.stdout.contains(&format!(
+            "unchanged: the owner's answer to the held stamp this GET carried; the member's \
+             last mutation is run {}, seq {}",
+            put.stamp.run.hex(),
+            put.stamp.seq.get()
+        )),
+        "{table}"
     );
     // The bytes the owner sent: the ones the GET carried.
     let raw = bus

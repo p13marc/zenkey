@@ -566,12 +566,17 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   <key> --body @FILE` already makes one, since zenoh sends a query's
   payload under `zenoh/bytes` unless told otherwise (`GetOpts::payload`
   sets no Encoding), and an owner whose member is unchanged answers the
-  bytes sent. The lens does not know what the GET carried, so the reply
-  is shown as a held stamp with its run and seq, undecodable as `held`,
-  never as a page cut short (`live_zk2.rs`'s
+  bytes sent. Since observer 0.36 §4.1 (F-572), `cmd/get.rs` reads the
+  body itself (`carried`: a held stamp, on one concrete key), and the
+  reply on that key that is the same held stamp (`unchanged`) is shown as
+  the owner's answer, `unchanged: …; the member's last mutation is run R,
+  seq S`, its row `"unchanged": {run, seq}` with no `value`, `verdict`
+  or `decode_error`; `--raw` and `--hex` show its bytes, and any other
+  held stamp stays undecodable as `held`, never a page cut short
+  (`a_held_stamp_that_is_the_body_given_is_shown_unchanged`, and
+  `live_zk2.rs`'s
   `get_with_a_held_stamp_as_its_body_is_answered_by_the_held_stamp`).
-  A `get --held RUN:SEQ` that writes the stamp and reads the answer as
-  unchanged is not built.
+  A `get --held RUN:SEQ` that writes the stamp is not built.
   A heartbeat's ahead time (#986's Q0, core 0.113 §7.5, `freshness.v2`
   0.12 §5): zenctl shows it through the fleet's lens and nowhere else.
   `echo`, `get`, `watch`, `record` and `timeline` over a heartbeat's key or

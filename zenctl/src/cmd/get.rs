@@ -20,6 +20,14 @@
 //! window (core §4, S3) — is a deletion in every form (#765): the tombstone
 //! words in the table, `--hex`, `--raw` and `--fmt`'s `%v`, and
 //! `"delete": true` on its row, never a put with an empty payload.
+//!
+//! **A body its user gave it** (observer §4.1, core §4.2). A GET whose
+//! `--body` is a held stamp, on one concrete key, is a conditional read
+//! the user asked for. The reply on that key that is the same held stamp
+//! is the owner's answer: shown as unchanged, the member's last mutation
+//! being that stamp, and never as a value (`"unchanged"` on its row, in
+//! place of `value`, `verdict` and `decode_error`). Any other held stamp
+//! stays no answer, `held`.
 
 use anyhow::Result;
 use zenkey_model::authoring::Kind;
@@ -70,6 +78,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
     // one-line hint for a base-relative `zk2/…` typed under a namespace.
     let selector = zk2::wire_selector(Some(&selector), &namespace)?;
     let payload = body.as_ref().map(crate::input::Source::read).transpose()?;
+    let carried = carried(&selector, payload.as_deref());
 
     // The lens before the GET: presence and the revisions it names, read in
     // the namespace — unless nothing is to be decoded, which asks nothing
@@ -102,7 +111,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
     if crate::render::Mode::of(dep.format()).machine() {
         let rows = answers
             .iter()
-            .map(|a| row(a, &lens, raw, structural_only))
+            .map(|a| row(a, &lens, raw, structural_only, carried.as_ref()))
             .collect();
         let report = crate::render::GetReport {
             selector: selector.clone(),
@@ -119,6 +128,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
             hex: hex_payload,
             fmt: fmt.as_deref(),
             structural_only,
+            carried: carried.as_ref(),
         };
         let mut n = 0usize;
         for a in &answers {
@@ -163,6 +173,57 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
     Ok(())
 }
 
+/// The held stamp a GET's body is, on the GET's one concrete key (observer
+/// §4.1, "A body its user gave it"): the key and the stamp a reply must be
+/// to answer it. `None` for a body that is no held stamp, and for a
+/// selector that is not one concrete key, which no held stamp answers
+/// (core §4.2).
+fn carried(selector: &str, body: Option<&[u8]>) -> Option<(String, zenkey_model::wire::Stamp)> {
+    let held = zenkey_model::wire::HeldStamp::parse(body?).ok()?;
+    zenkey_model::seed::is_concrete(selector).then(|| {
+        (
+            zenkey_model::seed::selector_key(selector).to_owned(),
+            held.stamp,
+        )
+    })
+}
+
+/// Whether a reply is the owner's answer to the held stamp the GET carried
+/// ([`carried`]): on that key, a put whose bytes are that same held stamp.
+/// Its stamp, the member's last mutation.
+fn unchanged(
+    a: &FleetAnswer,
+    carried: Option<&(String, zenkey_model::wire::Stamp)>,
+) -> Option<zenkey_model::wire::Stamp> {
+    let (key, sent) = carried?;
+    let Answer::Value(payload) = &a.answer else {
+        return None;
+    };
+    if a.is_delete() || &a.key != key {
+        return None;
+    }
+    let bytes = payload.to_bytes();
+    match zenkey_fleet::model::inband::payload(&a.key, a.encoding.as_deref(), &bytes) {
+        zenkey_fleet::model::inband::Payload::Refused(zenkey_model::wire::Refusal::Held(s))
+            if s == *sent =>
+        {
+            Some(s)
+        }
+        _ => None,
+    }
+}
+
+/// An unchanged answer in words: the owner's, to the held stamp the GET
+/// carried, naming the member's last mutation.
+fn unchanged_text(s: zenkey_model::wire::Stamp) -> String {
+    format!(
+        "unchanged: the owner's answer to the held stamp this GET carried; the member's last \
+         mutation is run {}, seq {} (core §4.2)",
+        s.run,
+        s.seq.get()
+    )
+}
+
 /// One reply through the lens: a response on an `@op` key, its resource's
 /// type otherwise. A delete carries nothing to decode (#765).
 fn line_of(a: &FleetAnswer, bytes: Vec<u8>, lens: &Lens<'_>, structural_only: bool) -> Line {
@@ -196,6 +257,8 @@ struct Human<'a> {
     /// `--fmt`: one line per reply, from the `%` vocabulary.
     fmt: Option<&'a str>,
     structural_only: bool,
+    /// The held stamp the GET's body is, on its one key ([`carried`]).
+    carried: Option<&'a (String, zenkey_model::wire::Stamp)>,
 }
 
 /// One reply as the table form prints it: stdout's lines, then stderr's
@@ -259,9 +322,12 @@ impl Human<'_> {
                     .as_ref()
                     .map(|t| attachment_display(&t.to_bytes()))
             });
+        let answered = unchanged(a, self.carried);
         if let Some(fmt) = self.fmt {
             let value = if delete {
                 TOMBSTONE.to_owned()
+            } else if let Some(s) = answered {
+                unchanged_text(s)
             } else {
                 line.value_text()
             };
@@ -291,6 +357,10 @@ impl Human<'_> {
             return p;
         }
         p.out.push(a.key.clone());
+        if let Some(s) = answered {
+            p.out.push(format!("  {}", unchanged_text(s)));
+            return p;
+        }
         p.out.push(match &line.checked {
             Some((rendering, _)) => format!("  {}", crate::render::payload_text(rendering)),
             None => format!("  {TOMBSTONE}"),
@@ -308,7 +378,13 @@ impl Human<'_> {
 
 /// One reply as a JSON row — the ndjson line and the json array element.
 /// A delete says so, `"delete": true`, and carries no bytes (#765).
-fn row(a: &FleetAnswer, lens: &Lens<'_>, raw: bool, structural_only: bool) -> serde_json::Value {
+fn row(
+    a: &FleetAnswer,
+    lens: &Lens<'_>,
+    raw: bool,
+    structural_only: bool,
+    carried: Option<&(String, zenkey_model::wire::Stamp)>,
+) -> serde_json::Value {
     match &a.answer {
         Answer::Error { name, message } => serde_json::json!({
             "error": { "name": name, "message": message },
@@ -332,7 +408,19 @@ fn row(a: &FleetAnswer, lens: &Lens<'_>, raw: bool, structural_only: bool) -> se
                 }
                 return obj;
             }
-            value_row(a, &line_of(a, bytes, lens, structural_only))
+            let mut obj = value_row(a, &line_of(a, bytes, lens, structural_only));
+            // The owner's answer to the held stamp the GET carried: never
+            // a value (observer §4.1).
+            if let (Some(s), Some(o)) = (unchanged(a, carried), obj.as_object_mut()) {
+                for field in ["value", "typed", "verdict", "decode_error"] {
+                    o.remove(field);
+                }
+                o.insert(
+                    "unchanged".to_owned(),
+                    serde_json::json!({"run": s.run.to_string(), "seq": s.seq.get()}),
+                );
+            }
+            obj
         }
     }
 }
@@ -482,7 +570,7 @@ mod tests {
         let lens = Lens::new("prod", None, &contracts);
 
         let foreign = value("plant/line-1/temp");
-        let r = row(&foreign, &lens, false, false);
+        let r = row(&foreign, &lens, false, false, None);
         assert_eq!(r["key"], "plant/line-1/temp");
         assert_eq!(r["identity"]["is"], "not_in_namespace");
         assert_eq!(r["value"], 1);
@@ -493,11 +581,11 @@ mod tests {
         assert!(r.get("origin").is_none(), "v1's origin left at FJ9");
 
         let zk2 = value("prod/zk2/host-a/tc/tc.netif.v1/state/namespaces");
-        let r = row(&zk2, &lens, false, false);
+        let r = row(&zk2, &lens, false, false, None);
         assert_eq!(r["identity"]["is"], "resource");
         assert_eq!(r["identity"]["address"], "host-a/tc");
 
-        let skipped = row(&zk2, &lens, false, true);
+        let skipped = row(&zk2, &lens, false, true, None);
         assert!(
             skipped["verdict"]
                 .as_str()
@@ -510,11 +598,11 @@ mod tests {
             "{skipped}"
         );
 
-        let raw = row(&zk2, &lens, true, true);
+        let raw = row(&zk2, &lens, true, true, None);
         assert_eq!(raw["hex"], "31");
         assert!(raw.get("identity").is_none(), "--raw resolves nothing");
 
-        let err = row(&error(), &lens, false, false);
+        let err = row(&error(), &lens, false, false, None);
         assert_eq!(err["error"]["name"], "error/unavailable");
     }
 
@@ -578,7 +666,7 @@ mod tests {
             .unwrap();
         let held = zenkey_fleet::Catalogs::new(vec![listing]);
         let lens = Lens::new("prod", None, &set).offline(&set).catalogs(&held);
-        let r = row(&a, &lens, false, false);
+        let r = row(&a, &lens, false, false, None);
         assert_eq!(r["value"]["at"], at, "under the catalog's epoch: {r}");
         assert!(!r.to_string().contains("assumed"), "{r}");
         let bare = Lens::new("prod", None, &set).offline(&set);
@@ -599,7 +687,7 @@ mod tests {
             &bytes,
         );
         assert_eq!(c.rendering.rendered.epoch_note(), None);
-        let r = row(&a, &bare, false, false);
+        let r = row(&a, &bare, false, false, None);
         assert_eq!(
             r["value"]["at"],
             at - epoch * 1000,
@@ -619,6 +707,7 @@ mod tests {
             hex,
             fmt,
             structural_only: raw,
+            carried: None,
         };
         let mut out = String::new();
         for (name, h) in [
@@ -677,7 +766,7 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
     fn a_deletion_row_says_delete_and_carries_no_bytes() {
         let contracts = zenkey_fleet::ContractSet::new();
         let lens = Lens::new("prod", None, &contracts);
-        let r = row(&tombstone(ETH0), &lens, false, false);
+        let r = row(&tombstone(ETH0), &lens, false, false, None);
         assert_data_eq!(
             serde_json::to_string_pretty(&r).expect("a row serializes"),
             str![[r#"
@@ -698,17 +787,118 @@ prod/zk2/host-a/tc/tc.netif.v1/state/interfaces/default/eth0
 }
 "#]]
         );
-        let put = row(&empty_put(ETH0), &lens, false, false);
+        let put = row(&empty_put(ETH0), &lens, false, false, None);
         assert_eq!(put["delete"], false);
         assert_eq!(put["payload_bytes"], 0, "an empty put is a value");
 
-        let raw = row(&tombstone(ETH0), &lens, true, true);
+        let raw = row(&tombstone(ETH0), &lens, true, true, None);
         assert_eq!(
             raw,
             serde_json::json!({"key": ETH0, "encoding": "zenoh/bytes", "delete": true})
         );
-        let raw_put = row(&empty_put(ETH0), &lens, true, true);
+        let raw_put = row(&empty_put(ETH0), &lens, true, true, None);
         assert_eq!(raw_put["delete"], false);
         assert_eq!(raw_put["hex"], "");
+    }
+
+    /// A reply whose payload is a held stamp (core §7.5): on a state key,
+    /// under `zenoh/bytes`.
+    fn held_reply(key: &str, stamp: zenkey_model::wire::Stamp) -> FleetAnswer {
+        FleetAnswer {
+            encoding: Some("zenoh/bytes".into()),
+            answer: Answer::Value(zenoh::bytes::ZBytes::from(
+                zenkey_model::wire::HeldStamp::new(stamp).write(),
+            )),
+            ..value(key)
+        }
+    }
+
+    /// Observer 0.36 §4.1, "A body its user gave it" (F-572): a held stamp
+    /// that is the body the GET carried, on its one concrete key, is the
+    /// owner's answer, shown as unchanged and never as a value, in the
+    /// table, `--fmt` and the row; `--raw` and `--hex` still show its
+    /// bytes. Another stamp, another key, a body that is no held stamp, and
+    /// a selector that is not one concrete key leave it `held`.
+    #[test]
+    fn a_held_stamp_that_is_the_body_given_is_shown_unchanged() {
+        use zenkey_model::wire::{HeldStamp, Run, Seq, Stamp};
+        let stamp = Stamp {
+            run: Run::U16(5),
+            seq: Seq::new(7).expect("a seq"),
+        };
+        let other = Stamp {
+            seq: Seq::new(8).expect("a seq"),
+            ..stamp
+        };
+        let body = HeldStamp::new(stamp).write();
+        let contracts = zenkey_fleet::ContractSet::new();
+        let lens = Lens::new("prod", None, &contracts);
+        let asked = carried(ETH0, Some(&body));
+        assert_eq!(asked, Some((ETH0.to_owned(), stamp)));
+        assert_eq!(carried(&format!("{ETH0}?_time=*"), Some(&body)), asked);
+        assert_eq!(carried("prod/zk2/host-a/tc/**", Some(&body)), None);
+        assert_eq!(carried(ETH0, Some(b"1")), None, "no held stamp");
+        assert_eq!(carried(ETH0, None), None);
+
+        let human = |carried| Human {
+            lens: &lens,
+            namespace: "prod",
+            raw: false,
+            hex: false,
+            fmt: None,
+            structural_only: false,
+            carried,
+        };
+        let answer = held_reply(ETH0, stamp);
+        assert_eq!(
+            human(asked.as_ref()).reply(&answer, 1).out,
+            [
+                ETH0.to_owned(),
+                "  unchanged: the owner's answer to the held stamp this GET carried; the \
+                 member's last mutation is run 0005, seq 7 (core §4.2)"
+                    .to_owned()
+            ]
+        );
+        let fmt = Human {
+            fmt: Some("%v"),
+            ..human(asked.as_ref())
+        };
+        assert!(fmt.reply(&answer, 1).out[0].starts_with("unchanged: "));
+        let hex = Human {
+            hex: true,
+            ..human(asked.as_ref())
+        };
+        let shown = hex.reply(&answer, 1).out;
+        assert!(
+            shown[1].ends_with("e0 00 05 00 00 07"),
+            "--hex: its bytes: {shown:?}"
+        );
+        let r = row(&answer, &lens, false, false, asked.as_ref());
+        assert_eq!(r["unchanged"], serde_json::json!({"run": "0005", "seq": 7}));
+        for field in ["value", "verdict", "decode_error"] {
+            assert!(
+                r.get(field).is_none(),
+                "never a value, nor undecodable: {r}"
+            );
+        }
+        assert_eq!(r["payload_bytes"], 6, "{r}");
+
+        // The others stay no answer: `held`.
+        let others = [
+            ("another stamp", held_reply(ETH0, other), asked.clone()),
+            (
+                "another key",
+                held_reply(&format!("{ETH0}x"), stamp),
+                asked.clone(),
+            ),
+            ("no body", held_reply(ETH0, stamp), None),
+        ];
+        for (what, a, asked) in &others {
+            let out = human(asked.as_ref()).reply(a, 1).out.join("\n");
+            assert!(out.contains("no answer here: held"), "{what}: {out}");
+            let r = row(a, &lens, false, false, asked.as_ref());
+            assert!(r.get("unchanged").is_none(), "{what}: {r}");
+            assert_eq!(r["verdict"], "undecodable", "{what}: {r}");
+        }
     }
 }
