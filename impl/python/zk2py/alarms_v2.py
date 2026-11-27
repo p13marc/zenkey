@@ -1631,3 +1631,78 @@ def read_page(data: bytes, epoch: int | None = None) -> dict[str, Any]:
             t["run_width"], t["run"] = e["run_width"], e["run"]
         out["tombs"].append(t)
     return out
+
+
+# -- §2.5, the acknowledgement identity: ``at`` --------------------------------------------------
+
+#: §2.5's table: which acts take a new ``at``, and which keep it.
+RAISE, ESCALATE, REFRESH, REFRESH_WORDS, CONFIRM, RESOLVE = (
+    "raise", "escalate", "refresh", "refresh_words", "confirm", "resolve")
+NEW_AT = {RAISE, ESCALATE, RESOLVE}
+KEPT_AT = {REFRESH, REFRESH_WORDS, CONFIRM}
+
+
+def coded(at_ms: int | None, epoch: int | None = None) -> bool:
+    """Whether an instant has a code under the epoch: whole seconds from it,
+    0 to 2^32 − 1 (core §7.6)."""
+    if at_ms is None:
+        return False
+    e = packed.deployment_epoch(epoch)
+    return 1000 * e <= at_ms < 1000 * (e + (1 << 32))
+
+
+class AtClock:
+    """An owner's ``at`` for each identity (§2.5): "**New** is the owner's
+    clock, in whole seconds. Where that is not later than the greatest
+    ``at`` the owner knows it wrote for that identity, new is that ``at``
+    plus one second." "While its clock reads no instant the epoch codes, an
+    owner writes no ``at``. So does one whose new ``at`` would have no
+    code." Instants are Unix milliseconds."""
+
+    def __init__(self, epoch: int | None = None) -> None:
+        self.epoch = epoch
+        self.greatest: dict[Any, int] = {}
+
+    def new(self, identity: Any, clock_ms: int | None) -> int | None:
+        if clock_ms is None or not coded(clock_ms, self.epoch):
+            return None
+        at = clock_ms - clock_ms % 1000
+        g = self.greatest.get(identity)
+        if g is not None and at <= g:
+            at = g + 1000
+        if not coded(at, self.epoch):
+            return None
+        self.greatest[identity] = at
+        return at
+
+    def act(self, identity: Any, act: str, clock_ms: int | None, held: int | None) -> int | None:
+        """The ``at`` an act writes: a new one at a transition, "the one it
+        holds at a refresh" (and a confirmation puts nothing)."""
+        if act in NEW_AT:
+            return self.new(identity, clock_ms)
+        if act in KEPT_AT:
+            return held
+        raise ValueError(f"no act {act!r}")
+
+    def knows(self, identity: Any, at_ms: int | None) -> None:
+        """An ``at`` the owner knows it wrote for an identity, as an adopted
+        record's."""
+        if at_ms is not None and at_ms > self.greatest.get(identity, -1):
+            self.greatest[identity] = at_ms
+
+
+def ack_applies(acked_at: int | None, at: int | None) -> bool:
+    """"An acknowledgement applies while the alarm's ``at`` is at most the
+    acknowledged one"; "With no ``at``, no acknowledgement applies." An
+    acknowledgement made against no ``at`` applies to none."""
+    if at is None or acked_at is None:
+        return False
+    return at <= acked_at
+
+
+def from_v1(timestamp_ms: int, epoch: int | None = None) -> int | None:
+    """§2.9 "From ``alarms.v1``": "Its ``at`` is the document's ``timestamp``
+    in whole seconds (§2.5)"; none where that instant has no code under the
+    epoch."""
+    at = timestamp_ms - timestamp_ms % 1000
+    return at if coded(at, epoch) else None
