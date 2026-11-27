@@ -371,6 +371,32 @@ def confirmations(path: Path) -> list[Result]:
     return out
 
 
+# -- acks.json (§2.5) --------------------------------------------------------------------------
+
+def acks(path: Path) -> list[Result]:
+    data = _load(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["writes"]):
+        clock = a2.AtClock(c.get("epoch"))
+        held = c.get("known")
+        clock.knows("x", held)
+        got_a, want_a = [], []
+        for act in c["acts"]:
+            name = {"raise": a2.RAISE, "escalate": a2.ESCALATE, "refresh": a2.REFRESH, "resolve": a2.RESOLVE,
+                    "confirm": a2.CONFIRM, "refresh_words": a2.REFRESH_WORDS}[act["act"]]
+            held = clock.act("x", name, act["clock_ms"], held)
+            got_a.append(held)
+            want_a.append(act["expect"])
+        out.append(_check(f"v2 acks, writes #{i}: {c['note']}", got_a, want_a))
+    for i, c in enumerate(data["applies"]):
+        out.append(_check(f"v2 acks, applies #{i}: {c['note']}", a2.ack_applies(c["acked_at"], c["at"]), c["expect"]))
+    for i, c in enumerate(data["moves"]):
+        at = a2.from_v1(c["timestamp"], c.get("epoch"))
+        out.append(_check(f"v2 acks, moves #{i}: {c['note']}",
+                          {"at": at, "acknowledgement_applies": a2.ack_applies(c["timestamp"], at)}, c["expect"]))
+    return out
+
+
 FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": schema,
     "records.json": records,
@@ -380,6 +406,7 @@ FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "words.json": words,
     "transitions.json": transitions,
     "confirmations.json": confirmations,
+    "acks.json": acks,
 }
 
 
