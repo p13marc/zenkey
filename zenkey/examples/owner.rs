@@ -18,6 +18,7 @@
 //!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
+//!     [--first-run <hex>] [--takeover-puts-nothing]
 //!     [--timing] [--frames] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
 //!     [--owner-heartbeat]
 //!     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
@@ -560,10 +561,15 @@
 //! something, and the archive, read only on a complete read showing the
 //! author absent); every other command as it was asked.
 //!
-//! **`redundancy.v1`** (`spec/profiles/redundancy/v1.md`, #841) is the
-//! runtime's ([`zenkey::redundancy`]), for every contract given that lists
-//! `redundancy.v1` in `uses` (a governed interface: the scenarios'
-//! `ledger.v1` and `valve.v1`, `zenkey/tests/contracts/`). A governed
+//! **`redundancy.v1` and `redundancy.v2`** (`spec/profiles/redundancy/v1.md`,
+//! #841; `v2.md`, #987's N2) are the runtime's ([`zenkey::redundancy`]),
+//! for every contract given that lists either major in `uses` (a governed
+//! interface: the scenarios' `ledger.v1` and `valve.v1`, and
+//! `scenarios-v2.md`'s `ledger-run.v1` and `valve-run.v1`,
+//! `zenkey/tests/contracts/`). A `redundancy.v1` candidate's session stamps
+//! every write (v1 §2.10); a `redundancy.v2` one's runs as any owner's
+//! (v2 §2.10), unless `--hlc`, and its states are answered by snapshot. A
+//! governed
 //! contract needs `--standby`, implied by every option below but
 //! `--instance-id`, `--name`, `--lease-ms` and `--peer`, and `--standby`
 //! needs a governed contract: either alone refuses to start, exit 1. The
@@ -606,7 +612,15 @@
 //!   other line before it is refused.
 //! - A contract listing `redundancy.v1` is written only once the start has
 //!   checked its declaration (F-214): an invalid one stops the owner with
-//!   `not started: … invalid`, exit 1.
+//!   `not started: … invalid`, exit 1. So is one listing `redundancy.v2`,
+//!   `explicit_stream` among its reasons (v2 §2.2).
+//! - `--first-run <hex>` chooses the first instance's run, 8 lowercase hex
+//!   digits (`scenarios-v2.md` §14's hook): its claim's descriptor states
+//!   it. A `redundancy.v2` candidate that reads it in a lower id's
+//!   descriptor draws a new one before it serves (v2 §2.10).
+//! - `--takeover-puts-nothing`: a takeover puts no value (`scenarios-v2.md`
+//!   §13 step 3), so a follower's seed finds the new incumbent holding
+//!   none.
 //!
 //! Its commands, each answered by one JSON line, or `refused <line>:
 //! <why>`:
@@ -620,6 +634,8 @@
 //! redundancy hold-heal on|off                {"redundancy": "hold-heal", "held": <bool>}
 //! redundancy wait <iface> serving|standby <ms>   {"redundancy": "wait", "iface", "reached": <bool>, "standing"}
 //! redundancy new-epoch                       {"redundancy": "new-epoch", "instance": <id>}
+//! redundancy run                             {"redundancy": "run", "run": <hex>}
+//! redundancy new-run                         {"redundancy": "new-run", "run": <hex>}
 //! ```
 //!
 //! A `<standing>` is `{"role": "unclaimed"|"standby"|"serving", "why"?,
@@ -633,6 +649,10 @@
 //! answers once the role is reached, or at the deadline. `new-epoch` is a
 //! re-mint in this session (core §8.1): a serving interface's token is
 //! re-minted make-before-break, and the election knows its new id (F-209).
+//! `run` is the run the instance writes under, as its descriptor states it;
+//! `new-run` takes a new one within the instance (core §4.3,
+//! `Service::new_run`), its descriptor put stating it before anything is
+//! written under it (`scenarios-v2.md` §14 step 1).
 //! **A crash is the process's**: kill it, as the scenarios' §1 and §10 do.
 //!
 //! **Frames** (core §7.7, #981's K3) are the runtime's
@@ -849,6 +869,12 @@ pub struct Options {
     pub refuse_without_lock: bool,
     /// `--hold-heal`: the heal's reads held from the start.
     pub hold_heal: bool,
+    /// `--first-run <hex>`: the first instance's run, chosen
+    /// (`scenarios-v2.md` §14's hook).
+    pub first_run: Option<zenkey::model::wire::Run>,
+    /// `--takeover-puts-nothing`: a takeover puts no value
+    /// (`scenarios-v2.md` §13 step 3).
+    pub takeover_puts_nothing: bool,
     /// `--peer`: with `--connect`, every session a peer that listens on
     /// loopback and gossips, rather than a client (core §8.1, 0.40).
     pub peer: bool,
@@ -942,6 +968,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
+    [--first-run <hex>] [--takeover-puts-nothing]
     [--timing] [--frames] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
     [--owner-heartbeat]
     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
@@ -1392,9 +1419,12 @@ desired.v2 (spec/profiles/desired/v2.md)
                                   read, the reads its watch asked for, whether it reads
                                   no heartbeat (its period stands), and its GETs in all
 
-redundancy.v1 (spec/profiles/redundancy/v1.md)
-  For every contract given that lists redundancy.v1 in uses (a governed
-  interface; the scenarios' ledger.v1 and valve.v1). A governed contract needs
+redundancy.v1 and redundancy.v2 (spec/profiles/redundancy/v1.md, v2.md)
+  For every contract given that lists either major in uses (a governed
+  interface; the scenarios' ledger.v1 and valve.v1, scenarios-v2.md's
+  ledger-run.v1 and valve-run.v1). A redundancy.v1 candidate's session stamps
+  every write (v1 §2.10); a redundancy.v2 one's runs as any owner's (v2 §2.10),
+  its states answered by snapshot. A governed contract needs
   --standby (implied by every option here but --instance-id, --name,
   --lease-ms and --peer), and --standby a governed contract: either alone
   refuses to start, exit 1. The owner claims at its start (its descriptor marks
@@ -1402,7 +1432,7 @@ redundancy.v1 (spec/profiles/redundancy/v1.md)
   address on a watch session, reads on a reader of its own, and serves only
   once elected: ready says it claimed, not that it serves.
 
-  --standby                       take part in redundancy.v1's election
+  --standby                       take part in the election (either major)
   --election claim|external       every governed contract must declare it (checked,
                                   never set: the election is the contract's)
   --instance-id <id>              the first instance's id, 16 lowercase hex digits
@@ -1425,6 +1455,11 @@ redundancy.v1 (spec/profiles/redundancy/v1.md)
                                   listening on loopback and gossiping
   --wait-go                       open every session, say waiting go, and start the service
                                   at a go line on standard input (scenarios.md §3)
+  --first-run <hex>               the first instance's run, 8 lowercase hex digits, its
+                                  claim's descriptor stating it (scenarios-v2.md §14);
+                                  a redundancy.v2 candidate reading it in a lower id's
+                                  descriptor draws a new one before it serves
+  --takeover-puts-nothing         a takeover puts no value (scenarios-v2.md §13 step 3)
 
   redundancy role                 each governed interface's standing
   redundancy reads                the election's reads, the poll's last reads, and each
@@ -1436,6 +1471,9 @@ redundancy.v1 (spec/profiles/redundancy/v1.md)
   redundancy wait <iface> serving|standby <ms>
                                   answered once the role is reached, or at <ms>
   redundancy new-epoch            a re-mint in this session, the election told first
+  redundancy run                  the run it writes under, as its descriptor states it
+  redundancy new-run              a new run within the instance, its descriptor put
+                                  stating it first (core §4.3; scenarios-v2.md §14)
 
   Answers, one JSON line each:
     {\"redundancy\": \"role\", \"instance\": <id>, \"interfaces\": {<iface>: <standing>}}
@@ -1450,6 +1488,8 @@ redundancy.v1 (spec/profiles/redundancy/v1.md)
     {\"redundancy\": \"hold-heal\", \"held\": <bool>}
     {\"redundancy\": \"wait\", \"iface\": <iface>, \"reached\": <bool>, \"standing\": <standing>}
     {\"redundancy\": \"new-epoch\", \"instance\": <id>}
+    {\"redundancy\": \"run\", \"run\": <hex>}
+    {\"redundancy\": \"new-run\", \"run\": <hex>}
     <standing>: {\"role\": \"unclaimed\"|\"standby\"|\"serving\", \"why\"?: <why>,
       \"instance\"?: <id>, \"fault\"?: <words>}, <why> as elections.json writes it:
       incumbent, incomplete, own_claim_missing, descriptor_unread, lower_candidate,
@@ -1656,6 +1696,7 @@ impl Options {
              [--standby] [--election claim|external] [--instance-id <id>] [--name <word>] \
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
+             [--first-run <hex>] [--takeover-puts-nothing] \
              [--timing] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>] \
              [--owner-heartbeat] \
              [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] \
@@ -1714,6 +1755,8 @@ impl Options {
             lock_file: None,
             refuse_without_lock: false,
             hold_heal: false,
+            first_run: None,
+            takeover_puts_nothing: false,
             peer: false,
             wait_go: false,
             timing: false,
@@ -2024,6 +2067,22 @@ impl Options {
                 }
                 [flag, tail @ ..] if flag == "--hold-heal" => {
                     o.hold_heal = true;
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, value, tail @ ..] if flag == "--first-run" => {
+                    o.first_run = Some(
+                        zenkey::model::wire::Run::from_hex(value)
+                            .filter(|r| r.is_wide())
+                            .ok_or_else(|| {
+                                format!("--first-run {value:?}: 8 lowercase hex digits")
+                            })?,
+                    );
+                    o.standby = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--takeover-puts-nothing" => {
+                    o.takeover_puts_nothing = true;
                     o.standby = true;
                     rest = tail;
                 }
@@ -2441,13 +2500,19 @@ pub async fn run_with(
         Some(endpoint) => {
             side(&mut z, &opts, endpoint)?;
             // Core §8.2: an owner's session runs without timestamping,
-            // unless `--hlc`, or a candidate's (`--standby`: redundancy.v1
-            // §2.10). A simulated offset leaves `--hlc` off (the module
-            // doc): the HLC would re-stamp the offset clock's stamps before
-            // they leave. A candidate's stays on whatever its clock, its
-            // stamps under its own id (F-467); `--no-hlc` turns it off, and
-            // the runtime then refuses the candidate.
-            let stamps = if opts.standby {
+            // unless `--hlc`, or a `redundancy.v1` candidate's (`--standby`
+            // on a contract listing it: v1 §2.10; a `redundancy.v2` one's
+            // runs as any owner's, v2 §2.10). A simulated offset leaves
+            // `--hlc` off (the module doc): the HLC would re-stamp the
+            // offset clock's stamps before they leave. A v1 candidate's
+            // stays on whatever its clock, its stamps under its own id
+            // (F-467); `--no-hlc` turns it off, and the runtime then
+            // refuses the candidate.
+            let governs_v1 = imps.iter().any(|i| {
+                zenkey::model::redundancy::Major::of(&i.contract().uses)
+                    == Some(zenkey::model::redundancy::Major::V1)
+            });
+            let stamps = if opts.standby && governs_v1 {
                 !opts.no_hlc
             } else {
                 opts.hlc && opts.clock_offset_ms == 0 && !opts.no_hlc
@@ -2562,6 +2627,7 @@ pub async fn run_with(
         red,
         calls: Arc::default(),
         first_up: std::sync::atomic::AtomicBool::new(true),
+        first_run: std::sync::atomic::AtomicBool::new(true),
         arb_steer,
         arb_watch,
         lines: lines_out,
@@ -2706,6 +2772,9 @@ struct Ctx<'a> {
     calls: Arc<std::sync::atomic::AtomicU64>,
     /// Whether the next bring-up is the first: `--instance-id` is its.
     first_up: std::sync::atomic::AtomicBool,
+    /// Whether the next bring-up is the first to choose its run:
+    /// `--first-run` is its.
+    first_run: std::sync::atomic::AtomicBool,
     /// arbitration.v1's revision of steer.v1 held, with `--arbitrate`.
     arb_steer: Option<Arc<Contract>>,
     /// The actuator's watch session, with `--arbitrate`.
@@ -2906,6 +2975,15 @@ impl Ctx<'_> {
         {
             b.set_instance_id(id.clone());
         }
+        // scenarios-v2.md §14's hook: the first instance's run, chosen
+        // before anything takes one.
+        if let Some(r) = opts.first_run
+            && self
+                .first_run
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            b.minter().simulate_run(r)?;
+        }
         let value = opts.name.clone().unwrap_or_else(|| "ok".to_owned());
         let mut governed = std::collections::BTreeSet::new();
         let mut gated = std::collections::BTreeSet::new();
@@ -2917,10 +2995,11 @@ impl Ctx<'_> {
         for imp in self.imps.iter().cloned() {
             let iface = imp.iface().clone();
             let resources = imp.contract().resources.clone();
-            // redundancy.v1 §2.2 (#841): a governed interface is elected,
-            // and --election says which election it must declare.
+            // redundancy.v1 §2.2 (#841), v2 §2.2: a governed interface of
+            // either major is elected, and --election says which election
+            // it must declare.
             if let zenkey::model::redundancy::Declaration::Governed(e) =
-                zenkey::model::redundancy::declaration_of(imp.contract(), false)
+                zenkey::model::redundancy::either_declaration_of(imp.contract(), false)
             {
                 if let Some(want) = opts.election
                     && want != e
@@ -2932,8 +3011,9 @@ impl Ctx<'_> {
                 }
                 governed.insert((iface.clone(), e));
             }
-            // F-214: an interface whose contract lists redundancy.v1 is
-            // written only once start() has checked its declaration.
+            // F-214: an interface whose contract lists either major of
+            // redundancy is written only once start() has checked its
+            // declaration.
             if zenkey::model::redundancy::is_governed(imp.contract()) {
                 gated.insert(iface.clone());
             }
@@ -3234,9 +3314,11 @@ impl Ctx<'_> {
                     .with_retry(Duration::from_millis(opts.retry_ms))
                     .with_grace(Duration::from_millis(opts.grace_ms))
                     .with_takeover(Arc::new(PutStates {
+                        // --takeover-puts-nothing (scenarios-v2.md §13 step
+                        // 3): a takeover that puts no value.
                         states: states
                             .iter()
-                            .filter(|(i, _)| elected.contains(i))
+                            .filter(|(i, _)| elected.contains(i) && !opts.takeover_puts_nothing)
                             .map(|(i, w)| (i.clone(), Arc::clone(w)))
                             .collect(),
                         value: value.clone(),
@@ -4347,7 +4429,7 @@ async fn redundancy_command(
     let words: Vec<&str> = line.split_whitespace().collect();
     let refuse = |why: &str| format!("refused {}: {why}", words.join(" "));
     let (Some((r, lock)), Some(ctx)) = (&up.red, red) else {
-        return refuse("redundancy.v1 takes part in no election here (--standby)");
+        return refuse("redundancy takes part in no election here (--standby)");
     };
     let roles = || -> serde_json::Map<String, serde_json::Value> {
         r.governed()
@@ -4465,10 +4547,18 @@ async fn redundancy_command(
             Ok(id) => json!({"redundancy": "new-epoch", "instance": id.as_str()}),
             Err(e) => return refuse(&e.to_string()),
         },
+        ["redundancy", "run"] => json!({
+            "redundancy": "run",
+            "run": up.svc.minter().run().hex(),
+        }),
+        ["redundancy", "new-run"] => json!({
+            "redundancy": "new-run",
+            "run": up.svc.new_run().hex(),
+        }),
         _ => {
             return refuse(
                 "usage: redundancy role | reads | zid | lock hold|lose | calls | hold-heal on|off \
-                 | wait <iface> serving|standby <ms> | new-epoch",
+                 | wait <iface> serving|standby <ms> | new-epoch | run | new-run",
             );
         }
     };
