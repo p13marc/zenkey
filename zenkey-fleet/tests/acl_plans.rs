@@ -609,9 +609,9 @@ fn link_v2_check_face_reads_a_null_as_zenoh_does() {
         let null = block.replace(&stated, "lease: null,");
         assert_ne!(null, block, "{name}: the edit applies");
         match (policy.binding, read(&null)) {
-            (link::Binding::Zenoh1_10_1, Err(_)) => {}
-            (link::Binding::Zenoh1_10_1, Ok(_)) => {
-                panic!("{name}: zenoh 1.10.1 refuses a `null` lease at load")
+            (link::Binding::Zenoh1_10_1 | link::Binding::Zenoh1_10_2, Err(_)) => {}
+            (link::Binding::Zenoh1_10_1 | link::Binding::Zenoh1_10_2, Ok(_)) => {
+                panic!("{name}: stock zenoh refuses a `null` lease at load")
             }
             (link::Binding::Zm1_10_2R1, read) => {
                 let report = read.unwrap_or_else(|e| panic!("{name}: read as data: {e}"));
