@@ -605,6 +605,7 @@ pub fn health_report() -> HealthReport {
         verdict,
         reason: reason.into(),
         level,
+        one_instant: None,
     };
     let stamp = |clock: &str| Stamp {
         time: "2026-10-10T08:00:00.000000000Z".into(),
@@ -612,6 +613,7 @@ pub fn health_report() -> HealthReport {
     };
     let row = |address: &str, verdict, reason: &str, level, says: &str| HealthRow {
         address: address.into(),
+        profile: Some("health.v1"),
         verdict,
         reason: reason.into(),
         level,
@@ -652,7 +654,9 @@ pub fn health_report() -> HealthReport {
     liar.status = Some(StatusSeen {
         level: LevelRead::Token("ok"),
         reason: "serving".into(),
-        since_ns: 1_791_700_000_000_000_000,
+        since_ns: Some(1_791_700_000_000_000_000),
+        word: None,
+        since_s: None,
         stamp: Some(stamp("a1")),
         via: StatusVia::Get,
     });
@@ -660,6 +664,8 @@ pub fn health_report() -> HealthReport {
         check: "disk".into(),
         level: LevelRead::Token("failed"),
         detail: "full".into(),
+        word: None,
+        at_s: None,
     }];
     let mut ok = row(
         "lab/ok",
@@ -671,7 +677,9 @@ pub fn health_report() -> HealthReport {
     ok.status = Some(StatusSeen {
         level: LevelRead::Token("ok"),
         reason: "serving".into(),
-        since_ns: 1_791_700_000_000_000_000,
+        since_ns: Some(1_791_700_000_000_000_000),
+        word: None,
+        since_s: None,
         stamp: Some(stamp("a2")),
         via: StatusVia::Subscription,
     });
@@ -698,6 +706,9 @@ pub fn health_report() -> HealthReport {
         class: "profile",
         level: LevelRead::Token("failed"),
         detail: "2000 ms ahead".into(),
+        word: None,
+        argument: None,
+        at_s: None,
     });
     let mut unknown = row(
         "lab/new",
@@ -714,7 +725,9 @@ pub fn health_report() -> HealthReport {
     unknown.status = Some(StatusSeen {
         level: LevelRead::Token("unspecified"),
         reason: "starting".into(),
-        since_ns: 1_791_700_000_000_000_000,
+        since_ns: Some(1_791_700_000_000_000_000),
+        word: None,
+        since_s: None,
         stamp: Some(stamp("a3")),
         via: StatusVia::Get,
     });
@@ -739,10 +752,13 @@ pub fn health_report() -> HealthReport {
         archive: "lab/archive".into(),
         level: LevelRead::Token("degraded"),
         reason: "upstream lost".into(),
-        since_ns: 1_791_600_000_000_000_000,
+        since_ns: Some(1_791_600_000_000_000_000),
+        word: None,
+        since_s: None,
         stamp: Some(stamp("a4")),
         confirmed: true,
     });
+    gone.profile = None;
     HealthReport {
         namespace: "acme".into(),
         service: None,
@@ -770,6 +786,198 @@ pub fn health_report() -> HealthReport {
             stale: 1,
             unobservable: 1,
             not_asked: 1,
+        },
+        unobservable: None,
+    }
+}
+
+/// `zenctl health` over `health.v2` owners (#986's Q2): a service's own
+/// word named by its table (`lab/tc`, its check's detail the profile's
+/// `timeout`), a word no table names, a number no table in hand names, a
+/// break of §2.2 reported from one reading that is one instant, and a clock
+/// ahead answered by the last read heartbeat, with the `clock_ahead` fault
+/// shown as the occurrence it is — words never part of a verdict.
+pub fn health_v2_report() -> HealthReport {
+    let answer = |answer, reason: &str, says: &str| HealthAnswer {
+        answer,
+        reason: reason.into(),
+        says: says.into(),
+    };
+    let reading = |verdict, reason: &str, level, one_instant| HealthReadingVerdict {
+        verdict,
+        reason: reason.into(),
+        level,
+        one_instant: Some(one_instant),
+    };
+    let word = |number: u8, read: &'static str, name: Option<&str>| WordSeen {
+        number,
+        read,
+        name: name.map(Into::into),
+    };
+    let row = |address: &str, verdict, reason: &str, level, says: &str| HealthRow {
+        address: address.into(),
+        profile: Some("health.v2"),
+        verdict,
+        reason: reason.into(),
+        level,
+        says: says.into(),
+        readings: vec![
+            reading(verdict, reason, level, true),
+            reading(verdict, reason, level, true),
+        ],
+        agrees: answer(
+            HealthAnswerToken::Yes,
+            "ok",
+            "its status is fresh at a level, and no current check is worse",
+        ),
+        clock_ahead: answer(
+            HealthAnswerToken::No,
+            "confirmed",
+            "its last read heartbeat's time was an instant: its clock guard did not hold when \
+             it wrote it",
+        ),
+        status: None,
+        checks: vec![],
+        last_known: None,
+        faults: 0,
+        last_fault: None,
+    };
+    let status = |level: &'static str, reason: &str, w: WordSeen| StatusSeen {
+        level: LevelRead::Token(level),
+        reason: reason.into(),
+        since_ns: None,
+        word: Some(w),
+        since_s: Some(1_794_062_759),
+        stamp: Some(Stamp {
+            time: "2026-11-22T15:25:59.000000000Z".into(),
+            clock: "6c61622f7463".into(),
+        }),
+        via: StatusVia::Get,
+    };
+    let mut tc = row(
+        "lab/tc",
+        HealthVerdict::Unhealthy,
+        "degraded",
+        Some(HealthLevel::Degraded),
+        "its status is DEGRADED",
+    );
+    tc.status = Some(status(
+        "degraded",
+        "tc_netns_gone",
+        word(32, "service", Some("tc_netns_gone")),
+    ));
+    tc.checks = vec![CheckSeen {
+        check: "qdisc".into(),
+        level: LevelRead::Token("degraded"),
+        detail: "timeout".into(),
+        word: Some(word(3, "profile", Some("timeout"))),
+        at_s: Some(1_794_062_759),
+    }];
+    tc.faults = 1;
+    tc.last_fault = Some(FaultSeen {
+        code: "tc_netns_restarted".into(),
+        class: "service",
+        level: LevelRead::Token("degraded"),
+        detail: String::new(),
+        word: Some(word(32, "service", Some("tc_netns_restarted"))),
+        argument: Some(serde_json::json!(3)),
+        at_s: Some(1_794_062_759),
+    });
+    let mut plain = row(
+        "lab/plain",
+        HealthVerdict::Unhealthy,
+        "degraded",
+        Some(HealthLevel::Degraded),
+        "its status is DEGRADED",
+    );
+    plain.status = Some(status("degraded", "", word(63, "out_of_range", None)));
+    let mut old = row(
+        "lab/old",
+        HealthVerdict::Healthy,
+        "ok",
+        Some(HealthLevel::Ok),
+        "its status is OK and confirmed, and no check is worse",
+    );
+    old.status = Some(status("ok", "33", word(33, "number", None)));
+    let mut liar = row(
+        "lab/liar",
+        HealthVerdict::Unhealthy,
+        "inconsistent",
+        Some(HealthLevel::Failed),
+        "a check is worse than its status, which health.v2 §2.2 forbids",
+    );
+    liar.agrees = answer(
+        HealthAnswerToken::No,
+        "inconsistent",
+        "a current check is worse than its fresh status in one reading that is one instant, \
+         its two snapshots under one run and one asof with no entry above it: its owner breaks \
+         health.v2 §2.2",
+    );
+    liar.status = Some(status("ok", "serving", word(2, "profile", Some("serving"))));
+    liar.checks = vec![CheckSeen {
+        check: "disk".into(),
+        level: LevelRead::Token("failed"),
+        detail: String::new(),
+        word: Some(word(0, "none", None)),
+        at_s: None,
+    }];
+    let mut ahead = row(
+        "lab/ahead",
+        HealthVerdict::Healthy,
+        "ok",
+        Some(HealthLevel::Ok),
+        "its status is OK and confirmed, and no check is worse",
+    );
+    ahead.status = Some(status(
+        "ok",
+        "fallback",
+        word(6, "profile", Some("fallback")),
+    ));
+    ahead.clock_ahead = answer(
+        HealthAnswerToken::Yes,
+        "ahead",
+        "its last heartbeat's time was ahead: its clock guard held",
+    );
+    ahead.faults = 1;
+    ahead.last_fault = Some(FaultSeen {
+        code: "clock_ahead".into(),
+        class: "profile",
+        level: LevelRead::Token("failed"),
+        detail: String::new(),
+        word: Some(word(1, "profile", Some("clock_ahead"))),
+        argument: Some(serde_json::json!(3)),
+        at_s: Some(1_794_062_759),
+    });
+    HealthReport {
+        namespace: "acme".into(),
+        service: None,
+        presence: Some(HealthPresence {
+            selector: "zk2/*/*/@zk/**".into(),
+            complete: true,
+            cut_off_during: false,
+            services: 5,
+        }),
+        face: None,
+        window_s: Some(31.0),
+        apart_s: 31.0,
+        clock: ClockGround::Measured,
+        asked: vec![
+            "zk2/*/*/@zk/**".into(),
+            "zk2/*/*/health.v2/state/**".into(),
+            "zk2/*/*/health.v1/state/**".into(),
+            "zk2/*/*/health.v2/state/status".into(),
+            "zk2/*/*/health.v2/stream/faults".into(),
+            "zk2/*/*/health.v1/state/status".into(),
+            "zk2/*/*/health.v1/stream/faults".into(),
+        ],
+        services: vec![tc, plain, old, liar, ahead],
+        rollup: HealthRollup {
+            worst: Some(HealthLevel::Failed),
+            healthy: 2,
+            unhealthy: 3,
+            stale: 0,
+            unobservable: 0,
+            not_asked: 0,
         },
         unobservable: None,
     }

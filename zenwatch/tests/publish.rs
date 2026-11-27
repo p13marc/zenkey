@@ -114,6 +114,7 @@ async fn health_of(tool: &zenoh::Session, at: &Addr) -> zenkey_fleet::report::He
             clocks_synced: true,
             face: None,
             catalogs: Default::default(),
+            contracts: Default::default(),
         },
         |_| {},
     )

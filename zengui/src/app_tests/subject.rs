@@ -99,12 +99,14 @@ fn a_health_reading_lands_only_on_the_selected_address_in_this_namespace() {
                     clocks_synced: false,
                     face: None,
                     catalogs: Default::default(),
+                    contracts: Default::default(),
                 },
                 presence: None,
                 first: Err("no session".into()),
                 second: Err("no session".into()),
                 window: None,
                 archived: None,
+                tables: Default::default(),
             },
         ))
     };

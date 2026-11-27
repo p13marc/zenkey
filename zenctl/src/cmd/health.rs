@@ -1,11 +1,15 @@
-//! `health` (#721, PF) — every service's `health.v1`, or one's, read as the
-//! profile's reader reads it (`spec/profiles/health/v1.md` §2.11).
+//! `health` (#721, PF; #986's Q2) — every service's `health.v1` or
+//! `health.v2`, or one's, read as the profile's reader reads it
+//! (`spec/profiles/health/v1.md` §2.11, `v2.md` §2.11), each by the major
+//! its descriptor lists, `health.v2` where it lists both.
 //!
 //! The reading is the engine's ([`zenkey_fleet::run_health`]): presence and
-//! descriptors, a window's subscription to every status and to the faults,
-//! two readings of the owners' `health.v1/state/**`, and for an absent owner
-//! an archive's last-known status; every verdict decided from values by
-//! `zenkey_model::health`. This command is orchestration and rendering:
+//! descriptors, a window's subscription to every status and to the faults
+//! under both majors, two readings of the owners' `health.v2/state/**` and
+//! `health.v1/state/**`, the tables of each `health.v2` owner's words from
+//! the revisions its descriptor names (`--contracts`, else retrieved), and
+//! for an absent owner an archive's last-known status; every verdict
+//! decided from values by `zenkey_model::health`. This command is orchestration and rendering:
 //! resolve the deployment, open a session **in** its namespace, read, print,
 //! and exit through the report's own judgement — 1 on a service unhealthy,
 //! stale, breaking §2.2 in both readings or running its clock ahead, 0 when
@@ -26,7 +30,7 @@ use anyhow::Result;
 use zenkey_fleet::{AcrossFace, HealthSpec, HealthTarget, Judgement};
 
 use crate::bus::Deployment;
-use crate::cli::{FaceStatus, HealthArgs};
+use crate::cli::{FaceStatus, HealthArgs, HealthIface};
 
 /// The verdict verb's name, spelled once (#355).
 pub const ASKING: crate::exit::Asking = crate::exit::Asking::new("health");
@@ -42,14 +46,15 @@ pub async fn run(cli: HealthArgs) -> Result<()> {
         for_secs,
         grace,
         across_face,
+        iface,
+        contracts,
         catalog,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
-    let catalogs = ASKING.ask(super::zk2::load_catalogs(&crate::cli::ContractArgs {
-        contracts: Vec::new(),
-        catalog,
-    }));
+    let offline = crate::cli::ContractArgs { contracts, catalog };
+    let catalogs = ASKING.ask(super::zk2::load_catalogs(&offline));
+    let contracts = ASKING.ask(super::zk2::load_contracts(&offline));
     let grace = ASKING.ask(super::positive_secs("--grace", grace));
     let window = match for_secs {
         Some(s) => Some(ASKING.ask(super::positive_secs("--for", s))),
@@ -63,8 +68,13 @@ pub async fn run(cli: HealthArgs) -> Result<()> {
         clocks_synced,
         face: across_face.map(|f| AcrossFace {
             status_crosses: f == FaceStatus::Crosses,
+            major: match iface {
+                Some(HealthIface::V2) => zenkey_model::health::Major::V2,
+                Some(HealthIface::V1) | None => zenkey_model::health::Major::V1,
+            },
         }),
         catalogs,
+        contracts,
     };
     let target = address.map_or(HealthTarget::All, HealthTarget::One);
     let session = ASKING.ask(dep.session().await);
