@@ -1,0 +1,20 @@
+# redundancy.v2's scenarios (#987 N2; spec/profiles/redundancy/scenarios-v2.md
+# §10): valve.v1's revision 1.1, its `uses` moved from redundancy.v1 to
+# redundancy.v2; everything else is valve.v1.toml's.
+[interface]
+name  = "valve"
+major = 1
+minor = 1
+uses  = ["redundancy.v2"]
+
+[defaults]
+annotations = { "redundancy.election" = "external" }
+
+[resources.position]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.set]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
