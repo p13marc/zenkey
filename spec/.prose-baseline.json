@@ -279,6 +279,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/profiles/redundancy/v2.md": {
+    "mean": 13.22,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/telemetry/CHANGELOG.md": {
     "mean": 19.02,
     "over": 2,
