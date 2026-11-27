@@ -2334,6 +2334,140 @@ async fn the_owner_example_stands_by_and_takes_over() {
     b.stop().await;
 }
 
+/// `redundancy.v2` in the owner example (#987's N2): a candidate of
+/// `ledger-run.v1` runs without timestamping, its first run chosen
+/// (`--first-run`, scenarios-v2.md §14) and a new one taken on demand
+/// (`redundancy new-run`), its state answered by snapshot (v2 §2.6); a
+/// standby whose takeover puts nothing (`--takeover-puts-nothing`, §13 step
+/// 3) takes over holding none, and the runtime's follower drops what the
+/// last incumbent held by the omission rule (v2 §2.10).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_runs_a_redundancy_v2_candidate() {
+    use zenkey::follow::FollowEvent;
+    for piece in [
+        "--first-run <hex>",
+        "--takeover-puts-nothing",
+        "redundancy run",
+        "redundancy new-run",
+        "{\"redundancy\": \"new-run\", \"run\": <hex>}",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+    for piece in [
+        "--follow",
+        "--descriptor-delay-ms <ms>",
+        "\"seed_discarded\"",
+    ] {
+        assert!(
+            consume::HELP.contains(piece),
+            "consume --help names {piece:?}"
+        );
+    }
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let ledger = governed("ledger-run.v1");
+    let balance = "zk2/lab/ledger/ledger.v1/state/balance";
+    let a = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--standby",
+        "--instance-id",
+        "000000000000000a",
+        "--name",
+        "A",
+        "--first-run",
+        "0a0b0c0d",
+        "lab/ledger",
+        &ledger,
+    ]);
+    line(&a.lines).await;
+    line(&a.lines).await;
+    let waited = ask_json(&a, "redundancy wait ledger.v1 serving 10000").await;
+    assert_eq!(waited["reached"], true, "{waited}");
+    assert_eq!(
+        ask_json(&a, "redundancy run").await,
+        serde_json::json!({"redundancy": "run", "run": "0a0b0c0d"})
+    );
+    // Its takeover's put, under its run, answered by one snapshot.
+    let replies: Vec<Sample> = get(
+        &tool,
+        balance,
+        b"",
+        QueryTarget::All,
+        ConsolidationMode::None,
+    )
+    .await
+    .into_iter()
+    .filter_map(|r| r.into_result().ok())
+    .collect();
+    assert_eq!(replies.len(), 1);
+    assert!(zenkey::inband::is_snapshot(&replies[0]), "a snapshot");
+    let entries = common::replies(replies[0].clone());
+    assert_eq!(entries.len(), 1);
+    assert_eq!(common::record(&entries[0]), b"A");
+    assert_eq!(
+        common::inband(&entries[0]).map(|s| s.run.hex()),
+        Some("0a0b0c0d".to_owned())
+    );
+    // A new run on demand.
+    let next = ask_json(&a, "redundancy new-run").await;
+    let run = next["run"].as_str().unwrap().to_owned();
+    assert_ne!(run, "0a0b0c0d");
+    assert_eq!(ask_json(&a, "redundancy run").await["run"], run.as_str());
+
+    // K, the runtime's follower, holds A's value.
+    let session = client(&ep).await;
+    let watch = client(&ep).await;
+    let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let t = std::sync::Arc::clone(&told);
+    let k = zenkey::consumer::Consumer::for_tool(
+        &session,
+        std::sync::Arc::new(common::contract("ledger-run.v1")),
+        &["lab/ledger"],
+        &std::collections::BTreeMap::new(),
+    )
+    .unwrap()
+    .with_watch(watch.clone())
+    .follow("state/balance", move |e| t.lock().unwrap().push(e))
+    .await
+    .unwrap();
+    eventually("K holds A's value", || async {
+        k.value(balance)
+            .is_some_and(|d| d.sample.payload().to_bytes().as_ref() == b"A")
+    })
+    .await;
+
+    // B stands by, then takes over at A's crash, putting nothing.
+    let b = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--standby",
+        "--instance-id",
+        "000000000000000b",
+        "--takeover-puts-nothing",
+        "lab/ledger",
+        &ledger,
+    ]);
+    line(&b.lines).await;
+    line(&b.lines).await;
+    let waited = ask_json(&b, "redundancy wait ledger.v1 standby 10000").await;
+    assert_eq!(waited["reached"], true, "{waited}");
+    a.task.abort();
+    let waited = ask_json(&b, "redundancy wait ledger.v1 serving 10000").await;
+    assert_eq!(waited["reached"], true, "{waited}");
+    eventually("K dropped A's value by the omission rule", || async {
+        k.value(balance).is_none()
+            && told.lock().unwrap().iter().any(|e| {
+                matches!(e,
+                FollowEvent::Omitted { key, .. } if key == balance)
+            })
+    })
+    .await;
+    assert!(state(&tool, balance).await.is_empty(), "B holds no value");
+    drop(k);
+    b.stop().await;
+}
+
 /// `--election external` with the commands' lock (#841, RB): an owner
 /// without the lock stands by, marked, whatever its id; `redundancy lock
 /// hold` takes over, `lose` steps down; `--refuse-without-lock` refuses
