@@ -31,6 +31,15 @@ timestamp, and G what a GET draws.
 
 A check here states what was seen. Where that is not what §2.18 says, the
 check's name says so, and the finding is in ``SPEC-FINDINGS.md``.
+
+``--only s16`` (round 125) runs ``scenarios-v2.md`` §16 as text 0.2 words
+it, in each pairing: runs A and B are ``v1-target`` with the reference's
+target told ``--desired-word-alone`` ("In §16's runs A and B, the
+reference's target reads its author's revision by the deployment's word
+alone, as one built before this major does"); run C is ``v2-target`` told,
+and its refusal names the role; run D is :func:`run_d`, the same target
+told the scenarios' own ``tasking.v2`` while its author runs run C's
+revision, and the author's descriptor reaches it.
 """
 
 from __future__ import annotations
@@ -159,9 +168,11 @@ def _drive(w: Wire, author: Proc, target: Proc, key: str) -> dict[str, Any]:
     return out
 
 
-def v1_target(rp: Report, a_impl: str, t_impl: str, timestamping: bool) -> dict[str, Any]:
-    sec = (f"a desired.v1 target under a desired.v2 author [{impl_name(a_impl)} author, {impl_name(t_impl)} target, "
-           f"the router's timestamping {'on' if timestamping else 'off'}]")
+def v1_target(rp: Report, a_impl: str, t_impl: str, timestamping: bool, s16: bool = False,
+              hlc: bool = False) -> dict[str, Any]:
+    sec = (f"{'§16 run ' + ('B' if timestamping else 'A') + ': ' if s16 else ''}a desired.v1 target under a "
+           f"desired.v2 author [{impl_name(a_impl)} author, {impl_name(t_impl)} target, the router's timestamping "
+           f"{'on' if timestamping else 'off'}{', the target session HLC on' if hlc else ''}]")
     w = Wire(timestamping)
     key = f"zk2/{AUTHOR}/tasking.v1/state/tasks/{TARGET}"
     contract = str(MIXED / "tasking.v1.toml")
@@ -172,9 +183,18 @@ def v1_target(rp: Report, a_impl: str, t_impl: str, timestamping: bool) -> dict[
         else:
             author = w.add(_rust(w.ep, ["--desired-author"], AUTHOR, [contract]))
         if t_impl == "zk2py":
-            target = w.add(_py("zk2py.desired_owner", w.ep, ["--desired-target", AUTHOR, "--desired-watch"], TARGET))
+            target = w.add(_py("zk2py.desired_owner", w.ep, ["--desired-target", AUTHOR, "--desired-watch",
+                                                             *(["--hlc"] if hlc else [])], TARGET))
         else:
-            target = w.add(_rust(w.ep, ["--desired-target", AUTHOR, "--desired-watch"], TARGET))
+            target = w.add(_rust(w.ep, ["--desired-target", AUTHOR, "--desired-watch",
+                                        *(["--desired-word-alone"] if s16 else []), *(["--hlc"] if hlc else [])],
+                                 TARGET))
+        if s16:
+            time.sleep(1.0)
+            seed = target.say("report")
+            rp.check(sec, "setup: the target starts after the author, and its seed acts on nothing: its report "
+                          "{key: D, source: baseline}", target.n_acts() == 0 and isinstance(seed, dict)
+                     and seed.get("source") == "baseline" and "observed" not in seed, f"{seed}")
         got = _drive(w, author, target, key)
         puts = [x for x in got["wire"] if x[0] == "put"]
         dels = [x for x in got["wire"] if x[0] == "delete"]
@@ -188,15 +208,21 @@ def v1_target(rp: Report, a_impl: str, t_impl: str, timestamping: bool) -> dict[
         acts = [got["put1_acts"], got["put2_acts"], got["delete_acts"]]
         rep = got["delete_report"] if isinstance(got["delete_report"], dict) else {}
         obs = (rep.get("observed") or {})
-        if not timestamping:
+        if hlc:
+            # measured, never judged here: §2.18 names the routers alone (F-617)
+            rp.note(sec, f"the target's own session stamping, no router stamping: acts {acts}, report {rep}, "
+                         f"runs {got['delete_running']}")
+            rp.check(sec, "the run ran: two puts and a delete, each read by the target", None not in acts,
+                     f"acts {acts}")
+        elif not timestamping:
             rp.check(sec, "§2.18 \"reads every version as unstamped (v1 §2.6). It acts on none\": no act after two "
                           "puts and a delete, its report the baseline's, and what it runs the baseline",
                      acts == [0, 0, 0] and rep.get("source") == "baseline" and "observed" not in rep
                      and got["delete_running"] == BASELINE, f"acts {acts}, {rep}")
         else:
-            rp.check(sec, "NOT as §2.18 says: through a router that timestamps, the target acts on both puts, under "
-                          "the router's id; the delete, which carries no timestamp, is ignored: it stays converged "
-                          "on the deleted v2, and runs it",
+            rp.check(sec, "§2.18 (0.2, F-588) \"Where one timestamps\": through a router that timestamps, the "
+                          "target acts on both puts, under the router's id; the delete, which carries no timestamp, "
+                          "is ignored: it stays converged on the deleted v2, and runs it (§16 Expected 1 to 3)",
                      acts == [1, 2, 2] and rep.get("outcome") == "converged" and obs.get("revision") == 2
                      and str(obs.get("stamp", "")).endswith("/" + w.zid) and got["delete_running"] == DOC2,
                      f"acts {acts}, {rep}, runs {got['delete_running']}")
@@ -205,9 +231,10 @@ def v1_target(rp: Report, a_impl: str, t_impl: str, timestamping: bool) -> dict[
         w.close()
 
 
-def v2_target(rp: Report, a_impl: str, t_impl: str, told: bool) -> dict[str, Any]:
-    sec = (f"a desired.v2 target under a desired.v1 author [{impl_name(a_impl)} author, {impl_name(t_impl)} target, "
-           f"{'told' if told else 'not told'} its author's revision]")
+def v2_target(rp: Report, a_impl: str, t_impl: str, told: bool, s16: bool = False) -> dict[str, Any]:
+    sec = (f"{'§16 run C: ' if s16 and told else ''}a desired.v2 target under a desired.v1 author "
+           f"[{impl_name(a_impl)} author, {impl_name(t_impl)} target, {'told' if told else 'not told'} its author's "
+           "revision]")
     w = Wire(True)
     key = f"zk2/{AUTHOR}/tasking.v2/state/tasks/{TARGET}"
     contract = str(MIXED / "tasking.v2.toml")
@@ -228,10 +255,11 @@ def v2_target(rp: Report, a_impl: str, t_impl: str, told: bool) -> dict[str, Any
             time.sleep(1.0)
             err = "".join(target.stderr).strip().splitlines()
             rp.check(sec, "told its author's revision uses desired.v1, the target, which declares the packed Report "
-                          "alone, does not start: no ready line, exit 1, and no instance token",
+                          "alone, does not start: no ready line, exit 1, and no instance token; its refusal names "
+                          "its role `task` (§2.18, 0.2: \"It names the role\"; §16 Expected 4)",
                      target.instance is None and target.proc.poll() == 1
-                     and not w.live.list_presence(w.g, f"zk2/{TARGET}/@zk/instance/*").instances,
-                     f"stderr: {err[-1] if err else ''}")
+                     and not w.live.list_presence(w.g, f"zk2/{TARGET}/@zk/instance/*").instances
+                     and bool(err) and "task" in err[-1], f"stderr: {err[-1] if err else ''}")
             return {"started": target.instance is not None, "stderr": err[-1] if err else ""}
         got = _drive(w, author, target, key)
         puts = [x for x in got["wire"] if x[0] == "put"]
@@ -258,9 +286,65 @@ def v2_target(rp: Report, a_impl: str, t_impl: str, told: bool) -> dict[str, Any
         w.close()
 
 
+def run_d(rp: Report, a_impl: str, t_impl: str) -> dict[str, Any]:
+    """§16 run D: worker.v2's target, told the scenarios' own tasking.v2,
+    under an author running run C's revision (tasking.v2 using desired.v1),
+    whose descriptor reaches the target. Steps 5 and 6; Expected 5 and 6."""
+    sec = f"§16 run D: a target that learns its author's major after its start [{impl_name(a_impl)} author, " \
+          f"{impl_name(t_impl)} target]"
+    w = Wire(True)
+    key = f"zk2/{AUTHOR}/tasking.v2/state/tasks/{TARGET}"
+    contract = str(MIXED / "tasking.v2.toml")
+    rp_key = f"zk2/{TARGET}/worker.v2/state/desired/task"
+    run_key = f"zk2/{TARGET}/worker.v2/state/running"
+    try:
+        if a_impl == "zk2py":
+            author = w.add(_py("zk2py.desired_v2_owner", w.ep, ["--desired-author", "--desired-contract", contract],
+                               AUTHOR))
+        else:
+            author = w.add(_rust(w.ep, ["--desired-author", "--desired-v2"], AUTHOR, [contract]))
+        time.sleep(0.5)
+        heard: list[tuple[str, bytes]] = []
+        sub = w.s.declare_subscriber(f"zk2/{TARGET}/worker.v2/state/**", w.zenoh.handlers.Callback(
+            lambda smp: heard.append((str(smp.key_expr), smp.payload.to_bytes()))))
+        if t_impl == "zk2py":
+            target = w.add(_py("zk2py.desired_v2_owner", w.ep, ["--desired-target", AUTHOR, "--desired-presence-watch"],
+                               TARGET))
+        else:
+            target = w.add(_rust(w.ep, ["--desired-target", AUTHOR, "--desired-v2", "--desired-watch"], TARGET))
+        time.sleep(2.0)
+        seeds = target.cmd("desired seeds") or ""
+        words = dict(x.split("=", 1) for x in seeds.split()[3:] if "=" in x)
+        st = w.live.get_state(w.g, rp_key, 1.0)
+        raw = next((r.raw for r in st.replies if r.key == rp_key and r.raw), b"")
+        base = d2.read_put(raw).report if raw else None
+        rp.check(sec, "5. the target starts (its word names a revision it can report), reads its author's "
+                      "descriptor, and says where it says what its seed found that it names one that uses "
+                      "desired.v1; Rp holds the baseline's report",
+                 target.instance is not None and str(words.get("revision", "")).startswith("stopped:desired.v1:")
+                 and base is not None and base.get("source") == "baseline" and "observed_seq" not in base,
+                 f"{seeds!r}, Rp {base}")
+        n0 = len(heard)
+        acts0 = target.n_acts()
+        said = author.cmd(f"desired put {TARGET} {json.dumps(DOC1)}")
+        time.sleep(2.5)
+        wire = w.samples(key)
+        later = heard[n0:]
+        rp.check(sec, "6. the author puts v1: the target acts on nothing; Rp and Run receive nothing (§2.18, 0.2: "
+                      "\"While the descriptor names it, a target MUST NOT act on a version of that author's\")",
+                 bool(said) and any(k == "put" for k, _, _ in wire) and target.n_acts() == acts0 == 0
+                 and not [x for x in later if x[0] in (rp_key, run_key)],
+                 f"author {said!r}, acts {acts0} -> {target.n_acts()}, after the put {[(k.rsplit('/', 1)[1], v.hex()) for k, v in later]}, "
+                 f"seeds {target.cmd('desired seeds')!r}")
+        sub.undeclare()
+        return {"seeds": seeds, "report": base, "after": later}
+    finally:
+        w.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.desired_v2_mixed", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=["v1-target", "v2-target"])
+    ap.add_argument("--only", action="append", choices=["v1-target", "v2-target", "s16", "hlc"])
     args = ap.parse_args(argv)
     rp = Report()
     only = args.only or ["v1-target", "v2-target"]
@@ -270,6 +354,13 @@ def main(argv: list[str] | None = None) -> int:
         runs += [(v1_target, (a, t, ts)) for ts in (False, True) for a in impls for t in impls]
     if "v2-target" in only:
         runs += [(v2_target, (a, t, told)) for told in (False, True) for a in impls for t in impls]
+    if "s16" in only:
+        runs += [(v1_target, (a, t, ts, True)) for ts in (False, True) for a in impls for t in impls]
+        runs += [(v2_target, (a, t, True, True)) for a in impls for t in impls]
+        runs += [(run_d, (a, t)) for a in impls for t in impls]
+    if "hlc" in only:
+        # round 125 (F-617): run A's router, the target's own session's HLC on
+        runs += [(v1_target, (a, t, False, True, True)) for a in impls for t in impls]
     for fn, a in runs:
         try:
             fn(rp, *a)

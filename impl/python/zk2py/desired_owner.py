@@ -139,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--desired-watch", action="store_true")
     ap.add_argument("--desired-reread-ms", type=int)
     ap.add_argument("--desired-hold", action="store_true")
+    ap.add_argument("--hlc", action="store_true",
+                    help="a target's own session with zenoh's timestamping on (a test rig's, round 125)")
     ap.add_argument("--clock-offset-ms", type=int, default=0,
                     help="the author's minting clock's offset from the host's, as the owner example's")
     ap.add_argument("address")
@@ -178,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             target = Target(args.address, args.connect, author=args.desired_target or "lab/author",
                             unbound=args.desired_unbound, archive=args.desired_archive, watch=args.desired_watch,
                             reread_ms=args.desired_reread_ms, hold=args.desired_hold, worker=given.get("worker.v1"),
-                            tasking=given.get("tasking.v1"))
+                            tasking=given.get("tasking.v1"), hlc=args.hlc)
             instance = target.start()
         except OwnerRefused as e:
             # §2.1 (0.6): refused at its start, nothing declared

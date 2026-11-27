@@ -17,6 +17,7 @@ then one line per command read on standard input:
 - ``clock <ms>``: the clock's offset from now on (the scenarios' "Without
   root": "offsets the owner's clock in its runtime");
 - ``unvouch`` and ``vouch``: stop and resume vouching for the status;
+- ``untimed on|off``: records with no time from now on (round 125);
 - ``flip <ms>`` and ``flip stop``: every ``<ms>`` the check ``disk`` to
   ``failed`` and back, the status following in §2.2's order;
 - ``state``: one JSON line, what the owner holds, its guard and its log;
@@ -80,6 +81,14 @@ def answer(line: str, o: HealthV2Owner, off: Offset, flip: dict[str, Any]) -> st
             o.publish_fault(None if w[1] == "-" else w[1], w[2], arg)
         elif w[0] == "clock":
             off.ms = int(w[1])
+        elif w[0] == "untimed":
+            # a test owner's (round 125, health.v2 0.3 §2.6): from now on its
+            # records carry no time, an owner "that does not trust its clock"
+            # (core §2.6), so a reader needs no catalog to read them
+            if w[1] == "on":
+                o.clock_ms = lambda: None
+            else:
+                o.clock_ms = lambda: time.time_ns() // 1_000_000 + off.ms
         elif w[0] == "unvouch":
             o.owner.close_writer(o.status_key)
         elif w[0] == "vouch":

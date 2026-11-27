@@ -1231,8 +1231,10 @@ def section13(rp: Report) -> None:
                  len(mine) >= 2 and all(g[1] == held7 and g[2] == zk2c.ENCODING for g in mine)
                  and held7[0] == 0xE0 and len(held7) == 6 and target.acts() == acts0 and not bus.since(t1, RP)
                  and not bus.since(t1, RUN), f"{len(mine)} re-reads, {[g[1] and g[1].hex() for g in mine]}")
-        rp.note(sec, f"an unchanged reply is 6 bytes of payload where the v1 document P answered is {doc_len} "
-                     f"bytes, and {len(json.dumps(v(1), separators=(',', ':')))} with no space (the text: 44)")
+        compact = len(json.dumps(v(1), separators=(',', ':')))
+        rp.check(sec, "1. \"v1's document alone is 40, as its author puts it\" (0.2, F-584): v1 with no space, its "
+                      "author's canonical form", compact == 40,
+                 f"{compact} bytes with no space; P answered {doc_len}, spaced")
         n0 = p.count()
         p.script = [("snapshot", v(2), 9), ("held",)]
         ok = _wait(lambda: target.report() == converged(s9, 2), 6.0, 0.05)
