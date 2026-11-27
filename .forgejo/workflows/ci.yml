@@ -143,7 +143,8 @@ jobs:
       - uses: https://github.com/Swatinem/rust-cache@v2.9.3
         with:
           cache-targets: false
-      # The newest nextest this install-action release has a manifest for.
+      # nextest stays at 0.9.143: `.config/nextest.toml`'s test groups and
+      # `priority` were measured on it (#1151).
       - uses: https://github.com/taiki-e/install-action@v2.90.8
         with:
           tool: cargo-nextest@0.9.143
