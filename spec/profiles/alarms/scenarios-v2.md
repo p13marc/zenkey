@@ -7,7 +7,7 @@ a setup, steps, and expected observations. §1 to §8 and §10 restate
 changes. §9, §11 and §12 are new. §1 to §7, §9 and §12 are the
 runtime's. §8, §10 and §11 are a tool's.
 
-No implementation runs them yet. The reference implements `alarms.v1`.
+The reference runs the runtime's. Its default is `alarms.v1`.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.5) are v2.md's rules. Core
