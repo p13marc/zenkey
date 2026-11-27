@@ -5,6 +5,45 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.13 — 2026-11-27: editorial: a read on the near side that draws no reply takes the deployment's word, and which catalog that word is, no keyword changed (#609, #986)
+
+zk2py's round 117 found §2.5 reading two ways of one case (F-574): a
+subscriber with no face, whose descriptor GET draws no reply.
+
+**Before.** "Where no descriptor answers, as across a constrained face,
+the subscriber takes the deployment's word." And: "A read that fails
+names no catalog … Until an answer comes, each group is
+`unknown_catalog`." Silence was a read that failed too. 0.11's entry
+said the first: "A reader on the near side whose read drew no reply
+cannot tell that from a face."
+
+**Now (§2.5).**
+- **A read that draws no reply** is no descriptor answering, on either
+  side of a face. The subscriber reads its groups through the catalog
+  it was provisioned. The group's tag and digest stay its checks.
+- **A read that fails** is one that ends in an error reply, or whose
+  descriptors all state another run. Each group is then
+  `unknown_catalog` until an answer comes.
+- **Several catalogs.** The deployment's word is one catalog per owner,
+  or its successor (core R7). A subscriber given several takes the one
+  the deployment names for that owner. The reference's tools take the
+  last given as that one, and the note now says so.
+
+**Which implementation moves.** The reference read silence so: `zenctl
+watch --catalog` printed 9 confirmation rows beside an owner whose
+descriptor answers no GET. zk2py read each group `unknown_catalog`. The
+text sides with 0.11's entry, and zk2py moves.
+
+**0.12's "Not verified" (F-601).** It said the reference ran §2's steps
+against all ones. At 08f3600a its owner wrote the ahead time, as a
+heartbeat's time and an owner heartbeat's, and `zenctl echo` read
+zk2py's as ahead (zk2py's round 120). 0.12's entry stands as a record.
+
+**Deliberately not changed.** No keyword, no fixture and no scenario.
+`apply.json` gives a subscriber its catalog as a case's input, so a
+read's silence is no case of it. The header is still written against
+core 0.108.
+
 ## `v2.md` 0.12 — 2026-11-22: while its clock guard holds, an owner writes the ahead time, never the unknown time (#986)
 
 Core 0.113 gives a heartbeat's time a code for "this owner's clock is
