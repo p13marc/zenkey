@@ -1,7 +1,9 @@
-//! `desired.v1` (#840, DD), the reads: one target's roles against their
-//! authors' documents, read as §2.17's tool reads them
-//! (`spec/profiles/desired/v1.md`), through a session in the deployment's
-//! namespace.
+//! `desired.v1` (#840, DD) and `desired.v2` (#986's J4), the reads: one
+//! target's roles against their authors' documents, read as §2.17's tool
+//! reads them (`spec/profiles/desired/v1.md`, `v2.md`), through a session
+//! in the deployment's namespace. Each role is read by the major its
+//! author's revision lists (`desired.v2` §2.18,
+//! [`crate::model::desired::RoleRead::settle`]).
 //!
 //! What one reading reads ([`observe`]), in order:
 //! 1. whether the session reaches any other zenoh node
@@ -21,11 +23,17 @@
 //! 4. S4's GET of each target's report resources, its replies merged per
 //!    key (observer §4.1; two instances' reports on one key are one
 //!    reply) and each key's read as a `desired.v1.Report` (§2.10's
-//!    reading, `zenkey_model::desired::decode`);
+//!    reading, `zenkey_model::desired::decode`); and of the key of each
+//!    role's `desired.v2` report, the member of the resource whose
+//!    `desired.report` names the role (v2 §2.10), merged the same way and
+//!    read as the packed `Report` under its envelope's tag;
 //! 5. S4's GET of each slice from its author, present or across a face
-//!    (§2.17 step 6); and, for an author absent by a complete read, each
-//!    archive's last-known of the slice, shown and never current (core
-//!    §4.4, S6).
+//!    (§2.17 step 6): under `desired.v1` each reply's Zenoh timestamp,
+//!    under `desired.v2` a member read's snapshot, its entry, its
+//!    tombstone or no entry (v2 §2.5), and none at all for a `desired.v2`
+//!    role with no revision of its author's in hand (v2 §2.17); and, for
+//!    an author absent by a complete read, each archive's last-known of
+//!    the slice, shown and never current (core §4.4, S6).
 //!
 //! Each step's reads are made at once, at most [`CONCURRENCY`] in flight
 //! (review of #856): the authors' presence reads, the targets' report GETs
@@ -56,10 +64,11 @@ use crate::bus::health::Stamped;
 use crate::bus::presence::Scope;
 use crate::model::catalog::{Catalog, ContractSet, Observed};
 use crate::model::desired::{
-    Archived, Behind, Contracts, DesiredRead, FaceWord, Named, ReportReply, ReportsGet, RoleRead,
-    RoleResolution, SliceFrom, SliceGet, SliceReply, TargetRead, author_contract, descriptor_in,
-    members_selector, named_revision, report_resources, requirement_names, resolve_role,
-    resolve_unread, seen_in,
+    Archived, Behind, Contracts, DesiredRead, FaceWord, Major, MemberReply, Named, PackedReply,
+    PackedUnreadable, ReportReply, ReportWhere, ReportsGet, RoleRead, RoleResolution, SliceFrom,
+    SliceGet, SliceReply, TargetRead, author_contract, descriptor_in, members_selector,
+    named_revision, packed_read, report_resources, requirement_names, resolve_role, resolve_unread,
+    seen_in,
 };
 use crate::report::DesiredReport;
 
@@ -353,12 +362,10 @@ async fn observe_with(
                     (Seen::Present, Ok(Some(_))) => Some(Listing::NotListed),
                     _ => None,
                 };
-                tr.roles.push(RoleRead {
-                    resolution: RoleResolution::bare(role_asked(spec), listing),
-                    author_seen: None,
-                    current: None,
-                    archived: None,
-                });
+                tr.roles.push(RoleRead::new(RoleResolution::bare(
+                    role_asked(spec),
+                    listing,
+                )));
             }
             read.targets.push(tr);
         }
@@ -379,12 +386,18 @@ async fn observe_with(
         .targets
         .iter()
         .enumerate()
-        .filter(|(_, tr)| tr.roles.iter().any(|r| !r.resolution.slice.is_empty()))
+        .filter(|(_, tr)| {
+            tr.roles.iter().any(|r| {
+                !r.resolution.slice.is_empty()
+                    || (r.resolution.bound()
+                        && r.resolution.report_at.as_ref().is_some_and(|w| w.names()))
+            })
+        })
         .map(|(i, tr)| (i, report_selectors(tr, &contracts, offline)))
         .collect();
     for (_, p) in &plans {
         if let Ok(sels) = p {
-            read.asked.extend(sels.iter().map(|(s, _)| s.clone()));
+            read.asked.extend(sels.iter().map(|s| s.selector.clone()));
         }
     }
     let needs_archives = spec.archives
@@ -421,6 +434,15 @@ async fn observe_with(
     for (i, r) in reports {
         read.targets[i].reports = Some(r);
     }
+    // Each role's major, now that its target's reports are read
+    // (desired.v2 §2.18): a desired.v2 role with no revision of its
+    // author's in hand has no slice, so nothing more is read of it.
+    for tr in &mut read.targets {
+        let TargetRead { roles, reports, .. } = tr;
+        for r in roles.iter_mut() {
+            r.settle(reports.as_ref());
+        }
+    }
     let mut legs = Vec::new();
     for (i, tr) in read.targets.iter().enumerate() {
         for (j, r) in tr.roles.iter().enumerate() {
@@ -431,9 +453,9 @@ async fn observe_with(
             match r.author_seen.as_ref().map(|(s, _)| *s) {
                 Some(Seen::Present | Seen::AcrossFace) => {
                     read.asked.push(slice.clone());
-                    legs.push((i, j, slice, true));
+                    legs.push((i, j, slice, Some(r.major)));
                 }
-                Some(Seen::Absent) if spec.archives => legs.push((i, j, slice, false)),
+                Some(Seen::Absent) if spec.archives => legs.push((i, j, slice, None)),
                 _ => {}
             }
         }
@@ -444,8 +466,11 @@ async fn observe_with(
                 let s = session.clone();
                 let at = archives.clone();
                 Box::pin(async move {
-                    let leg = if current {
-                        Leg::Current(slice_get(&s, &slice, t).await)
+                    let leg = if let Some(major) = current {
+                        Leg::Current(match major {
+                            Major::V1 => slice_get(&s, &slice, t).await,
+                            Major::V2 => slice_get_v2(&s, &slice, t).await,
+                        })
                     } else {
                         Leg::Archived(match at {
                             Some(Ok(at)) => Ok(archived(&s, &at, &slice, t).await),
@@ -486,8 +511,18 @@ async fn bounded<T>(futs: Vec<BoxFuture<'static, T>>) -> Vec<T> {
         .await
 }
 
+/// One GET of a target's reports: a `desired.v1.Report` resource's members,
+/// or the one key of a role's `desired.v2` report.
+#[derive(Debug, Clone)]
+struct ReportSelector {
+    selector: String,
+    horizon: zenkey_model::freshness::Horizon,
+    /// The major its replies are read by.
+    major: Major,
+}
+
 /// A target's report selectors, or why there are none to read.
-type ReportPlan = Result<Vec<(String, zenkey_model::freshness::Horizon)>, String>;
+type ReportPlan = Result<Vec<ReportSelector>, String>;
 
 /// One read of a role's: S4's GET of its slice, or the archives'
 /// last-known of it.
@@ -504,12 +539,7 @@ fn unread(a: &Addr, spec: &DesiredSpec, seen: Seen, why: Option<String>) -> Targ
         seen_why: why,
         word: None,
         descriptor: Err("not read".to_owned()),
-        roles: vec![RoleRead {
-            resolution: RoleResolution::bare(role_asked(spec), None),
-            author_seen: None,
-            current: None,
-            archived: None,
-        }],
+        roles: vec![RoleRead::new(RoleResolution::bare(role_asked(spec), None))],
         reports: None,
     }
 }
@@ -581,10 +611,16 @@ fn resolve_roles(
     let Ok(Some(d)) = &t.descriptor else {
         return Vec::new();
     };
-    // A target of this profile holds a report resource (§2.10).
+    // A target of this profile holds a report resource (§2.10), of
+    // either major: typed `desired.v1.Report`, or named by `desired.report`.
     let reporting = d.interfaces.iter().any(|e| {
-        named_revision(d, &e.iface, contracts, offline)
-            .is_some_and(|r| !report_resources(r.contract()).is_empty())
+        named_revision(d, &e.iface, contracts, offline).is_some_and(|r| {
+            !report_resources(r.contract()).is_empty()
+                || r.contract().resources.iter().any(|x| {
+                    x.annotations
+                        .contains_key(zenkey_model::desired::v2::REPORT_KEY)
+                })
+        })
     });
     // Whether every revision it names is in hand: when one is not, a role
     // whose author's contract is not either may be desired, and cannot be
@@ -620,31 +656,33 @@ fn resolve_roles(
             Named::Unread(by) => resolve_unread(e, by, author_c),
             _ => resolve_role(&t.addr, e, templates, author_c),
         };
+        // Where desired.v2 finds the role's report (v2 §2.10): by the
+        // contract that declares the role, when it is in hand.
+        let report_at = e
+            .declared_by
+            .as_deref()
+            .and_then(|by| named_revision(d, by, contracts, offline))
+            .filter(|rev| rev.contract().requires.contains_key(&e.role))
+            .map(|rev| ReportWhere::of(&t.addr, rev.contract(), &e.role));
         match resolved {
-            Some(res) if held || reporting || !all_held => out.push(RoleRead {
-                resolution: res,
-                author_seen: None,
-                current: None,
-                archived: None,
-            }),
-            _ if spec.role.is_some() => out.push(RoleRead {
-                resolution: RoleResolution::bare(e.role.clone(), Some(Listing::NotListed)),
-                author_seen: None,
-                current: None,
-                archived: None,
-            }),
+            Some(mut res) if held || reporting || !all_held => {
+                res.report_at = report_at;
+                out.push(RoleRead::new(res));
+            }
+            _ if spec.role.is_some() => out.push(RoleRead::new(RoleResolution::bare(
+                e.role.clone(),
+                Some(Listing::NotListed),
+            ))),
             _ => {}
         }
     }
     if out.is_empty()
         && let Some(r) = &spec.role
     {
-        out.push(RoleRead {
-            resolution: RoleResolution::bare(r.clone(), Some(Listing::NotListed)),
-            author_seen: None,
-            current: None,
-            archived: None,
-        });
+        out.push(RoleRead::new(RoleResolution::bare(
+            r.clone(),
+            Some(Listing::NotListed),
+        )));
     }
     out
 }
@@ -709,6 +747,7 @@ fn across_face(a: &Addr, word: &FaceWord, spec: &DesiredSpec, offline: &Contract
     if res.listing != Some(Listing::NotListed) {
         res.listing = Some(word.listing);
     }
+    res.report_at = declaring.map(|rev| ReportWhere::of(a, rev.contract(), &role));
     let author_seen = word.author.as_ref().map(|_| {
         if word.author_across {
             (Seen::AcrossFace, None)
@@ -719,24 +758,36 @@ fn across_face(a: &Addr, word: &FaceWord, spec: &DesiredSpec, offline: &Contract
             )
         }
     });
-    t.roles.push(RoleRead {
-        resolution: res,
-        author_seen,
-        current: None,
-        archived: None,
-    });
+    let mut role = RoleRead::new(res);
+    role.author_seen = author_seen;
+    t.roles.push(role);
     t
 }
 
 /// The selectors of `t`'s report resources (§2.10), from the revisions its
 /// descriptor names, or across a face every one held offline; `Err` when
 /// one it names is not in hand and none found holds a report.
-fn report_selectors(
-    t: &TargetRead,
-    contracts: &Contracts,
-    offline: &ContractSet,
-) -> Result<Vec<(String, zenkey_model::freshness::Horizon)>, String> {
-    let mut out = Vec::new();
+fn report_selectors(t: &TargetRead, contracts: &Contracts, offline: &ContractSet) -> ReportPlan {
+    let v1 = |selector: String, r: &zenkey_model::contract::Resource| ReportSelector {
+        selector,
+        horizon: zenkey_model::freshness::horizon_of(r),
+        major: Major::V1,
+    };
+    // desired.v2 (§2.10): the key of each bound role's report, the member
+    // of the resource whose `desired.report` names the role.
+    let mut out: Vec<ReportSelector> = t
+        .roles
+        .iter()
+        .filter(|r| r.resolution.bound())
+        .filter_map(|r| r.resolution.report_at.as_ref())
+        .filter_map(|w| {
+            Some(ReportSelector {
+                selector: w.key()?,
+                horizon: w.horizon.clone(),
+                major: Major::V2,
+            })
+        })
+        .collect();
     let mut missing = Vec::new();
     match &t.descriptor {
         Ok(Some(d)) => {
@@ -744,10 +795,7 @@ fn report_selectors(
                 match named_revision(d, &e.iface, contracts, offline) {
                     Some(rev) => {
                         for r in report_resources(rev.contract()) {
-                            out.push((
-                                members_selector(&t.addr, rev.iface(), r),
-                                zenkey_model::freshness::horizon_of(r),
-                            ));
+                            out.push(v1(members_selector(&t.addr, rev.iface(), r), r));
                         }
                     }
                     None => missing.push(format!("{} {}", e.iface, e.contract)),
@@ -757,10 +805,7 @@ fn report_selectors(
         _ => {
             for rev in offline.iter() {
                 for r in report_resources(rev.contract()) {
-                    out.push((
-                        members_selector(&t.addr, rev.iface(), r),
-                        zenkey_model::freshness::horizon_of(r),
-                    ));
+                    out.push(v1(members_selector(&t.addr, rev.iface(), r), r));
                 }
             }
         }
@@ -772,7 +817,7 @@ fn report_selectors(
         ));
     }
     let mut seen = BTreeSet::new();
-    out.retain(|(s, _)| seen.insert(s.clone()));
+    out.retain(|s| seen.insert(s.selector.clone()));
     Ok(out)
 }
 
@@ -817,62 +862,134 @@ fn report_replies(
     out
 }
 
+/// One `desired.v2` report key's replies as v2 §2.10 reads them: merged
+/// per key first, as [`report_replies`] merges `desired.v1`'s (observer
+/// §4.1: two instances' reports on one key are one reply, within one run
+/// the higher seq, across two runs the later arrival), a delete skipped
+/// after the merge. Then the reply the key kept is read as the packed
+/// `Report` under the tag its envelope's CH carried
+/// ([`packed_read`]): a refused envelope, or a record core §7.6 refuses, is
+/// unreadable with its token, never guessed at. A reply on any key but
+/// `key` is not this role's report.
+fn packed_replies(
+    samples: Vec<zenoh::sample::Sample>,
+    key: &str,
+    horizon: &zenkey_model::freshness::Horizon,
+) -> Vec<PackedReply> {
+    let mut out = Vec::new();
+    for sample in crate::bus::query::merged(samples) {
+        if sample.kind() == SampleKind::Delete || sample.key_expr().as_str() != key {
+            continue;
+        }
+        let stamp = sample.timestamp().map(|ts| Stamped {
+            time: ts.get_time().to_system_time(),
+            clock: ts.get_id().to_string(),
+        });
+        let (read, inband) = match zenkey::inband::read(sample) {
+            zenkey::inband::Read::Enveloped { sample, stamp, tag } => (
+                packed_read(Some(tag.get()), &sample.payload().to_bytes()),
+                Some(stamp),
+            ),
+            zenkey::inband::Read::Plain(sample) => {
+                (packed_read(None, &sample.payload().to_bytes()), None)
+            }
+            zenkey::inband::Read::Refused { refusal, .. } => (
+                Err(PackedUnreadable::new(refusal.token(), &refusal.reason())),
+                None,
+            ),
+            // A heartbeat, a frame or a page on a report's key: never a
+            // record of the key's type.
+            other => (
+                Err(PackedUnreadable::new(
+                    zenkey_model::heartbeat::FormRefusal::TOKEN,
+                    &format!(
+                        "the reply carries no mutation's record ({})",
+                        other
+                            .undecodable()
+                            .map(|u| u.to_string())
+                            .unwrap_or_else(|| "another form".to_owned())
+                    ),
+                )),
+                None,
+            ),
+        };
+        out.push(PackedReply {
+            key: key.to_owned(),
+            read,
+            inband,
+            stamp,
+            horizon: horizon.clone(),
+        });
+    }
+    out
+}
+
 /// S4's GET of each report resource (core §4.2), its replies merged per
 /// key and each key's read as a `desired.v1.Report` (§2.10,
-/// [`report_replies`]). A reply on a wildcard key is no member (R6).
-async fn reports_get(
-    session: &Session,
-    selectors: Vec<(String, zenkey_model::freshness::Horizon)>,
-    t: Duration,
-) -> ReportsGet {
+/// [`report_replies`]) or, on a `desired.v2` report's key, as the packed
+/// `Report` (v2 §2.10, [`packed_replies`]). A reply on a wildcard key is
+/// no member (R6).
+async fn reports_get(session: &Session, selectors: Vec<ReportSelector>, t: Duration) -> ReportsGet {
     let mut out = ReportsGet {
-        selectors: selectors.iter().map(|(s, _)| s.clone()).collect(),
+        selectors: selectors.iter().map(|s| s.selector.clone()).collect(),
         complete: true,
         replies: Vec::new(),
+        packed: Vec::new(),
         at: SystemTime::now(),
     };
     // Each resource's GET at once.
     let gets = bounded(
         selectors
             .into_iter()
-            .map(|(sel, horizon)| {
-                let session = session.clone();
-                Box::pin(async move {
-                    let mut replies_out = Vec::new();
-                    let mut complete = true;
-                    let replies = match crate::bus::query::state_get(
-                        &session,
-                        &sel,
-                        &crate::bus::query::GetOpts::new(t),
-                    )
-                    .await
-                    {
-                        Ok(r) => r,
-                        Err(_) => return (false, replies_out),
-                    };
-                    let mut samples = Vec::new();
-                    while let Ok(reply) = replies.recv_async().await {
-                        let Ok(sample) = reply.result() else {
-                            complete = false;
-                            continue;
+            .map(
+                |ReportSelector {
+                     selector: sel,
+                     horizon,
+                     major,
+                 }| {
+                    let session = session.clone();
+                    Box::pin(async move {
+                        let mut replies_out = Vec::new();
+                        let mut packed_out = Vec::new();
+                        let mut complete = true;
+                        let replies = match crate::bus::query::state_get(
+                            &session,
+                            &sel,
+                            &crate::bus::query::GetOpts::new(t),
+                        )
+                        .await
+                        {
+                            Ok(r) => r,
+                            Err(_) => return (false, replies_out, packed_out),
                         };
-                        if sample.key_expr().as_str().contains('*') {
-                            continue;
+                        let mut samples = Vec::new();
+                        while let Ok(reply) = replies.recv_async().await {
+                            let Ok(sample) = reply.result() else {
+                                complete = false;
+                                continue;
+                            };
+                            if sample.key_expr().as_str().contains('*') {
+                                continue;
+                            }
+                            // A snapshot's page is its entries (core §4.2;
+                            // #977's E3).
+                            samples.extend(crate::bus::query::reply_samples(sample));
                         }
-                        // A snapshot's page is its entries (core §4.2;
-                        // #977's E3).
-                        samples.extend(crate::bus::query::reply_samples(sample));
-                    }
-                    replies_out.extend(report_replies(samples, &horizon));
-                    (complete, replies_out)
-                }) as BoxFuture<'static, _>
-            })
+                        match major {
+                            Major::V1 => replies_out.extend(report_replies(samples, &horizon)),
+                            Major::V2 => packed_out.extend(packed_replies(samples, &sel, &horizon)),
+                        }
+                        (complete, replies_out, packed_out)
+                    }) as BoxFuture<'static, _>
+                },
+            )
             .collect(),
     )
     .await;
-    for (complete, replies) in gets {
+    for (complete, replies, packed) in gets {
         out.complete &= complete;
         out.replies.extend(replies);
+        out.packed.extend(packed);
     }
     out.at = SystemTime::now();
     out
@@ -906,6 +1023,7 @@ async fn slice_get(session: &Session, slice: &str, t: Duration) -> Result<SliceG
         selector: slice.to_owned(),
         complete: true,
         replies: Vec::new(),
+        member: Vec::new(),
         at: SystemTime::now(),
     };
     let mut samples = Vec::new();
@@ -933,6 +1051,101 @@ async fn slice_get(session: &Session, slice: &str, t: Duration) -> Result<SliceG
     Ok(out)
 }
 
+/// S4's GET of one `desired.v2` slice from its author (v2 §2.5, §2.17 step
+/// 6): a member read of one concrete key, with no held stamp, so it is
+/// answered whole. Each reply on the key (R6) is a snapshot's page: its
+/// entry on the key, a live one or a tombstone, with its in-band stamp, or
+/// no entry, the author's word that it holds no document, under the page's
+/// run. The entries are merged per key (observer §4.1). A per-key reply (a
+/// `redundancy.v1` author's, v2 §2.4) is read by its envelope alike; a
+/// reply with no envelope carries no version; a refused one, and a held
+/// stamp, which this reader did not send (core §4.2), are no answer.
+async fn slice_get_v2(session: &Session, slice: &str, t: Duration) -> Result<SliceGet, String> {
+    let replies = crate::bus::query::state_get(session, slice, &crate::bus::query::GetOpts::new(t))
+        .await
+        .map_err(|e| format!("GET {slice}: {}", crate::one_line(&e)))?;
+    let mut out = SliceGet {
+        selector: slice.to_owned(),
+        complete: true,
+        replies: Vec::new(),
+        member: Vec::new(),
+        at: SystemTime::now(),
+    };
+    let mut samples = Vec::new();
+    while let Ok(reply) = replies.recv_async().await {
+        match reply.result() {
+            Ok(sample) if sample.key_expr().as_str() == slice => samples.push(sample.clone()),
+            // R6: a reply on any key but the slice's is discarded.
+            Ok(_) => {}
+            Err(_) => out.complete = false,
+        }
+    }
+    out.member = member_replies(samples, slice);
+    out.at = SystemTime::now();
+    Ok(out)
+}
+
+/// What the replies on a `desired.v2` slice's key said ([`slice_get_v2`]),
+/// in arrival order: each reply that gave no version, each snapshot with
+/// no entry, then the one entry or tombstone the key kept after the merge.
+fn member_replies(samples: Vec<zenoh::sample::Sample>, slice: &str) -> Vec<MemberReply> {
+    let mut out = Vec::new();
+    let mut entries = Vec::new();
+    for s in samples {
+        if let Some(h) = zenkey::inband::held(&s) {
+            out.push(MemberReply::Refused(format!(
+                "held: a held stamp, {}, which this reader did not send (core §4.2)",
+                zenkey_model::desired::v2::version_text(h.stamp)
+            )));
+            continue;
+        }
+        match zenkey::inband::read(s.clone()) {
+            zenkey::inband::Read::Snapshot {
+                sample,
+                page: Ok(page),
+            } => {
+                let mine: Vec<_> = zenkey::inband::replies(&sample, &page)
+                    .into_iter()
+                    .filter(|m| m.key_expr().as_str() == slice)
+                    .collect();
+                if !mine.is_empty() {
+                    entries.extend(mine);
+                } else if page.index == 0 && !page.more {
+                    // A member's snapshot is one page: with no entry, the
+                    // author's word that it holds no document.
+                    out.push(MemberReply::NoEntry {
+                        run: page.run,
+                        asof: page.asof,
+                    });
+                }
+            }
+            zenkey::inband::Read::Snapshot {
+                page: Err(refusal), ..
+            } => out.push(MemberReply::Refused(format!(
+                "a snapshot's page whose body is refused: {}",
+                refusal.token()
+            ))),
+            zenkey::inband::Read::Refused { refusal, .. } => {
+                out.push(MemberReply::Refused(refusal.reason()));
+            }
+            zenkey::inband::Read::Plain(sample) if sample.kind() == SampleKind::Put => {
+                out.push(MemberReply::Unstamped);
+            }
+            // A per-key reply in its envelope, and a `reply_del`.
+            _ => entries.push(s),
+        }
+    }
+    for sample in crate::bus::query::merged(entries) {
+        let delete = sample.kind() == SampleKind::Delete;
+        match zenkey::inband::read(sample).stamp() {
+            Some(v) if delete => out.push(MemberReply::Tombstone(v)),
+            Some(v) => out.push(MemberReply::Entry(v)),
+            None => out.push(MemberReply::Unstamped),
+        }
+    }
+    out
+}
+
 /// The archives presence shows, by token or descriptor (core §4.4).
 async fn archive_providers(session: &Session, t: Duration) -> Result<Vec<Addr>, String> {
     let all = crate::bus::presence::observe(session, &Scope::all(), t)
@@ -957,6 +1170,7 @@ async fn archived(session: &Session, at: &[Addr], slice: &str, t: Duration) -> V
                         Ok(Some(lk)) => Some(Archived {
                             deleted: lk.value.is_none(),
                             stamp: lk.timestamp.as_ref().map(zenkey::desired::stamp),
+                            inband: lk.inband,
                             revision: lk.value.as_deref().and_then(dm::revision_of_text),
                             confirmed: lk.confirmed,
                             archive: a,
@@ -1099,6 +1313,214 @@ mod tests {
                 (OTHER.to_owned(), Source::Call)
             ]
         );
+    }
+
+    /// desired.v2 §2.10, "Two instances' reports on one key are one reply
+    /// after a tool's merge (observer §4.1), as in v1": the packed report's
+    /// replies go through the same merge as `desired.v1`'s, in each shape
+    /// and in both orders. Within one run the higher seq is kept, across
+    /// two runs the later arrival; a newer delete leaves no report; a
+    /// reply on another key is not the role's; and the kept reply is read
+    /// under its envelope's tag, a refused record unreadable with core
+    /// §7.6's token, a put with no envelope `tag`.
+    #[test]
+    fn two_packed_reports_on_one_key_are_merged_before_they_are_read() {
+        use zenkey_model::desired::Source;
+        use zenkey_model::desired::v2::{self as d2, Outcome, Report};
+        use zenkey_model::freshness::Horizon;
+        use zenkey_model::wire::{DeleteStamp, Envelope, Run, Seq, Stamp, Tag};
+        use zenoh::bytes::Encoding;
+        use zenoh::sample::{Sample, SampleBuilder};
+
+        const RP: &str = "zk2/lab/worker/worker.v2/state/desired/task";
+        const OTHER: &str = "zk2/lab/worker/worker.v2/state/desired/plan";
+        let stamp = |run: u16, seq: u32| Stamp {
+            run: Run::U16(run),
+            seq: Seq::new(seq).unwrap(),
+        };
+        let ke = |k: &str| zenoh::key_expr::KeyExpr::try_from(k.to_owned()).unwrap();
+        let baseline = Report::baseline();
+        let call = Report {
+            source: Source::Call,
+            ..Report::baseline()
+        };
+        // A report as its target puts it: the record under tag 12, its
+        // own run and seq.
+        let put = |key: &str, at: Stamp, r: &Report| -> Sample {
+            SampleBuilder::put(ke(key), r.put(at).unwrap())
+                .encoding(Encoding::ZENOH_BYTES)
+                .into()
+        };
+        let delete = |at: Stamp| -> Sample {
+            SampleBuilder::delete(ke(RP))
+                .attachment(DeleteStamp { stamp: at }.write())
+                .into()
+        };
+        let read = |samples: Vec<Sample>| packed_replies(samples, RP, &Horizon::Undeclared);
+        let sources = |samples: Vec<Sample>| -> Vec<(Source, Option<Stamp>)> {
+            read(samples)
+                .into_iter()
+                .map(|p| {
+                    assert_eq!(p.key, RP);
+                    let r = p.read.expect("a report").report.expect("consistent");
+                    assert_eq!(r.outcome, Outcome::NotActed);
+                    (r.source, p.inband)
+                })
+                .collect()
+        };
+        // One run, seqs 1 and 2, differing: seq 2's, in both orders.
+        let (first, second) = (put(RP, stamp(7, 1), &baseline), put(RP, stamp(7, 2), &call));
+        let kept = vec![(Source::Call, Some(stamp(7, 2)))];
+        assert_eq!(sources(vec![first.clone(), second.clone()]), kept);
+        assert_eq!(sources(vec![second, first.clone()]), kept);
+        // Two runs, which nothing orders: the later arrival, in both orders.
+        let other_run = put(RP, stamp(8, 1), &call);
+        assert_eq!(
+            sources(vec![first.clone(), other_run.clone()]),
+            [(Source::Call, Some(stamp(8, 1)))]
+        );
+        assert_eq!(
+            sources(vec![other_run, first.clone()]),
+            [(Source::Baseline, Some(stamp(7, 1)))]
+        );
+        // A delete is skipped after the merge: a newer one leaves no report.
+        assert!(read(vec![first.clone(), delete(stamp(7, 2))]).is_empty());
+        assert!(read(vec![delete(stamp(7, 2)), first.clone()]).is_empty());
+        assert_eq!(
+            sources(vec![put(RP, stamp(7, 3), &call), delete(stamp(7, 2))]),
+            [(Source::Call, Some(stamp(7, 3)))]
+        );
+        // A reply on another key is not this role's report.
+        assert_eq!(
+            sources(vec![first.clone(), put(OTHER, stamp(7, 2), &call)]),
+            [(Source::Baseline, Some(stamp(7, 1)))]
+        );
+        // A record of another tag, one cut short, and a put with no
+        // envelope: unreadable, each with its token, never guessed at.
+        let record = baseline.write().unwrap().bytes;
+        let tagged = |tag: u8, bytes: &[u8]| -> Sample {
+            let payload = Envelope::mutation(Tag::new(tag).unwrap(), stamp(7, 4), bytes).write();
+            SampleBuilder::put(ke(RP), payload)
+                .encoding(Encoding::ZENOH_BYTES)
+                .into()
+        };
+        let token = |samples: Vec<Sample>| -> String {
+            let mut got = read(samples);
+            assert_eq!(got.len(), 1);
+            got.remove(0).read.expect_err("unreadable").token
+        };
+        assert_eq!(token(vec![tagged(3, &record)]), "tag");
+        assert_eq!(token(vec![tagged(d2::TAG, &record[..2])]), "length");
+        let bare: Sample = SampleBuilder::put(ke(RP), record.clone())
+            .encoding(Encoding::APPLICATION_OCTET_STREAM)
+            .into();
+        assert_eq!(token(vec![bare]), "tag");
+        // A malformed one reads, with its finding: found, never unreadable.
+        let malformed = read(vec![tagged(d2::TAG, &[0x04, 0, 0])]);
+        let got = malformed[0].read.as_ref().expect("it reads");
+        assert!(got.report.is_none() && !got.findings.is_empty());
+    }
+
+    /// desired.v2 §2.5, §2.17 step 6: what a member read's replies say. A
+    /// page's live entry and its tombstone, with their in-band stamps; a
+    /// page of no entry, the author's word under the page's run; two
+    /// instances' entries merged per key; a reply with no envelope, which
+    /// carries no version; and a held stamp, which this reader never sent,
+    /// no answer.
+    #[test]
+    fn a_member_reads_replies_say_an_entry_a_tombstone_or_no_entry() {
+        use zenkey_model::collection::{Confirmation, Entry, Snapshot, Time, Tombstone};
+        use zenkey_model::wire::{HeldStamp, Run, Seq, Stamp, Tag};
+        use zenoh::bytes::Encoding;
+        use zenoh::sample::{Sample, SampleBuilder};
+
+        const D: &str = "zk2/lab/author/tasking.v2/state/tasks/lab/worker";
+        let stamp = |run: u16, seq: u32| Stamp {
+            run: Run::U16(run),
+            seq: Seq::new(seq).unwrap(),
+        };
+        let ke = || zenoh::key_expr::KeyExpr::try_from(D.to_owned()).unwrap();
+        let page = |at: Stamp, live: Option<u32>, tomb: Option<u32>| -> Sample {
+            let snapshot = Snapshot {
+                tag: Tag::NONE,
+                run: at.run,
+                asof: at.seq,
+                time: Time::Unknown,
+                coll: 0,
+                live: live
+                    .map(|seq| Entry {
+                        id: String::new(),
+                        run: None,
+                        seq: Seq::new(seq).unwrap(),
+                        confirmation: Confirmation::None,
+                        record: br#"{"revision": 1}"#.to_vec(),
+                    })
+                    .into_iter()
+                    .collect(),
+                tombs: tomb
+                    .map(|seq| Tombstone {
+                        id: String::new(),
+                        run: None,
+                        seq: Seq::new(seq).unwrap(),
+                    })
+                    .into_iter()
+                    .collect(),
+            };
+            let bytes = snapshot.paginate(1024).expect("a page")[0]
+                .write()
+                .expect("a page writes");
+            SampleBuilder::put(ke(), bytes)
+                .encoding(Encoding::ZENOH_BYTES)
+                .into()
+        };
+        let read = |samples: Vec<Sample>| member_replies(samples, D);
+        assert_eq!(
+            read(vec![page(stamp(7, 12), Some(12), None)]),
+            [MemberReply::Entry(stamp(7, 12))]
+        );
+        assert_eq!(
+            read(vec![page(stamp(7, 14), None, Some(13))]),
+            [MemberReply::Tombstone(stamp(7, 13))]
+        );
+        assert_eq!(
+            read(vec![page(stamp(8, 3), None, None)]),
+            [MemberReply::NoEntry {
+                run: Run::U16(8),
+                asof: Seq::new(3).unwrap(),
+            }]
+        );
+        // Two instances of one run: the higher seq, in both orders; and an
+        // entry beside another instance's snapshot of no entry keeps both.
+        let (old, new) = (
+            page(stamp(7, 12), Some(12), None),
+            page(stamp(7, 15), Some(15), None),
+        );
+        for both in [vec![old.clone(), new.clone()], vec![new, old.clone()]] {
+            assert_eq!(read(both), [MemberReply::Entry(stamp(7, 15))]);
+        }
+        assert_eq!(
+            read(vec![page(stamp(8, 3), None, None), old]),
+            [
+                MemberReply::NoEntry {
+                    run: Run::U16(8),
+                    asof: Seq::new(3).unwrap(),
+                },
+                MemberReply::Entry(stamp(7, 12)),
+            ]
+        );
+        // A put with no envelope carries no version.
+        let bare: Sample = SampleBuilder::put(ke(), br#"{"revision": 1}"#.to_vec())
+            .encoding(Encoding::APPLICATION_JSON)
+            .into();
+        assert_eq!(read(vec![bare]), [MemberReply::Unstamped]);
+        // A held stamp: this reader sent none, so it answers nothing.
+        let held: Sample = SampleBuilder::put(ke(), HeldStamp::new(stamp(7, 12)).write())
+            .encoding(Encoding::ZENOH_BYTES)
+            .into();
+        match read(vec![held]).as_slice() {
+            [MemberReply::Refused(why)] => assert!(why.starts_with("held: "), "{why}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     fn word(bound: bool) -> FaceWord {

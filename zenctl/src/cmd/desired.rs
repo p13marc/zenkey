@@ -1,6 +1,7 @@
-//! `desired` (#840, DD) — each desired.v1 target's roles against their
-//! authors' documents, read as the profile's tool reads them
-//! (`spec/profiles/desired/v1.md` §2.17, §5).
+//! `desired` (#840, DD; #986's J4) — each desired.v1 or desired.v2 target's
+//! roles against their authors' documents, read as the profile's tool reads
+//! them (`spec/profiles/desired/v1.md` §2.17, §5; `v2.md` §2.10, §2.17), each
+//! role by the major its author's revision lists (`desired.v2` §2.18).
 //!
 //! The reading is the engine's ([`zenkey_fleet::run_desired`]): presence
 //! and descriptors, the revisions they name, each target's reports by type
@@ -27,6 +28,8 @@
 //! 500 ms while an answer may move, so a target that converges inside the
 //! window is read converged, and one still "not yet" on the same version
 //! at its end is behind. A single reading never finds a target behind.
+//! Under desired.v2 the window is the only way: a version is a run and a
+//! seq, with no time for `--clocks-synced` to age (v2 §2.17).
 //!
 //! **No `--across-face`.** Across a constrained face neither presence nor
 //! the descriptor crosses, so the deployment's word must say the role, its

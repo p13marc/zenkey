@@ -796,7 +796,9 @@ impl Author {
     /// first: for each, the held stamp it carried, or none, and whether the
     /// author answered with that stamp alone (`desired.v2` §2.5, a
     /// conditional re-read; `scenarios-v2.md`, "What a section observes of
-    /// a read"). The latest 1,024 over every key the service was asked.
+    /// a read"). The latest 1,024 over every `desired.v2` desired resource
+    /// the service authors: a GET of any other resource is not kept, so a
+    /// `desired.v1` author's are none.
     pub fn reads(&self, target: &str) -> Result<Vec<Asked>> {
         let key = zenoh::key_expr::OwnedKeyExpr::try_from(self.key(target)?).map_err(zenoh)?;
         Ok(self.inner.store.reads_of(&key))
@@ -1757,11 +1759,7 @@ impl Target {
             && let Some(period) = startup.reread
             && period < startup.timeout
         {
-            let why = format!(
-                "role {role:?}: its period of re-reads, {period:?}, is below its read's \
-                 timeout, {:?} (desired.v2 §2.5)",
-                startup.timeout
-            );
+            let why = period_below_timeout(role, period, startup.timeout);
             b.refused.push(why.clone());
             return Err(Error::NotExposed(why));
         }
@@ -1912,18 +1910,28 @@ impl Target {
         self.inner.last_seed.lock().expect("not poisoned").clone()
     }
 
-    /// Sets the deployment's period of re-reads (§2.5); `None`: none. A
-    /// role bound to a `desired.v2` author keeps the period it had when
-    /// given one below its read's timeout (`desired.v2` §2.5), and says so.
-    pub fn set_reread(&self, period: Option<Duration>) {
+    /// Sets the deployment's period of re-reads (§2.5); `None`: none.
+    ///
+    /// # Errors
+    /// For a role bound to a `desired.v2` author, a period below its
+    /// read's timeout is refused, as the same period is at the start
+    /// (`desired.v2` §2.5: such a target would always hold a read
+    /// outstanding): [`Error::NotExposed`], in the start's words. The
+    /// period the role had stands.
+    pub fn set_reread(&self, period: Option<Duration>) -> Result<()> {
         if self.inner.major == Major::V2
+            && self.inner.key.is_some()
             && let Some(p) = period
             && p < self.inner.startup.timeout
         {
-            tracing::warn!(role = %self.inner.role, "desired.v2: a period of re-reads of {p:?} is below the read's timeout, {:?}, and is not taken (§2.5)", self.inner.startup.timeout);
-            return;
+            return Err(Error::NotExposed(period_below_timeout(
+                &self.inner.role,
+                p,
+                self.inner.startup.timeout,
+            )));
         }
         self.inner.reread.send_replace(period);
+        Ok(())
     }
 
     /// The target's own operation changed what is in force (§2.7): its
@@ -1944,6 +1952,15 @@ impl Target {
         }
         tokio::spawn(Arc::clone(&self.inner).run(rx, closed));
     }
+}
+
+/// Why a `desired.v2` role's period of re-reads is refused (§2.5): at the
+/// start, and when one is set on a running target.
+fn period_below_timeout(role: &str, period: Duration, timeout: Duration) -> String {
+    format!(
+        "role {role:?}: its period of re-reads, {period:?}, is below its read's timeout, \
+         {timeout:?} (desired.v2 §2.5)"
+    )
 }
 
 impl TargetInner {
@@ -2622,6 +2639,138 @@ impl Handler for ConfigHandler {
 #[cfg(test)]
 mod tests {
     use super::{FileRecord, Kept, KeptDelete, KeptDocument, escape};
+
+    /// Review of #1156: a state GET is kept for [`super::Author::reads`]
+    /// only where it reads a member of a `desired.v2` desired resource.
+    /// One on another state of the same service keeps nothing, with a held
+    /// stamp or none, answered whole or by that stamp alone; one on the
+    /// author's slice is kept, with the stamp it carried and how it was
+    /// answered.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_get_is_kept_only_for_a_desired_v2_resource() {
+        use crate::state::Asked;
+        use std::time::Duration;
+        use zenkey_model::wire;
+        use zenoh::query::{ConsolidationMode, QueryTarget};
+
+        // A session of its own: its GETs reach its own queryables.
+        let mut c = zenoh::Config::default();
+        c.insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        c.insert_json5("listen/endpoints", "[]").unwrap();
+        let s = zenoh::open(c).await.unwrap();
+        let imp = |name: &str| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/contracts")
+                .join(name);
+            let l = zenkey_model::contract::load_path(&path);
+            crate::Implementation::new(l.contract.unwrap_or_else(|| panic!("{}", l.report)))
+        };
+        let (tasking, sysinfo) = (imp("tasking.v2.toml"), imp("sysinfo.v1.toml"));
+        let (ti, si) = (tasking.iface().clone(), sysinfo.iface().clone());
+        let mut b = crate::ServiceBuilder::new(
+            &s,
+            crate::ServiceConfig::new("lab/author".parse().unwrap()),
+        );
+        b.implement(tasking).unwrap();
+        b.implement(sysinfo).unwrap();
+        let none = zenkey_model::template::Bindings::new();
+        let _cpu = b.declare_writer(&si, "stream/cpu", &none).await.unwrap();
+        let uptime = b
+            .declare_state_writer(
+                &si,
+                "state/uptime",
+                &zenkey_model::template::Bindings::new(),
+            )
+            .await
+            .unwrap();
+        let author = b
+            .desired_author(
+                &ti,
+                "state/tasks/{system}/{service}",
+                super::AuthorStartup::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(author.major(), super::Major::V2);
+        let svc = b.start().await.unwrap();
+        let up = uptime.put(b"42".to_vec()).await.unwrap().stamp;
+        let v1 = author
+            .put(
+                "lab/worker",
+                br#"{"revision": 1, "mode": "run", "rate_hz": 10}"#.to_vec(),
+            )
+            .await
+            .unwrap()
+            .version()
+            .unwrap();
+        // One GET of one concrete key, with a held stamp or none: how many
+        // replies it drew.
+        let get = |key: String, held: Option<wire::Stamp>| {
+            let s = s.clone();
+            async move {
+                let mut get = s
+                    .get(key)
+                    .target(QueryTarget::All)
+                    .consolidation(ConsolidationMode::None)
+                    .timeout(Duration::from_secs(2));
+                if let Some(stamp) = held {
+                    get = get
+                        .payload(wire::HeldStamp::new(stamp).write())
+                        .encoding(zenoh::bytes::Encoding::ZENOH_BYTES);
+                }
+                let rx = get.await.unwrap();
+                let mut replies = 0;
+                while let Ok(r) = rx.recv_async().await {
+                    assert!(r.result().is_ok(), "an error reply");
+                    replies += 1;
+                }
+                replies
+            }
+        };
+        let slice = author.key("lab/worker").unwrap();
+        let other = "zk2/lab/author/sysinfo.v1/state/uptime".to_owned();
+        let store = svc.store();
+        // The other state: answered whole, and by its held stamp alone, and
+        // by a snapshot under another stamp; nothing is kept.
+        for held in [None, Some(up), Some(v1)] {
+            assert_eq!(get(other.clone(), held).await, 1, "{held:?}");
+        }
+        assert_eq!(store.reads_kept(), 0, "no GET of sysinfo.v1 is kept");
+        let other_key = zenoh::key_expr::OwnedKeyExpr::try_from(other).unwrap();
+        assert!(store.reads_of(&other_key).is_empty());
+        assert!(author.reads("lab/worker").unwrap().is_empty());
+        // The slice: each GET kept, with what it carried and how it was
+        // answered.
+        for held in [None, Some(v1), Some(up)] {
+            assert_eq!(get(slice.clone(), held).await, 1, "{held:?}");
+        }
+        assert_eq!(
+            author.reads("lab/worker").unwrap(),
+            [
+                Asked {
+                    held: None,
+                    unchanged: false
+                },
+                Asked {
+                    held: Some(v1),
+                    unchanged: true
+                },
+                Asked {
+                    held: Some(up),
+                    unchanged: false
+                },
+            ]
+        );
+        assert_eq!(store.reads_kept(), 3);
+        // A wildcard over the slice's resource is no read of one key.
+        assert_eq!(
+            get("zk2/lab/author/tasking.v2/state/tasks/**".to_owned(), None).await,
+            1
+        );
+        assert_eq!(store.reads_kept(), 3);
+        svc.close().await.unwrap();
+    }
 
     /// The file record reads back what it renders, a binary document as
     /// hex.

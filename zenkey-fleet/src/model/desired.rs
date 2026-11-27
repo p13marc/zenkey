@@ -1,5 +1,18 @@
-//! `desired.v1` (#840, DD): one target's roles as values in hand
-//! (`spec/profiles/desired/v1.md` §2.3, §2.10, §2.17, §5).
+//! `desired.v1` (#840, DD) and `desired.v2` (#986's J4): one target's roles
+//! as values in hand (`spec/profiles/desired/v1.md` §2.3, §2.10, §2.17, §5;
+//! `v2.md` §2.10, §2.17, §2.18).
+//!
+//! **Either major, per role** (`desired.v2` §2.18). A role is read by the
+//! major its author's revision lists in `uses` ([`RoleRead::major`]): the
+//! author's version is its reply's Zenoh timestamp under `desired.v1`, and
+//! its snapshot entry's in-band stamp under `desired.v2`
+//! ([`current_v2_of`]); the target's report is a `desired.v1.Report` found
+//! by type identity and its `key`, or the packed `Report` on the resource
+//! whose `desired.report` names the role ([`packed_report_of`]). With no
+//! revision of the author's in hand, the target's contract says which: a
+//! role a `desired.report` names is read as `desired.v2`'s, unless only a
+//! `desired.v1.Report` claims it ([`RoleRead::settle`]). A `desired.v2`
+//! role has no slice from the target alone (v2 §2.17).
 //!
 //! **Values in hand → the model's reading.** A [`DesiredRead`] is what one
 //! reading of the bus found ([`crate::bus::desired`] fills it): the
@@ -36,6 +49,7 @@ use std::time::{Duration, Instant, SystemTime};
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::contract::{Body, Contract, Resource};
 use zenkey_model::descriptor::{Descriptor, RequireEntry};
+use zenkey_model::desired::v2 as d2;
 use zenkey_model::desired::{
     self as dm, AuthorReading, Binding, BindingProblem, Current, Declaration, Invalid, Listing,
     ReportRead, Seen, TargetReading,
@@ -45,10 +59,21 @@ use zenkey_model::grammar::{Addr, IfaceId, KindToken};
 use zenkey_model::schema::TypeId;
 use zenkey_model::seed::Stamp;
 use zenkey_model::template::{Segment, Template};
+use zenkey_model::wire;
 
 use crate::bus::health::Stamped;
 use crate::model::catalog::{Catalog, ContractSet, ContractState, Observed, Revision};
 use crate::model::health::Trust;
+
+pub use zenkey_model::desired::v2::Major;
+
+/// The profile's id of a major, as a row names it.
+pub fn profile_of(major: Major) -> &'static str {
+    match major {
+        Major::V1 => dm::PROFILE,
+        Major::V2 => d2::PROFILE,
+    }
+}
 
 /// What a reading found for each revision it asked about, by `(iface,
 /// fingerprint)`: what [`crate::BundleStore::fetch`] answered, or why it
@@ -150,6 +175,64 @@ pub struct RoleResolution {
     /// resource (text 0.8, F-225). The tool's sight, not the target's
     /// problem.
     pub requirement_unread: Option<String>,
+    /// The major the author's revision in hand lists in `uses`
+    /// (`desired.v2` §2.18), `desired.v1` for one that lists neither;
+    /// `None` with no revision of the author's interface in hand.
+    pub author_major: Option<Major>,
+    /// Where `desired.v2` finds the role's report (v2 §2.10), by the
+    /// contract of the target's that declares the role; `None` when that
+    /// contract is not in hand, or the role is a manifest's.
+    pub report_at: Option<ReportWhere>,
+}
+
+/// Where a role's `desired.v2` report is (v2 §2.10): the model's finding
+/// over the contract that declares the role, and that contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportWhere {
+    /// The interface of the contract that declares the role.
+    pub iface: IfaceId,
+    pub at: d2::ReportAt,
+    /// The report resource's horizon (v2 §2.10, "Its horizon"), when one
+    /// resource names the role.
+    pub horizon: Horizon,
+}
+
+impl ReportWhere {
+    /// [`d2::report_at_of`] in `declaring`, the contract of `target`'s that
+    /// declares `role`.
+    pub fn of(target: &Addr, declaring: &Contract, role: &str) -> ReportWhere {
+        let at = d2::report_at_of(target, declaring, role);
+        let naming: Vec<&Resource> = declaring
+            .resources
+            .iter()
+            .filter(|r| {
+                r.annotations
+                    .get(d2::REPORT_KEY)
+                    .and_then(d2::Names::read)
+                    .is_some_and(|n| n.names(role))
+            })
+            .collect();
+        ReportWhere {
+            iface: declaring.iface.clone(),
+            at,
+            horizon: match naming.as_slice() {
+                [one] => freshness::horizon_of(one),
+                _ => Horizon::Undeclared,
+            },
+        }
+    }
+
+    /// Whether a resource of the contract names the role by
+    /// `desired.report`, validly or not: the target's contract speaks
+    /// `desired.v2` of it.
+    pub fn names(&self) -> bool {
+        self.at != d2::ReportAt::None
+    }
+
+    /// The report's key, when one resource names the role and is declared.
+    pub fn key(&self) -> Option<String> {
+        self.at.key().map(ToString::to_string)
+    }
 }
 
 impl RoleResolution {
@@ -167,6 +250,8 @@ impl RoleResolution {
             slice: Vec::new(),
             slice_from: None,
             requirement_unread: None,
+            author_major: None,
+            report_at: None,
         }
     }
 
@@ -198,9 +283,20 @@ fn desired_resources<'c>(
         .resources
         .iter()
         .filter(|r| templates.is_none_or(|t| t.iter().any(|t| t == r.template.as_str())))
-        .map(|r| (r, dm::declaration_of(r)))
+        .map(|r| (r, declaration_in(author, r)))
         .filter(|(_, d)| *d != Declaration::NotThisProfiles)
         .collect()
+}
+
+/// A desired resource's declaration by the major its revision lists
+/// (`desired.v2` §2.2): v1 §2.2's reading, and under `desired.v2`
+/// `horizon_v1` after it.
+fn declaration_in(c: &Contract, r: &Resource) -> Declaration {
+    if d2::uses_v2(c) {
+        d2::declaration_of(c, r)
+    } else {
+        dm::declaration_of(r)
+    }
 }
 
 /// What a role's requirement names, as a tool reads it (core §3.1, §3.3;
@@ -274,6 +370,7 @@ pub fn resolve_unread(
     out.interface = IfaceId::from_str(&entry.interface).ok();
     out.author = one_author(&entry.bindings);
     out.requirement_unread = Some(declaring.to_owned());
+    out.author_major = author.map(|(c, _)| Major::of(c).unwrap_or(Major::V1));
     Some(out)
 }
 
@@ -298,6 +395,7 @@ pub fn resolve_role(
     );
     out.interface = IfaceId::from_str(&entry.interface).ok();
     out.author = one_author(&entry.bindings);
+    out.author_major = author.map(|(c, _)| Major::of(c).unwrap_or(Major::V1));
     let mut req = dm::Requirement {
         bindings: &entry.bindings,
         params: &entry.params,
@@ -458,6 +556,71 @@ pub struct ReportReply {
     pub horizon: Horizon,
 }
 
+/// Why a reply on a `desired.v2` report's key does not read (v2 §2.10): the
+/// refusal's token, core §7.6's or the envelope's, and its words. Never
+/// guessed at: an unreadable report answers nothing (v2 §2.17).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackedUnreadable {
+    pub token: String,
+    /// The refusal in words, without its token in front.
+    pub says: String,
+}
+
+impl PackedUnreadable {
+    /// A refusal by its token and its words, a `<token>: ` the words
+    /// already lead with taken off.
+    pub fn new(token: &str, says: &str) -> PackedUnreadable {
+        PackedUnreadable {
+            token: token.to_owned(),
+            says: says
+                .strip_prefix(token)
+                .and_then(|rest| rest.strip_prefix(": "))
+                .unwrap_or(says)
+                .to_owned(),
+        }
+    }
+}
+
+impl std::fmt::Display for PackedUnreadable {
+    /// `<token>: <words>`, as a row's `unreadable` spells it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.token, self.says)
+    }
+}
+
+/// One reply on a `desired.v2` report resource's key (v2 §2.10), as read:
+/// the packed `Report` under its envelope's tag.
+#[derive(Debug, Clone)]
+pub struct PackedReply {
+    /// The key it came on, base-relative.
+    pub key: String,
+    /// The record read, malformed where it has a finding, or why it does
+    /// not read.
+    pub read: Result<d2::Read, PackedUnreadable>,
+    /// Its put's in-band stamp, the target's own (core §4.3).
+    pub inband: Option<wire::Stamp>,
+    /// Its Zenoh timestamp, where its resource's puts carry one.
+    pub stamp: Option<Stamped>,
+    /// Its resource's horizon (v2 §2.10).
+    pub horizon: Horizon,
+}
+
+/// Reads a reply's record as a `desired.v2` `Report` (v2 §2.10, "How a
+/// reader reads one"): under the tag its envelope's CH carried. A put with
+/// no envelope carries no tag, so core §7.6 refuses it, `tag`.
+pub fn packed_read(tag: Option<u8>, record: &[u8]) -> Result<d2::Read, PackedUnreadable> {
+    use zenkey_model::packed::ReadRefusal;
+    match tag {
+        Some(tag) => {
+            d2::read(tag, record).map_err(|r| PackedUnreadable::new(r.token(), r.reason()))
+        }
+        None => Err(PackedUnreadable::new(
+            ReadRefusal::Tag.token(),
+            "the put carries no envelope, so no tag to read its record under",
+        )),
+    }
+}
+
 /// S4's GET of one target's report resources.
 #[derive(Debug, Clone)]
 pub struct ReportsGet {
@@ -465,6 +628,9 @@ pub struct ReportsGet {
     /// Whether every GET ran to its final reply.
     pub complete: bool,
     pub replies: Vec<ReportReply>,
+    /// The replies on `desired.v2` report resources' keys (v2 §2.10), one a
+    /// key after the merge.
+    pub packed: Vec<PackedReply>,
     /// This host's clock as the GETs ended: what a reply is aged at.
     pub at: SystemTime,
 }
@@ -478,13 +644,35 @@ pub struct SliceReply {
     pub stamp: Option<(Stamp, SystemTime)>,
 }
 
+/// What one reply of S4's GET of a `desired.v2` slice said (v2 §2.5): a
+/// member read of one concrete key, answered by snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemberReply {
+    /// A live entry: a put, with its version.
+    Entry(wire::Stamp),
+    /// A tombstone: a delete within the author's window, with its version.
+    Tombstone(wire::Stamp),
+    /// A snapshot with no entry: the author's word that it holds no
+    /// document for the target, under its header's run.
+    NoEntry { run: wire::Run, asof: wire::Seq },
+    /// A reply with no envelope, which carries no version (core S1).
+    Unstamped,
+    /// A reply whose envelope or page is refused, or a held stamp this
+    /// reader did not send (core §4.2): no answer, with why.
+    Refused(String),
+}
+
 /// S4's GET of a slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SliceGet {
     pub selector: String,
     /// It ran to its final reply, with no error reply.
     pub complete: bool,
+    /// `desired.v1`: each reply on the key, by its Zenoh timestamp.
     pub replies: Vec<SliceReply>,
+    /// `desired.v2`: what each reply on the key said, in arrival order,
+    /// the entries merged per key (observer §4.1).
+    pub member: Vec<MemberReply>,
     pub at: SystemTime,
 }
 
@@ -497,6 +685,9 @@ pub struct Archived {
     /// A tombstone (`reply_del`).
     pub deleted: bool,
     pub stamp: Option<Stamp>,
+    /// Its in-band stamp, which the archive's record keeps with the
+    /// envelope (core §4.4): a `desired.v2` document's version.
+    pub inband: Option<wire::Stamp>,
     /// The document's own revision (§2.4), when it carries one.
     pub revision: Option<u64>,
     pub confirmed: bool,
@@ -505,6 +696,9 @@ pub struct Archived {
 /// What one reading read of one role.
 #[derive(Debug, Clone)]
 pub struct RoleRead {
+    /// The major the role is read by (`desired.v2` §2.18): its author's
+    /// revision's, [`RoleRead::settle`]d once the reports are read.
+    pub major: Major,
     pub resolution: RoleResolution,
     /// The author's presence, and why it is not known when it is not.
     pub author_seen: Option<(Seen, Option<String>)>,
@@ -663,16 +857,127 @@ pub fn report_freshness(
     at: SystemTime,
     trust: &Trust<'_>,
 ) -> freshness::Judged {
+    reply_freshness(reply.stamp.as_ref(), &reply.horizon, at, trust)
+}
+
+/// [`report_freshness`] of a reply of either major: its stamp, where its
+/// put carried one, aged at `at` under its resource's `horizon`.
+pub fn reply_freshness(
+    stamp: Option<&Stamped>,
+    horizon: &Horizon,
+    at: SystemTime,
+    trust: &Trust<'_>,
+) -> freshness::Judged {
     let observation = Observation::Got {
         reply: Some(Reply::Put {
-            stamp_age: reply.stamp.as_ref().map(|s| StampAge::between(s.time, at)),
+            stamp_age: stamp.map(|s| StampAge::between(s.time, at)),
         }),
-        clock: reply
-            .stamp
-            .as_ref()
-            .map_or(ClockTrust::Untrusted, |s| trust.of(&s.clock)),
+        clock: stamp.map_or(ClockTrust::Untrusted, |s| trust.of(&s.clock)),
     };
-    freshness::judge_all(&reply.horizon, &[observation])
+    freshness::judge_all(horizon, &[observation])
+}
+
+/// A tool's finding of one role's `desired.v2` report (v2 §2.10, "A tool
+/// finds a target's report"), among the replies of S4's GET.
+#[derive(Debug, Clone)]
+pub enum PackedFound<'a> {
+    /// None was read: no resource names the role, the one that does is
+    /// invalidly declared (its reasons), or no reply is on its key.
+    None(Vec<d2::ReportInvalid>),
+    /// Two or more resources name the role: unreadable, `two_reports`.
+    Two,
+    /// The reply on the report's key, its record refused: unreadable.
+    Unreadable(&'a PackedReply),
+    /// The reply read; malformed where it has a finding.
+    One(&'a PackedReply),
+}
+
+impl PackedFound<'_> {
+    /// The fixture's token (`v2/slices.json`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PackedFound::None(_) => "none",
+            PackedFound::Two | PackedFound::Unreadable(_) => "unreadable",
+            PackedFound::One(_) => "one",
+        }
+    }
+}
+
+/// Finds a role's `desired.v2` report (v2 §2.10): the reply on the key the
+/// target's contract gives it (`at`), among `replies` as the tool's merge
+/// left them, one a key. Never by a resource's name, and never a reply on
+/// another key.
+pub fn packed_report_of<'a>(at: &d2::ReportAt, replies: &'a [PackedReply]) -> PackedFound<'a> {
+    match at {
+        d2::ReportAt::None => PackedFound::None(Vec::new()),
+        d2::ReportAt::Two => PackedFound::Two,
+        d2::ReportAt::Invalid(why) => PackedFound::None(why.clone()),
+        d2::ReportAt::At { key, .. } => {
+            let key = key.to_string();
+            match replies.iter().find(|p| p.key == key) {
+                None => PackedFound::None(Vec::new()),
+                Some(p) if p.read.is_ok() => PackedFound::One(p),
+                Some(p) => PackedFound::Unreadable(p),
+            }
+        }
+    }
+}
+
+/// The author's answer to S4's GET of a `desired.v2` slice (v2 §2.17 step
+/// 6), and why it is no version when it is none. The replies' entries were
+/// merged per key (observer §4.1), so at most one entry or tombstone is
+/// here. An entry or a tombstone answers before a snapshot with no entry:
+/// two instances answering one key, one holding a document. A reply that
+/// does not read, or one with no envelope, is a GET that could not answer.
+pub fn current_v2_of(get: Option<&Result<SliceGet, String>>) -> (d2::Current, Option<String>) {
+    use d2::Current as C;
+    match get {
+        None => (C::NotRead, None),
+        Some(Err(why)) => (
+            C::NotRead,
+            Some(format!("the GET could not be made: {why}")),
+        ),
+        Some(Ok(g)) if !g.complete => (
+            C::Incomplete,
+            Some("the GET ended at its timeout, or with an error reply".to_owned()),
+        ),
+        Some(Ok(g)) => {
+            if g.member.is_empty() {
+                return (C::Silent, None);
+            }
+            if let Some(why) = g.member.iter().find_map(|m| match m {
+                MemberReply::Refused(why) => Some(why),
+                _ => None,
+            }) {
+                return (
+                    C::Incomplete,
+                    Some(format!(
+                        "a reply does not read, so it gives no version: {why}"
+                    )),
+                );
+            }
+            if g.member.contains(&MemberReply::Unstamped) {
+                return (
+                    C::Unstamped,
+                    Some(
+                        "a reply carries no envelope, so no version (core S1, §7.5): its author \
+                         broke S1"
+                            .to_owned(),
+                    ),
+                );
+            }
+            let version = g.member.iter().rev().find_map(|m| match m {
+                MemberReply::Entry(v) => Some(C::Entry(*v)),
+                MemberReply::Tombstone(v) => Some(C::Tombstone(*v)),
+                _ => None,
+            });
+            let no_entry = g.member.iter().rev().find_map(|m| match m {
+                MemberReply::NoEntry { run, .. } => Some(C::NoEntry(*run)),
+                _ => None,
+            });
+            (version.or(no_entry).unwrap_or(C::Silent), None)
+        }
+    }
 }
 
 /// The author's current version of `slice` by S4's GET (§2.17 step 6), and
@@ -760,7 +1065,271 @@ pub struct RoleReading<'a> {
     pub author_why: Option<String>,
 }
 
+/// What a `desired.v2` role's reading needs, kept beside it (v2 §2.17).
+#[derive(Debug, Clone)]
+pub struct RoleReadingV2<'a> {
+    pub target: TargetReading<'a, d2::Read>,
+    pub author: d2::AuthorReading,
+    /// The reply found on the report's key, when one was.
+    pub report: Option<&'a PackedReply>,
+    /// The report resource's two tables, as the revision in hand of the
+    /// target's contract holds them (v2 §2.10, "A reader reads an index");
+    /// `None` with no declared report resource in hand: numbers are shown.
+    pub tables: Option<&'a d2::Tables>,
+    /// Two or more resources name the role: unreadable, `two_reports`.
+    pub two_reports: bool,
+    /// The reasons of the one report resource that names the role, when
+    /// its declaration is invalid.
+    pub report_invalid: &'a [d2::ReportInvalid],
+    /// Why step 3 read none, when it read none.
+    pub no_report: Option<String>,
+    pub freshness: freshness::Judged,
+    /// Why the author's presence or its version is not known.
+    pub author_why: Option<String>,
+}
+
 impl RoleRead {
+    /// A role resolved and nothing read of it yet, its major its author's
+    /// revision's where one is in hand.
+    pub fn new(resolution: RoleResolution) -> RoleRead {
+        RoleRead {
+            major: resolution.author_major.unwrap_or(Major::V1),
+            resolution,
+            author_seen: None,
+            current: None,
+            archived: None,
+        }
+    }
+
+    /// Settles the role's major once its target's reports are read
+    /// (`desired.v2` §2.18): its author's revision's, where one is in hand.
+    /// With none, the target's contract says: a role a `desired.report`
+    /// names is `desired.v2`'s, unless no reply is on that report's key and
+    /// a `desired.v1.Report` claims one of the requirement's candidate
+    /// slices (a target that serves both majors puts the report of its
+    /// author's). A `desired.v2` role has no slice from the target alone
+    /// (v2 §2.17): the candidates are dropped.
+    pub fn settle(&mut self, reports: Option<&Result<ReportsGet, String>>) {
+        let res = &mut self.resolution;
+        self.major = res.author_major.unwrap_or_else(|| {
+            let Some(at) = res.report_at.as_ref().filter(|w| w.names()) else {
+                return Major::V1;
+            };
+            let replies = reports.and_then(|r| r.as_ref().ok());
+            let packed = at
+                .key()
+                .is_some_and(|k| replies.is_some_and(|g| g.packed.iter().any(|p| p.key == k)));
+            let claimed = replies.is_some_and(|g| {
+                g.replies.iter().any(|r| {
+                    r.read
+                        .as_ref()
+                        .is_ok_and(|d| d.key.as_ref().is_some_and(|k| res.slice.contains(k)))
+                })
+            });
+            if packed || !claimed {
+                Major::V2
+            } else {
+                Major::V1
+            }
+        });
+        if self.major == Major::V2 && res.slice_from == Some(SliceFrom::Requirement) {
+            res.slice.clear();
+            res.slice_from = None;
+        }
+    }
+
+    /// What the target's descriptor, or across a face the deployment's
+    /// word, says of the role (§2.17 step 2).
+    fn listings(&self, t: &TargetRead) -> (Option<Listing>, Option<Listing>) {
+        let res = &self.resolution;
+        match (&t.word, &t.descriptor) {
+            // The deployment's word stands for the descriptor, but for a
+            // role a revision in hand shows on no desired resource
+            // (text 0.6, F-217).
+            (Some(_), _) if res.listing == Some(Listing::NotListed) => {
+                (None, Some(Listing::NotListed))
+            }
+            (Some(w), _) => (None, Some(w.listing)),
+            (None, Ok(Some(_))) | (None, Ok(None)) => (res.listing, None),
+            (None, Err(_)) => (None, None),
+        }
+    }
+
+    /// Why the role has no slice, when it has none.
+    fn no_slice(&self) -> String {
+        let res = &self.resolution;
+        if !res.declaration_invalid.is_empty() {
+            format!(
+                "the author's declaration of its desired resource is invalid ({}), so the role \
+                 has no slice (§2.2)",
+                res.declaration_invalid
+                    .iter()
+                    .map(|i| i.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else if !res.binding_problems.is_empty() {
+            format!(
+                "its binding is invalid ({}), so the role has no slice (§2.3)",
+                res.binding_problems
+                    .iter()
+                    .map(|p| p.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else if let Some(by) = &res.requirement_unread {
+            format!(
+                "its requirement is unread: its descriptor names {by} as the contract declaring \
+                 role {}, and no revision of it in hand declares the role, so which resource the \
+                 role binds is not known, never every resource (§2.17, text 0.8)",
+                res.role
+            )
+        } else if res.author_major.is_none() {
+            "no revision of its author's interface is in hand, so the role has no slice: a \
+             desired.v2 report names no key, and the target alone gives none (desired.v2 §2.17)"
+                .to_owned()
+        } else {
+            "its slice could not be built from its binding (§2.3)".to_owned()
+        }
+    }
+
+    /// This role's reading under `desired.v2` (v2 §2.17): the target's
+    /// presence and listing as v1's, its report found by `desired.report`
+    /// with no slice needed (v2 §2.10), and the author's version by its
+    /// snapshot. `trust` ages a reply's stamp.
+    pub fn reading_v2<'a>(&'a self, t: &'a TargetRead, trust: &Trust<'_>) -> RoleReadingV2<'a> {
+        let res = &self.resolution;
+        let mut out = RoleReadingV2 {
+            target: TargetReading {
+                presence: t.seen,
+                descriptor: None,
+                deployment: None,
+                report: ReportRead::NotRead,
+                freshness: freshness::Verdict::NotAsked,
+            },
+            author: d2::AuthorReading {
+                presence: Seen::Incomplete,
+                current: d2::Current::NotRead,
+            },
+            report: None,
+            tables: None,
+            two_reports: false,
+            report_invalid: &[],
+            no_report: None,
+            freshness: freshness::judge_all(&Horizon::Undeclared, &[]),
+            author_why: None,
+        };
+        match (&res.requirement_unread, &res.report_at) {
+            (Some(by), _) => {
+                out.no_report = Some(format!(
+                    "its requirement is unread: its descriptor names {by} as the contract \
+                     declaring role {}, and no revision of it is in hand, so the resource whose \
+                     `desired.report` names the role is not known (desired.v2 §2.10)",
+                    res.role
+                ));
+            }
+            (None, None) => {
+                out.no_report = Some(format!(
+                    "no revision in hand of the contract that declares role {}, so the resource \
+                     whose `desired.report` names it is not known (desired.v2 §2.10)",
+                    res.role
+                ));
+            }
+            (None, Some(w)) => match &w.at {
+                d2::ReportAt::None => {
+                    out.no_report = Some(format!(
+                        "no resource of {} names role {} by `desired.report`: no report was read \
+                         (desired.v2 §2.10)",
+                        w.iface, res.role
+                    ));
+                }
+                d2::ReportAt::Two => {
+                    out.two_reports = true;
+                    out.target.report = ReportRead::Unreadable;
+                    out.no_report = Some(format!(
+                        "two or more resources of {} name role {} by `desired.report`: the \
+                         target's contract says two things of one role (desired.v2 §2.10, \
+                         two_reports)",
+                        w.iface, res.role
+                    ));
+                }
+                d2::ReportAt::Invalid(why) => {
+                    out.report_invalid = why;
+                    out.no_report = Some(format!(
+                        "the resource of {} whose `desired.report` names role {} is invalidly \
+                         declared ({}): no report was read (desired.v2 §2.10)",
+                        w.iface,
+                        res.role,
+                        why.iter()
+                            .map(|r| r.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                d2::ReportAt::At { key, tables } => {
+                    out.tables = Some(tables);
+                    match &t.reports {
+                        None => {
+                            out.no_report = Some("its report resources were not read".to_owned());
+                        }
+                        Some(Err(why)) => {
+                            out.no_report =
+                                Some(format!("the GET of its reports could not be made: {why}"));
+                        }
+                        Some(Ok(g)) => match packed_report_of(&w.at, &g.packed) {
+                            PackedFound::One(p) | PackedFound::Unreadable(p) => {
+                                out.report = Some(p);
+                                match &p.read {
+                                    Ok(r) => {
+                                        out.target.report = ReportRead::Read(r);
+                                        out.freshness = reply_freshness(
+                                            p.stamp.as_ref(),
+                                            &p.horizon,
+                                            g.at,
+                                            trust,
+                                        );
+                                    }
+                                    Err(_) => out.target.report = ReportRead::Unreadable,
+                                }
+                            }
+                            _ => {
+                                out.no_report = Some(if g.complete {
+                                    format!(
+                                        "no reply on its report's key, {key} (desired.v2 §2.10)"
+                                    )
+                                } else {
+                                    format!(
+                                        "no reply on its report's key, {key}, and the GET ended \
+                                         at its timeout"
+                                    )
+                                });
+                            }
+                        },
+                    }
+                }
+            },
+        }
+        let (descriptor, deployment) = self.listings(t);
+        out.target.descriptor = descriptor;
+        out.target.deployment = deployment;
+        out.target.freshness = out.freshness.verdict;
+        let (author_seen, seen_why) = self
+            .author_seen
+            .clone()
+            .unwrap_or((Seen::Incomplete, Some("the author was not read".to_owned())));
+        let (current, current_why) = if res.slice.is_empty() {
+            (d2::Current::NotRead, Some(self.no_slice()))
+        } else {
+            current_v2_of(self.current.as_ref())
+        };
+        out.author = d2::AuthorReading {
+            presence: author_seen,
+            current,
+        };
+        out.author_why = seen_why.or(current_why);
+        out
+    }
+
     /// This role's reading, as `zenkey_model::desired` takes it (§2.17):
     /// the target's presence, its descriptor or the deployment's word, its
     /// report of the slice and its age, the author's presence and its
@@ -852,17 +1421,7 @@ impl RoleRead {
                 },
             }
         }
-        let (descriptor, deployment) = match (&t.word, &t.descriptor) {
-            // The deployment's word stands for the descriptor, but for a
-            // role a revision in hand shows on no desired resource
-            // (text 0.6, F-217).
-            (Some(_), _) if res.listing == Some(Listing::NotListed) => {
-                (None, Some(Listing::NotListed))
-            }
-            (Some(w), _) => (None, Some(w.listing)),
-            (None, Ok(Some(_))) | (None, Ok(None)) => (res.listing, None),
-            (None, Err(_)) => (None, None),
-        };
+        let (descriptor, deployment) = self.listings(t);
         let target = TargetReading {
             presence: t.seen,
             descriptor,
@@ -908,11 +1467,34 @@ pub enum BehindBy {
     Clock,
 }
 
+/// What an author answered that a target is "not yet" on, of either major:
+/// a version, or under `desired.v2` a snapshot with no entry, the author's
+/// word that it holds no document (v2 §2.17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorVersion {
+    /// `desired.v1`: a Zenoh timestamp, `<time>/<id>`.
+    V1(Stamp),
+    /// `desired.v2`: an in-band stamp, `<run>/<seq>`. It has no time.
+    V2(wire::Stamp),
+    /// `desired.v2`: no document, under this run.
+    NoEntry(wire::Run),
+}
+
+impl std::fmt::Display for AuthorVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AuthorVersion::V1(s) => write!(f, "{s}"),
+            AuthorVersion::V2(v) => f.write_str(&d2::version_text(*v)),
+            AuthorVersion::NoEntry(run) => write!(f, "no entry under run {run}"),
+        }
+    }
+}
+
 /// A role found behind one version of its author's for at least the
 /// window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BehindFor {
-    pub version: Stamp,
+    pub version: AuthorVersion,
     /// How long, at least.
     pub since: Duration,
     pub by: BehindBy,
@@ -922,13 +1504,19 @@ pub struct BehindFor {
 /// that found it "not yet" on one version of its author's (§2.17 step 7).
 #[derive(Debug, Clone, Default)]
 pub struct Behind {
-    since: BTreeMap<(String, String), (Stamp, Instant)>,
+    since: BTreeMap<(String, String), (AuthorVersion, Instant)>,
 }
 
 impl Behind {
     /// One reading's answer for a role (`target`, `role`): "not yet" on
     /// `version`, read at `began`; anything else ends its run.
-    pub fn note(&mut self, target: &str, role: &str, not_yet_on: Option<Stamp>, began: Instant) {
+    pub fn note(
+        &mut self,
+        target: &str,
+        role: &str,
+        not_yet_on: Option<AuthorVersion>,
+        began: Instant,
+    ) {
         let key = (target.to_owned(), role.to_owned());
         match not_yet_on {
             Some(v) => match self.since.get(&key) {
@@ -947,7 +1535,9 @@ impl Behind {
     /// `began`, by the readings, or else by the version's time on a trusted
     /// clock (`clocks_synced`): `clock` the version's stamp on the wall
     /// clock and this host's clock as its GET was answered
-    /// ([`current_dated`]).
+    /// ([`current_dated`]). Only a `desired.v1` version is dated: a
+    /// `desired.v2` version has no time, so it is behind by the window
+    /// alone (v2 §2.17).
     pub fn behind(
         &self,
         target: &str,
@@ -964,6 +1554,9 @@ impl Behind {
                 since: by_readings,
                 by: BehindBy::Window,
             });
+        }
+        if !matches!(version, AuthorVersion::V1(_)) {
+            return None;
         }
         let (version_time, at) = clock?;
         let age = at.duration_since(version_time).ok()?;
@@ -1459,6 +2052,7 @@ mod tests {
                 selector: D.into(),
                 complete,
                 replies,
+                member: vec![],
                 at,
             })
         };
@@ -1497,12 +2091,13 @@ mod tests {
         let w = Duration::from_secs(5);
         let t0 = Instant::now();
         let mut b = Behind::default();
-        b.note("lab/worker", "task", Some(st(1, "a1")), t0);
+        let v1 = |t: u64| Some(AuthorVersion::V1(st(t, "a1")));
+        b.note("lab/worker", "task", v1(1), t0);
         assert!(b.behind("lab/worker", "task", w, t0, None).is_none());
-        b.note("lab/worker", "task", Some(st(1, "a1")), t0 + w);
+        b.note("lab/worker", "task", v1(1), t0 + w);
         let got = b.behind("lab/worker", "task", w, t0 + w, None).unwrap();
         assert_eq!((got.by, got.since), (BehindBy::Window, w));
-        b.note("lab/worker", "task", Some(st(2, "a1")), t0 + w);
+        b.note("lab/worker", "task", v1(2), t0 + w);
         assert!(b.behind("lab/worker", "task", w, t0 + w, None).is_none());
         let now = SystemTime::now();
         let old = now - Duration::from_secs(6);
@@ -1512,5 +2107,389 @@ mod tests {
         assert_eq!(got.by, BehindBy::Clock);
         b.note("lab/worker", "task", None, t0 + w);
         assert!(b.followed().is_empty());
+    }
+
+    fn version(text: &str) -> wire::Stamp {
+        d2::parse_version(text).expect("a version")
+    }
+
+    /// desired.v2 §2.17: a version has no time, so a target is behind one
+    /// by readings a window apart alone, never by a clock, whatever its
+    /// trust; a snapshot with no entry is followed as a version is, and a
+    /// version after it starts the run again.
+    #[test]
+    fn a_v2_version_is_behind_by_the_window_alone() {
+        let w = Duration::from_secs(5);
+        let t0 = Instant::now();
+        let now = SystemTime::now();
+        let long_ago = Some((now - Duration::from_secs(3600), now));
+        let mut b = Behind::default();
+        let v6 = AuthorVersion::V2(version("0007/6"));
+        b.note("lab/worker", "task", Some(v6), t0);
+        assert!(
+            b.behind("lab/worker", "task", w, t0, long_ago).is_none(),
+            "no clock dates a desired.v2 version"
+        );
+        b.note("lab/worker", "task", Some(v6), t0 + w);
+        let got = b
+            .behind("lab/worker", "task", w, t0 + w, long_ago)
+            .expect("behind by the readings");
+        assert_eq!(
+            (got.by, got.version.to_string().as_str()),
+            (BehindBy::Window, "0007/6")
+        );
+        let none = AuthorVersion::NoEntry(version("0007/0").run);
+        b.note("lab/worker", "task", Some(none), t0 + w);
+        assert!(
+            b.behind("lab/worker", "task", w, t0 + w, long_ago)
+                .is_none()
+        );
+        b.note("lab/worker", "task", Some(none), t0 + w + w);
+        let got = b.behind("lab/worker", "task", w, t0 + w + w, None).unwrap();
+        assert_eq!(got.version.to_string(), "no entry under run 0007");
+    }
+
+    /// The author's answer to a desired.v2 member read (v2 §2.5, §2.17
+    /// step 6): silent, incomplete, an entry, a tombstone, a snapshot with
+    /// no entry under its run, an entry before another instance's no
+    /// entry, and a reply that gives no version.
+    #[test]
+    fn the_authors_answer_to_a_member_read() {
+        use d2::Current as C;
+        let get = |complete: bool, member: Vec<MemberReply>| {
+            Ok(SliceGet {
+                selector: D.into(),
+                complete,
+                replies: vec![],
+                member,
+                at: SystemTime::now(),
+            })
+        };
+        let v = version("0007/12");
+        let no_entry = MemberReply::NoEntry {
+            run: version("0008/0").run,
+            asof: version("0008/3").seq,
+        };
+        assert_eq!(current_v2_of(None).0, C::NotRead);
+        assert_eq!(current_v2_of(Some(&Err("refused".into()))).0, C::NotRead);
+        assert_eq!(current_v2_of(Some(&get(true, vec![]))).0, C::Silent);
+        assert_eq!(
+            current_v2_of(Some(&get(false, vec![MemberReply::Entry(v)]))).0,
+            C::Incomplete
+        );
+        assert_eq!(
+            current_v2_of(Some(&get(true, vec![MemberReply::Entry(v)]))).0,
+            C::Entry(v)
+        );
+        assert_eq!(
+            current_v2_of(Some(&get(true, vec![MemberReply::Tombstone(v)]))).0,
+            C::Tombstone(v)
+        );
+        assert_eq!(
+            current_v2_of(Some(&get(true, vec![no_entry.clone()]))).0,
+            C::NoEntry(version("0008/0").run)
+        );
+        for both in [
+            vec![no_entry.clone(), MemberReply::Entry(v)],
+            vec![MemberReply::Entry(v), no_entry.clone()],
+        ] {
+            assert_eq!(current_v2_of(Some(&get(true, both))).0, C::Entry(v));
+        }
+        let (c, why) = current_v2_of(Some(&get(
+            true,
+            vec![MemberReply::Entry(v), MemberReply::Unstamped],
+        )));
+        assert_eq!(c, C::Unstamped);
+        assert!(why.unwrap().contains("no envelope"));
+        let (c, why) = current_v2_of(Some(&get(
+            true,
+            vec![MemberReply::Refused("held: not sent".into()), no_entry],
+        )));
+        assert_eq!(c, C::Incomplete);
+        assert!(why.unwrap().contains("held: not sent"));
+    }
+
+    fn worker_v2() -> Contract {
+        let l = zenkey_model::contract::load_path(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../zenkey/tests/contracts/worker.v2.toml"),
+        );
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
+    }
+
+    fn tasking_v2() -> Contract {
+        let l = zenkey_model::contract::load_path(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../zenkey/tests/contracts/tasking.v2.toml"),
+        );
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
+    }
+
+    const D_V2: &str = "zk2/lab/author/tasking.v2/state/tasks/lab/worker";
+    const RP_V2: &str = "zk2/lab/worker/worker.v2/state/desired/task";
+
+    fn packed(key: &str, report: &d2::Report) -> PackedReply {
+        PackedReply {
+            key: key.to_owned(),
+            read: packed_read(Some(d2::TAG), &report.write().unwrap().bytes),
+            inband: None,
+            stamp: None,
+            horizon: Horizon::Undeclared,
+        }
+    }
+
+    fn reports(replies: Vec<ReportReply>, packed: Vec<PackedReply>) -> Result<ReportsGet, String> {
+        Ok(ReportsGet {
+            selectors: vec![],
+            complete: true,
+            replies,
+            packed,
+            at: SystemTime::now(),
+        })
+    }
+
+    /// desired.v2 §2.18: a role is read by its author's revision's major;
+    /// the scenarios' `worker.v2` reports it on the resource whose
+    /// `desired.report` names it, with its two tables.
+    #[test]
+    fn a_role_is_read_by_its_authors_major() {
+        let own: Addr = "lab/worker".parse().unwrap();
+        let mut e = entry(&["lab/author"]);
+        e.interface = "tasking.v2".into();
+        e.declared_by = Some("worker.v2".into());
+        let templates = vec!["tasks/{system}/{service}".to_owned()];
+        let author = tasking_v2();
+        let mut res = resolve_role(
+            &own,
+            &e,
+            Some(&templates),
+            Some((&author, SliceFrom::AuthorContract)),
+        )
+        .unwrap();
+        assert_eq!(res.author_major, Some(Major::V2));
+        assert_eq!(res.slice, [D_V2]);
+        res.report_at = Some(ReportWhere::of(&own, &worker_v2(), "task"));
+        let w = res.report_at.as_ref().unwrap();
+        assert!(w.names());
+        assert_eq!(w.key().as_deref(), Some(RP_V2));
+        assert_eq!(w.horizon, Horizon::Undeclared);
+        let d2::ReportAt::At { tables, .. } = &w.at else {
+            panic!("{:?}", w.at);
+        };
+        assert_eq!(tables.pointers[3], "/endpoint");
+        let mut r = RoleRead::new(res);
+        assert_eq!(r.major, Major::V2);
+        r.settle(None);
+        assert_eq!((r.major, r.resolution.slice.len()), (Major::V2, 1));
+        // A desired.v1 author's role stays desired.v1's, whatever the
+        // target's contract reports in.
+        let res = resolve_role(
+            &own,
+            &entry(&["lab/author"]),
+            Some(&templates),
+            Some((&tasking(), SliceFrom::AuthorContract)),
+        )
+        .unwrap();
+        assert_eq!(res.author_major, Some(Major::V1));
+        let mut r = RoleRead::new(res);
+        r.resolution.report_at = Some(ReportWhere::of(&own, &worker_v2(), "task"));
+        r.settle(Some(&reports(
+            vec![],
+            vec![packed(RP_V2, &d2::Report::baseline())],
+        )));
+        assert_eq!(r.major, Major::V1);
+        assert_eq!(r.resolution.slice, [D]);
+    }
+
+    /// desired.v2 §2.17, "The slice from the target alone goes": with no
+    /// revision of the author's interface in hand, a role its target's
+    /// contract reports by `desired.report` is desired.v2's and has no
+    /// slice, the requirement's candidates dropped; a role only a
+    /// `desired.v1.Report` claims stays desired.v1's with its candidates;
+    /// and a target that serves both is read by the report it put.
+    #[test]
+    fn with_no_author_revision_the_targets_contract_says_the_major() {
+        let own: Addr = "lab/worker".parse().unwrap();
+        let templates = vec!["tasks/{system}/{service}".to_owned()];
+        let alone = || {
+            let res = resolve_role(&own, &entry(&["lab/author"]), Some(&templates), None).unwrap();
+            assert_eq!(res.author_major, None);
+            assert_eq!(res.slice_from, Some(SliceFrom::Requirement));
+            RoleRead::new(res)
+        };
+        let v1_report = || {
+            reply(
+                "zk2/lab/worker/worker.v1/state/desired/task",
+                &format!(r#"{{"key": "{D}", "source": "baseline"}}"#),
+            )
+        };
+        // No `desired.report` names the role: desired.v1, its candidates kept.
+        let mut r = alone();
+        r.resolution.report_at = Some(ReportWhere::of(&own, &worker(), "task"));
+        assert!(!r.resolution.report_at.as_ref().unwrap().names());
+        r.settle(Some(&reports(vec![v1_report()], vec![])));
+        assert_eq!((r.major, r.resolution.slice.len()), (Major::V1, 2));
+        // The target's contract not in hand either: desired.v1's reading.
+        let mut r = alone();
+        r.settle(None);
+        assert_eq!(r.major, Major::V1);
+        // `desired.report` names it: desired.v2, and no slice.
+        let at = || Some(ReportWhere::of(&own, &worker_v2(), "task"));
+        let mut r = alone();
+        r.resolution.report_at = at();
+        r.settle(Some(&reports(
+            vec![],
+            vec![packed(RP_V2, &d2::Report::baseline())],
+        )));
+        assert_eq!(r.major, Major::V2);
+        assert!(r.resolution.slice.is_empty() && r.resolution.slice_from.is_none());
+        // Named, and nothing read on its key nor claimed: desired.v2 still.
+        let mut r = alone();
+        r.resolution.report_at = at();
+        r.settle(Some(&reports(vec![], vec![])));
+        assert_eq!(r.major, Major::V2);
+        // A target that serves both, its author on desired.v1: only the
+        // desired.v1.Report was put, and it claims a candidate.
+        let mut r = alone();
+        r.resolution.report_at = at();
+        r.settle(Some(&reports(vec![v1_report()], vec![])));
+        assert_eq!((r.major, r.resolution.slice.len()), (Major::V1, 2));
+        // Both put: the packed one on the role's key says desired.v2.
+        let mut r = alone();
+        r.resolution.report_at = at();
+        r.settle(Some(&reports(
+            vec![v1_report()],
+            vec![packed(RP_V2, &d2::Report::baseline())],
+        )));
+        assert_eq!(r.major, Major::V2);
+    }
+
+    /// `spec/profiles/desired/conformance/v2/slices.json` (desired.v2
+    /// §2.10), through the fleet's reading of a reply ([`packed_read`]) and
+    /// its choice of the role's report among a GET's replies
+    /// ([`packed_report_of`]): a tool finds a role's report exactly as the
+    /// fixture does, and never by a resource's name.
+    #[test]
+    fn every_v2_slice_reads_as_the_fixture() {
+        use serde_json::{Value, json};
+        use zenkey_model::authoring::Kind;
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/profiles/desired/conformance/v2/slices.json");
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 16);
+        let unhex = |h: &str| -> Vec<u8> {
+            (0..h.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        for case in cases {
+            let what = &case["note"];
+            let r = &case["reading"];
+            let target: Addr = r["target"].as_str().unwrap().parse().unwrap();
+            let iface: IfaceId = r["iface"].as_str().unwrap().parse().unwrap();
+            let requires: Vec<&str> = r["requires"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_str().unwrap())
+                .collect();
+            struct Held {
+                template: Template,
+                token: KindToken,
+                is_report: bool,
+                annotations: BTreeMap<String, Value>,
+            }
+            let held: Vec<Held> = r["resources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| {
+                    assert_eq!(x["kind"], "state", "{what}");
+                    let ty = &x["type"];
+                    Held {
+                        template: Template::parse(x["template"].as_str().unwrap()).unwrap(),
+                        token: if x["explicit"] == true {
+                            KindToken::ExplicitState
+                        } else {
+                            KindToken::State
+                        },
+                        is_report: ty["kind"] == "packed"
+                            && ty["name"] == d2::REPORT
+                            && d2::is_published(ty["artifact"].as_str().unwrap()),
+                        annotations: x["annotations"]
+                            .as_object()
+                            .unwrap()
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect(),
+                    }
+                })
+                .collect();
+            let views: Vec<d2::ReportResource<'_>> = held
+                .iter()
+                .map(|h| d2::ReportResource {
+                    kind: Kind::State,
+                    token: h.token,
+                    template: &h.template,
+                    is_report: h.is_report,
+                    annotations: &h.annotations,
+                })
+                .collect();
+            let at = d2::report_at(&target, &iface, r["role"].as_str().unwrap(), &views, |n| {
+                requires.contains(&n)
+            });
+            // The GET's replies, each read as the bus reads one.
+            let replies: Vec<PackedReply> = r["replies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| PackedReply {
+                    key: x["key"].as_str().unwrap().to_owned(),
+                    read: packed_read(
+                        Some(u8::try_from(x["tag"].as_u64().unwrap()).unwrap()),
+                        &unhex(x["hex"].as_str().unwrap()),
+                    ),
+                    inband: None,
+                    stamp: None,
+                    horizon: Horizon::Undeclared,
+                })
+                .collect();
+            let found = packed_report_of(&at, &replies);
+            let reasons = |why: &[d2::ReportInvalid]| {
+                json!(why.iter().map(|w| w.as_str()).collect::<Vec<_>>())
+            };
+            let mut got = json!({
+                "found": found.as_str(),
+                "key": at.key().map(|k| k.to_string()),
+                "reasons": match &found {
+                    PackedFound::None(why) => reasons(why),
+                    _ => json!([]),
+                },
+            });
+            match &found {
+                PackedFound::None(_) => {}
+                PackedFound::Two => got["why"] = json!("two_reports"),
+                PackedFound::Unreadable(p) => {
+                    got["why"] = json!(p.read.as_ref().unwrap_err().token);
+                }
+                PackedFound::One(p) => {
+                    got["findings"] = json!(
+                        p.read
+                            .as_ref()
+                            .unwrap()
+                            .findings
+                            .iter()
+                            .map(|f| f.as_str())
+                            .collect::<Vec<_>>()
+                    );
+                }
+            }
+            assert_eq!(got, case["expect"], "{what}");
+        }
+        // A put with no envelope carries no tag: core §7.6 refuses it.
+        let bare = packed_read(None, &[0, 0, 0]).unwrap_err();
+        assert_eq!(bare.token, "tag");
     }
 }

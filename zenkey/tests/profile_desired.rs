@@ -631,14 +631,18 @@ async fn s2_never_an_older_version() {
 
     // 3. A re-read every 2 s: the author answers v2 under s2.
     let seeds = w.target.seeds();
-    w.target.set_reread(Some(Duration::from_secs(2)));
+    w.target.set_reread(Some(Duration::from_secs(2))).unwrap();
     eventually("a re-read", || async { w.target.seeds() > seeds }).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(w.target.last_seed().unwrap().answered, 1);
     assert!(s.on(RP, mark).is_empty(), "the same version: nothing put");
     assert_eq!(w.target.acts(), acts, "acted on nothing");
     assert!(converged_on(&w.target.report().await, &s2, 2));
-    w.target.set_reread(None);
+    // A desired.v1 role takes any period: v2's refusal is not its own.
+    w.target
+        .set_reread(Some(Duration::from_millis(500)))
+        .unwrap();
+    w.target.set_reread(None).unwrap();
     w.svc.close().await.unwrap();
     a.svc.close().await.unwrap();
 }

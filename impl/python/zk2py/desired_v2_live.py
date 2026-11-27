@@ -283,8 +283,20 @@ class Target:
                  presence_watch: bool = False, reread_ms: int | None = None, hold: bool = False, poll_ms: int = 500,
                  timeout: float = 1.0, across: bool = False, reply_timeout_ms: int | None = None, watch: bool = False,
                  moves: bool = True, worker: Any = None, tasking: Any = None, watched: bool = False,
-                 run_record: str | None = None, catalog: str | None = None) -> None:
+                 run_record: str | None = None, catalog: str | None = None, archive: str | None = None) -> None:
         self.address, self.endpoint, self.author = address, endpoint, author
+        #: v1 §2.9, which §2.9 keeps: "With its author absent, by a complete
+        #: read without its instance token (core §8.1), ... a target MAY read
+        #: its slice's last-known from an archive, through the key's archive
+        #: form". zk2py reads it as the reference does (v1 §2.5): only after a
+        #: complete read shows its author absent, never on a silent GET while
+        #: its author is present (round 121).
+        self.archive = archive
+        #: what its last seed found, in the owner example's words (v1's
+        #: ``desired seeds``): the replies it drew, the author's presence where
+        #: it was read, and the archive
+        self.seeds = 0
+        self.last_seed: dict[str, Any] | None = None
         #: the catalogs the target holds (core §8.6), and the id its author
         #: names, read once it is needed
         self.catalogs: list[Any] = []
@@ -544,6 +556,9 @@ class Target:
         no_entry = [h for h in st.snapshots if h.key == self.key and h.done
                     and not any(p["live"] or p["tombs"] for p in h.pages.values())]
         unchanged = [h for h in st.held if h[2] == seed_held.UNCHANGED]
+        if why in ("seed", "appearance", "again"):
+            self.seeds += 1
+            self._seeded(len(mine) + len(no_entry) + len(unchanged))
         if unchanged and sent is not None:
             # "Answered unchanged, by the held stamp it sent, the target
             # judges nothing. ... it confirms a last-known one (§2.9)."
@@ -575,7 +590,60 @@ class Target:
             self.role.asked = None
             self.watch.no_answer()
             self.read_log.append((why, None if sent is None else sent.text, drew))
+        if drew == "silent" and why in ("seed", "appearance", "again"):
+            return self._from_archive(why)
         return drew
+
+    def _seeded(self, answered: int, author: str = "not-read", archive: str = "-", why: str = "") -> None:
+        with self.lock:
+            self.last_seed = {"answered": answered, "author": author, "archive": archive, "why": why}
+
+    def author_presence(self) -> tuple[str, str]:
+        """The author's presence, by one read on the target's own session,
+        which holds no liveliness subscriber (core §8.1, observer §3):
+        ``present``, ``absent`` (a complete read without its token),
+        ``incomplete`` or ``not-made``, with why where there is one."""
+        assert self.owner is not None and self.owner.session is not None
+        p = live.list_presence(self.owner.session, self._instance_selector(), self.timeout)
+        if p.kind == live.NOT_MADE:
+            return "not-made", p.not_made or ""
+        if p.instances:
+            return "present", ""
+        if p.kind == live.COMPLETE:
+            return "absent", ""
+        return "incomplete", p.reading
+
+    def _from_archive(self, why: str) -> str:
+        """A seed that drew nothing: with an archive given and its author
+        absent by a complete read, its slice's last-known through the key's
+        archive form (v1 §2.9, core §4.4, S5). "An archive's record keeps the
+        document's envelope (core §4.4), so its version is the author's"
+        (§2.9): the reply's in-band stamp is read as the version, and judged
+        by §2.6 "like any other". A version so acted on is last-known
+        (``archive`` origin)."""
+        if self.archive is None or self.across:
+            self._seeded(0)
+            return "silent"
+        from .alarms import archive_form
+
+        seen = self.author_presence()
+        if seen[0] != "absent":
+            self._seeded(0, seen[0], why=seen[1])
+            return "silent"
+        assert self.owner is not None and self.owner.session is not None
+        form = archive_form(self.archive, self.key)
+        try:
+            st = live.get_state(self.owner.session, form, self.timeout)
+        except Exception:  # noqa: BLE001 - an archive read that fails is no verdict
+            self._seeded(0, "absent", "nothing", "the archive read failed")
+            return "silent"
+        mine = [r for r in st.replies if r.key == form and r.refusal is None]
+        with self.lock:
+            self.read_log.append((why, None, "archive" if mine else "archive_nothing"))
+        self._seeded(0, "absent", "answered" if mine else "nothing")
+        for r in mine:
+            self._receive(self._sample(desired.ARCHIVE, r.deleted, r.inband, r.payload), False)
+        return "archive" if mine else "silent"
 
     @staticmethod
     def _sample(origin: str, deleted: bool, ib: Any, payload: bytes) -> d2.Sample:

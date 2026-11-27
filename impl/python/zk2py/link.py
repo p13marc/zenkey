@@ -1563,7 +1563,7 @@ ARCHIVE_IFACE = "archive.v1"
 
 
 def declaration_grant(gets: list[tuple[str, list[str]]], calls: list[tuple[str, list[str], str]],
-                      archives: list[str] = ()) -> list[str]:  # type: ignore[assignment]
+                      archives: Sequence[str] = ()) -> list[str]:
     """§2.5 (0.2), core §8.5 (0.30): the far principal's ``declare_queryable``
     egress grant "over every queryable its side may query, as the owner
     declares it".

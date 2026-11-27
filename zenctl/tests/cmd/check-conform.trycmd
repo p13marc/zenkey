@@ -113,7 +113,10 @@ on one resource:
                    resource or a desired.v1.Report resource, every
                    report it puts reads strict and consistent, and
                    each such role has its report: of its slice, or
-                   keyless for a role left unbound (desired.v1 §2.10)
+                   keyless for a role left unbound (desired.v1 §2.10);
+                   a desired.v2 role's is the packed report on the
+                   resource whose desired.report names it (desired.v2
+                   §2.10)
   desired-binding  its descriptor lists each such role with a
                    binding §2.3 reads: one exact author, each target
                    parameter its own self, the author's declaration

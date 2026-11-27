@@ -1152,7 +1152,9 @@ pub fn structural_value(
 /// Whether core §4.3's table lists `r`, a resource of `contract`: one whose
 /// owner sets a Zenoh timestamp on each mutation beside its in-band stamp,
 /// and on each reply of a state (S1, S2). A state whose contract declares
-/// `freshness.ttl_s` above 0, a `desired.v1` desired resource, a state that
+/// `freshness.ttl_s` above 0, a desired resource of a contract that does
+/// not use `desired.v2` (core 0.112: a `desired.v2` one's version is its
+/// in-band stamp alone, and its owner sets no Zenoh timestamp), a state that
 /// is a `telemetry.v1` metric resource (its declaration valid, its type not
 /// raw, as the runtime's writer meters it), and a stream that declares a
 /// `timing.v1` lifespan.
@@ -1178,10 +1180,11 @@ pub fn on_the_table(
             zenkey_model::freshness::horizon_of(r),
             zenkey_model::freshness::Horizon::Within(_)
         );
-    let desired = matches!(
-        zenkey_model::desired::declaration_of(r),
-        zenkey_model::desired::Declaration::Declared(_)
-    );
+    let desired = !zenkey_model::desired::v2::uses_v2(contract)
+        && matches!(
+            zenkey_model::desired::declaration_of(r),
+            zenkey_model::desired::Declaration::Declared(_)
+        );
     let metric = match &r.body {
         zenkey_model::contract::Body::Data(d) => {
             matches!(
@@ -1287,11 +1290,13 @@ mod tests {
     }
 
     /// Core §4.3's table, read from the contracts that exercise each row: a
-    /// `freshness.v1` state with a horizon, a desired resource, a state
-    /// metric resource and a lifespan's stream are on it; a plain state, a
-    /// plain stream, a stream metric resource, a stream without a lifespan
-    /// and a `freshness.v2` state with a horizon (`tc.netif.v1` since #978's
-    /// F5) are not.
+    /// `freshness.v1` state with a horizon, a `desired.v1` desired resource,
+    /// a state metric resource and a lifespan's stream are on it; a plain
+    /// state, a plain stream, a stream metric resource, a stream without a
+    /// lifespan, a `freshness.v2` state with a horizon (`tc.netif.v1` since
+    /// #978's F5) and a `desired.v2` desired resource (core 0.112; zk2py
+    /// round 121 found `check conform` failing such an author on S1 and S2)
+    /// are not.
     #[test]
     fn the_table_lists_what_core_4_3_names() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -1326,6 +1331,12 @@ mod tests {
         assert!(on(&pace, "zk2/l/p/pace.v1/stream/cmd"));
         assert!(!on(&pace, "zk2/l/p/pace.v1/stream/axis/x"));
         assert!(resource_of(&pace, "zk2/l/p/pace.v1/state/cmd").is_none());
+        // The same desired resource under each major: `tasking.v1`'s is on
+        // the table, `tasking.v2`'s is not. Neither has a horizon.
+        let v1 = load("zenkey/tests/contracts/tasking.v1.toml");
+        assert!(on(&v1, "zk2/g/a/tasking.v1/state/tasks/l/w"));
+        let v2 = load("zenkey/tests/contracts/tasking.v2.toml");
+        assert!(!on(&v2, "zk2/g/a/tasking.v2/state/tasks/l/w"));
     }
 
     fn stamp(run: u16, seq: u32) -> Stamp {

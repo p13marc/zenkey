@@ -3813,13 +3813,16 @@ async fn desired_command(words: &[&str], rest: &str, up: &mut Up) -> Result<Stri
         }
         ["desired", "reread", period] => {
             let t = target()?;
+            // A period below a desired.v2 role's read timeout is refused,
+            // as it is at the start (§2.5), and the line says so.
             if *period == "off" {
-                t.set_reread(None);
+                t.set_reread(None).map_err(|e| e.to_string())?;
             } else {
                 let ms: u64 = period
                     .parse()
                     .map_err(|e| format!("reread <ms>|off: {e}"))?;
-                t.set_reread(Some(Duration::from_millis(ms)));
+                t.set_reread(Some(Duration::from_millis(ms)))
+                    .map_err(|e| e.to_string())?;
             }
             Ok(format!("desired reread {period}"))
         }

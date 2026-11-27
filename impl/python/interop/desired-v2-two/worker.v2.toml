@@ -1,0 +1,32 @@
+# desired-v2-two/worker.v2.toml: scenarios-v2.md §11's "worker.v2, both":
+# the scenarios' worker.v2 whose role names both of desired-v2-two's
+# tasking.v2 desired resources, two documents for one role, which a target
+# refuses at its start (desired.v1 §2.1, §2.3). zk2py's own (round 121); it
+# must load with no finding at all.
+[interface]
+name  = "worker"
+major = 2
+minor = 0
+uses  = ["desired.v2"]
+
+[schemas]
+packed     = ["../../../../spec/profiles/desired/desired.v2.json"]
+jsonschema = ["../desired-v2/tasking.json"]
+
+[resources.running]
+kind = "state"
+type = "json:Task"
+
+[resources."desired/task"]
+kind = "state"
+type = "packed:Report"
+
+[resources."desired/task".annotations]
+"desired.report"   = "task"
+"desired.pointers" = ["", "/mode", "/rate_hz", "/endpoint", "/revision"]
+"desired.details"  = ["above what the drive supports", "names how the worker reaches the bus", "a revision above 4,294,967,295"]
+
+[requires.task]
+interface = "tasking.v2"
+resources = ["tasks/{system}/{service}", "plans/{system}/{service}"]
+optional  = true

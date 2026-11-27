@@ -9,6 +9,7 @@ zk2py processes against each other (#609, round 118)::
         [--desired-presence-watch] [--desired-reread-ms <ms>] [--desired-hold]
         [--desired-across] [--desired-reply-timeout-ms <ms>] [--desired-watch] [--desired-no-move]
         [--desired-catalog <file>] [--desired-owner-heartbeat] [--desired-contract <file>]
+        [--desired-archive <system>/<service>] [--desired-worker <file>]
         <system>/<service>
 
 Standard output: ``connected <endpoint>``, then ``ready
@@ -45,7 +46,7 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
     cmd = words[1] if len(words) > 1 else ""
     rest = words[2] if len(words) > 2 else ""
     a_cmds = {"put", "delete", "delete!", "documents", "adoption", "gets", "run"}
-    t_cmds = {"report", "running", "fail-next", "hold", "release", "reread", "acts", "watch", "reads"}
+    t_cmds = {"report", "running", "fail-next", "hold", "release", "reread", "acts", "watch", "reads", "seeds"}
     if cmd not in a_cmds | t_cmds | {"new-epoch"}:
         # refused before any role is asked for: an author-only process holds
         # no target, and an unknown word is no target's command
@@ -99,6 +100,16 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
         return f"desired reread {arg}"
     if cmd == "acts":
         return f"desired acts {target.acts} reads={target.reads} held={'true' if target.held else 'false'}"
+    if cmd == "seeds":
+        # the owner example's words (its --help, desired.v1's): "desired seeds
+        # <n> answered=<n> author=<...> archive=<-|answered|nothing> [because
+        # <why>]", "desired seeds 0 none before the first"
+        ls = target.last_seed
+        if ls is None:
+            return "desired seeds 0 none"
+        why = f" because {ls['why']}" if ls.get("why") else ""
+        return (f"desired seeds {target.seeds} answered={ls['answered']} author={ls['author']} "
+                f"archive={ls['archive']}{why}")
     if cmd in ("watch", "reads"):
         return f"desired {cmd} " + _dump(target.watch_says())
     return f"refused {line}: unknown command"
@@ -124,6 +135,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--desired-no-move", action="store_true", help="do not move the digest it expects at its own change")
     ap.add_argument("--desired-contract", help="the author's interface in a revision of the caller's own, by its "
                                                "file: the author's contract, and what a target is told its author uses")
+    ap.add_argument("--desired-worker", help="the target's contract, worker.v2 in a revision of the caller's own, by "
+                                             "its file (scenarios-v2 §11's worker.v2, both)")
+    ap.add_argument("--desired-archive", help="<system>/<service>: the target's last-known, read when a seed draws "
+                                              "nothing and a complete presence read shows its author absent (v1 §2.9)")
     ap.add_argument("--desired-catalog", help="core §8.6's catalog: the author states its id; the target reads groups by it")
     ap.add_argument("--desired-owner-heartbeat", action="store_true",
                     help="the author confirms its interface by owner heartbeats (freshness.v2 §2.4); needs a catalog")
@@ -150,7 +165,9 @@ def main(argv: list[str] | None = None) -> int:
                             reread_ms=args.desired_reread_ms, hold=args.desired_hold, across=args.desired_across,
                             reply_timeout_ms=args.desired_reply_timeout_ms, watch=args.desired_watch,
                             moves=not args.desired_no_move, watched=args.desired_watched,
-                            run_record=args.desired_run_record, catalog=args.desired_catalog, tasking=tasking)
+                            run_record=args.desired_run_record, catalog=args.desired_catalog, tasking=tasking,
+                            archive=args.desired_archive,
+                            worker=contract_file(args.desired_worker) if args.desired_worker else None)
             instance = target.start()
     except OwnerRefused as e:
         print(f"not started: {e}", file=sys.stderr, flush=True)

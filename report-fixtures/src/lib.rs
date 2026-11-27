@@ -4016,6 +4016,7 @@ pub fn desired_report() -> DesiredReport {
                     .expect("a descriptor"),
                 )),
                 roles: vec![RoleRead {
+                    major: zenkey_fleet::model::desired::Major::V1,
                     resolution: res,
                     author_seen: Some((seen_author, None)),
                     current: current.map(|(t, at)| {
@@ -4027,6 +4028,7 @@ pub fn desired_report() -> DesiredReport {
                                 delete: false,
                                 stamp: Some((st(t), at)),
                             }],
+                            member: vec![],
                             at: now,
                         })
                     }),
@@ -4035,6 +4037,7 @@ pub fn desired_report() -> DesiredReport {
                             archive: "lab/archive".parse().expect("an address"),
                             deleted: false,
                             stamp: Some(st(100)),
+                            inband: None,
                             revision: Some(1),
                             confirmed: true,
                         }])
@@ -4049,6 +4052,7 @@ pub fn desired_report() -> DesiredReport {
                         stamp: None,
                         horizon: zenkey_model::freshness::Horizon::Undeclared,
                     }],
+                    packed: vec![],
                     at: now,
                 })),
             }
@@ -4096,6 +4100,272 @@ pub fn desired_report() -> DesiredReport {
         complete: true,
         cut_off_during: false,
         services: 7,
+    });
+    report
+}
+
+/// `zenctl desired` over a deployment of both majors (#986's J4, `desired.v2`
+/// §2.18), judged by the engine from values a reading would have read: a
+/// `desired.v2` author and its targets beside a `desired.v1` role. One
+/// converged, its versions `<run>/<seq>`; one refused, its place and line
+/// the target's contract's words; one refused at an index no table in hand
+/// names, shown as its number, with `out_of_range` and the type's own
+/// code; one whose report core §7.6 refuses, unreadable with its token; one
+/// behind a snapshot with no entry under its observed run; one whose
+/// author answers no entry under another run, which a tool cannot read;
+/// one with no revision of its author's in hand, so no slice; and a
+/// `desired.v1` role, read as before.
+pub fn desired_v2_report() -> DesiredReport {
+    use std::time::{Duration, Instant, SystemTime};
+    use zenkey_fleet::model::desired::{
+        DesiredRead, Major, MemberReply, PackedReply, ReportReply, ReportWhere, ReportsGet,
+        RoleRead, RoleResolution, SliceFrom, SliceGet, SliceReply, TargetRead, packed_read,
+    };
+    use zenkey_model::desired::v2::{self as d2, Code, Index, Observed, Outcome, Refusal, Report};
+    use zenkey_model::desired::{self as dm, Listing, Seen, Source};
+    use zenkey_model::grammar::{Addr, IfaceId, KindToken, data_key};
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_761_264_000);
+    let version = |v: &str| d2::parse_version(v).expect("a version");
+    let observed = |v: &str, revision: u64| {
+        Some(Observed {
+            version: version(v),
+            revision: Some(revision),
+        })
+    };
+    let descriptor = |addr: &Addr| {
+        Ok(Some(
+            serde_json::from_value(serde_json::json!({
+                "format": "zk2-descriptor/0.1", "service": addr.to_string(),
+                "instance": "0123456789abcdef", "interfaces": []
+            }))
+            .expect("a descriptor"),
+        ))
+    };
+    // worker.v2's report resource, as `scenarios-v2.md` declares it.
+    let worker: IfaceId = "worker.v2".parse().expect("an interface");
+    let tables = d2::Tables {
+        pointers: ["", "/mode", "/rate_hz", "/endpoint", "/revision"]
+            .map(str::to_owned)
+            .to_vec(),
+        details: [
+            "above what the drive supports",
+            "names how the worker reaches the bus",
+            "a revision above 4,294,967,295",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+    };
+    // One desired.v2 target: its report's record under a tag, and what its
+    // author's member read said.
+    let target = |name: &str,
+                  seen_author: Seen,
+                  record: (u8, Vec<u8>),
+                  member: Option<Vec<MemberReply>>,
+                  author_held: bool| {
+        let addr: Addr = format!("lab/{name}").parse().expect("an address");
+        let slice = format!("zk2/lab/author/tasking.v2/state/tasks/lab/{name}");
+        let rp = data_key(&addr, &worker, KindToken::State, &["desired", "task"])
+            .expect("the report's key");
+        let mut res = RoleResolution::bare("task", Some(Listing::Listed { bound: true }));
+        res.interface = Some("tasking.v2".parse().expect("an interface"));
+        res.author = Some("lab/author".parse().expect("an address"));
+        if author_held {
+            res.resource = Some("state/tasks/{system}/{service}".into());
+            res.slice = vec![slice.clone()];
+            res.slice_from = Some(SliceFrom::AuthorContract);
+            res.author_major = Some(Major::V2);
+        }
+        res.report_at = Some(ReportWhere {
+            iface: worker.clone(),
+            at: d2::ReportAt::At {
+                key: rp.clone(),
+                tables: tables.clone(),
+            },
+            horizon: zenkey_model::freshness::Horizon::Undeclared,
+        });
+        let mut role = RoleRead::new(res);
+        role.author_seen = Some((seen_author, None));
+        role.current = member.map(|member| {
+            Ok(SliceGet {
+                selector: slice.clone(),
+                complete: true,
+                replies: vec![],
+                member,
+                at: now,
+            })
+        });
+        let reports = Ok(ReportsGet {
+            selectors: vec![rp.to_string()],
+            complete: true,
+            replies: vec![],
+            packed: vec![PackedReply {
+                key: rp.to_string(),
+                read: packed_read(Some(record.0), &record.1),
+                inband: Some(version("0031/4")),
+                stamp: None,
+                horizon: zenkey_model::freshness::Horizon::Undeclared,
+            }],
+            at: now,
+        });
+        role.settle(Some(&reports));
+        TargetRead {
+            addr: addr.clone(),
+            seen: Seen::Present,
+            seen_why: None,
+            word: None,
+            descriptor: descriptor(&addr),
+            roles: vec![role],
+            reports: Some(reports),
+        }
+    };
+    let written = |r: &Report| (d2::TAG, r.write().expect("a record").bytes);
+    let converged = Report {
+        source: Source::Desired,
+        outcome: Outcome::Converged,
+        last_known: false,
+        observed: observed("0007/12", 2),
+        in_force: observed("0007/12", 2),
+        refusal: None,
+    };
+    let refused = |code, pointer, detail| Report {
+        source: Source::Desired,
+        outcome: Outcome::Refused,
+        last_known: false,
+        observed: observed("0007/13", 3),
+        in_force: observed("0007/12", 2),
+        refusal: Some(Refusal {
+            code,
+            pointer: Some(pointer),
+            detail: Some(detail),
+        }),
+    };
+    let entry = |v: &str| Some(vec![MemberReply::Entry(version(v))]);
+    let no_entry = |run: &str| {
+        Some(vec![MemberReply::NoEntry {
+            run: version(&format!("{run}/0")).run,
+            asof: version("0007/20").seq,
+        }])
+    };
+    // The desired.v1 role beside them: `lab/old` on worker.v1, its author
+    // `lab/planner` on tasking.v1.
+    let old = {
+        let addr: Addr = "lab/old".parse().expect("an address");
+        let slice = "zk2/lab/planner/tasking.v1/state/tasks/lab/old".to_owned();
+        let rp = "zk2/lab/old/worker.v1/state/desired/task".to_owned();
+        let mut res = RoleResolution::bare("task", Some(Listing::Listed { bound: true }));
+        res.interface = Some("tasking.v1".parse().expect("an interface"));
+        res.author = Some("lab/planner".parse().expect("an address"));
+        res.resource = Some("state/tasks/{system}/{service}".into());
+        res.slice = vec![slice.clone()];
+        res.slice_from = Some(SliceFrom::AuthorContract);
+        res.author_major = Some(Major::V1);
+        let mut role = RoleRead::new(res);
+        role.author_seen = Some((Seen::Present, None));
+        role.current = Some(Ok(SliceGet {
+            selector: slice.clone(),
+            complete: true,
+            replies: vec![SliceReply {
+                key: slice.clone(),
+                delete: false,
+                stamp: Some((
+                    zenkey_model::seed::Stamp::parse(100, "a1").expect("a stamp"),
+                    now,
+                )),
+            }],
+            member: vec![],
+            at: now,
+        }));
+        let report = format!(
+            r#"{{"key":"{slice}","source":"desired","in_force":{{"stamp":"100/a1","revision":1}},"observed":{{"stamp":"100/a1","revision":1}},"outcome":"converged"}}"#
+        );
+        TargetRead {
+            addr: addr.clone(),
+            seen: Seen::Present,
+            seen_why: None,
+            word: None,
+            descriptor: descriptor(&addr),
+            roles: vec![role],
+            reports: Some(Ok(ReportsGet {
+                selectors: vec![rp.clone()],
+                complete: true,
+                replies: vec![ReportReply {
+                    key: rp,
+                    read: dm::decode(report.as_bytes()),
+                    stamp: None,
+                    horizon: zenkey_model::freshness::Horizon::Undeclared,
+                }],
+                packed: vec![],
+                at: now,
+            })),
+        }
+    };
+    let read = DesiredRead {
+        began: Instant::now(),
+        at: now,
+        cut_off: None,
+        presence: None,
+        targets: vec![
+            target(
+                "worker",
+                Seen::Present,
+                written(&converged),
+                entry("0007/12"),
+                true,
+            ),
+            target(
+                "w2",
+                Seen::Present,
+                written(&refused(Code::Reach, Index::At(3), Index::At(1))),
+                entry("0007/13"),
+                true,
+            ),
+            target(
+                "w3",
+                Seen::Present,
+                written(&refused(Code::Own, Index::At(9), Index::OutOfRange)),
+                entry("0007/13"),
+                true,
+            ),
+            target(
+                "w4",
+                Seen::Present,
+                (3, written(&converged).1),
+                entry("0007/12"),
+                true,
+            ),
+            target(
+                "w5",
+                Seen::Present,
+                written(&converged),
+                no_entry("0007"),
+                true,
+            ),
+            target(
+                "w6",
+                Seen::Present,
+                written(&converged),
+                no_entry("0008"),
+                true,
+            ),
+            target("w7", Seen::Absent, written(&converged), None, false),
+            old,
+        ],
+        asked: vec![
+            "zk2/*/*/@zk/**".into(),
+            "zk2/lab/worker/worker.v2/state/desired/task".into(),
+            "zk2/lab/author/tasking.v2/state/tasks/lab/worker".into(),
+        ],
+    };
+    let mut spec = zenkey_fleet::DesiredSpec::new(Duration::from_secs(1));
+    spec.window = Some(Duration::from_secs(10));
+    spec.clocks_synced = true;
+    let mut behind = zenkey_fleet::DesiredBehindTracker::default();
+    let mut report = zenkey_fleet::judge_desired("acme", None, &spec, &read, &mut behind, 1);
+    report.presence = Some(DesiredPresence {
+        selector: "zk2/*/*/@zk/**".into(),
+        complete: true,
+        cut_off_during: false,
+        services: 10,
     });
     report
 }

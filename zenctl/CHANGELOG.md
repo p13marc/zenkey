@@ -6,6 +6,25 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `desired` reads `desired.v2` (#986's J4)
+
+`desired.v2` 0.1 §2.10, §2.17, §2.18, §5. `desired`, the doctor's
+`desired-*` checks and `check conform`'s `desired-*` cases read each role
+by the major its author's revision lists. No flag is new, and no exit
+code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `desired` over a `desired.v2` author's target: no report found (`no_report`), its slice's GET read for a Zenoh timestamp it does not carry | read as `desired.v2`: the packed `Report` on the resource whose `desired.report` names the role, and the author's version from its member read's snapshot | per role: a `desired.v1` role beside it is read as before |
+| a `desired` row | also `profile`, `desired.v1` or `desired.v2` | the table's head line names the majors read, and a `desired.v2` row says `requiring <iface> (desired.v2)` |
+| `report.document`: a `desired.v1.Report` | for a `desired.v2` role, the profile's reading: `source`, `outcome`, `last_known`, `observed` and `in_force` as `{version, revision}`, `refusal` as `{code, pointer, detail}` | a version is `<run>/<seq>`, never a time; `code` is `null` for the type's own; `pointer` and `detail` are indices, or `"out_of_range"` |
+| a refusal's place and line: text in the report | `report.place` and `report.line`, the words the target's contract's `desired.pointers` and `desired.details` hold at those indices | absent where no table in hand names the index: the number stands, and the table says so |
+| a report that does not read: `unreadable`, `json`, `schema`, `stamp`, `revision_range`, `two_differ` | for a `desired.v2` one, core §7.6's token (`tag`, `length`, `code`, `extension`, `pad`), its envelope's refusal, or `two_reports`; a malformed one keeps `findings` and shows `record`, its fields | neither answers a question: `report_invalid` |
+| `author.current`: `put`, `delete`, `silent`, `incomplete`, `not_read` | also `entry`, `tombstone`, `no_entry` (with `author.run`) and `unstamped` | a snapshot with no entry answers only under the run of the report's observed version: not yet, `behind`, or yes, `reverted`; under another run unobservable, `author_silent` |
+| a role whose author's contract is not in hand: its slice from the target's requirement and binding | for a `desired.v2` role, no slice: converged is not asked, `author_absent`, or unobservable, `author_not_read`, and no archive is read | `--contracts` with the author's revision gives the slice, and an absent author's last-known beside it |
+| `--for` with `--clocks-synced`: a target behind a version stamped longer ago than the window is found at the first reading | for a `desired.v2` role, only readings the window apart find it: a version has no time | the doctor's `desired-behind` leaves such a role unjudged, and says why |
+| `check conform`: `desired-report` wants a report whose key is the role's slice | for a `desired.v2` role, the packed report on the role's key, consistent | `desired-author` reads a `desired.v2` revision's declaration, `horizon_v1` among its reasons |
+
 ## Unreleased (`main`, zk2) — an owner that sends owner heartbeats (#1110's H3)
 
 `freshness.v2` 0.10 §2.4, §3; observer 0.34 §7.5. The runtime's owner

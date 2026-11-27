@@ -1,11 +1,89 @@
-//! `desired.v1` (#840, DD): `zenctl desired`'s report.
+//! `desired.v1` (#840, DD) and `desired.v2` (#986's J4): `zenctl desired`'s
+//! report, each row by the major it was read by.
 
 use zenkey_fleet::report::{
-    ClockGround, DesiredAnswerToken, DesiredBehindBy, DesiredListing, DesiredQuestion,
-    DesiredReport,
+    ClockGround, DesiredAnswerToken, DesiredBehindBy, DesiredCurrentState, DesiredDocument,
+    DesiredListing, DesiredQuestion, DesiredReport, DesiredReportSeen,
 };
 
 use crate::render::{Cell, Grid, Note, ObservedScope, Render, Row, Table, envelope_without};
+
+/// `desired.v2`'s id, as a row's `profile` names it.
+const V2: &str = "desired.v2";
+
+/// The majors a report's rows were read by, as its head line names them.
+fn profiles(r: &DesiredReport) -> &'static str {
+    let v2 = r.rows.iter().filter(|x| x.profile == V2).count();
+    if v2 == 0 {
+        "desired.v1"
+    } else if v2 == r.rows.len() {
+        V2
+    } else {
+        "desired.v1 and desired.v2"
+    }
+}
+
+/// What a row shows of a report: the document as its profile writes it; a
+/// `desired.v2` refusal's place and line as the contract's words beside
+/// its indices, an index no table in hand names left as its number (v2
+/// §2.10); a malformed `desired.v2` one as its record's fields.
+fn report_words(rep: &DesiredReportSeen) -> String {
+    match (&rep.document, &rep.record, &rep.unreadable) {
+        (Some(d), _, _) => {
+            let mut s = match d {
+                DesiredDocument::V1(d) => json(d),
+                DesiredDocument::V2(d) => reading_words(d),
+            };
+            if let Some(p) = &rep.place {
+                s.push_str(&format!(" — at {p:?}"));
+            }
+            if let Some(l) = &rep.line {
+                s.push_str(&format!(
+                    "{}{l:?}",
+                    if rep.place.is_some() { ": " } else { " — " }
+                ));
+            }
+            s
+        }
+        (None, Some(r), _) => format!("record {}", json(r)),
+        (None, None, Some(u)) => format!("unreadable: {u}"),
+        (None, None, None) => "nothing".to_owned(),
+    }
+}
+
+/// A `desired.v2` report's reading on one line, its members in the
+/// record's order (v2 §3), a version's and a refusal's in theirs: JSON
+/// all the same, and what `--format json` carries.
+fn reading_words(d: &serde_json::Value) -> String {
+    const ORDER: [&str; 11] = [
+        "source",
+        "outcome",
+        "last_known",
+        "observed",
+        "in_force",
+        "refusal",
+        "version",
+        "revision",
+        "code",
+        "pointer",
+        "detail",
+    ];
+    let Some(map) = d.as_object() else {
+        return json(d);
+    };
+    let mut keys: Vec<&String> = map.keys().collect();
+    keys.sort_by_key(|k| ORDER.iter().position(|o| o == k).unwrap_or(ORDER.len()));
+    let members: Vec<String> = keys
+        .into_iter()
+        .map(|k| format!("{}:{}", json(k), reading_words(&map[k])))
+        .collect();
+    format!("{{{}}}", members.join(","))
+}
+
+/// One line of JSON of anything that serializes.
+fn json<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_string(v).unwrap_or_default()
+}
 
 fn namespace_words(ns: &str) -> String {
     if ns.is_empty() {
@@ -30,8 +108,10 @@ fn says(q: &DesiredQuestion) -> String {
     format!("{} ({}) — {}", answer_word(q.answer), q.reason, q.says)
 }
 
-/// `desired.v1` (#840, DD): §5's four answers per role, in the profile's
-/// tokens and in words. One row per target's role (`desired`), with what
+/// `desired.v1` (#840, DD) and `desired.v2` (#986's J4): §5's four answers
+/// per role, in the profile's tokens and in words. A `desired.v2` row says
+/// so, shows each version as `<run>/<seq>`, never a time (v2 §5), and a
+/// refusal's place and line as its target's contract's words. One row per target's role (`desired`), with what
 /// was read beside the answers: the slice, the report as the target put
 /// it, the author's version, an archive's last-known (never current), and
 /// a target behind past the window. In the table, "has it converged?"
@@ -59,7 +139,8 @@ impl Render for DesiredReport {
     fn table(&self, t: &mut Table) {
         use crate::render::style;
         t.line(format!(
-            "desired.v1 in {}{}{} — {} role(s), {} reading(s)",
+            "{} in {}{}{} — {} role(s), {} reading(s)",
+            profiles(self),
             namespace_words(&self.namespace),
             self.target
                 .as_ref()
@@ -106,7 +187,10 @@ impl Render for DesiredReport {
                 listing,
                 r.interface
                     .as_ref()
-                    .map(|i| format!(", requiring {i}"))
+                    .map(|i| format!(
+                        ", requiring {i}{}",
+                        if r.profile == V2 { " (desired.v2)" } else { "" }
+                    ))
                     .unwrap_or_default(),
                 r.author
                     .as_ref()
@@ -141,11 +225,7 @@ impl Render for DesiredReport {
                 ));
             }
             if let Some(rep) = &r.report {
-                let what = match (&rep.document, &rep.unreadable) {
-                    (Some(d), _) => serde_json::to_string(d).unwrap_or_default(),
-                    (None, Some(u)) => format!("unreadable: {u}"),
-                    (None, None) => "nothing".to_owned(),
-                };
+                let what = report_words(rep);
                 detail.push(format!(
                     "    report {} {what}{}",
                     if rep.differing.is_empty() {
@@ -166,9 +246,16 @@ impl Render for DesiredReport {
                 detail.push(format!(
                     "    its author's current version: {} {s}",
                     match a.current {
-                        zenkey_fleet::report::DesiredCurrentState::Delete => "delete",
+                        DesiredCurrentState::Delete | DesiredCurrentState::Tombstone => "delete",
                         _ => "put",
                     }
+                ));
+            }
+            if let Some(a) = &r.author
+                && let Some(run) = &a.run
+            {
+                detail.push(format!(
+                    "    its author's answer: a snapshot with no entry, under run {run}"
                 ));
             }
             for a in &r.archived {
@@ -256,6 +343,17 @@ impl Render for DesiredReport {
             })
             .cite("desired.v1 §2.17"),
         );
+        if self.rows.iter().any(|r| r.profile == V2) {
+            notes.push(
+                Note::coverage(
+                    "a role whose author's revision uses desired.v2 is read by it: its report \
+                     found by `desired.report`, a refusal's place and line read with the target's \
+                     contract, and each version its put's in-band stamp, shown <run>/<seq>; a \
+                     version has no time, so only the window finds a target behind, never a clock",
+                )
+                .cite("desired.v2 §2.10, §2.17, §2.18"),
+            );
+        }
         notes.push(
             Note::caveat(match self.clock {
                 ClockGround::DeploymentWord => {

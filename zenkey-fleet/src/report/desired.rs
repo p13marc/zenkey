@@ -1,5 +1,7 @@
-//! `desired.v1` (#840, DD): what a target's roles converged on, as a tool
-//! reads them (`spec/profiles/desired/v1.md` §2.17, §5).
+//! `desired.v1` (#840, DD) and `desired.v2` (#986's J4): what a target's
+//! roles converged on, as a tool reads them (`spec/profiles/desired/v1.md`
+//! §2.17, §5; `v2.md` §2.17, §5). Each row says the major it was read by
+//! ([`DesiredRow::profile`], `desired.v2` §2.18).
 //!
 //! **The profile's own vocabulary, then the judgement shape.** §5's four
 //! questions each answer in the tokens `conclusions.json` states (`yes`,
@@ -19,7 +21,8 @@
 //!
 //! **What was read is shown as read.** The target's report is the
 //! document as it read ([`DesiredReportSeen`]), the author's version is
-//! its stamp as the profile writes one (`<time>/<id>`, §2.4), and an
+//! its stamp as the profile writes one (`<time>/<id>`, v1 §2.4; under
+//! `desired.v2` `<run>/<seq>`, never a time, v2 §2.4, §5), and an
 //! archive's last-known of a slice whose author is absent is
 //! [`DesiredArchived`]: last-known, never current, never part of a verdict
 //! (core S6).
@@ -91,18 +94,48 @@ pub enum DesiredListing {
     Unread,
 }
 
+/// A target's report, as the profile of its major writes one.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum DesiredDocument {
+    /// A `desired.v1.Report`, its JSON document.
+    V1(zenkey_model::desired::Report),
+    /// A `desired.v2` `Report`'s reading, as `v2/reports.json` writes one:
+    /// `{source, outcome, last_known, observed?, in_force?, refusal?}`, a
+    /// version `<run>/<seq>`, a refusal's `code` `null` for the type's own,
+    /// its `pointer` and `detail` indices, or `"out_of_range"`.
+    V2(serde_json::Value),
+}
+
 /// How the target's report was read (§2.10).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DesiredReportSeen {
-    /// The key it came on, base-relative.
+    /// The key it came on, base-relative. Under `two_reports`, where no
+    /// key is the report's, the target's interface prefix.
     pub key: String,
-    /// The report, when it reads, as the profile writes it.
+    /// The report, when it reads, as the profile writes it. A `desired.v2`
+    /// one only when it has no finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub document: Option<zenkey_model::desired::Report>,
+    pub document: Option<DesiredDocument>,
+    /// A malformed `desired.v2` report's record, its fields as core §7.6
+    /// reads them: shown, and answered from in nothing (v2 §2.17).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<serde_json::Value>,
+    /// A `desired.v2` refusal's place, the JSON Pointer its `pointer`
+    /// indexes in the target's contract (`desired.pointers`, v2 §2.10).
+    /// Absent where no table in hand names the index: the number stands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<String>,
+    /// A `desired.v2` refusal's line, the words its `detail` indexes in
+    /// the target's contract (`desired.details`). Absent as `place` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
     /// Why it does not read (§2.10): `json`, `schema`, `stamp` or
     /// `revision_range`, or `two_differ` when readable reports of two
     /// report resources claim the slice and differ (text 0.5, F-212), then
-    /// the words.
+    /// the words. Under `desired.v2`: core §7.6's refusal of the record
+    /// (`tag`, `length`, `code`, `extension`, `pad`), its envelope's, or
+    /// `two_reports` when two resources name the role.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unreadable: Option<String>,
     /// Under `two_differ`, the keys of the other reports that claim the
@@ -117,6 +150,10 @@ pub struct DesiredReportSeen {
     /// Its put's stamp: the target's own clock (core S1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stamp: Option<Stamp>,
+    /// A `desired.v2` report's put's in-band stamp, `<run>/<seq>`: the
+    /// target's own run, never its author's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inband: Option<String>,
     /// Its age by `freshness.v1` (§2.17 step 4).
     pub freshness: DesiredFreshness,
 }
@@ -144,6 +181,15 @@ pub enum DesiredCurrentState {
     Put,
     /// Its latest delete, or `reply_del`.
     Delete,
+    /// `desired.v2`: a reply with no envelope, which carries no version.
+    Unstamped,
+    /// `desired.v2`: its snapshot's live entry.
+    Entry,
+    /// `desired.v2`: its snapshot's tombstone, a delete within its window.
+    Tombstone,
+    /// `desired.v2`: a snapshot with no entry, its word that it holds no
+    /// document for the target (v2 §2.5).
+    NoEntry,
 }
 
 /// The author, as read (§2.17 step 6).
@@ -155,9 +201,14 @@ pub struct DesiredAuthorSeen {
     pub presence: String,
     /// Its version of the slice by S4's GET.
     pub current: DesiredCurrentState,
-    /// That version's stamp, as the profile writes one (§2.4).
+    /// That version's stamp, as the profile writes one (§2.4): `<time>/<id>`
+    /// under `desired.v1`, `<run>/<seq>` under `desired.v2`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stamp: Option<String>,
+    /// The run of a `desired.v2` snapshot with no entry, as a descriptor
+    /// writes one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
     /// Why its presence or its version is not known, when it is not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
@@ -193,10 +244,13 @@ pub enum DesiredBehindBy {
 
 /// A target "not yet" on one version of its author's for at least the
 /// window: the finding §2.17 lets a tool make of a target behind for
-/// longer than it expects (text 0.4).
+/// longer than it expects (text 0.4). Under `desired.v2` by the window
+/// alone: a version has no time (v2 §2.17).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DesiredBehind {
-    /// The author's version, `<time>/<id>`.
+    /// The author's version, `<time>/<id>`; under `desired.v2`
+    /// `<run>/<seq>`, or `no entry under run <run>` for its snapshot with
+    /// no entry.
     pub version: String,
     /// For at least this long, seconds.
     pub since_s: f64,
@@ -210,6 +264,10 @@ pub struct DesiredRow {
     pub target: String,
     /// The role; `*` when none could be read.
     pub role: String,
+    /// The major the role was read by, `desired.v1` or `desired.v2`: its
+    /// author's revision's, or with none in hand what the target's
+    /// contract reports the role in (`desired.v2` §2.18).
+    pub profile: String,
     pub listing: DesiredListing,
     /// The required interface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -454,6 +512,7 @@ mod tests {
         DesiredRow {
             target: "lab/worker".into(),
             role: "task".into(),
+            profile: "desired.v1".into(),
             listing: DesiredListing::Bound,
             interface: Some("tasking.v1".into()),
             resource: Some("state/tasks/{system}/{service}".into()),
@@ -509,12 +568,15 @@ mod tests {
         );
         r.report = Some(DesiredReportSeen {
             key: "zk2/lab/worker/worker.v1/state/desired/task".into(),
-            document: Some(Report {
+            document: Some(DesiredDocument::V1(Report {
                 source: Source::Baseline,
                 ..Report::baseline(Some(
                     "zk2/lab/author/tasking.v1/state/tasks/lab/worker".into(),
                 ))
-            }),
+            })),
+            record: None,
+            place: None,
+            line: None,
             unreadable: None,
             differing: vec![],
             findings: vec![],
@@ -522,6 +584,7 @@ mod tests {
                 time: "2026-10-24T00:00:00.000000000Z".into(),
                 clock: "ab12".into(),
             }),
+            inband: None,
             freshness: DesiredFreshness {
                 verdict: FreshnessToken::NotAsked,
                 reason: "no_horizon".into(),
@@ -533,6 +596,7 @@ mod tests {
             presence: "present".into(),
             current: DesiredCurrentState::Put,
             stamp: Some("200/a1".into()),
+            run: None,
             why: None,
         });
         r.archived = vec![DesiredArchived {
@@ -551,7 +615,8 @@ mod tests {
         assert_eq!(
             v,
             json!({
-                "target": "lab/worker", "role": "task", "listing": "bound",
+                "target": "lab/worker", "role": "task", "profile": "desired.v1",
+                "listing": "bound",
                 "interface": "tasking.v1", "resource": "state/tasks/{system}/{service}",
                 "slice": "zk2/lab/author/tasking.v1/state/tasks/lab/worker",
                 "slice_from": "author_contract",
@@ -645,10 +710,14 @@ mod tests {
         r.report = Some(DesiredReportSeen {
             key: "zk2/lab/worker/worker.v1/state/desired/task".into(),
             document: None,
+            record: None,
+            place: None,
+            line: None,
             unreadable: Some("two_differ: two say two things".into()),
             differing: vec!["zk2/lab/worker/worker2.v1/state/desired/task".into()],
             findings: vec![],
             stamp: None,
+            inband: None,
             freshness: DesiredFreshness {
                 verdict: FreshnessToken::NotAsked,
                 reason: "no_horizon".into(),

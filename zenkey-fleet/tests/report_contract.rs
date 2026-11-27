@@ -336,6 +336,65 @@ fn an_alarms_report_keeps_every_answer_apart() {
     assert_eq!(judgement_exit_code(&r.judgement()), 1);
 }
 
+/// `desired.v2` beside `desired.v1` (#986's J4, v2 §2.18): each row names
+/// the major it was read by; a `desired.v2` report is the profile's
+/// reading, its versions `<run>/<seq>`, a refusal's indices with the
+/// contract's words beside; an unreadable one says its token and holds no
+/// document; a snapshot with no entry is the author's answer, with its
+/// run and no stamp; and the run's judgement is the refusals'.
+#[test]
+fn a_desired_report_of_both_majors_names_each_rows_major() {
+    let r = fx::desired_v2_report();
+    let v = serde_json::to_value(&r).unwrap();
+    let rows = v["rows"].as_array().unwrap();
+    let row = |t: &str| rows.iter().find(|r| r["target"] == t).unwrap();
+    for r in rows {
+        let want = if r["target"] == "lab/old" {
+            "desired.v1"
+        } else {
+            "desired.v2"
+        };
+        assert_eq!(r["profile"], want, "{r}");
+    }
+    assert_eq!(
+        row("lab/worker")["report"]["document"],
+        serde_json::json!({
+            "source": "desired", "outcome": "converged", "last_known": false,
+            "observed": {"version": "0007/12", "revision": 2},
+            "in_force": {"version": "0007/12", "revision": 2},
+        })
+    );
+    assert_eq!(
+        row("lab/old")["report"]["document"]["observed"]["stamp"],
+        "100/a1"
+    );
+    let refused = &row("lab/w2")["report"];
+    assert_eq!(
+        refused["document"]["refusal"],
+        serde_json::json!({"code": "reach", "pointer": 3, "detail": 1})
+    );
+    assert_eq!(refused["place"], "/endpoint");
+    let unreadable = &row("lab/w4")["report"];
+    assert!(unreadable.get("document").is_none() && unreadable.get("record").is_none());
+    assert!(
+        unreadable["unreadable"]
+            .as_str()
+            .unwrap()
+            .starts_with("tag")
+    );
+    assert_eq!(
+        row("lab/w4")["answers"]["refused"]["answer"],
+        "unobservable",
+        "an unreadable report answers nothing"
+    );
+    assert_eq!(
+        row("lab/w5")["author"],
+        serde_json::json!({"address": "lab/author", "presence": "present",
+                           "current": "no_entry", "run": "0007"})
+    );
+    assert_eq!(judgement_exit_code(&r.judgement()), 1);
+}
+
 /// `desired.v1` (#840, DD): §5's four answers per role in the fixture's
 /// tokens, a target behind past the window and a refusal the findings, an
 /// absent author's slice shown from an archive and never as current.
@@ -542,6 +601,10 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
             DesiredCurrentState::Silent => "silent",
             DesiredCurrentState::Put => "put",
             DesiredCurrentState::Delete => "delete",
+            DesiredCurrentState::Unstamped => "unstamped",
+            DesiredCurrentState::Entry => "entry",
+            DesiredCurrentState::Tombstone => "tombstone",
+            DesiredCurrentState::NoEntry => "no_entry",
         }
     }
     fn desired_behind(v: &DesiredBehindBy) -> &'static str {
@@ -573,6 +636,10 @@ fn every_enum_in_the_surface_names_its_wire_vocabulary() {
         DesiredCurrentState::Silent,
         DesiredCurrentState::Put,
         DesiredCurrentState::Delete,
+        DesiredCurrentState::Unstamped,
+        DesiredCurrentState::Entry,
+        DesiredCurrentState::Tombstone,
+        DesiredCurrentState::NoEntry,
     ] {
         assert_eq!(wire(&v, ""), desired_current(&v));
     }

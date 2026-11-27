@@ -29855,6 +29855,9 @@ made in three parts, two checks failed, both the runner's:
   pairings reads with no finding and writes back to its bytes. One does
   not: zk2py's own failed revert of F-577, which reads malformed. No
   record of a later text, and no `code` past 4, was met on a bus. Open.
+- **Round 121, live:** 111 more records, read by a GET after each
+  numbered Expected of §9 in three pairings, none with a finding, each
+  writing back to its bytes. Open.
 
 ### F-577 · ambiguity · `desired.v2` §2.10 and §2.8: a revert on a snapshot with no entry that fails
 
@@ -30105,6 +30108,11 @@ made in three parts, two checks failed, both the runner's:
     under a 32-bit run writes 8.
   - A tool beside the author's snapshot with no entry answers converged
     unobservable, `author_silent`, of either target's report. Open.
+- **Round 121, both tools, live.** After §3 step 4, beside the author's
+  no entry under the held run, `zenctl desired` and zk2py's tool each
+  answer converged unobservable, `author_silent`; refused no,
+  `reverted`; last-known no; in force no, `baseline`. In every pairing.
+  Open.
 
 ### F-586 · minor · `desired.v2` §2.17: no slice, and the author's presence possibly incomplete
 
@@ -30118,6 +30126,8 @@ made in three parts, two checks failed, both the runner's:
 - **What zk2py does:** v1's order, as the case.
 - **Fix:** "and otherwise as step 6 says of a GET not made".
 - **Round 119.** Not run: no tool reads `desired.v2` on a bus. Open.
+- **Round 121.** The tools ran on a bus, but no presence read could be
+  made possibly incomplete there. Not run. Open.
 
 ### F-587 · minor · core §4.3 and `link.v2` §2.11: a `desired.v2` desired resource of a contract that uses `redundancy.v1`
 
@@ -30494,6 +30504,9 @@ second.
 - **What zk2py does:** `link.keeps_floor`, and a reading on case 49 with
   its template changed (`readings`).
 - **Fix:** two cases.
+- **Round 121: half answered.** `link.v2` 0.24's case 50 is case 49 at
+  `{vehicle}/plan`, floored. No case holds a resource of a contract that
+  uses `redundancy.v1`. Open.
 
 ### F-592 · minor · `scenarios-v2.md` §4, Expected 5: a failed act's place and line
 
@@ -30512,6 +30525,9 @@ second.
   "and no place".
 - **Changes:** whether two implementations of the scenarios' worker
   agree byte for byte.
+- **Round 121, read by both tools.** `zenctl desired` and zk2py's tool
+  show the reference's failed act at `/mode` with no line, and zk2py's
+  with neither. Open.
 
 ### F-576 to F-587, after the live run
 
@@ -31047,5 +31063,308 @@ above showed.
   cannot be run as written, and its deny reads as closing a question it
   leaves open.
 - **Open:** F-437 to F-441; F-569 to F-602.
+
+  F-365 stays open as #965's.
+
+## At link.v2 0.24, against the reference's tools
+
+Round 121 read this tree at 84163348 (#986 J4), its black boxes built
+from 8e599347. **One text version moved: `link.v2` 0.24,** editorial.
+- **What moved in the texts zk2py reads:** `link.v2`'s header,
+  `profiles/README.md`'s row, `v2/plan.json`'s case 50, the top entry of
+  `link/CHANGELOG.md`, and one paragraph of `scenarios-v2.md`'s intro.
+  "§9 is to run as a test of `zenctl`, and no implementation runs it
+  yet" became "§9 is a test of `zenctl` (`zenctl/tests/live_zk2.rs`,
+  `desired_v2_s9_…`), T being `zenctl desired`."
+- **How that was checked.** zk2py listed the files under `spec/`,
+  `examples/zk2/` and `zenkey/tests/contracts/` that differ between
+  round 120's base, 08f3600a, and this tree, by name, and read each
+  beside its earlier text. `spec/CLAUDE.md` is among them, and stays
+  unread.
+- **The walk.** `just py-conformance` failed 7 of 8104 before any line of
+  this round: five counts of `v2/plan.json`, the header's 0.23, and round
+  119's reading of the intro. Each now takes 0.24. It passes **8107 of
+  8107** with three readings more. `RULES.md` did not move: 297 rules,
+  and the walk's 310 rows keep their verdicts.
+
+**The reference's tools now read `desired.v2`.** `zenctl desired` renders
+a role of either major, its row naming its `profile`, and `check
+conform`'s `desired-report` and `desired-author` read v2. zk2py learnt
+both from their `--help`. Every router is zenoh-python's, zenoh 1.10.1,
+and every listener took port 0.
+
+### Case 50, read against §2.11
+
+**zk2py agrees with it,** and its plan gave it on a first run.
+- **It is case 49 moved to `{vehicle}/plan`.** The two differ in the
+  template, the note and `windows`, and nowhere else.
+- **§2.11 floors it.** "a template whose first chunk is a parameter,
+  which has no snapshot key (core §4.2)" is the list's last item, and
+  "**A `desired.v2` desired resource has no floor,** unless its
+  template's first chunk is a parameter." So it keeps the floor whatever
+  its revision uses.
+- **Its plan is case 31's, byte for byte:** the same policy, the owner's
+  window floored at the face's `max_outage_s`, 86,400 s.
+- **zk2py had read this already.** Round 119's reading moved case 49's
+  template to `{vehicle}/plan` and got that floor. Case 50 pins it in the
+  file: F-591's first half is answered. Its second half, a resource of a
+  contract that uses `redundancy.v1`, has no case still.
+
+### §9, with the reference's `zenctl` as T
+
+`desired_v2_scenarios --only 9`, in three pairings. zk2py's tool
+(`desired_v2_tool`) asked beside `zenctl` at every step, and every
+reading of both was printed side by side (`COMPARE`).
+
+| Pairing | §9 | Each Expected |
+|---|---|---|
+| zk2py's author, zk2py's target | 40 of 40 | met, Expected 4's last sentence as below |
+| The reference's author, zk2py's target | 40 of 40 | the same |
+| zk2py's author, the reference's target | 40 of 40 | the same |
+| The reference's author and target, a check of the runner | 40 of 40 | the same |
+
+What `zenctl desired` concluded, the same in all three pairings:
+
+| Step | The state | `zenctl desired` | Expected |
+|---|---|---|---|
+| 1 | §1 step 4: converged on v2 | exit 0; yes `converged`, no `converged`, no `current`, yes `desired`. Row `profile` `desired.v2`, slice from `author_contract`, the author's current an `entry` at v2's `<run>/<seq>` | met |
+| 2 | §4 step 1: refused, `reach` | exit 1; no `refused`, yes `refused`, no `current`, yes `desired`. `pointer` 3 and `detail` 1, shown as `/endpoint` and "names how the worker reaches the bus" | met |
+| 3 | §4 step 5: failed | exit 1; no `failed`, yes `failed`, no `current`, yes `partial` | met |
+| 4 | §7 step 1: the archive's v1, the author absent | exit 2; not asked `author_absent`, no `converged`, yes `last_known`, yes `desired` | the four answers met; the archive shown only with the author's revision in hand (below) |
+| 5 | §8's target, unbound | exit 2; not asked `unbound` three times, no `unbound` | met |
+| 6 | v5 converged, the next act held, v6 put | once: exit 2, not yet `behind`, the report's observed version v5's, the author's v6's. `--clocks-synced`, once: exit 2, no `behind`. `--for 2`: exit 1, `behind` v6 by `window`, 2.0 s, 5 readings. `--for 1 --clocks-synced`: by `window`, never by clock | met |
+| 7 | §15 step 1 | exit 2; unobservable `author_silent`, yes `desired`. The author's current `no_entry` under its new run. Refused and last-known: no `converged`, no `current` | met (F-605) |
+
+- **`check conform`, after steps 1 and 2.** On `lab/worker worker.v2`:
+  `desired-report` and `desired-binding` pass, reading the packed
+  report; `desired-author` is not asked. On `lab/author tasking.v2`:
+  `desired-author` passes.
+- **`check conform` fails both authors, on the core.** It exits 1 on
+  the author of either implementation: `state-stamp` and `state-get`
+  established on `state/tasks/{system}/{service}`, "on core §4.3's
+  table every mutation MUST also carry one the owner set", and "a GET
+  reply MUST carry its mutation's".
+  - **The text is plain.** Core §4.3's table lists "A desired resource
+    of a contract that does not use `desired.v2`", and "**A `desired.v2`
+    desired resource** carries none". `desired.v2` §2.4: "An author MUST
+    NOT set a Zenoh timestamp on a put or a delete of it".
+  - **So this is the reference's tool, not the text,** and no finding.
+    A `desired.v2` author passes it only by breaking §2.4.
+  - Its `desired-*` cases cite `desired.v1` sections for a v2 role.
+- **The reference's `zenctl` and zk2py's tool, side by side.** Ten
+  readings in each pairing, the nine above and F-585's. **They agree in
+  every answer, and in every field of every report, but for run and
+  seq.** In the third pairing, zk2py's tool read the reference's
+  target's bytes. That is deliverable 3's reverse question: zk2py's
+  reading of §2.17 against the reference's report bytes, the same.
+- **The reports, by target.** For each state the two targets put the
+  same bytes but for seq, except step 3: the reference's failed act
+  holds `pointer` 1 and `detail` `out_of_range`, 14 bytes, and zk2py's
+  neither, 12 (F-592). Both tools show the reference's at `/mode`, and
+  no line.
+- **Each tool's row names the major it read by:** `desired.v2` at every
+  step, step 4 with no revision in hand among them (F-603).
+- **Records.** 111 records were read by a GET after each numbered
+  Expected, 37 per pairing. None has a finding, and each writes back to
+  its bytes (F-576).
+
+### "As v1's": how zk2py read it
+
+§9's Setup is "As v1's", and v1's T "With its author absent, T has no
+descriptor of the author's to read its contract by, and takes D from the
+target's requirement and binding (§2.17)". `v2.md` §2.17 removed that:
+"**The slice from the target alone** goes." Only step 4 has its author
+absent, so step 4 was read three ways.
+
+| Reading | `zenctl` | zk2py's tool | Expected 4 |
+|---|---|---|---|
+| As §2.17 says, no revision of the author's in hand | no slice; nothing archived shown | the same | the four answers met; "T shows the archive's v1 as last-known" **not met** |
+| The author's revision given offline (`--contracts tasking.v2`) | slice from `offline_contract`; `archived` `lab/archive`, `0000/1`, revision 1, `confirmed` | slice from `offline_contract`; `lab/archive` at `0000/1` | met whole |
+| v1's way, D from the target's requirement | no such mode | slice from `requirement`; `lab/archive` at `0000/1` | met whole |
+
+- **zk2py read the Setup as v2 §2.17 allows,** and ran all three. The four
+  answers are the same in each. Only what T shows beside them moves.
+- **That is F-604.** Each step's other premises read the same both ways:
+  the author is present, so the slice comes from its contract.
+
+### §7 and §10 with zk2py's target
+
+zk2py's `desired.v2` target now reads an archive, as v1 §2.9 says and
+as the reference does (v1 §2.5): only after a complete read shows its
+author absent, through the slice's archive form. The archive is the
+reference's, a black box.
+
+| Section | The reference's author | zk2py's author |
+|---|---|---|
+| §7 | 3 of 3 | 3 of 3 |
+| §10 | 5 of 5 | 5 of 5 |
+
+- **The archive's reply carries the author's envelope,** so its version
+  is the author's: `0000/1`, as §2.9 says.
+- **§10 step 2:** the seed after the heal carries the archive's version,
+  `0000/1`, and the author answers with that stamp alone: confirmed,
+  `last_known` false.
+- **§10 step 3:** X's token at the author's address, and a silent GET.
+  zk2py's target says `desired seeds 6 answered=0 author=present
+  archive=-`: no archive read, the reference's words.
+
+### §11 and §12
+
+- **§11,** "As v1's, with tasking.v2 and worker.v2". The two copies are
+  zk2py's, `interop/desired-v2-two/`: `tasking.v2` with `plans` beside
+  `tasks`, and `worker.v2` whose role names both. Both load, and `zk2
+  contract lint` passes them.
+
+  | Target | Step 1 | Step 2 |
+  |---|---|---|
+  | zk2py's | exit 1, "not started: role 'task': its binding is invalid (two_documents)", no token, no report | starts; its report `000000` |
+  | The reference's | exit 1, "not started: role \"task\": its binding is invalid (two_documents) (desired.v2 §2.3)", no token, no report | the same |
+
+- **§12, zk2py's alone:** 14 of 14. zk2py's `config.v1` owner was fed
+  through `desired.v2` (`ConfigOwner(fed_major=2)`), once refusing the
+  re-mint and once re-minting as a restart. Its feed holds the author's
+  in-band version, and the author answers the slice by snapshot.
+  - **The author's contract** is zk2py's `interop/desired-v2/configs.v1.toml`,
+    `configs.v1` at minor 2 with `uses` moved to `desired.v2`. §12 names
+    none (F-606).
+  - **The reference's owner example has no such owner.** Its `config
+    desired <json>` takes a document by command, not through this
+    profile.
+
+### Both majors side by side, read by the reference's tools
+
+One deployment: a `desired.v1` role (`lab/worker1` on `lab/author1`'s
+`tasking.v1`) beside a `desired.v2` one (`lab/worker` on `lab/author`'s
+`tasking.v2`), each pair of one implementation. `zenctl desired` with no
+target, `check conform` on each target, and zk2py's tool. 7 of 7 with
+the v1 pair the reference's and the v2 pair zk2py's, and 7 of 7 the
+other way.
+- **One row per role, each by its own major.** The v1 row is `profile`
+  `desired.v1`, its `desired.v1.Report` as the target put it, its key
+  the slice and its stamps `<time>/<id>`. The v2 row is `desired.v2`, its
+  packed `Report` read, `<run>/<seq>`, the author's current an `entry`.
+  Both converged, exit 0.
+- **`check conform`** passes `desired-report` and `desired-binding` on
+  each target, each reading its major's report.
+- **zk2py's tool** reads the v1 role by its `desired.v1` tool and the v2
+  role by `desired_v2_tool`, by each author's revision's `uses`.
+
+### F-603 · gap · `desired.v2` §2.18 and §2.17: a role's major, with no revision of its author's interface in hand
+
+> §2.18: "**A tool reads both,** per role: the report by its type
+> identity, and the author's version by its revision's major."
+> §2.17: "A tool with no revision of the author's interface in hand has
+> no slice. It answers §5's last three questions from the report."
+
+- **The gap.** With its author absent and no revision held, a tool has
+  no revision whose major it can read. §2.17 tells it how to answer, but
+  not which major's rules answer. v1's §2.17 and this one's differ in
+  the report they look for, and in what `not_acted`, a refusal's place
+  and `in_force` mean.
+- **Both tools chose one rule, and it is neither text's.** `zenctl
+  desired --help`: "With no revision of the author's in hand, a role is
+  read as desired.v2's when a `desired.report` of its target's contract
+  names it, unless only a desired.v1.Report claims it." zk2py's tool:
+  this major's where a `desired.report` of the target's contract names
+  the role.
+- **Measured:** §9 step 4, no revision in hand. Both read the role as
+  `desired.v2`'s and met Expected 4's answers.
+- **Where it bites:** a target that serves both majors, "declares a
+  report resource of each" (§2.18). Each names the role, by type
+  identity and by `desired.report`. Only the author's revision says
+  which is put.
+- **Fix:** a sentence in §2.18, the rule both tools use, or "a role
+  whose author's revision no tool holds is read by the report it finds".
+
+### F-604 · contradiction · `scenarios-v2.md` §9: "As v1's" takes the slice from the target, which §2.17 removed
+
+> `scenarios-v2.md` §9: "**Setup.** As v1's. T finds the target's report
+> by `desired.report` (§2.10), and GETs `D` from the author." "**Expected.**
+> 1 to 5 as v1's."
+> v1's §9 Setup: "With its author absent, T has no descriptor of the
+> author's to read its contract by, and takes `D` from the target's
+> requirement and binding (§2.17)." Its Expected 4: "T shows the
+> archive's v1 as last-known, never current."
+> `v2.md` §2.17: "**The slice from the target alone** goes. A report names
+> no key, so it cannot choose among candidates. A tool with no revision
+> of the author's interface in hand has no slice."
+
+- **The contradiction.** Step 4 is the one step whose author is absent.
+  By reference it asks T to take `D` from the target, which §2.17 forbids,
+  and to show the archive's v1, which needs `D`: the archive's form is
+  the slice's key's.
+- **Measured** (above): with no revision in hand neither tool shows the
+  archive. Given `tasking.v2` offline, both do. zk2py's tool told v1's
+  way does too. The four answers are the same in all three.
+- **Fix:** "T holds `tasking.v2` offline", in §9's Setup, or Expected 4
+  restated: "T has no slice, and shows no archive".
+- **Changes:** whether a T that follows §2.17 passes §9.
+
+### F-605 · minor · `scenarios-v2.md` §9, Expected 6 and 7: two of four answers stated
+
+> "6. Once: converged **not yet**, `behind`. Over the window, …"
+> "7. Converged: **unobservable**, `author_silent`. The author answers a
+> snapshot with no entry under a run the report does not name. In
+> force: **yes**, `desired`."
+
+- **The error.** v1's Expected 6 states refused too: "refused **no**,
+  `converged`". v2's replaces 6 whole and drops it. Expected 7 states
+  converged and in force, and not refused or last-known. Every other
+  Expected states all four.
+- **What both tools answered:** at 6, no `converged` and no `current`;
+  at 7, the same. A tool that answered anything there would pass.
+- **Fix:** "Refused: **no**, `converged`. Last-known: **no**, `current`."
+  in each.
+
+### F-606 · minor · `scenarios-v2.md` §12: "the author's contract listing desired.v2" names no revision
+
+> "As v1's, the author's contract listing `desired.v2`. The owner's
+> report is its own, in its view or its record."
+> v1's §12: "The author implements `configs.v1`. … The reference keeps
+> it as `zenkey/tests/contracts/configs.v1.toml`."
+
+- **The error.** Which contract: `configs.v1` at a later minor, "An
+  author moves by a revision of its contract: `uses` goes from
+  `desired.v1` to `desired.v2`" (§2.18), or a new major? v1's named its
+  file. `zenkey/tests/contracts/` holds `configs.v1.toml` alone, and it
+  lists `desired.v1`.
+- **What zk2py ran:** `configs.v1` at minor 2, its `uses` moved, in
+  `interop/desired-v2/configs.v1.toml`.
+- **Fix:** name it, and keep it beside `tasking.v2.toml`.
+
+### F-569 to F-602, after the live run
+
+| Finding | What the bus showed |
+|---|---|
+| F-576 | 111 records read, none with a finding, each writing back. Open. |
+| F-585 | **The two tools agree, live.** After §3 step 4, beside the author's no entry under the held run, `zenctl` and zk2py's tool each answer converged unobservable, `author_silent`; refused no, `reverted`; in force no, `baseline`: case 20, in every pairing. Open. |
+| F-586 | Not run: no presence read could be made possibly incomplete. |
+| F-591 | Case 50 answers its first half. The `redundancy.v1` half has no case. Open. |
+| F-592 | Both tools read the reference's failed act at `/mode`, with no line, and zk2py's with no place. Open. |
+| The others | Nothing of this round bears on them. Open. |
+
+### Not run
+
+- **The reference against itself** for the majors: each pair there is of
+  one implementation, the other's beside it.
+- **§12 against the reference:** its owner example has no `config` owner
+  fed through either major.
+- **`config.v2`'s owner as §12's target:** zk2py's `config.v2` owner is
+  not fed through `desired.v2`.
+- **F-586, live.**
+- **A full `link.v2` face,** and a `redundancy.v1` author (round 119's
+  carry).
+- **zenohd:** `bin/current` holds none.
+
+### Counts at link.v2 0.24, against the reference's tools
+
+606 entries.
+- **New: F-603 to F-606:**
+  - one contradiction: F-604;
+  - one gap: F-603;
+  - two minor errors: F-605 and F-606.
+  None is a blocker. F-604 is the one to settle first: it decides
+  whether a T that follows §2.17 passes §9.
+- **Open:** F-437 to F-441; F-569 to F-606.
 
   F-365 stays open as #965's.

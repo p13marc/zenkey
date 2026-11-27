@@ -37,6 +37,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from . import zk2c
@@ -960,7 +961,7 @@ def section9(ctx: Ctx) -> None:
     use_z = _zenctl_ready(rp, sec, 17)
     disagree: list[str] = []
 
-    def ask(bus: Bus, step: int, extra: list[str] = ()) -> tuple[Any, Any, Any]:
+    def ask(bus: Bus, step: int, extra: Sequence[str] = ()) -> tuple[Any, Any, Any]:
         mine = dt.read(bus.g1, TARGET, "task")
         rc, doc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *extra]) if use_z \
             else (None, None, "")
@@ -974,7 +975,7 @@ def section9(ctx: Ctx) -> None:
                 disagree.append(f"step {step}: zk2py {m}, zenctl {z}")
         return mine[0] if mine else None, doc, rc
 
-    def doctor(bus: Bus, extra: list[str] = ()) -> Any:
+    def doctor(bus: Bus, extra: Sequence[str] = ()) -> Any:
         rc, doc, _ = zenctl(["doctor", "-c", bus.ep1, "--timeout", "1", "--check", "desired-refused", "--check",
                              "desired-behind", "--check", "desired-last-known", *extra])
         return rc, doc
@@ -1758,7 +1759,8 @@ def _configs_key() -> str:
                              {"system": "lab", "service": "rf0"})
 
 
-def _rf0(bus: Bus, remint: str, device: Any = None, overlay: Any = None, events_at: Any = None) -> Any:
+def _rf0(bus: Bus, remint: str, device: Any = None, overlay: Any = None, events_at: Any = None,
+         major: int = 1) -> Any:
     """``config.v1``'s scenarios' owner ``lab/rf0`` (its schema, startup
     values, floor and apply delay: ``config_scenarios``'), fed through this
     profile (v1.md §2.16): its role ``configs`` bound to ``lab/author``,
@@ -1770,7 +1772,7 @@ def _rf0(bus: Bus, remint: str, device: Any = None, overlay: Any = None, events_
     configured = load_contract(REPO / "impl/python/interop/desired/zk2py_configured.v1.toml", spec_dir=REPO / "spec")
     o = cf.ConfigOwner("lab", "rf0", schema=rf_schema(), startup=STARTUP, floor_s=10, apply_after_s=1.0,
                        connect=bus.ep1, overlay=overlay, device=device, events_at=events_at,
-                       contracts=[configured], fed=(_configs_key(), AUTHOR), remint=remint,
+                       contracts=[configured], fed=(_configs_key(), AUTHOR), remint=remint, fed_major=major,
                        bindings={"configs": [AUTHOR]},
                        params={"configs": {"system": "self.system", "service": "self.service"}})
     o.start()
@@ -1801,7 +1803,7 @@ def _tokens12(bus: Bus, t: float) -> list[tuple[str, str]]:
                 if at >= t and key.startswith(f"zk2/{RF0}/@zk/instance/")]
 
 
-def section12(ctx: Ctx) -> None:
+def section12(ctx: Ctx, major: int = 1) -> None:
     """scenarios.md §12 (text 0.10, F-336), "A ``config.v1`` owner's re-mint
     is a restart": the runtime's, so zk2py's own owner, in process, a
     :class:`zk2py.config.ConfigOwner` fed through this profile (the owner
@@ -1810,10 +1812,14 @@ def section12(ctx: Ctx) -> None:
     refuses the re-mint, as the reference does, and one that re-mints as a
     restart. The author is a zk2py owner of ``interop/desired/configs.v1``,
     its document put once, stamped. S is the Bus's: every delivery under
-    ``zk2/lab/**`` and the instance tokens."""
+    ``zk2/lab/**`` and the instance tokens.
+
+    ``major`` 2 is ``scenarios-v2.md`` §12 (round 121): "As v1's, the
+    author's contract listing desired.v2": ``interop/desired-v2``'s
+    ``configs.v1`` at minor 2, and the owner fed through ``desired.v2``."""
     rp = ctx.report
     if ctx.target_impl != "zk2py" or ctx.author_impl != "zk2py":
-        rp.cannot(ctx.name("§12 a config.v1 owner's re-mint is a restart"),
+        rp.cannot(ctx.name("§12 a config.v1 owner's re-mint is a restart" + (" (desired.v2)" if major == 2 else "")),
                   "the runtime's, run with zk2py's config.v1 owner alone: the owner example has no config.v1 "
                   "owner fed through desired.v1")
         return
@@ -1822,16 +1828,18 @@ def section12(ctx: Ctx) -> None:
     from .owner import Owner, OwnerRefused
 
     for branch in ("refuse", "restart"):
-        sec = ctx.name(f"§12 a config.v1 owner's re-mint is a restart ({branch})")
+        sec = ctx.name(f"§12 a config.v1 owner's re-mint is a restart ({branch})"
+                       + (", fed through desired.v2" if major == 2 else ""))
         bus = Bus()
         author = None
         owners: list[Any] = []
         try:
-            configs = load_contract(REPO / "impl/python/interop/desired/configs.v1.toml", spec_dir=REPO / "spec")
+            configs = load_contract(REPO / "impl/python/interop" / ("desired-v2" if major == 2 else "desired")
+                                    / "configs.v1.toml", spec_dir=REPO / "spec")
             author = Owner("lab", "author", [configs], connect=bus.ep1)
             author.start()
             author.set_state(_configs_key(), cf.encode_json(DESIRED12))
-            o = _rf0(bus, branch)
+            o = _rf0(bus, branch, major=major)
             owners.append(o)
             converged = {"observed_revision": 1, "outcome": "converged"}
 
@@ -1845,6 +1853,16 @@ def section12(ctx: Ctx) -> None:
                           "holds fraction_ppm 20000", ok, f"St {bus.get_json(ST12)[0]}")
             if not ok:
                 continue
+            if major == 2:
+                from . import desired_v2
+
+                rr = o.role.report() if isinstance(o.role, desired_v2.TargetRole) else {}
+                st_d = bus.get(_configs_key())
+                snap = [h for h in st_d.snapshots if h.key == _configs_key()]
+                rp.check(sec, "setup (desired.v2): the feed holds the author's in-band version, its run and seq, and "
+                              "the author answers the slice by snapshot (desired.v2 §2.4)",
+                         ("observed_run16" in rr or "observed_run32" in rr) and "observed_seq" in rr and bool(snap),
+                         f"role {rr}; snapshots {len(snap)}")
             old = o.instance
             t1 = time.monotonic()
             n0 = len(o.device.log)
@@ -1899,7 +1917,7 @@ def section12(ctx: Ctx) -> None:
             o.close()
             owners.remove(o)
             time.sleep(0.5)
-            o2 = _rf0(bus, branch, device=o.device, overlay=o.core.overlay, events_at=o.core.events_at)
+            o2 = _rf0(bus, branch, device=o.device, overlay=o.core.overlay, events_at=o.core.events_at, major=major)
             owners.append(o2)
             ok = _wait(lambda: settled(o2) and bool(_applied12(bus, t2, o2.instance)), 10.0, 0.1)
             toks = _tokens12(bus, t2)

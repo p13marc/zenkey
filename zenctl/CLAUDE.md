@@ -368,7 +368,31 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   conform`'s `desired-report` (a role covered only by its interface's own
   reports, DE), `desired-binding` and `desired-author` (27
   cases). Scenarios §9 run live in `tests/live_zk2.rs` on the owner
-  example's drive. #841's RC added `redundancy [SYSTEM/SERVICE] [--iface]
+  example's drive. #986's J4 made `desired` read `desired.v2` beside
+  `desired.v1`, each role by the major its author's revision lists (v2
+  §2.18), with no flag: a row's `profile`, the packed report found by
+  `desired.report` (`report.document` the profile's reading, `place` and
+  `line` the contract's words beside its indices, `record` a malformed
+  one's fields, `unreadable` core §7.6's token), the author's version its
+  member read's snapshot (`author.current`: `entry`, `tombstone`,
+  `no_entry` with its `run`, `unstamped`), every version `<run>/<seq>`,
+  and a target behind by `--for`'s readings alone, never
+  `--clocks-synced`; its exit contract is unchanged. The table's head
+  line names the majors read (`desired.v1`, `desired.v2`, or both), a
+  `desired.v2` row says `requiring <iface> (desired.v2)`, and a note
+  says how such a role is read. `scenarios-v2.md` §9 runs live in
+  `tests/live_zk2.rs` (`desired_v2_s9_*`: steps 1 to 3 and 6; 4 and 5;
+  7 after §15's step 1 through the runtime's `Link`, `mod scenario`),
+  with `desired_reads_both_majors_side_by_side`; `tests/render.rs`'s
+  `a_desired_reading_of_both_majors_is_drawn_by_each_roles_major` is the
+  table over `report-fixtures`' `desired_v2_report` (a v2 author and
+  target, a refusal in words and one by number, an unreadable report, a
+  snapshot with no entry under the observed run and under another, a
+  role with no slice, and a `desired.v1` role beside them): a render
+  snapshot, since no trycmd case reaches a bus. With its author absent
+  and no revision of the author's interface in hand, a `desired.v2` role
+  has no slice, so no archive's last-known is shown: `--contracts` gives
+  the revision (§9 step 4 runs both ways). #841's RC added `redundancy [SYSTEM/SERVICE] [--iface]
   [--grace] [--across-face] [--contracts]`, a root judgement beside
   `health`: exit 1 on a split, a twin or a lasting vacancy; 0 when each
   governed interface has one incumbent and every instance is accounted
