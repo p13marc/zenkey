@@ -31858,3 +31858,109 @@ No finding: these are the reference's words, and its verdicts are
   F-611.
 
   F-365 stays open as #965's.
+
+## At alarms.v2 0.1 and core 0.115
+
+Round 124 read this tree at d1dd4196 (#984): core 0.115's two places
+(Appendix D's `alarms` row and §8.1's tokenless list), and a new major,
+`alarms.v2`, text 0.1, with its standard contract, its two schemas, ten
+fixture files and twelve scenarios.
+
+### The answers, given from the text first
+
+Each was written here from `v2.md`, with `v1.md` beside it, before any
+`alarms.v2` code and before any file of `conformance/v2/` was opened.
+
+1. **A restart whose record holds one identity firing on two slots.**
+   The owner adopts it once, on the lower slot, and puts nothing on the
+   other. "**One identity firing on two slots** of the record breaks
+   §2.2. The owner adopts it on the lowest of them, by the steps above,
+   and puts nothing on the others: they are free." (§2.9.)
+   - "By the steps above" means the lower slot still goes through §2.9's
+     four steps. Under a rule the owner no longer evaluates, it is put
+     resolved there (step 3). Otherwise it is put firing, "its `at`
+     kept, under its new run" (step 4).
+   - The other slot gets no put and no delete. A reader that held it
+     reads it as "the previous instance's last word", and "the next
+     complete snapshot leaves it out, and it then reads `not_held`"
+     (§2.9).
+   - **What the text leaves open:** which record's fields are adopted
+     when the two slots' records differ, in severity or in `at`. "Adopts
+     it on the lowest" reads as the lower slot's record. zk2py takes
+     that one.
+2. **Which slot a reader takes where no run is stated.** None. "A slot
+   is taken only under the present run. So a reader with no run stated,
+   as across a face, takes no slot." (§2.6, under "One identity on two
+   slots".)
+   - Where a run is stated, the reader takes "the record under the run
+     its owner's present descriptor states". "Where no slot is under
+     that run, it takes none: each is an earlier instance's last word."
+     Where two slots are under it, it takes "the later by seq".
+   - **Its scope** is the bullet it sits under: one identity on two
+     slots. zk2py does not read it as "a far reader takes no slot at
+     all". That reading would contradict §2.15's face table, where a
+     complete snapshot is "established. Each firing entry is aged by its
+     confirmation".
+3. **How a reader names an alarm whose words it did not take.** That
+   depends on how the alarm is written.
+   - **By words:** it is shown "by its alert key, with no words" (§2.4),
+     and "An alarm by words whose words the reader did not take is shown
+     by its alert key" (§5). It is still **named**: §0 calls an alarm
+     named when its alert key is "read from the record of an alarm by
+     words". So its reference and its acknowledgements hold.
+   - **By a table the reader cannot read:** it is **unnamed**, for
+     `no_table`, `rule` or `labels` (§2.4). It is "shown by its numbers,
+     as in `rule 1, labels 2`, and the tool says why" (§5). §2.16 has it
+     "reported by its owner, its slot and its `at`".
+   - An unnamed alarm "matches no reference, so no acknowledgement and
+     no remembered notice" (§2.14). It still counts in "anything
+     firing".
+4. **When one snapshot establishes "nothing fires".** An owner's alarms
+   are **established** by the reader's latest collection read when that
+   read meets all five of §2.15's conditions:
+   - it ran to its final reply with no error reply;
+   - it drew a complete snapshot, "with any number of entries or none";
+   - the snapshot is under a run that a present descriptor states.
+     Across a face "the deployment's word stands for the descriptor, and
+     no run is compared";
+   - it was asked after the reader's last loss and after the owner's
+     last presence gap;
+   - the reader's subscription, if any, lost nothing since.
+
+   "Nothing fires" is then v1's "anything firing" answering `no`
+   (§2.15's last item): every owner in scope is established, the scope's
+   reads are whole, and no alarm answers yes or unobservable at or above
+   *S*. One snapshot is enough with no entry, and enough with only
+   resolved entries. "It does not lapse."
+5. **A v1 reader beside a v2 owner, and a v2 reader beside a v1 owner.**
+   - **A v1 reader** "finds no `alarms.v1` in an `alarms.v2` owner's
+     descriptor. It answers **not asked**, `not_listed`, and counts that
+     owner among those with no alarms to ask." So "its 'is anything
+     firing?' can read no while that owner fires" (§2.17).
+   - **A v2 reader** reads a v1 owner by v1's text: "One that holds
+     `alarms.v1` and not `alarms.v2` is read by `alarms.v1`'s" (§2.14
+     step 2; §2.1's MUST). Over a selector of either major it "reads both
+     majors of the owners it selects: one subscription and one read for
+     each", and "Its answers, its reasons and its counts are one set for
+     both" (§2.17).
+   - A descriptor listing both majors is read by this text (§2.1), though
+     its owner breaks §2.1's MUST NOT.
+6. **Where a refresh may be deferred, and what a re-mint holds.**
+   - **A refresh** may be deferred within 450 s of the alarm's last
+     refresh. "An owner SHOULD NOT refresh one alarm more than once in
+     450 s." (§2.5.) Both of §2.5's refresh rows are refreshes, the
+     argument's and the words'. A transition is never deferred: an
+     escalation and a resolve take a new `at` at once.
+   - **What happens after the 450 s** is the scenarios' word, not
+     `v2.md`'s: "The owner MAY put the latest reading once they have
+     passed" (scenarios-v2 §2, Expected 3).
+   - **A re-mint** is an instance change (v1 §2.9, "by a restart or a
+     re-mint", which v2 §2.9 keeps). The new instance holds only what it
+     puts again: each firing alarm it adopts, "on its slot, before it
+     answers a GET with it", `at` kept, under its new run.
+   - It puts no resolved record again: the record "stays until an
+     identity takes the slot (§2.2), or its instance ends. A new
+     instance puts no resolved record again" (§2.5). So those slots are
+     free. Its snapshot leaves them out, neither live nor tombstoned
+     (§2.9). A reader that held them reads them as the previous
+     instance's last word, then `not_held`.
