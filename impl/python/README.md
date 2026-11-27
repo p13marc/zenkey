@@ -9553,6 +9553,77 @@ the code half. It files F-616 (a contradiction) and F-617 (a gap). See
 "At desired.v2 0.2, health.v2 0.3, core 0.115 and observer 0.36" in
 `SPEC-FINDINGS.md`.
 
+## Core 0.117, observer 0.37, `link.v1` 0.21 and `link.v2` 0.27: E051 and `owner_heartbeat_denied`, each written before its case (round 126)
+
+Round 126 read this tree at a5055e41 (#1145, #1152), its black boxes
+built from a5055e41.
+- **Core 0.117:** E051, a packed type whose layout tag is 0, per type,
+  read by cascade 7 in a file without E028. A heartbeat's tag 0 is
+  accepted. `packed/vectors.json`'s `Grow` moves to the tag 11.
+- **Observer 0.37:** editorial.
+- **`link.v1` 0.21:** the deployment may name the services whose owner
+  heartbeats it turns on. The plan warns `owner_heartbeat_denied` at
+  such a service, once a face, where one of its interfaces' heartbeats
+  crosses.
+- **`link.v2` 0.27:** a link.v2 plan draws none of it.
+- **The reference:** `zk2 contract lint` refuses E051. An enrollment's
+  `[[service]]` takes `owner_heartbeat = true`, which `zenctl acl gen
+  --face-policy` and `check face` read. Neither `--help` names the
+  warning or the key; the changelog does.
+
+**`just py-conformance`: 8680 of 8680.** Re-keyed first, at 8671 of
+8673: the two failures were the new cases. Each part was then written
+from the text and committed before its case ran:
+- **E051** (`packed.tag_zero`, read by `schemas`): `e051-packed-tag`,
+  `e028-packed-tag` and `Grow` passed on the first run;
+- **`owner_heartbeats`** (`link.plan`, `link_v2.plan`): `plan.json`'s
+  case 18 and `v2/plan.json`'s case 53 passed on the first run.
+
+`_round126_readings` pins the sentences, the survey, F-618 to F-620 and
+the frame's tag 0.
+
+### Live
+
+```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.packed_tag_live [--json <out>]
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.owner_heartbeat_tools_live
+```
+
+| Run | Result |
+|---|---|
+| The survey: every packed document under `spec/`, `examples/zk2/` and `zenkey/tests/contracts/` | 287 clean declarations in 97 files, the entry's count. At 0: the two cases' types, `Tick`, and `derive.json` case 2's derived `Record` (F-619) |
+| `zk2 contract lint` beside zk2py, 304 contract files | the errors agree on each; `e001-interface` alone differs, by zk2py's W107 |
+| `derive.json` case 2's groups in a contract | `zk2 config derive` writes its `Record` at 0; both linters refuse it, E051 |
+| A type at 0 on an explicit stream or an attachment | E044 and E051 at both; E047 beside E044 at both (F-618) |
+| A frame at CH tag 0, its declaration not held | `zenctl echo` and zk2py show it by its envelope, never sniffed |
+| `owner_heartbeat_denied`, seven deployments | zk2py's plan, `acl gen` and `check face` warn alike: 21 of 21 |
+
+- **The frame's tag 0** is answered by the text. Observer §7.3 and §7.6
+  read a frame by its form, never as a record, so its tag 0 is no
+  sniffed payload. `frame/layouts.json`'s `tick-pow2` has it.
+- **`check face`** prints the warning on stderr alone, and exits 0. Its
+  `--format json` document holds none of it, where `acl gen`'s notes do.
+
+### What changed in zk2py
+
+- **`packed`:** `tag_zero`, E051 over a linted file's clean types. E044,
+  a reference's finding, takes none out. The codec is unchanged.
+- **`schemas`:** E051 for a packed file with no E028.
+- **`link`:** `plan` and `plan_face` take `owner_heartbeats`. A link.v1
+  face warns `owner_heartbeat_denied`; a link.v2 face, never.
+- **`link_v2`:** `plan` takes `owner_heartbeats`, for a link.v1 policy's
+  plan alone.
+- **`packed_tag_live` and `owner_heartbeat_tools_live`,** new.
+- **The runners** pass each plan case's `owner_heartbeats`.
+
+**Not run:** `zenkey/bundles/`, which zk2py does not read; an owner on
+a bus behind a link.v1 face with its owner heartbeats on.
+
+Round 126 files F-618 (an ambiguity), F-619 (a gap) and F-620 (an index
+error). None is a blocker; F-619 is the one to settle first. See "At
+core 0.117, observer 0.37, link.v1 0.21 and link.v2 0.27" in
+`SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -9753,10 +9824,14 @@ impl/python/
                                 transport's and a request under another Encoding refused (core 0.99, round 104)
     packed.py         §7.6 §9.2 the packed kind: a file's lints (E038–E045), layouts, the tag, the writer and the
                                 reader in exact decimals, a record in the envelope (round 94); a sample read
-                                as observer §7.3 reads it, the deployment epoch (the mend after round 94)
+                                as observer §7.3 reads it, the deployment epoch (the mend after round 94);
+                                tag_zero, E051 over a file's clean types (core 0.117, round 126)
     packed_live.py    §7.6, observer §7.3 packed records live: zenctl gen writing for zk2py's consumer, tool and S4
                                 GET; zk2py's owner writing for zenctl get state, watch and echo; wrong revisions
                                 refused by tag and by length (the mend after round 94)
+    packed_tag_live.py §7.6 §9.2 E051 against the reference: every packed type's tag in the tree, zk2 contract
+                                lint beside zk2py on every contract file, a config.v2 derived Record at 0, E044
+                                beside E051, and a frame at CH tag 0 shown by zenctl echo (round 126)
     compat.py         §9.7 §9.8 the classifier, retention identity
     conformance.py              the runner
     classes.py        §12       the classes zk2py claims, and its walk of spec/RULES.md (round 89)
@@ -9847,7 +9922,10 @@ impl/python/
                                 example's --config-v2 with zk2py's caller, zk2py's owner with zenctl config), and a
                                 re-mint (config.v1 §2.12) with both owners (round 102)
     link.py           link.v1   the face policy, exposure, the plan and its carve-out, the checks, a generator;
-                                heartbeats/{class} in the stream carve, whichever revision is given (0.20, round 113)
+                                heartbeats/{class} in the stream carve, whichever revision is given (0.20, round 113);
+                                owner_heartbeats and owner_heartbeat_denied (0.21, round 126)
+    owner_heartbeat_tools_live.py link.v1 0.21 owner_heartbeat_denied: seven deployments, zk2py's plan beside
+                                zenctl acl gen --face-policy and zenctl check face (round 126)
     link_scenarios.py link.v1   scenarios.md §1–§13 on zenoh-python routers, over examples/zk2/link/
     link_v2.py        link.v2   the policy, the plan, the transport block and its checks (round 96); the contract
                                 side and frames per face, exposure.json (0.3, round 99); timestamping off in the
