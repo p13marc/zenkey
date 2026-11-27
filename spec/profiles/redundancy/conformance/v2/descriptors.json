@@ -1,0 +1,937 @@
+{
+  "cases": [
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true,
+            "token": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "a standby on a governed interface: marked, token true, its 32-bit run stated from its claim on (v1 §2.4, §2.10)"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "token absent is true: a standby"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "token": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "serving",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "standby absent is serving"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": false,
+            "token": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "serving",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "standby false written out is the same as absent (core §3.3)"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "external",
+      "iface": "ledger.v1",
+      "note": "a standby under external: the same mark, and its run"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true,
+            "token": false
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "standby_tokenless",
+          "governed_tokenless"
+        ],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "D012: marked standby and tokenless, on a governed interface: both findings"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true,
+            "token": false
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "standby_tokenless"
+        ],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "no_contract",
+      "iface": "ledger.v1",
+      "note": "D012 on an interface whose governance is not known: the core's finding alone"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "token": false
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "governed_tokenless"
+        ],
+        "listed": true,
+        "mark": "serving",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "a governed interface marked tokenless, serving: v1 §2.14's finding, which needs the contract"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": false,
+            "token": false
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "governed_tokenless"
+        ],
+        "listed": true,
+        "mark": "serving",
+        "run": "fabc5f2c"
+      },
+      "governance": "external",
+      "iface": "ledger.v1",
+      "note": "a governed interface marked tokenless under external"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "token": false
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "serving",
+        "run": "fabc5f2c"
+      },
+      "governance": "not_governed",
+      "iface": "ledger.v1",
+      "note": "tokenless and not governed: the core's tokenless set, no finding here"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "not_governed"
+        ],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "not_governed",
+      "iface": "ledger.v1",
+      "note": "a standby mark on an interface no profile governs: not this profile's (v1 §2.14)"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true,
+            "token": false
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "standby_tokenless",
+          "not_governed"
+        ],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "not_governed",
+      "iface": "ledger.v1",
+      "note": "a standby mark on a tokenless interface no profile governs: D012, and not this profile's"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "no_contract",
+      "iface": "ledger.v1",
+      "note": "a standby mark, governance not known: no finding the reader can make, and the run read"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "serving",
+        "run": "fabc5f2c"
+      },
+      "governance": "no_contract",
+      "iface": "ledger.v1",
+      "note": "serving, governance not known: nothing but the run"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": "yes",
+            "token": false
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "listed": true,
+        "mark": null,
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "standby a string: not the record's shape (core D000); the mark is not read, and the run still is"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": null
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "listed": true,
+        "mark": null,
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "standby null: malformed, not absent"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true,
+            "token": "true"
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "listed": true,
+        "mark": null,
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "token a string: malformed"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          [
+            "ledger.v1"
+          ]
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [
+          "malformed"
+        ],
+        "listed": true,
+        "mark": null,
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "an entry that is not an object: malformed"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "cardinality": {},
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true,
+            "unavailable": [
+              {
+                "cause": "config",
+                "resource": "@op/append"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "unavailable and cardinality on a standby say what it will expose once it serves: no finding of the mark"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "a 16-bit run, 4 digits: its run, a run of its own width"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "00005f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "00005f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "a 32-bit run with leading zeros: 8 digits, another run than 5f2c"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": null
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "no run stated: a checker reads run as optional (core §3.3), and the follower holds none of this instance's"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "FABC5F2C",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": null
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "upper case is no run's spelling (core D002): the follower holds none from this descriptor"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "abc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": null
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "7 digits: D002, no run held"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": 4207697708,
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": null
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "a number: not the member's type (core D000), no run held"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": null,
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": null
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "run null: no run held"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "no meta.zid: core §3.3's SHOULD, and nothing this major reads (§2.10)"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "health.v1",
+            "minor": 0
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": false,
+        "mark": null,
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "an instance listing other interfaces only: no candidate, no mark, and its run held all the same, as another instance's (§2.10, step 4)"
+    },
+    {
+      "descriptor": {
+        "format": "zk2-descriptor/0.1",
+        "instance": "000000000000000b",
+        "interfaces": [
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "health.v1",
+            "minor": 0
+          },
+          {
+            "contract": "sha256:abababababababababababababababababababababababababababababababab",
+            "iface": "ledger.v1",
+            "minor": 1,
+            "standby": true
+          }
+        ],
+        "meta": {
+          "zid": "da2b07b8cc340f61cc31dbc32892752b"
+        },
+        "profiles": [
+          "redundancy.v2"
+        ],
+        "run": "fabc5f2c",
+        "service": "lab/ledger"
+      },
+      "expect": {
+        "findings": [],
+        "listed": true,
+        "mark": "standby",
+        "run": "fabc5f2c"
+      },
+      "governance": "claim",
+      "iface": "ledger.v1",
+      "note": "two entries: the governed interface's is read, marked standby"
+    }
+  ],
+  "description": "redundancy.v2 §2.10, §2.14; v1 §2.4, §2.14; core §3.3: a descriptor, as JSON, the governed interface's id (iface), and what the reader knows of its governance (claim or external: governed, with that election; not_governed; no_contract: its contract not read) -> what a follower reads of it. expect.run is the descriptor's run, 4 or 8 lowercase hexadecimal digits, as the instance's run of that width, or null where the descriptor states none or spells it otherwise (core D000, D002): the follower then holds no run from it. The run is read whatever the governance and the listing. expect.listed is whether an entry of interfaces is for iface; with none, mark is null and findings empty. An entry that is not an object is read as iface's, malformed. expect.mark is standby, serving, or null when the entry is malformed; expect.findings, in this order: malformed (the entry not an object, or standby or token present and not a boolean, null included: core D000; nothing else of the entry is read, and it is the only finding), standby_tokenless (standby true and token false: core D012), governed_tokenless (token false, the interface governed, under either election), not_governed (standby true, the interface not governed). standby absent is false, token absent is true. meta.zid is not read by this major. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed."
+}
