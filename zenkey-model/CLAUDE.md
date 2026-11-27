@@ -681,9 +681,10 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `Record::name(table)` → `Naming::{Named, Unnamed(no_table | rule |
   labels), ByWords}`. Slots: `Slots<I>` (`new(bound)`, `raise` →
   `Raise::{Put, Firing, Refused}`, `resolve` → `Resolve`, `slot_of`,
-  `held`, `restart(left, bound)` → `Adoption::{Left, Free, Resolved,
-  Adopted}`, an identity the record holds firing on two slots adopted
-  on the lowest, §2.9), `taken(seen, present: Option<Run>)` → `Taken {
+  `held`, `forget(slot)` (S2: a put that did not go out, or a resolved
+  record a re-mint does not hold), `restart(left, bound)` →
+  `Adoption::{Left, Free, Resolved, Adopted}`, an identity the record
+  holds firing on two slots adopted on the lowest, §2.9), `taken(seen, present: Option<Run>)` → `Taken {
   takes, double }` (no slot taken with no run stated, as across a face,
   §2.6) and `one_slot_each`. Words:
   `Words` (`from_json`, `decode`, `derive`), `words_taken(record, words)`

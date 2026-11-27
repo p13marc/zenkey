@@ -13,7 +13,9 @@ runs the owner's half of each profile that has one (`hostid.v1`,
 `desired.v1` and `desired.v2`, …). `health.v2`, the same health in packed
 records with its words as indices into tables, is opt-in
 (`ServiceBuilder::health_v2`): a service implements one of the two majors,
-and `health.v1` stays the default.
+and `health.v1` stays the default. So is `alarms.v2`, each alarm one packed
+record on a slot, named by the service's own table of rules or by words
+(`ServiceBuilder::alarms_v2`), beside the default `alarms.v1`.
 
 What needs no session (keys, contracts, bundles) is
 [`zenkey-model`](https://crates.io/crates/zenkey-model)'s, re-exported as

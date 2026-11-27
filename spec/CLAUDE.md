@@ -954,6 +954,10 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   restart's record holding one identity firing on two slots adopts it on
   the lowest (§2.9), and a slot is taken only under the present run, so
   a reader with no run stated, as across a face, takes none (§2.6).
+  S2's owner runs `scenarios-v2.md` §1 to §7, §9 and §12 on real
+  sessions (`zenkey/tests/profile_alarms_v2.rs`), every step as written;
+  its intro and the 0.1 entry's "Not verified" say so. §8, §10 and §11
+  are the readers' (S3).
 - **`freshness.v1`** is `experimental` since #978's F5 (a status entry in
   `freshness/CHANGELOG.md`, text still 0.5): the adopters' contracts and
   `nav.v2` moved to `freshness.v2`, each a `uses_changed` revision in
