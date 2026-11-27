@@ -247,7 +247,8 @@ impl SchemaSet {
                     continue;
                 }
             };
-            if let Some(n) = unsafe_integer(&doc) {
+            let unsafe_number = unsafe_integer(&doc);
+            if let Some(n) = &unsafe_number {
                 report.push(Diagnostic::error(
                     "E028",
                     at.clone(),
@@ -293,6 +294,25 @@ impl SchemaSet {
                     format!("{at} {}", x.at)
                 };
                 report.push(Diagnostic::error(x.code, place, x.message.clone()));
+            }
+            // E051 (core §9.2, cascade 7; #1152): a type whose layout tag is
+            // 0, the tag a record of any other kind carries (§7.5), read in
+            // every type with a layout, named by a resource or not. A file
+            // with E028 has no form every implementation hashes alike.
+            if unsafe_number.is_none() {
+                for (name, layout) in &read.types {
+                    if layout.as_ref().is_some_and(|l| l.tag() == 0) {
+                        report.push(Diagnostic::error(
+                            "E051",
+                            format!("{at} types.{name}"),
+                            "its layout form has the tag 0, the tag of a record of any other \
+                             kind, so a tool holding no type would sniff its records (core \
+                             §7.6): swap two of its fields of different forms, move a bound, or \
+                             add a reserved code or a marker; a rename keeps the tag"
+                                .to_owned(),
+                        ));
+                    }
+                }
             }
             self.artifacts.insert(id.clone(), art);
             self.packed.push(PackedFile {

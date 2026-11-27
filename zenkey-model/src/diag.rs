@@ -297,6 +297,10 @@ pub const CODES: &[(&str, &str)] = &[
         "timing a frame resource cannot keep: a deadline below its span, a deadband past its deadline, or a lifespan",
     ),
     (
+        "E051",
+        "a packed type whose layout tag is 0, the tag a record of any other kind carries",
+    ),
+    (
         "W101",
         "overlapping templates under one kind token carry different types",
     ),
