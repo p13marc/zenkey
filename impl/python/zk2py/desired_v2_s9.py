@@ -510,7 +510,7 @@ def section12(rp: Report) -> None:
     :class:`zk2py.config.ConfigOwner` fed through ``desired.v2``, once
     refusing the re-mint and once re-minting as a restart, against zk2py's
     author of ``interop/desired-v2/configs.v1.toml`` (``configs.v1`` at minor
-    1, its ``uses`` ``desired.v2``). v1's runner (``desired_scenarios``)
+    2, its ``uses`` ``desired.v2``). v1's runner (``desired_scenarios``)
     holds the steps; this runs them on this major."""
     from . import desired_scenarios as v1sc
 

@@ -2165,7 +2165,11 @@ fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
                         continue;
                     };
                     match crate::model::desired::packed_report_of(&w.at, &g.packed) {
-                        PackedFound::One(p) => match &p.read {
+                        // `One` is a reply that reads and `Unreadable` one
+                        // that does not; each is judged by its own reading,
+                        // so neither drops out of the verdict (review-bot
+                        // on #1166).
+                        PackedFound::One(p) | PackedFound::Unreadable(p) => match &p.read {
                             Ok(x) if x.findings.is_empty() => {
                                 read_ok += 1;
                                 covered_by.push(format!("{} by {}", res.role, p.key));
@@ -2179,17 +2183,8 @@ fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
                                     .collect::<Vec<_>>()
                                     .join(", ")
                             )),
-                            Err(_) => {}
+                            Err(e) => broken.push(format!("{}: unreadable ({e})", p.key)),
                         },
-                        PackedFound::Unreadable(p) => broken.push(format!(
-                            "{}: unreadable ({})",
-                            p.key,
-                            p.read
-                                .as_ref()
-                                .err()
-                                .map(ToString::to_string)
-                                .unwrap_or_default()
-                        )),
                         PackedFound::Two => broken.push(format!(
                             "role {}: two or more resources name it by `desired.report` \
                              (two_reports, desired.v2 §2.10)",
