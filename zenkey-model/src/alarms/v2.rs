@@ -13,7 +13,7 @@
 //! instance_table(named…)      ─▶ the one table among the revisions a descriptor names: none │ a list │ differ
 //! write_alarm · Record::name  ─▶ words ⇄ a rule's index, its labels' codes and its argument, or by words with the alert key
 //! Slots                       ─▶ §2.2, §2.8, §2.9: the slot an identity takes, the bound's refusal, a restart's adoption
-//! taken(seen, run)            ─▶ §2.6: which of two slots a reader takes for one identity, and §2.2's break
+//! taken(seen, run)            ─▶ §2.6: which of two slots a reader takes for one identity, none with no run; §2.2's break
 //! Words, words_taken          ─▶ §2.4: `words/{slot}`, taken only where they derive the record's key
 //! Track::apply(sample)        ─▶ §2.6: one slot read by identity: rebound │ replaced │ dropped, then v1's table
 //! Dating, acknowledged        ─▶ §2.5: `at`, new at a transition, a second at a time, and the acknowledgement it carries
@@ -1828,8 +1828,9 @@ impl<I: Clone + Eq> Slots<I> {
     /// left, by slot (§2.9); empty with no source. For each slot, what the
     /// new instance does, and it holds what it put and nothing else.
     ///
-    /// An identity the record holds firing on two slots breaks §2.2: the
-    /// lowest is adopted, and nothing is put on the other.
+    /// An identity the record holds firing on two slots breaks §2.2: it is
+    /// adopted on the lowest, and nothing is put on the others, which are
+    /// free.
     #[must_use]
     pub fn restart(
         left: impl IntoIterator<Item = (u8, Left<I>)>,
@@ -1878,7 +1879,7 @@ pub struct Taken {
     /// For each alert key, the slot the reader takes it on: the one under
     /// the run its owner's present descriptor states, the later by seq of
     /// two under it, and `None` where none is under it, each then an
-    /// earlier instance's last word.
+    /// earlier instance's last word, or where no run is stated.
     pub takes: BTreeMap<u64, Option<u8>>,
     /// The alert keys two slots of the present run name: the break of
     /// §2.2 a tool may report (§5).
@@ -1886,16 +1887,18 @@ pub struct Taken {
 }
 
 /// [`Taken`] over what a reader holds of one owner, `present` being the
-/// run that owner's present descriptor states (core §3.3). Unnamed alarms
-/// are not compared: two slots with no alert key are two alarms.
+/// run that owner's present descriptor states (core §3.3). A slot is taken
+/// only under it, so with none stated, as across a face, no slot is
+/// taken. Unnamed alarms are not compared: two slots with no alert key
+/// are two alarms.
 #[must_use]
-pub fn taken(seen: &[Seen], present: Run) -> Taken {
+pub fn taken(seen: &[Seen], present: Option<Run>) -> Taken {
     let mut out = Taken::default();
     let mut best: BTreeMap<u64, Seq> = BTreeMap::new();
     for s in seen {
         let Some(key) = s.alert_key else { continue };
         let take = out.takes.entry(key).or_insert(None);
-        if s.stamp.run != present {
+        if Some(s.stamp.run) != present {
             continue;
         }
         match best.get(&key) {

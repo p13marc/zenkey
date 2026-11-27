@@ -13,6 +13,11 @@ file here was blessed.
 Both scripts are one drafter's. So they catch a slip of computation, and
 not a reading of the text that both share.
 
+Two cases of [`slots.json`](slots.json) came later: its last case and
+its last view. Each was written by hand from one sentence. One is
+§2.9's restart. The other is §2.6's reader with no run. Each was
+computed once.
+
 No implementation has run them yet.
 
 | File | Rules | What it pins |

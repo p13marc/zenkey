@@ -1,5 +1,5 @@
 {
- "description": "alarms.v2 §2.2, §2.6, §2.8, §2.9: which slot an identity holds. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `cases`: one service's instances, as its owner runs them. `bound` is its first instance's bound (256, or the cardinality its descriptor states). An identity is a letter standing for an alert key. `events`, in order, each with what the owner does (`expect`) and, but in the one case of 259 events, the records its instance then holds (`holds`: slot -> {id, state}). `raise`: the condition of an identity is found -> {put: slot, state: \"firing\"}; {none: \"firing\"} for a duplicate observation; or {refused: \"bound\"} where every slot below the bound holds a firing record: nothing is put, and no alarm is resolved or put over. The identity takes the slot its instance holds a record of it on, firing or resolved, else the lowest slot on which the instance holds no firing record. `resolve`: its condition cleared -> {put: slot, state: \"resolved\"}, the record staying on its slot, or {none: \"not_firing\"}. `restart`: a new instance, with the `record` its previous instance left (slot -> {id, state, reads, derives, evaluated}: whether the entry reads, whether its words derive its alert key, and whether the new instance still evaluates its rule; null for no source) and its `bound` -> for each slot of the record, in §2.9's order: `left` (at or above the new bound: neither put nor resolved), `free` (resolved, or it does not read, or its words do not derive its key: nothing is put), `resolved` (firing under a rule no longer evaluated: put resolved on its slot) or `adopted` (put again, firing, on its slot). The new instance holds what it put, and nothing else. `views`: what one reader holds of one owner, each slot's record with the `run` and `seq` of its put, its `alert_key` (null for an unnamed alarm) and its state, and the run the owner's present descriptor states -> `takes`: for each alert key, the slot the reader takes it on: the one under the present run, the later by seq of two under it, null where none is under it; and `double`: the alert keys two slots of the present run name, the break of §2.2 a tool may report. Unnamed alarms are not compared.",
+ "description": "alarms.v2 §2.2, §2.6, §2.8, §2.9: which slot an identity holds. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `cases`: one service's instances, as its owner runs them. `bound` is its first instance's bound (256, or the cardinality its descriptor states). An identity is a letter standing for an alert key. `events`, in order, each with what the owner does (`expect`) and, but in the one case of 259 events, the records its instance then holds (`holds`: slot -> {id, state}). `raise`: the condition of an identity is found -> {put: slot, state: \"firing\"}; {none: \"firing\"} for a duplicate observation; or {refused: \"bound\"} where every slot below the bound holds a firing record: nothing is put, and no alarm is resolved or put over. The identity takes the slot its instance holds a record of it on, firing or resolved, else the lowest slot on which the instance holds no firing record. `resolve`: its condition cleared -> {put: slot, state: \"resolved\"}, the record staying on its slot, or {none: \"not_firing\"}. `restart`: a new instance, with the `record` its previous instance left (slot -> {id, state, reads, derives, evaluated}: whether the entry reads, whether its words derive its alert key, and whether the new instance still evaluates its rule; null for no source) and its `bound` -> for each slot of the record, in §2.9's order: `left` (at or above the new bound: neither put nor resolved), `free` (resolved, or it does not read, or its words do not derive its key, or its identity fires on a lower slot of the record, which it takes: nothing is put), `resolved` (firing under a rule no longer evaluated: put resolved on its slot) or `adopted` (put again, firing, on its slot). The new instance holds what it put, and nothing else. `views`: what one reader holds of one owner, each slot's record with the `run` and `seq` of its put, its `alert_key` (null for an unnamed alarm) and its state, and the run the owner's present descriptor states (null where no run is stated, as across a face) -> `takes`: for each alert key, the slot the reader takes it on: the one under the present run, the later by seq of two under it, null where none is under it or no run is stated; and `double`: the alert keys two slots of the present run name, the break of §2.2 a tool may report. Unnamed alarms are not compared. The last case and the last view were written by hand from §2.9's and §2.6's sentences, and computed once.",
  "cases": [
   {
    "note": "W2's day: three alarms on slots 0 to 2, and a transient on 3",
@@ -3352,6 +3352,142 @@
      }
     }
    ]
+  },
+  {
+   "note": "a record that holds one identity firing on two slots: A is adopted on the lower, 1, and nothing is put on 3, which is free. A raise of A is then no act, and the next new identity after C takes 3",
+   "bound": 256,
+   "events": [
+    {
+     "restart": {
+      "record": {
+       "1": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "2": {
+        "id": "B",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "3": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       }
+      },
+      "bound": 256
+     },
+     "expect": {
+      "1": "adopted",
+      "2": "adopted",
+      "3": "free"
+     },
+     "holds": {
+      "1": {
+       "id": "A",
+       "state": "firing"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "A",
+     "expect": {
+      "none": "firing"
+     },
+     "holds": {
+      "1": {
+       "id": "A",
+       "state": "firing"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "A",
+       "state": "firing"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "D",
+     "expect": {
+      "put": 3,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "A",
+       "state": "firing"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      },
+      "3": {
+       "id": "D",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 1,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      },
+      "3": {
+       "id": "D",
+       "state": "firing"
+      }
+     }
+    }
+   ]
   }
  ],
  "views": [
@@ -3571,6 +3707,40 @@
    "held": [],
    "expect": {
     "takes": {},
+    "double": []
+   }
+  },
+  {
+   "note": "no run stated, as across a face: no slot is taken, A's two slots included, and nothing is a break",
+   "present_run": null,
+   "held": [
+    {
+     "slot": 0,
+     "run": "0007",
+     "seq": 3,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "run": "0007",
+     "seq": 4,
+     "alert_key": "abb089906038056a",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "run": "0008",
+     "seq": 1,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "a659f813308ad1da": null,
+     "abb089906038056a": null
+    },
     "double": []
    }
   }
