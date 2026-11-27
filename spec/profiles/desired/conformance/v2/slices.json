@@ -1,5 +1,5 @@
 {
- "description": "desired.v2 §2.10: a tool's finding of one role's report. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. reading.target is the target's address, reading.iface the interface of the target's contract that declares the role, reading.role the role, reading.requires that contract's requirements' names, reading.resources its resources as declarations.json's `reports` writes one, and reading.replies the replies of S4's GET over the target's state, as a tool's merge leaves them, one a key: {key, tag, hex}, a record's CH tag and its bytes. Every role's name here is its own slug. expect.found: none (no resource names the role, by its name or by a parameter in braces; or the one that does is invalid, expect.reasons its declaration's, the others of its contract its `others`; or it is declared and no reply is on its key); unreadable (two or more name the role, expect.why two_reports; or the reply's record is refused, expect.why core §7.6's token); one (the reply read, expect.findings §2.10's, a report with one being malformed). expect.key is the report's key where one resource names the role and is declared: zk2, the target, the interface, the kind token (state, or @state for an explicit resource) and the template, a parameter filled with the role's name; null otherwise.",
+ "description": "desired.v2 §2.10: a tool's finding of one role's report. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. reading.target is the target's address, reading.iface the interface of the target's contract that declares the role, reading.role the role, reading.requires that contract's requirements' names, reading.resources its resources as declarations.json's `reports` writes one, and reading.replies the replies of S4's GET over the target's state, as a tool's merge leaves them, one a key: {key, tag, hex}, a record's CH tag and its bytes. Every role's name here is its own slug. expect.found: none (no resource names the role, by its name or by a parameter in braces; or the one that does is invalid, expect.reasons its declaration's, the others of its contract its `others`; or it is declared and no reply is on its key); unreadable (two or more name the role, whatever their kinds, expect.why two_reports; or the reply's record is refused, expect.why core §7.6's token); one (the reply read, expect.findings §2.10's, a report with one being malformed). expect.key is the report's key where one resource names the role and is declared: zk2, the target, the interface, the kind token (state, or @state for an explicit resource) and the template, a parameter filled with the role's name; null otherwise. Case 16, of text 0.2, was written by hand from the text and read against the reference's finding, not computed twice.",
  "cases": [
   {
    "note": "the scenarios' worker.v2: the one resource that names the role, its reply read",
@@ -711,6 +711,59 @@
     "reasons": [
      "pointers"
     ]
+   }
+  },
+  {
+   "note": "a stream that names the role beside the state that does: two resources name it, whatever their kind, so unreadable (§0, §2.10). Written by hand for text 0.2",
+   "reading": {
+    "target": "lab/worker",
+    "iface": "worker.v2",
+    "role": "task",
+    "requires": [
+     "task",
+     "plan"
+    ],
+    "resources": [
+     {
+      "kind": "state",
+      "template": "desired/task",
+      "params": {},
+      "type": {
+       "kind": "packed",
+       "name": "Report",
+       "artifact": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd"
+      },
+      "annotations": {
+       "desired.report": "task"
+      }
+     },
+     {
+      "kind": "stream",
+      "template": "desired/task",
+      "params": {},
+      "type": {
+       "kind": "packed",
+       "name": "Report",
+       "artifact": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd"
+      },
+      "annotations": {
+       "desired.report": "task"
+      }
+     }
+    ],
+    "replies": [
+     {
+      "key": "zk2/lab/worker/worker.v2/state/desired/task",
+      "tag": 12,
+      "hex": "498003a00001900000003000"
+     }
+    ]
+   },
+   "expect": {
+    "found": "unreadable",
+    "key": null,
+    "reasons": [],
+    "why": "two_reports"
    }
   }
  ]

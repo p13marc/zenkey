@@ -1,5 +1,5 @@
 {
- "description": "desired.v2 §2.4, §2.6 to §2.10: one target's role, and the steps it takes, in order -> what each step does, and the report after the last, in the profile's reading (reports.json). Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A step is one of: {sample: {from, kind, version, revision?, document? | bytes?}}, a sample or an answer received from either path (§2.5), from \"owner\" (the author's own put, delete or snapshot entry) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" (a put, or a live entry) or \"delete\" (a delete, or a tombstone), its version <run>/<seq> (§2.4) or null for a sample with no envelope, revision the document type's own when it carries one, and a put's document, decoded JSON holding integers and strings only, equal when its members and values are (v1 §2.7's comparison, which v1's order.json pins), or its bytes in hex, equal byte for byte; {sample: {from: \"owner\", kind: \"no_entry\", snapshot: {run, asof}}}, a member's snapshot with no entry, its header's run and its asof (§2.8); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete or a snapshot with no entry reverted), refused whole, or failed partway (a refusal of a revert is read as a failure), a Refusal being {code, pointer?, detail?} with its indices; {finish: \"check\"}, the running act's put ends as §2.4's bound judges it: done when its revision is at most 4,294,967,295 or it has none, else refused whole, {code: invalid}; {call: true}, the target's own operation changed what is in force; {restart: true}, a new process of the target, holding nothing. The target starts holding nothing, its report {source: baseline, outcome: not_acted, last_known: false}. Two runs are the same when their widths and values are. The target remembers, per run, the highest seq it acted on or adopted a version of, or the asof of a snapshot with no entry it reverted on where that is higher; no case names more than 16 runs. expect.steps, for a put or a delete: unstamped (no envelope); older (a seq below the remembered run's highest, or at or below a remembered asof, or below the one held waiting's in its run); same_version (a seq equal to the remembered run's highest, or to the one held waiting's), or confirmed where that version is the one held, or held waiting, came from an archive, and this delivery is the owner's; held (admitted while an act runs: it replaces what waits); and, admitted otherwise, adopted when the target has acted on or adopted a version in this process and the last of them has the same document (two equal documents, or two that are no document: a delete, or a snapshot with no entry), else act or revert, the act starting. For a snapshot with no entry: no_verdict (the target holds no put's version of the snapshot's run: nothing held, a delete held, or another run), older (it holds one whose seq is above the asof), each judged of the version last acted on or adopted, the running act's while one runs, then of the one held waiting; else held while an act runs, or revert. For finish: done, or adopted, act or revert for a version held waiting, as it starts. called; restarted. expect.report is the report after the last step, as §2.10 builds it: observed the last version acted on or adopted, with its revision for a put that has one of at most 4,294,967,295, and absent after a revert on a snapshot with no entry; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline otherwise, no in_force; reverted: source baseline, no in_force; adopted: observed the adopted version, in_force too when it named the previous one, outcome, refusal and source kept; last_known true when the version acted on or adopted came from an archive and no owner's delivery of the same version confirmed it; call: source call, no in_force.",
+ "description": "desired.v2 §2.4, §2.6 to §2.10: one target's role, and the steps it takes, in order -> what each step does, and the report after the last, in the profile's reading (reports.json). Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A step is one of: {sample: {from, kind, version, revision?, document? | bytes?}}, a sample or an answer received from either path (§2.5), from \"owner\" (the author's own put, delete or snapshot entry) or \"archive\" (an archive's last-known, §2.9), its kind \"put\" (a put, or a live entry) or \"delete\" (a delete, or a tombstone), its version <run>/<seq> (§2.4) or null for a sample with no envelope, revision the document type's own when it carries one, and a put's document, decoded JSON holding integers and strings only, equal when its members and values are (v1 §2.7's comparison, which v1's order.json pins), or its bytes in hex, equal byte for byte; {sample: {from: \"owner\", kind: \"no_entry\", snapshot: {run, asof}}}, a member's snapshot with no entry, its header's run and its asof (§2.8); {finish: \"done\" | {refused: Refusal} | {failed: Refusal}}, the running act ends, applied whole (a put converged, a delete or a snapshot with no entry reverted), refused whole, or failed partway (a refusal of a revert is read as a failure), a Refusal being {code, pointer?, detail?} with its indices; {finish: \"check\"}, the running act's put ends as §2.4's bound judges it: done when its revision is at most 4,294,967,295 or it has none, else refused whole, {code: invalid}; {call: true}, the target's own operation changed what is in force; {restart: true}, a new process of the target, holding nothing. The target starts holding nothing, its report {source: baseline, outcome: not_acted, last_known: false}. Two runs are the same when their widths and values are. The target remembers, per run, the highest seq it acted on or adopted a version of, or the asof of a snapshot with no entry it reverted on where that is higher; no case names more than 16 runs. expect.steps, for a put or a delete: unstamped (no envelope); older (a seq below the remembered run's highest, or at or below a remembered asof, or below the one held waiting's in its run); same_version (a seq equal to the remembered run's highest, or to the one held waiting's), or confirmed where that version is the one held, or held waiting, came from an archive, and this delivery is the owner's; held (admitted while an act runs: it replaces what waits); and, admitted otherwise, adopted when the target has acted on or adopted a version in this process and the last of them has the same document (two equal documents, or two that are no document: a delete, or a snapshot with no entry), else act or revert, the act starting. For a snapshot with no entry: no_verdict (the target holds no put's version of the snapshot's run: nothing held, a delete held, or another run), older (it holds one whose seq is above the asof), each judged of the version last acted on or adopted, the running act's while one runs, then of the one held waiting; else held while an act runs, or revert. For finish: done, or adopted, act or revert for a version held waiting, as it starts. called; restarted. expect.report is the report after the last step, as §2.10 builds it: observed the last version acted on or adopted, with its revision for a put that has one of at most 4,294,967,295: absent after a revert on a snapshot with no entry that ends done, and the reverted document's, with its revision, after one that fails, since a snapshot names no version; converged: source desired, in_force the version; refused: source and in_force as they were; failed: source desired for a put, baseline otherwise, no in_force; reverted: source baseline, no in_force; adopted: observed the adopted version, in_force too when it named the previous one, outcome, refusal and source kept; last_known true when the version acted on or adopted came from an archive and no owner's delivery of the same version confirmed it; call: source call, no in_force. Cases 67 and 68, of text 0.2, were written by hand from the text and read against the reference's state machine, not computed twice.",
  "cases": [
   {
    "note": "a first put, acted on and converged (§2.6 step 2, §2.7)",
@@ -4247,6 +4247,111 @@
      },
      "observed": {
       "version": "0008/1"
+     }
+    }
+   }
+  },
+  {
+   "note": "a snapshot with no entry whose asof is the held version's own seq reverts: at or below the asof (§2.8). Written by hand for text 0.2",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0007/9",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0007",
+       "asof": 9
+      }
+     }
+    },
+    {
+     "finish": "done"
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "reverted",
+     "last_known": false
+    }
+   }
+  },
+  {
+   "note": "a revert on a snapshot with no entry that fails keeps the observed version it had, the document's it was reverting, with its revision (§2.8, §2.10). Written by hand for text 0.2",
+   "steps": [
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "put",
+      "version": "0041/7",
+      "document": {
+       "mode": "run",
+       "rate_hz": 10,
+       "revision": 1
+      },
+      "revision": 1
+     }
+    },
+    {
+     "finish": "done"
+    },
+    {
+     "sample": {
+      "from": "owner",
+      "kind": "no_entry",
+      "snapshot": {
+       "run": "0041",
+       "asof": 9
+      }
+     }
+    },
+    {
+     "finish": {
+      "failed": {
+       "code": "apply"
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "act",
+     "done",
+     "revert",
+     "done"
+    ],
+    "report": {
+     "source": "baseline",
+     "outcome": "failed",
+     "last_known": false,
+     "observed": {
+      "version": "0041/7",
+      "revision": 1
+     },
+     "refusal": {
+      "code": "apply"
      }
     }
    }

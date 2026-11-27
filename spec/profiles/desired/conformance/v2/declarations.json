@@ -1,5 +1,5 @@
 {
- "description": "desired.v2 §2.2, §2.10: a resolved resource -> its declaration. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `resources`: a contract's `uses` and a resource, written as desired.v1's declarations.json writes one (kind, explicit, template, params, annotations) -> its declaration as a desired resource: v1 §2.2's reading, word for word (not_this_profiles; invalid with v1's seven reasons in v1's order; declared with its targets), and one reason more, checked last: horizon_v1, a freshness.ttl_s that is an integer above 0 in a contract whose uses does not list freshness.v2, skipped where the resource is not_state. `reports`: the contract's requirements' names (`requires`), the desired.report values of its other resources (`others`), and a resource with its `type` ({kind, name, artifact}: the type's kind, its name in its artifact, and the artifact's id) -> its declaration as a report resource: not_this_profiles (no desired.report, whatever tables it holds); invalid, with reasons, in this order, a check that needs a value an earlier one found wrong skipped: not_state; value (not a string that is a role's name, with no brace in it and at least one character, or one parameter's name in braces; after it no check reads the value); not_a_role (a name that is no requirement); not_a_param (braces around a name that is no parameter of the template) or rest_param (around a rest parameter), after either of which param_not_role is skipped; param_not_role (a template parameter the value does not name: any parameter under a role's name, any other under a parameter's); not_report (the type is not the packed Report of an artifact schema.json publishes); pointers (desired.pointers, where present, is not an array of 1 to 255 strings, the first \"\", each empty or starting with / with every ~ followed by 0 or 1, none twice); details (desired.details, where present, is not an array of at most 255 strings of at least one character each); two_reports (one of `others` is a value in one of the two forms that names the same role, or names a parameter, or this one names a parameter); or declared, with role or param, and its two tables as a reader holds them: pointers ([\"\"] when absent) and details ([] when absent).",
+ "description": "desired.v2 §2.2, §2.10: a resolved resource -> its declaration. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `resources`: a contract's `uses` and a resource, written as desired.v1's declarations.json writes one (kind, explicit, template, params, annotations) -> its declaration as a desired resource: v1 §2.2's reading, word for word (not_this_profiles; invalid with v1's seven reasons in v1's order; declared with its targets), and one reason more, checked last: horizon_v1, a freshness.ttl_s that is an integer above 0 in a contract whose uses does not list freshness.v2, skipped where the resource is not_state. `reports`: the contract's requirements' names (`requires`), the desired.report values of its other resources (`others`), and a resource with its `type` ({kind, name, artifact}: the type's kind, its name in its artifact, and the artifact's id) -> its declaration as a report resource: not_this_profiles (no desired.report, whatever tables it holds); invalid, with reasons, in this order, a check that needs a value an earlier one found wrong skipped: not_state; value (not a string that is a role's name, with no brace in it and at least one character, or one parameter's name in braces; after it no check reads the value); not_a_role (a name that is no requirement); not_a_param (braces around a name that is no parameter of the template) or rest_param (around a rest parameter), after either of which param_not_role is skipped; param_not_role (a template parameter the value does not name: any parameter under a role's name, any other under a parameter's); not_report (the type is not the packed Report of an artifact schema.json publishes); pointers (desired.pointers, where present, is not an array of 1 to 255 strings, the first \"\", each empty or starting with / with every ~ followed by 0 or 1, none twice); details (desired.details, where present, is not an array of at most 255 strings of at least one character each); two_reports (one of `others` is a value in one of the two forms that names the same role, or names a parameter, or this one names a parameter), checked after every other reason but value, which leaves it no name; `others` are the values of every other resource that holds desired.report, whatever its kind; or declared, with role or param, and its two tables as a reader holds them: pointers ([\"\"] when absent) and details ([] when absent). Reports 34 to 37, of text 0.2, were written by hand from the text and read against the reference's reading, not computed twice.",
  "resources": [
   {
    "note": "the scenarios' tasking.v2: two target parameters, no horizon",
@@ -2144,6 +2144,130 @@
      "not_report",
      "pointers",
      "details"
+    ]
+   }
+  },
+  {
+   "note": "two_reports after not_state: a stream that names the role another resource names (§2.10). Written by hand for text 0.2",
+   "requires": [
+    "task",
+    "plan"
+   ],
+   "others": [
+    "task"
+   ],
+   "resource": {
+    "kind": "stream",
+    "template": "desired/task",
+    "params": {},
+    "type": {
+     "kind": "packed",
+     "name": "Report",
+     "artifact": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd"
+    },
+    "annotations": {
+     "desired.report": "task"
+    }
+   },
+   "expect": {
+    "declaration": "invalid",
+    "reasons": [
+     "not_state",
+     "two_reports"
+    ]
+   }
+  },
+  {
+   "note": "two_reports after not_a_role: another resource names the same name (§2.10). Written by hand for text 0.2",
+   "requires": [
+    "task",
+    "plan"
+   ],
+   "others": [
+    "tasks"
+   ],
+   "resource": {
+    "kind": "state",
+    "template": "desired/task",
+    "params": {},
+    "type": {
+     "kind": "packed",
+     "name": "Report",
+     "artifact": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd"
+    },
+    "annotations": {
+     "desired.report": "tasks"
+    }
+   },
+   "expect": {
+    "declaration": "invalid",
+    "reasons": [
+     "not_a_role",
+     "two_reports"
+    ]
+   }
+  },
+  {
+   "note": "two_reports after not_a_param: this one names a parameter, so it can report any role (§2.10). Written by hand for text 0.2",
+   "requires": [
+    "task",
+    "plan"
+   ],
+   "others": [
+    "plan"
+   ],
+   "resource": {
+    "kind": "state",
+    "template": "applied/{topic}",
+    "params": {
+     "topic": "string"
+    },
+    "type": {
+     "kind": "packed",
+     "name": "Report",
+     "artifact": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd"
+    },
+    "annotations": {
+     "desired.report": "{role}"
+    }
+   },
+   "expect": {
+    "declaration": "invalid",
+    "reasons": [
+     "not_a_param",
+     "two_reports"
+    ]
+   }
+  },
+  {
+   "note": "two_reports after rest_param: the same (§2.10). Written by hand for text 0.2",
+   "requires": [
+    "task",
+    "plan"
+   ],
+   "others": [
+    "plan"
+   ],
+   "resource": {
+    "kind": "state",
+    "template": "applied/{topic...}",
+    "params": {
+     "topic": "path"
+    },
+    "type": {
+     "kind": "packed",
+     "name": "Report",
+     "artifact": "sha256:1ac893a1cb14a102cc1b01ea526a317b19390a8ed6c40707f08754f4429532dd"
+    },
+    "annotations": {
+     "desired.report": "{topic}"
+    }
+   },
+   "expect": {
+    "declaration": "invalid",
+    "reasons": [
+     "rest_param",
+     "two_reports"
     ]
    }
   }
