@@ -2725,15 +2725,21 @@ def run_python_health(report: Report, exe: Path, consume: Path) -> None:
         conf = [x.arrival_ns for x in sa.of(ask) if x.kind == "put"]
         q = h.clock_from(sa, "lab/ahead")
         held_beats = [a_ for t, a_ in sa.beats.get(("lab/ahead", "health.v1"), []) if t > t_fault and "read" in a_]
+        # freshness.v2 0.12 §2.10 (core 0.113, round 120): a held heartbeat
+        # carries the ahead time, where 0.11's carried none ("its time
+        # unknown"). health_scenarios took it in round 120; this check, run
+        # again in round 122, had not.
+        from . import heartbeat
+
         report.check(run, "step 2 (health.v1 0.9, scenarios §4): no status put after the fault; the fault again "
                           "within 31 s; its tokens present; every heartbeat since vouches for the status, its time "
-                          "unknown; at 65 s S judges healthy, ok, the heartbeats confirming it, and the clock question "
-                          "answers yes",
+                          "the ahead time (freshness.v2 §2.10, 0.12); at 65 s S judges healthy, ok, the heartbeats "
+                          "confirming it, and the clock question answers yes",
                      not puts_after and gap is not None and gap <= 31 and len(pres.instances) == 1
-                     and bool(held_beats) and all(a_.get("time") is None for a_ in held_beats)
+                     and bool(held_beats) and all(a_.get("time") == heartbeat.AHEAD for a_ in held_beats)
                      and a.expect() == {"verdict": "healthy", "reason": "ok", "level": "ok"} and q == "yes",
                      f"{len(puts_after)} puts after, fault gap {gap}, tokens {len(pres.instances)}, {a.expect()}, "
-                     f"clock ahead {q}")
+                     f"clock ahead {q}, the held heartbeats' times {sorted({str(a_.get('time')) for a_ in held_beats})}")
         line = ahead.command("clock-offset 0")
         t_fix = time.monotonic_ns()
         _sleep_until(t_fix + 35 * fr.NS)

@@ -69,11 +69,13 @@ PERIOD_S = 0.1
 
 def policy(arq: bool) -> str:
     """The routers' link.v2 face policy for the run: one face, ``radio``,
-    ``reply_timeout_ms = 3000``, at zenoh's own lease and keep-alives."""
+    ``reply_timeout_ms = 3000``, at zenoh's own lease and keep-alives. Its
+    binding is the zenoh zk2py's routers run, ``zenoh-1.10.2`` since round
+    122 (link.v2 0.25)."""
     return f'''profile  = "link.v2"
 system   = "lab"
 services = ["faced"]
-binding  = "zenoh-1.10.1"
+binding  = "zenoh-1.10.2"
 
 [transport]
 lease_ms             = 10000

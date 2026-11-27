@@ -1,6 +1,6 @@
 """``freshness.v2``'s ``scenarios-v2.md`` §8, "An owner heartbeat" (text
 0.10; §2.4, §2.5, §2.9; ``link.v2`` §2.9), as its text words it, on
-in-process zenoh-python routers (zenoh 1.10.1; #609, round 115):
+in-process zenoh-python routers (zenoh 1.10.1, 1.10.2 since round 122; #609, round 115):
 ``python -m zk2py.freshness_v2_s8_live [--pairing …] [--only 12|3|4|cause|forms] [--dump <dir>]``.
 Run with no ``--only``, it runs §8's four steps: 12, 3 and 4.
 
@@ -101,11 +101,13 @@ def _variant() -> str:
 #: Step 3's policy: "A `link.v2` face policy names one face, `rf`, of R1,
 #: toward the far principal F: `expose = "link"`, `interval_s = 2`, and a
 #: `[transport]` its linter accepts." The transport is link's scenarios'
-#: Conventions' (``spec/profiles/link/scenarios-v2.md``).
+#: Conventions' (``spec/profiles/link/scenarios-v2.md``). Its binding is the
+#: zenoh zk2py's routers run, ``zenoh-1.10.2`` since round 122 (link.v2 0.25
+#: §2.4: "A policy names the zenoh its router runs").
 POLICY_V2 = """profile  = "link.v2"
 system   = "lab"
 services = ["w2"]
-binding  = "zenoh-1.10.1"
+binding  = "zenoh-1.10.2"
 
 [transport]
 lease_ms             = 2000

@@ -61,6 +61,20 @@ from typing import Any
 import socket
 
 from .blackbox import BLACKBOX, workdir
+
+
+def _zp() -> str:
+    """The zenoh-python a run loads, as its checks name it: 1.10.2 since
+    round 122's pin, 1.10.1 before."""
+    from importlib.metadata import version
+
+    return f"zenoh-python {version('eclipse-zenoh')}"
+
+
+#: link.v2 0.25 §2.4: "The two stock bindings read the same." Each stock
+#: binding's file is read through zenoh's own loader by the reference's
+#: ``zenctl check face`` (§2.19's reference note), so each is run here.
+STOCK = ("zenoh-1.10.1", "zenoh-1.10.2")
 from .stamp_live import (ENROLLMENT, OPER, RADIO, Heard, Relay, _close_all, _codes, conventions_policy, near_config,
                          open_router)
 
@@ -1015,7 +1029,7 @@ def _null(work: str) -> list[Result]:
         except Exception as e:  # noqa: BLE001 - zenoh's refusal, whatever its type
             loaded, held = False, str(e).strip().splitlines()[0][:120]
         left_out = key == link_v2.NULL_LEFT_OUT
-        out.append((f"a null {path}: zenoh-python 1.10.1 {'loads the file' if left_out else 'refuses the file'}",
+        out.append((f"a null {path}: {_zp()} {'loads the file' if left_out else 'refuses the file'}",
                     loaded == left_out, f"loaded {loaded}: {held}"))
         mine = [f["code"] + " " + f["at"] for f in link_v2.check_transport(
             stock, link_v2.read_config(nulled))["findings"]]
@@ -1032,29 +1046,35 @@ def _null(work: str) -> list[Result]:
         # refuses a null at each of the seven. link.v2 0.20 §2.19: that tool
         # "names zenoh's refusal, and asks none of §5's questions of that
         # file. It read no key, so it reports no transport_differs".
-        code, rows, err, lines = _zenctl_face(work, f"stock-{key}", stock, nulled)
-        if left_out:
-            out.append((f"a null {path}, binding zenoh-1.10.1: zenctl check face reports no transport finding",
-                        rows == [] and code != 2, f"exit {code}; {rows}"))
-        else:
-            out.append((f"a null {path}, binding zenoh-1.10.1: zenctl check face, through zenoh's loader, names "
-                        "zenoh's refusal of the file, asks no question (no row at all) and ends at exit 2 "
-                        "(§2.19, \"A file zenoh refuses\")",
-                        code == 2 and "zenoh refused the config" in err and rows == [] and lines == 0,
-                        f"exit {code}; {rows}; {lines} lines of stdout; {err}"))
+        for binding in STOCK:
+            text = stock.replace('"zenoh-1.10.1"', f'"{binding}"')
+            code, rows, err, lines = _zenctl_face(work, f"stock-{binding}-{key}", text, nulled)
+            if left_out:
+                out.append((f"a null {path}, binding {binding}: zenctl check face reports no transport finding",
+                            rows == [] and code != 2, f"exit {code}; {rows}"))
+            else:
+                out.append((f"a null {path}, binding {binding}: zenctl check face, through zenoh's loader, names "
+                            "zenoh's refusal of the file, asks no question (no row at all) and ends at exit 2 "
+                            "(§2.19, \"A file zenoh refuses\")",
+                            code == 2 and "zenoh refused the config" in err and rows == [] and lines == 0,
+                            f"exit {code}; {rows}; {lines} lines of stdout; {err}"))
     # "as a string is": the control, a string lease under each binding.
     stringed = json.loads(json.dumps(conf))
     stringed["transport"]["link"]["tx"]["lease"] = "2000"
     code, rows, err, lines = _zenctl_face(work, "stock-string", stock, stringed)
+    code2, rows2, err2, lines2 = _zenctl_face(work, "stock2-string", stock.replace('"zenoh-1.10.1"', '"zenoh-1.10.2"'),
+                                              stringed)
     stringed_fork = json.loads(json.dumps(conf_fork))
     stringed_fork["transport"]["link"]["tx"]["lease"] = "2000"
     code_f, rows_f, _ = _zenctl_transport(work, "fork-string", fork, stringed_fork)
     out.append(("the control, a string lease (\"and so is one with a string for its lease\"): zenctl check face "
-                "names zenoh's refusal and asks nothing under zenoh-1.10.1, and reports transport_differs at the "
-                "key under zm-1.10.2-r1",
+                "names zenoh's refusal and asks nothing under zenoh-1.10.1 and zenoh-1.10.2, and reports "
+                "transport_differs at the key under zm-1.10.2-r1",
                 code == 2 and "zenoh refused the config" in err and rows == [] and lines == 0
+                and code2 == 2 and "zenoh refused the config" in err2 and rows2 == [] and lines2 == 0
                 and rows_f == ["transport_differs transport/link/tx/lease"] and code_f == 1,
-                f"zenoh-1.10.1: exit {code}; {rows}; {lines} lines; {err}; zm-1.10.2-r1: exit {code_f}; {rows_f}"))
+                f"zenoh-1.10.1: exit {code}; {rows}; {lines} lines; {err}; zenoh-1.10.2: exit {code2}; {rows2}; "
+                f"{lines2} lines; zm-1.10.2-r1: exit {code_f}; {rows_f}"))
     mine_s = [f["code"] + " " + f["at"] for f in link_v2.check_transport(stock, link_v2.read_config(stringed))["findings"]]
     out.append(("the same string lease read as data by zk2py's check: transport_differs at the lease, and no "
                 "wait_under_lease (\"Both are true of one file\")", mine_s == ["transport_differs transport.lease_ms"],
@@ -1064,11 +1084,15 @@ def _null(work: str) -> list[Result]:
     # which no reading as data can open either (§5's "Not asked").
     bogus = json.loads(json.dumps(conf))
     bogus["mode"] = "bogus"
-    code, rows, err, lines = _zenctl_face(work, "stock-mode", stock, bogus)
-    out.append(("a file zenoh refuses at none of the eight keys (a mode that is none), binding zenoh-1.10.1: zenctl "
-                "check face names zenoh's refusal, prints no row and ends at exit 2",
-                code == 2 and "zenoh refused the config" in err and lines == 0, f"exit {code}; {lines} lines; {err}"))
-    for binding, text in (("zenoh-1.10.1", stock), ("zm-1.10.2-r1", fork)):
+    for binding in STOCK:
+        code, rows, err, lines = _zenctl_face(work, f"stock-mode-{binding}",
+                                              stock.replace('"zenoh-1.10.1"', f'"{binding}"'), bogus)
+        out.append((f"a file zenoh refuses at none of the eight keys (a mode that is none), binding {binding}: "
+                    "zenctl check face names zenoh's refusal, prints no row and ends at exit 2",
+                    code == 2 and "zenoh refused the config" in err and lines == 0,
+                    f"exit {code}; {lines} lines; {err}"))
+    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", stock.replace('"zenoh-1.10.1"', '"zenoh-1.10.2"')),
+                          ("zm-1.10.2-r1", fork)):
         code, rows, err, lines = _zenctl_face(work, f"nojson-{binding}", text, "{ this is not : json5 ")
         out.append((f"a file that is no JSON5, binding {binding}: zenctl check face names its loader's refusal, "
                     "prints no row and ends at exit 2 (§5: \"Not asked: the file is one the tool's loader "
@@ -1096,8 +1120,8 @@ def _null(work: str) -> list[Result]:
         r = open_router(_nulled(conf, "routing/interests/timeout"))
         zid = str(r.zid())
         r.close()
-        out.append(("a router opens from the file with a null routing/interests/timeout (zenoh-python 1.10.1, "
-                    "port 0)", True, f"zid {zid}"))
+        out.append((f"a router opens from the file with a null routing/interests/timeout ({_zp()}, port 0)",
+                    True, f"zid {zid}"))
     except Exception as e:  # noqa: BLE001
         out.append(("a router opens from the file with a null routing/interests/timeout", False, str(e)[:200]))
     return out
@@ -1164,15 +1188,16 @@ def _peer(work: str) -> list[Result]:
              ("a string lease", tx("2000", 4), ["peer_differs transport.lease_ms"]),
              ("a null keep_alive", tx(2000, None), ["peer_differs transport.keep_alive"])]
     refused_by_zenoh = {"a null lease", "a string lease", "a null keep_alive"}
-    for binding, text in (("zenoh-1.10.1", stock), ("zm-1.10.2-r1", fork)):
+    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", stock.replace('"zenoh-1.10.1"', '"zenoh-1.10.2"')),
+                          ("zm-1.10.2-r1", fork)):
         conf, _ = near_config(text, work, "tcp/127.0.0.1:0", face)
         for what, peer, want in cases:
             mine = sorted(f"{f['code']} {f['at']}" for f in link_v2.check_transport(
                 text, link_v2.read_config(conf), peer=link_v2.read_config(peer))["findings"])
             code, rows, lines, err = _zenctl_peer(work, f"{binding}-{what.replace(' ', '-')}", text, conf,
                                                   json.dumps(peer))
-            if binding == "zenoh-1.10.1" and what in refused_by_zenoh:
-                out.append((f"the far end's file with {what}, binding zenoh-1.10.1: zenctl check face, through "
+            if binding in STOCK and what in refused_by_zenoh:
+                out.append((f"the far end's file with {what}, binding {binding}: zenctl check face, through "
                             "zenoh's loader, names zenoh's refusal of the far end's file and ends at exit 2 with no "
                             "row at all, the router's own rows unasked too; zk2py's check, as data, reports "
                             f"{want} (§2.19 \"A file zenoh refuses\", F-567)",
@@ -1258,7 +1283,8 @@ def _mode(work: str) -> list[Result]:
         ("a router's value off beside a mode name that is none of the three, which the text does not name", ...,
          {"router": False, "relay": True}, [], False),
     ]
-    for binding, text in (("zenoh-1.10.1", stock), ("zm-1.10.2-r1", fork)):
+    for binding, text in (("zenoh-1.10.1", stock), ("zenoh-1.10.2", stock.replace('"zenoh-1.10.1"', '"zenoh-1.10.2"')),
+                          ("zm-1.10.2-r1", fork)):
         conf, _ = near_config(text, work, "tcp/127.0.0.1:0", face)
         for n, (what, mode, stamping, want, said) in enumerate(shapes):
             doc = json.loads(json.dumps(conf))
@@ -1269,13 +1295,13 @@ def _mode(work: str) -> list[Result]:
             mine = sorted(f"{f['code']} {f['at']}" for f in link_v2.check_transport(
                 text, link_v2.read_config(doc))["findings"])
             code, rows, err, lines = _zenctl_findings(work, f"{binding}-mode-{n}", text, doc)
-            if binding == "zenoh-1.10.1":
+            if binding in STOCK:
                 try:
                     zenoh.Config.from_json5(json.dumps(doc, indent=1))
                     loaded = "loads"
                 except Exception as e:  # noqa: BLE001 - zenoh's refusal, whatever its type
                     loaded = "refuses: " + str(e).strip().splitlines()[0][:90]
-                out.append((f"{what}, binding zenoh-1.10.1: zenoh-python 1.10.1 refuses the file, and zenctl check "
+                out.append((f"{what}, binding {binding}: {_zp()} refuses the file, and zenctl check "
                             "face, through zenoh's loader, names zenoh's refusal and ends at exit 2 with no row, the "
                             f"loader's layer; zk2py's check, as data, reports {want or 'no finding'}"
                             + ("" if said else " (zk2py's reading)"),
