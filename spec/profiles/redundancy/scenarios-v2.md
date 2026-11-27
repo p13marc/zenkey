@@ -7,11 +7,11 @@ a setup, steps, and expected observations. §1 to §12 are
 stamp or an answer changes. §13 to §15 are new. §12 is a tool's, and the
 others the runtime's.
 
-**Who runs them.** The reference is to run §1 to §11 and §13 to §15 as
-tests of `zenkey`, one test per section, named after it, beside v1's in
-`zenkey/tests/profile_redundancy.rs`. It is to run §12 as a test of
-`zenctl` and of the doctor (`zenctl/tests/live_zk2.rs`). No
-implementation runs them yet.
+**Who runs them.** The reference runs §1 to §11 and §13 to §15 as tests
+of `zenkey`, one per section, named after it. They are in
+`zenkey/tests/profile_redundancy_v2.rs`. §12 is to run as a test of
+`zenctl` and of the doctor (`zenctl/tests/live_zk2.rs`). No tool runs it
+yet.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.10) are v2.md's rules; `v1 §n`
@@ -25,9 +25,9 @@ implementation runs them yet.
   a put that arrives unstamped (core §4.1).
 - **The contracts.** `ledger-run.v1` is `ledger.v1` at minor 1, its
   `uses` moved to this major. `valve-run.v1` is `valve.v1` at minor 1,
-  moved the same way. The reference is to keep them as
+  moved the same way. The reference keeps them as
   `zenkey/tests/contracts/ledger-run.v1.toml` and `valve-run.v1.toml`,
-  beside v1's, unchanged:
+  beside v1's:
 
   ```toml
   # ledger-run.v1.toml: ledger.v1's revision 1.1, a single writer fenced by run
