@@ -1,0 +1,24 @@
+# core §9.2, cascades 7 and 8: E044 reads where a resource places a packed
+# type, never the type's declaration, so it stops neither E051 nor E047.
+# Zero, at the tag 0 and ending in a marker, is an explicit stream's type:
+# E044 and E051. A frame resource's attachment is Zero too: E044 there,
+# and E047 for its record type's marker. Unnamed, which no resource names,
+# is the second E051. Two E044, one E047 and two E051.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+
+[schemas]
+packed = ["schemas/packed/tag.json"]
+
+[resources.zero]
+kind     = "stream"
+explicit = true
+type     = "packed:Zero"
+
+[resources."frames/zero"]
+kind       = "stream"
+type       = "packed:Zero"
+attachment = "packed:Zero"
+frame      = { records = 1 }
