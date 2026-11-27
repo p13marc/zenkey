@@ -7,6 +7,61 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## 0.21 — 2026-11-28: §2.3 and §2.9: the plan warns of a service whose owner heartbeats the deployment turns on behind a face, `owner_heartbeat_denied`, no keyword changed (#1145)
+
+Found by review-bot on #1144 (#1110's H3). Under this text no owner
+heartbeat crosses a face (§2.9). An interface its owner's owner
+heartbeats cover sends no heartbeat of its own (`freshness.v2` §2.4). So
+an owner that turns them on, while a heartbeat of one of its interfaces
+crosses such a face, leaves the far side with no confirmation: its
+crossing members read stale (`freshness.v2` §2.9). That is the safe
+side, and it was silent. The runtime's option said to leave it off
+behind a `link.v1` face, and an owner cannot see a face policy.
+
+**What changed.**
+- **§2.3, the plan's input.** The deployment may name the listed
+  services whose owner heartbeats it turns on. The plan reads that for
+  one warning alone. Where it names none, every listed service's owner
+  heartbeats are read as off.
+- **§2.3's table of warnings:** `owner_heartbeat_denied`, `at` the
+  service.
+- **§2.9, "No owner heartbeat crosses".** A new item says when the plan
+  warns, once for the service, and why.
+  - **Why per service.** Which interfaces an owner heartbeat covers is
+    its owner's choice, among those its catalog lists. An interface it
+    leaves out keeps its heartbeat. The plan sees no catalog, so it
+    names the service, and still lists the crossing heartbeats as
+    liveness evidence.
+  - "No evidence, no finding" is now "No evidence": an owner heartbeat
+    is still no liveness evidence here.
+
+**What deliberately did not change.**
+- **No owner heartbeat crosses,** as before. The fix is the
+  deployment's: the option off, or the face under `link.v2`, whose
+  `link` key crosses.
+- **No plan moved.** The denies, the windows and the liveness evidence
+  are as they were. A deployment that names no service draws no
+  warning, so every case before stands.
+- **The descriptor is not read.** A running owner that sends no owner
+  heartbeat lists `stream/heartbeats/{class}` `unavailable`
+  (`freshness.v2` §3). A generator reads no bus, so the plan takes the
+  deployment's word. #1145 offered both; its "done when" asks for the
+  deployment's.
+- **No keyword.** The warning is a plan's, as `history_on_frame` is.
+  `RULES.md` is unchanged.
+- **The header** is still written against core 0.32.
+
+**The case.** `plan.json`'s case 18 is case 17's face and deployment,
+with both services' owner heartbeats on. `b1` implements `beacon.v2`,
+whose heartbeat crosses: one warning, at `b1`. `b2`'s interfaces have no
+heartbeat, `old.v1` using `freshness.v1` and `quiet.v2` no collection
+with a horizon: none. The rest is case 17's plan. Written by hand from
+it, never blessed. 19 cases.
+
+**The reference.** An enrollment's `[[service]]` takes `owner_heartbeat =
+true`, which `zenctl acl gen --face-policy` and `zenctl check face` read
+(`zenkey_model::link::Deployment::owner_heartbeats`).
+
 ## link.v2 0.26 — 2026-11-27: editorial: a `desired.v2` resource of a contract that uses `redundancy.v1` keeps its floor, the mode read alone decides a per-mode value, and the scenarios' N runs zenoh 1.10.2, no keyword changed (#986, #1165)
 
 zk2py's rounds 117 to 122 found four sentences or cases short
