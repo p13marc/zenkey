@@ -32797,6 +32797,8 @@ deployments, each an enrollment whose `[[service]]` says
   `link.v1`'s, or said why not ("It restates `link.v1` text 0.16 still.
   0.17 changed no rule."). The 0.27 entry says neither.
 - **Fix:** "text 0.21". Or the entry says why it stays 0.20.
+- **Status: resolved in its PR:** the header restates `link.v1` text 0.21,
+  and link.v2 0.27's entry says so.
 
 ### Not run
 

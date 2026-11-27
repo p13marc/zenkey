@@ -5615,10 +5615,10 @@ def _round126_owner_heartbeats(root: Path, flat: Any, missing: Any) -> list[tupl
                               "does."),
                 [[18], ["b1"], [], True, [53]]))
     lv1 = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", l1)
-    out.append(("F-620 (round 126): link.v2's header restates link.v1 at text 0.20, while link.v1 is at 0.21 and "
+    out.append(("F-620 (round 126, resolved in its PR): link.v2's header restates link.v1 at text 0.21, as link.v1 is, and "
                 "link.v2 0.27's §0 names 0.21's warning; the earlier entries move that line with each link.v1 rule "
                 "(\"The header restates link.v1 text 0.20\", at link.v2 0.19)",
-                [lv1.group(1) if lv1 else None, "It restates [`link.v1`](v1.md), text 0.20, by reference (§0)." in l2]
+                [lv1.group(1) if lv1 else None, "It restates [`link.v1`](v1.md), text 0.21, by reference (§0)." in l2]
                 + missing(l2, "- §2.9's \"No owner heartbeat crosses\" is replaced, and with it the warning "
                               "`owner_heartbeat_denied`")
                 + missing(flat("profiles/link/CHANGELOG.md"), "**The header** restates `link.v1` text 0.20, and is "

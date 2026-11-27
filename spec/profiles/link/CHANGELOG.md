@@ -36,6 +36,8 @@ by hand from it. 54 cases, after 0.26's case 52.
 states it for its link.v2 faces too. The text says that it warns there
 of nothing, rather than leave a reader to infer it.
 
+**The header** restates `link.v1` text 0.21 (zk2py's round 126, F-620).
+
 ## 0.21 — 2026-11-28: §2.3 and §2.9: the plan warns of a service whose owner heartbeats the deployment turns on behind a face, `owner_heartbeat_denied`, no keyword changed (#1145)
 
 Found by review-bot on #1144 (#1110's H3). Under this text no owner
