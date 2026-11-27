@@ -951,6 +951,12 @@ class Naming:
             return self.word
         if run is not None and run in self.known:
             return self.known[run]
+        if run is not None and run in self.failed:
+            # §2.5: a run whose own read failed "waits for the next read,
+            # never for a guess", even after a silent start read made the
+            # deployment's word stand for runs no descriptor named
+            # (review-bot on #1171)
+            return None
         return self.provisioned if self.silent else None
 
     def begin(self) -> bool:

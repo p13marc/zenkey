@@ -131,6 +131,11 @@ def run_owner(endpoint: str, catalog_path: str) -> int:
                 o._instance_entities[0].undeclare()
                 key = o.instance_key
                 doc = o._docs.get(o.instance) if hasattr(o, "_docs") else None
+                if doc is None:
+                    # a rig that would answer nothing reads as silence, not as
+                    # a late answer: refuse it at once (review-bot on #1171)
+                    print("error: slow: the owner holds no descriptor to answer with", flush=True)
+                    continue
 
                 def late(q: Any, key: str = key) -> None:
                     def answer() -> None:

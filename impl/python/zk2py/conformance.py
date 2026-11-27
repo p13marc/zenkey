@@ -5382,11 +5382,13 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "stands over the word; a subscriber given no word, or several catalogs and none named for the owner, "
                 "reads nothing through silence; zenoh's own Timeout, a slow owner's read, is an error reply and "
                 "fails, as any other does (F-616, answered in the mend of round 125: round 125's first writing read "
-                "it as no reply)",
+                "it as no reply); and a run whose own read failed reads nothing, even after a silent start read "
+                "(review-bot on #1171)",
                 [naming("aabbccdd", [(None, [], False)]), naming("aabbccdd", [(None, [], True)]),
                  naming("aabbccdd", [(None, [{"run": "0007", "catalog": "11223344"}], False), ("0007", [], False)],
                         "0007"),
                  naming(None, [(None, [], False)]), naming("aabbccdd", [(None, [], True), ("0009", [], False)]),
+                 naming("aabbccdd", [(None, [], False), ("0009", [], True)]),
                  [f2.failed_by_error([b"Timeout"]), f2.failed_by_error([]), f2.failed_by_error([b"denied"]),
                   f2.failed_by_error([b"Timeout", b"denied"])],
                  f2.Provider.__init__.__defaults__ is not None]
@@ -5402,6 +5404,7 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "error reply, and fails. It waits for the next read, never for a guess.")
                 + [x for x in ("or a slow one's. So it is read as one.",) if x in fv2],
                 [["aabbccdd"], [None], ["11223344", False, "11223344"], [None], [None, True, "aabbccdd"],
+                 ["aabbccdd", True, None],
                  [True, False, True, True], True]))
 
     # -- core 0.115 and observer 0.36 ---------------------------------------------------
