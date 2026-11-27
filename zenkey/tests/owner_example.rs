@@ -2035,7 +2035,8 @@ async fn the_owner_example_implements_desired() {
         seeds.starts_with("desired seeds ")
             && seeds.contains(" answered=")
             && seeds.contains(" author=")
-            && seeds.contains(" archive=-"),
+            && seeds.contains(" archive=-")
+            && seeds.contains(" revision=given"),
         "{seeds}"
     );
     let gets = a.ask("desired gets lab/worker").await;
@@ -2178,7 +2179,10 @@ fn the_help_documents_the_desired_surface() {
         "desired acts <n> seeds=<n> held=<true|false>",
         "desired gets <key> <n>",
         "desired seeds <n> answered=<n> author=<present|absent|incomplete|not-read|not-made>",
-        "archive=<-|answered|nothing> [because <why>]",
+        "archive=<-|answered|nothing> revision=<given|another:<fp>|stopped:<major>:<fp>|",
+        "word|unread|not-read> [because <why>]",
+        "--desired-word-alone",
+        "desired seeds says revision=stopped:<major>:<fingerprint>",
         "desired seeds 0 none before the first",
         "{\"revision\": 0, \"mode\": \"idle\", \"rate_hz\": 1}",
     ] {

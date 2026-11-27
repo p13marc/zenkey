@@ -591,11 +591,33 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `desired::REVISION_LINE`. `desired_config` feeds `config.v1`'s or
   `config.v2`'s owner from a `desired.v2` author with no code of its own
   (§2.16; `config.v2` §2.18 names `desired.v1` alone). The three places
-  the text is silent keep the model's choices. `tests/profile_desired_v2.rs`
-  is `scenarios-v2.md` §1–§8 and §10–§15 over `tests/contracts/{tasking,
+  the text is silent keep the model's choices. **Both majors** (text 0.2
+  §2.18, zk2py rounds 116–123): `Target::declare` refuses, before any
+  declaration, a role whose report resource is of the other major than
+  its author's given revision (`report_major`: a `desired.report` or the
+  packed `Report` is v2's, a `json:desired.v1.Report` v1's), naming the
+  role and §2.18, and `start()` refuses too. After the start a target
+  reads its author's revision from its descriptor: every descriptor at
+  the start's seed and at each appearance or withdrawal
+  (`answer::owner_revisions`), and a version's run it does not hold once
+  (`answer::owner_revision`); a fingerprint it was not given is retrieved
+  (`answer::retrieved`) for its major. A version under a run whose
+  revision is of the other major is never judged (`TargetInner::admits`,
+  logged once a run): the role is stopped while the descriptor names it,
+  its report as it was. No descriptor, a read that failed or a revision
+  not retrieved take the deployment's word. `Seeded::revision`
+  (`AuthorRevision::{NotRead, Word, Given, Another, Stopped, Unread}`)
+  says what it read, and the owner example's `desired seeds` writes it
+  `revision=…`. `TargetStartup::word_alone` (`by_word_alone`, the owner
+  example's `--desired-word-alone`) plays a target built before this
+  major, which reads the given revision alone. The runtime holds one
+  report resource per role, so a role reports one major. `tests/profile_desired_v2.rs`
+  is `scenarios-v2.md` §1–§8 and §10–§16 over `tests/contracts/{tasking,
   worker}.v2.toml` (§13 a played author, §14 an author on a runtime of its
   own that the test stops, behind a router denying the target's session
-  `@zk`), with `config_v2_as_a_target`; the owner example's `--desired-v2`,
+  `@zk`; §16's four runs at once, A and B by `by_word_alone` through R1
+  with timestamping off and on, C both directions of the refusal, D the
+  stop), with `config_v2_as_a_target`; the owner example's `--desired-v2`,
   `--desired-ttl <s>` and `--desired-timeout-ms <ms>` drive it (`desired
   gets` listing `<held>=<unchanged|whole>`, `desired delete-unheld`,
   `desired watch`).

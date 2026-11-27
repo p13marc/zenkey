@@ -120,6 +120,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 use zenkey_model::authoring::Encoding as WireEncoding;
 use zenkey_model::bundle::Bundle;
+use zenkey_model::canonical::Fingerprint;
 use zenkey_model::contract::{Body, Contract, Resource};
 use zenkey_model::desired as model;
 use zenkey_model::desired::v2 as model2;
@@ -1378,6 +1379,12 @@ pub struct TargetStartup {
     pub timeout: Duration,
     /// How often presence is read without a watch session.
     pub poll: Duration,
+    /// Reads its author's revision by the deployment's word alone, the
+    /// author's [`Implementation`] given, and never by its descriptor:
+    /// what a target built before `desired.v2` does (`desired.v2` §2.18,
+    /// "Targets first"), which `scenarios-v2.md` §16's runs A and B play.
+    /// Such a target is not `desired.v2`'s. `false` by default.
+    pub word_alone: bool,
 }
 
 impl Default for TargetStartup {
@@ -1388,6 +1395,7 @@ impl Default for TargetStartup {
             reread: None,
             timeout: Duration::from_secs(1),
             poll: PRESENCE_POLL,
+            word_alone: false,
         }
     }
 }
@@ -1411,6 +1419,15 @@ impl TargetStartup {
     #[must_use]
     pub fn with_reread(mut self, period: Duration) -> Self {
         self.reread = Some(period);
+        self
+    }
+
+    /// Reading its author's revision by the deployment's word alone
+    /// ([`TargetStartup::word_alone`]): a target built before
+    /// `desired.v2`, played.
+    #[must_use]
+    pub fn by_word_alone(mut self) -> Self {
+        self.word_alone = true;
         self
     }
 
@@ -1519,6 +1536,37 @@ pub enum AuthorSeen {
     NotMade(String),
 }
 
+/// What a target read of its author's revision (`desired.v2` §2.18): the
+/// one its author's descriptor names for a version's run, retrieved by
+/// its fingerprint (core §8.4) where it is not the one the target was
+/// given, or the deployment's word where no descriptor reaches the target.
+/// Read at the start and each time the author's instance token appears,
+/// and for a version under a run read for the first time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthorRevision {
+    /// Not read: the kill switch, or a target that reads the deployment's
+    /// word alone ([`TargetStartup::word_alone`]).
+    NotRead,
+    /// No descriptor of the author's reached the target, as across a
+    /// constrained face: the revision the target was given, the
+    /// deployment's word, stands.
+    Word,
+    /// The author's descriptor names the revision the target was given.
+    Given,
+    /// It names another revision of the author's interface, whose
+    /// fingerprint this is, of the role's major: its versions are ordered
+    /// as the role's are.
+    Another(String),
+    /// It names a revision of the other major, whose fingerprint this is,
+    /// which the role's report cannot report. While it does, the role is
+    /// stopped: the target acts on none of that author's versions under
+    /// it, and its report stays as it was (§2.18).
+    Stopped { fingerprint: String, major: Major },
+    /// Not read: the GET of its descriptors failed, or a revision it
+    /// names could not be retrieved. No word, so the deployment's stands.
+    Unread,
+}
+
 /// What the last seed found (§2.5, §2.9).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seeded {
@@ -1528,6 +1576,10 @@ pub struct Seeded {
     pub author: AuthorSeen,
     /// Whether the archive was read, and answered.
     pub archive: Option<bool>,
+    /// What the target read of its author's revision (`desired.v2`
+    /// §2.18): the revisions its author's descriptors name now, a stopped
+    /// one first.
+    pub revision: AuthorRevision,
 }
 
 /// Why a seed is made.
@@ -1544,6 +1596,14 @@ enum Why {
     /// `desired.v2`'s watch: its author's heartbeat's section moved, or it
     /// expects none (`desired.v2` §2.5).
     Watch,
+}
+
+impl Why {
+    /// Whether the seed reads every descriptor of the author's again
+    /// first (§2.18): at the start, and when its instance tokens moved.
+    fn reads_revisions(self) -> bool {
+        matches!(self, Self::Start | Self::Appeared | Self::Withdrawn)
+    }
 }
 
 /// One sample or reply of the slice, as received: a document under a zk2c
@@ -1625,8 +1685,15 @@ pub struct Target {
 
 struct TargetInner {
     role: String,
-    /// Which major the author's revision uses (`desired.v2` §2.18).
+    /// Which major the author's revision uses (`desired.v2` §2.18): the
+    /// one the target was given, the deployment's word.
     major: Major,
+    /// The author's interface, and the fingerprint of the revision of it
+    /// the target was given.
+    author_iface: IfaceId,
+    given: String,
+    /// What the author's descriptors named of its revision (§2.18).
+    revisions: tokio::sync::Mutex<Revisions>,
     /// `desired.v2`'s half, for a role bound to an author of it.
     v2: Option<v2::V2>,
     /// The slice's key; `None` for the kill switch.
@@ -1660,6 +1727,62 @@ struct Core {
     /// The running act's document, and the held one's.
     running: Option<Incoming>,
     waiting: Option<Incoming>,
+}
+
+/// What a target read of its author's revisions (`desired.v2` §2.18).
+#[derive(Default)]
+struct Revisions {
+    /// What the author's descriptor names under each run read: from the
+    /// last read of every descriptor, and for each version under a run
+    /// that read did not hold.
+    runs: BTreeMap<String, Named>,
+    /// What the last read of every descriptor named, a run stated or not.
+    sweep: Vec<Named>,
+    /// The major of each revision retrieved, by fingerprint: `None` where
+    /// it could not be had.
+    majors: BTreeMap<String, Option<Major>>,
+    /// The runs whose stop was logged.
+    said: std::collections::BTreeSet<String>,
+}
+
+/// What a descriptor read named of the author's revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Named {
+    /// No descriptor reached the target: the deployment's word.
+    Word,
+    /// A revision, by its fingerprint, and its major where it was had.
+    Revision {
+        fingerprint: String,
+        major: Option<Major>,
+    },
+    /// No word: a read that failed.
+    Unread,
+}
+
+/// The major of the report a report resource puts (§2.18): `desired.v2`'s
+/// for a report resource of this major (its annotation, or the packed
+/// `Report`), `desired.v1`'s for a `desired.v1.Report`; `None` for any
+/// other, which §2.10's readings refuse.
+fn report_major(b: &ServiceBuilder, at: &ReportAt) -> Result<Option<Major>> {
+    let imp = &b
+        .impls()
+        .iter()
+        .find(|s| s.imp.iface() == &at.iface)
+        .ok_or_else(|| Error::NotImplemented(at.iface.clone()))?
+        .imp;
+    let r = imp.resource(&at.resource)?;
+    if model2::report_declaration_of(imp.contract(), r)
+        != model2::ReportDeclaration::NotThisProfiles
+        || matches!(&r.body, Body::Data(d) if model2::is_report(&d.type_))
+    {
+        return Ok(Some(Major::V2));
+    }
+    Ok(match &r.body {
+        Body::Data(d) if matches!(&d.type_, TypeId::JsonSchema { name, .. } if name == model::REPORT) => {
+            Some(Major::V1)
+        }
+        _ => None,
+    })
 }
 
 impl Target {
@@ -1736,6 +1859,26 @@ impl Target {
                 return Err(Error::NotExposed(why));
             }
         };
+        // desired.v2 §2.18: one major's report alone cannot report a role
+        // bound to an author of the other. That binding is invalid, so a
+        // target given such an author's revision refuses to start, as
+        // `two_documents` is refused, naming the role; nothing declared.
+        if let Some(at) = &report
+            && let Some(theirs) = report_major(b, at)?
+            && theirs != major
+        {
+            let why = format!(
+                "role {role:?}: its author's revision of {} uses {}, and its report, {} {:?}, \
+                 is a {} report, which cannot report it (desired.v2 §2.18)",
+                contract.iface,
+                profile(major),
+                at.iface,
+                at.resource,
+                profile(theirs)
+            );
+            b.refused.push(why.clone());
+            return Err(Error::NotExposed(why));
+        }
         let author_addr = key
             .as_ref()
             .and_then(|_| binding.providers.first()?.parse::<Addr>().ok());
@@ -1794,6 +1937,9 @@ impl Target {
             inner: Arc::new(TargetInner {
                 role: role.to_owned(),
                 major,
+                author_iface: contract.iface.clone(),
+                given: Fingerprint::of(contract).to_string(),
+                revisions: tokio::sync::Mutex::new(Revisions::default()),
                 v2,
                 key,
                 author: author_addr,
@@ -1968,6 +2114,158 @@ impl TargetInner {
     fn author_selector(&self) -> Option<String> {
         let a = self.author.as_ref()?;
         Some(format!("zk2/{}/{}/@zk/instance/*", a.system, a.service))
+    }
+
+    /// The major of the revision of the author's interface whose
+    /// fingerprint is `fp` (§2.18): the role's for the one the target was
+    /// given; else that revision, retrieved once by its fingerprint (core
+    /// §8.4); `None` where it cannot be had.
+    async fn major_named(&self, rv: &mut Revisions, fp: &str) -> Option<Major> {
+        if fp == self.given {
+            return Some(self.major);
+        }
+        if let Some(m) = rv.majors.get(fp) {
+            return *m;
+        }
+        let m =
+            crate::answer::retrieved(&self.session, &self.author_iface, fp, self.startup.timeout)
+                .await
+                .map(|c| major_of(&c));
+        if m.is_none() {
+            tracing::warn!(role = %self.role, fingerprint = fp, "desired: the revision the author's descriptor names was not retrieved, so the deployment's word stands for it (desired.v2 §2.18, core §8.4)");
+        }
+        rv.majors.insert(fp.to_owned(), m);
+        m
+    }
+
+    /// Every descriptor the author serves now, read again (§2.18): at the
+    /// start's seed, and at each seed after its instance token appears or
+    /// is withdrawn. What each names under the run it states replaces what
+    /// was held, so a stop lasts while a descriptor names it.
+    async fn read_revisions(&self) {
+        if self.startup.word_alone {
+            return;
+        }
+        let Some(author) = &self.author else { return };
+        let read = crate::answer::owner_revisions(
+            &self.session,
+            author,
+            &self.author_iface,
+            self.startup.timeout,
+        )
+        .await;
+        let mut rv = self.revisions.lock().await;
+        let mut runs = BTreeMap::new();
+        let mut sweep = Vec::new();
+        match read {
+            crate::answer::OwnerRevisions::Named(named) => {
+                for (run, fingerprint) in named {
+                    let major = self.major_named(&mut rv, &fingerprint).await;
+                    let n = Named::Revision { fingerprint, major };
+                    if let Some(run) = run {
+                        runs.insert(run, n.clone());
+                    }
+                    sweep.push(n);
+                }
+            }
+            crate::answer::OwnerRevisions::Unreached => sweep.push(Named::Word),
+            crate::answer::OwnerRevisions::Unread => sweep.push(Named::Unread),
+        }
+        rv.runs = runs;
+        rv.sweep = sweep;
+    }
+
+    /// Whether a version under `run` may be judged (§2.18): not while the
+    /// author's descriptor stating that run names a revision of the other
+    /// major, which the role cannot report. A run the last read did not
+    /// hold is read once ([`crate::answer::owner_revision`]); a version
+    /// with no run, no descriptor reaching the target, and a read that
+    /// failed take the deployment's word.
+    async fn admits(&self, run: Option<zenkey_model::wire::Run>) -> bool {
+        if self.startup.word_alone {
+            return true;
+        }
+        let (Some(run), Some(key)) = (run, &self.key) else {
+            return true;
+        };
+        let at = run.to_string();
+        let mut rv = self.revisions.lock().await;
+        let named = match rv.runs.get(&at) {
+            Some(n) => n.clone(),
+            None => {
+                let n = match crate::answer::owner_revision(
+                    &self.session,
+                    key,
+                    run,
+                    &self.author_iface,
+                    self.startup.timeout,
+                )
+                .await
+                {
+                    crate::answer::OwnerRevision::Named(fingerprint) => {
+                        let major = self.major_named(&mut rv, &fingerprint).await;
+                        Named::Revision { fingerprint, major }
+                    }
+                    crate::answer::OwnerRevision::Unreached => Named::Word,
+                    crate::answer::OwnerRevision::Unread => Named::Unread,
+                };
+                rv.runs.insert(at.clone(), n.clone());
+                n
+            }
+        };
+        match named {
+            Named::Revision {
+                fingerprint,
+                major: Some(m),
+            } if m != self.major => {
+                if rv.said.insert(at.clone()) {
+                    tracing::warn!(role = %self.role, run = %at, fingerprint, "desired: the author's descriptor names a revision of {} that uses {}, which this role's report cannot report: the role is stopped, and acts on none of its versions under that run (desired.v2 §2.18)", self.author_iface, profile(m));
+                }
+                false
+            }
+            _ => true,
+        }
+    }
+
+    /// What the target holds of its author's revision now (§2.18), for
+    /// [`Seeded::revision`]: a stopped revision first, then one not
+    /// retrieved, another, the one given, a read that failed, and no
+    /// descriptor reaching it.
+    async fn revision_now(&self) -> AuthorRevision {
+        if self.startup.word_alone {
+            return AuthorRevision::NotRead;
+        }
+        let rv = self.revisions.lock().await;
+        let all: Vec<&Named> = rv.sweep.iter().chain(rv.runs.values()).collect();
+        let revision = |f: &dyn Fn(&str, Option<Major>) -> bool| {
+            all.iter().find_map(|n| match n {
+                Named::Revision { fingerprint, major } if f(fingerprint, *major) => {
+                    Some((fingerprint.clone(), *major))
+                }
+                _ => None,
+            })
+        };
+        if let Some((fingerprint, Some(major))) =
+            revision(&|_, m| m.is_some_and(|m| m != self.major))
+        {
+            return AuthorRevision::Stopped { fingerprint, major };
+        }
+        if revision(&|fp, m| fp != self.given && m.is_none()).is_some() {
+            return AuthorRevision::Unread;
+        }
+        if let Some((fingerprint, _)) = revision(&|fp, _| fp != self.given) {
+            return AuthorRevision::Another(fingerprint);
+        }
+        if revision(&|_, _| true).is_some() {
+            return AuthorRevision::Given;
+        }
+        if all.contains(&&Named::Unread) {
+            return AuthorRevision::Unread;
+        }
+        if all.contains(&&Named::Word) {
+            return AuthorRevision::Word;
+        }
+        AuthorRevision::NotRead
     }
 
     async fn run(
@@ -2237,6 +2535,9 @@ impl TargetInner {
         }
         let Some(key) = self.key.clone() else { return };
         self.seeds.fetch_add(1, Ordering::Relaxed);
+        if why.reads_revisions() {
+            self.read_revisions().await;
+        }
         let mut attempt = 0;
         let (got, author) = loop {
             let (got, _complete) = self.get_owner(&key).await;
@@ -2292,10 +2593,12 @@ impl TargetInner {
         if let AuthorSeen::NotMade(why) = &author {
             tracing::info!(role = %self.role, "desired.v1: the author's presence was not read, so no absence is concluded and no archive read (core §8.1): {why}");
         }
+        let revision = self.revision_now().await;
         *self.last_seed.lock().expect("not poisoned") = Some(Seeded {
             answered,
             author,
             archive,
+            revision,
         });
     }
 
@@ -2387,6 +2690,11 @@ impl TargetInner {
                 self.put_report(&report).await;
             }
             Event::Sample(i) => {
+                // §2.18: never a version under a run whose revision the
+                // role's report cannot report.
+                if !self.admits(i.inband.map(|s| s.run)).await {
+                    return;
+                }
                 let sample = self.sample_of(&i);
                 let mut c = self.core.lock().await;
                 let step = c.model.observe(sample);

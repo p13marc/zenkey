@@ -1275,6 +1275,9 @@ async fn s10_last_known_confirmed_by_its_author_and_a_present_authors_silence() 
             answered: 0,
             author: desired::AuthorSeen::Present,
             archive: None,
+            // X answers no descriptor: the deployment's word stands
+            // (desired.v2 §2.18).
+            revision: desired::AuthorRevision::Word,
         }),
         "the reference reads no archive while its author is present"
     );
