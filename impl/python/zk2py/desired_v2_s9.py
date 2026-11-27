@@ -49,8 +49,8 @@ v, converged = sc.v, sc.converged
 
 #: §9's Expected, per step (converged, refused, last_known, in_force), each
 #: (answer, reason). 1 to 5 are v1's, which v2's "1 to 5 as v1's" keeps.
-#: 6's once is v1's line, and 7's two are v2's; 7's refused and last-known
-#: are not stated, and are what §15's report, converged on v1, reads.
+#: 6's once and 7 state all four since text 0.2 (F-605): "Refused: no,
+#: converged. Last-known: no, current." in each.
 S9_EXPECT: dict[Any, dict[str, tuple[str, str]]] = {
     1: {"converged": ("yes", "converged"), "refused": ("no", "converged"), "last_known": ("no", "current"),
         "in_force": ("yes", "desired")},
@@ -74,8 +74,9 @@ S9_EXPECT: dict[Any, dict[str, tuple[str, str]]] = {
     "F-585": {"converged": ("unobservable", "author_silent"), "refused": ("no", "reverted"),
               "last_known": ("no", "current"), "in_force": ("no", "baseline")},
 }
-#: the two a step states, for 7
-STATED = {7: ("converged", "in_force")}
+#: the answers a step states where it states fewer than four (none, since
+#: text 0.2: round 121 compared two at step 7)
+STATED: dict[Any, tuple[str, ...]] = {}
 
 
 def zenctl(args: Sequence[str], timeout: float = 90.0) -> tuple[int | None, Any, str]:
@@ -353,19 +354,21 @@ def section9(rp: Report) -> None:
                          f"{row and row.slice_from!r}, archived {[(a, ver) for a, ver, _ in m_arch]}; exit {rc}")
             shows = bool(m_arch) and all(ver == s1 for _, ver, _ in m_arch)
             if label == "no-slice":
-                rp.check(sec, "4 (no-slice). As §2.17 says, no revision of the author's in hand: neither tool has a "
-                              "slice, so neither shows the archive's v1: Expected 4's \"T shows the archive's v1 as "
-                              "last-known\" is not met as worded",
+                rp.check(sec, "4 (no-slice). 0.2's Expected 4 (F-604): \"a T with no revision of tasking.v2 in hand "
+                              "has no slice. It gives the same four answers, and shows no archive\": neither tool "
+                              "has a slice, and neither shows one",
                          row is not None and row.slice is None and zr.get("slice") is None and not m_arch,
                          f"zk2py {row and row.slice}, zenctl {zr.get('slice')}")
             elif label == "contracts":
-                rp.check(sec, "4 (contracts). The author's revision given offline: both tools take D from it, and "
-                              "show the archive's v1 as last-known, never current",
+                rp.check(sec, "4 (contracts). 0.2's Setup (F-604): \"T holds tasking.v2 offline, as §2.17 allows. So "
+                              "it has the slice in step 4\": both tools take D from it, and show the archive's v1 as "
+                              "last-known, never current (v1's Expected 4)",
                          row is not None and row.slice == D and zr.get("slice") == D and shows
                          and bool(z_arch), f"zk2py {m_arch and [(a, ver) for a, ver, _ in m_arch]}, zenctl {z_arch}")
             else:
-                rp.check(sec, "4 (v1-way). D from the target's requirement and binding, as v1's §9 says: zk2py's "
-                              "tool shows the archive's v1, and the same four answers",
+                rp.check(sec, "4 (v1-way), beyond the text since 0.2 (\"v1's slice from the target's requirement "
+                              "goes\"): D from the target's requirement and binding, as v1's §9 said: zk2py's tool "
+                              "shows the archive's v1, and the same four answers",
                          row is not None and row.slice == D and row.slice_from == "requirement" and shows,
                          f"{row and (row.slice, row.slice_from)}")
     finally:

@@ -1,5 +1,5 @@
 {
- "description": "desired.v2 §2.5, the watch: one target, the base-relative `key` of its slice, the version it `held` ({kind: put | delete, version, last_known?} or null), whether it `moves` what it expects at its own change (§2.5's MAY), and its steps -> what each does, what the target expects after each, and whether the version it holds is still last-known at the end. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A step is one of: {heartbeat: {run, seq, section, members?}}, a heartbeat read by freshness.v2 §2.5's steps, its key's run (4 or 8 hexadecimal digits) and seq, and the section of the author's desired collection, {digest, live}, or null where the collection's map bit is 0; members, where given, are the author's live members, each {key, version}, of which the section is core §7.5's digest (the XOR of the first 4 bytes of the sha256 of each member's key, a zero byte, its run's width bit, its run and its seq) and their count; {heartbeat: {run, seq, read: \"revision\" | \"refused\"}}, one of another revision, or one core §7.5 refuses; {heard: {kind, version}}, a version of the slice heard live and admitted; {answer: \"unchanged\" | {whole: {kind: put | delete | no_entry, version?}} | \"timeout\" | \"held\"}, the outstanding read's end: the held stamp the target sent, a snapshot (its entry then the version the target holds, none for no_entry), no reply within the timeout, or a held stamp it did not send. The target starts expecting none, with no heartbeat read and no read outstanding. expect.steps, for a heartbeat, the first that answers: revision or refused (not read: it expects none, and the sequence does not move); older (in the last read one's run, its seq not after it by core §4.3's serial order: nothing changes); then, the heartbeat read and the sequence moved, the target expecting none where it is of another run than the last read one's or its seq is not that one's plus 1 modulo 2^24: no_section (it expects none); unmoved (the section is the one it expects); outstanding (a read is outstanding); read (one conditional read, carrying the version it holds, or none). For heard: moved (it moves, it expects a section and it holds a version: the old member's value XORed out where it held a put, the new one's XORed in for a put, the live count following) or kept. For an answer: unchanged (it expects the section of the heartbeat that made it read where it still holds the version it sent, else none; that version is no longer last-known), whole (it expects none), no_answer (nothing changes). expect.expects is what it expects after each step, {digest, live} or null. expect.last_known is true when the version it holds at the end came from an archive and no answer or sample of its author's carried it: an unmoved section never confirms.",
+ "description": "desired.v2 §2.5, the watch: one target, the base-relative `key` of its slice, the version it `held` ({kind: put | delete, version, last_known?} or null), whether it `moves` what it expects at its own change (§2.5's MAY), and its steps -> what each does, what the target expects after each, and whether the version it holds is still last-known at the end. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A step is one of: {heartbeat: {run, seq, section, members?}}, a heartbeat read by freshness.v2 §2.5's steps, its key's run (4 or 8 hexadecimal digits) and seq, and the section of the author's desired collection, {digest, live}, or null where the collection's map bit is 0; members, where given, are the author's live members, each {key, version}, of which the section is core §7.5's digest (the XOR of the first 4 bytes of the sha256 of each member's key, a zero byte, its run's width bit, its run and its seq) and their count; {heartbeat: {run, seq, read: \"revision\" | \"refused\"}}, one of another revision, or one core §7.5 refuses; {heard: {kind, version}}, a version of the slice heard live and admitted; {answer: \"unchanged\" | {whole: {kind: put | delete | no_entry, version?}} | \"timeout\" | \"held\"}, the outstanding read's end: the held stamp the target sent, a snapshot (its entry then the version the target holds, none for no_entry), no reply within the timeout, or a held stamp it did not send. The target starts expecting none, with no heartbeat read and no read outstanding. expect.steps, for a heartbeat, the first that answers: revision or refused (not read: it expects none, and the sequence does not move); older (in the last read one's run, its seq not after it by core §4.3's serial order: nothing changes); then, the heartbeat read and the sequence moved, the target expecting none where it is of another run than the last read one's or its seq is not that one's plus 1 modulo 2^24: no_section (it expects none); unmoved (the section is the one it expects); outstanding (a read is outstanding); read (one conditional read, carrying the version it holds, or none). For heard: moved (it moves, it expects a section and it holds a version: the old member's value XORed out where it held a put, the new one's XORed in for a put, the live count following) or kept. For an answer: unchanged (it expects the section of the heartbeat that made it read where it still holds the version it sent, else none; that version is no longer last-known), whole (it expects none), no_answer (nothing changes). expect.expects is what it expects after each step, {digest, live} or null. expect.last_known is true when the version it holds at the end came from an archive and no answer or sample of its author's carried it: an unmoved section never confirms. Cases 25 and 26, of text 0.2, were written by hand from the text and read against the reference's watch, not computed twice.",
  "cases": [
   {
    "note": "the first heartbeat: the target expects none, so it reads once; answered unchanged, it expects that section, and the next heartbeats, unmoved, make no read",
@@ -2346,6 +2346,158 @@
      {
       "digest": "741c0521",
       "live": 3
+     }
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a heartbeat not read moves no sequence: after one of another revision at seq 2, seq 1 follows the last read one, seq 0, in sequence, and is read; a reader that moved the sequence would read it older. Written by hand for text 0.2",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 2,
+      "read": "revision"
+     }
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 1,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "revision",
+     "read"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     null,
+     null
+    ],
+    "last_known": false
+   }
+  },
+  {
+   "note": "a seq exactly 2^23 after the last read one's is unordered by core §4.3's serial order, so not after it: older, and nothing changes. Written by hand for text 0.2",
+   "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+   "moves": true,
+   "held": {
+    "kind": "put",
+    "version": "0007/3"
+   },
+   "steps": [
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 0,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    },
+    {
+     "answer": "unchanged"
+    },
+    {
+     "heartbeat": {
+      "run": "0021",
+      "seq": 8388608,
+      "members": [
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/spare",
+        "version": "0007/1"
+       },
+       {
+        "key": "zk2/lab/author/tasking.v2/state/tasks/lab/worker",
+        "version": "0007/3"
+       }
+      ],
+      "section": {
+       "digest": "a78dbbd2",
+       "live": 2
+      }
+     }
+    }
+   ],
+   "expect": {
+    "steps": [
+     "read",
+     "unchanged",
+     "older"
+    ],
+    "expects": [
+     null,
+     {
+      "digest": "a78dbbd2",
+      "live": 2
+     },
+     {
+      "digest": "a78dbbd2",
+      "live": 2
      }
     ],
     "last_known": false

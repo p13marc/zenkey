@@ -1,5 +1,6 @@
-//! `spec/profiles/desired/scenarios-v2.md` §1–§8 and §10–§15 (`desired.v2`,
+//! `spec/profiles/desired/scenarios-v2.md` §1–§8 and §10–§16 (`desired.v2`,
 //! #986's J3), one test per section, named after it. §9 is a tool's (J4).
+//! §16 runs its four runs at once, each on a router of its own.
 //! `config_v2_as_a_target` runs `desired.v2` §2.16 beside them.
 //!
 //! Common setup, the text's: R1 is a router with timestamping on, a
@@ -1525,6 +1526,9 @@ async fn s10_last_known_confirmed_by_its_author_and_a_present_authors_silence() 
             answered: 0,
             author: desired::AuthorSeen::Present,
             archive: None,
+            // X answers no descriptor: the deployment's word stands
+            // (desired.v2 §2.18).
+            revision: desired::AuthorRevision::Word,
         }),
         "the reference reads no archive while its author is present"
     );
@@ -2475,8 +2479,11 @@ const CONFIGS: &str = "state/configs/{system}/{service}";
 /// contract listing `desired.v2`").
 fn configs_v2() -> Implementation {
     copy_of("configs.v1", |t| {
-        let listed = t.replace("uses  = [\"desired.v1\"", "uses  = [\"desired.v2\"");
-        assert_ne!(listed, t);
+        // §12: minor 2, its `uses` moved (F-606).
+        let listed = t
+            .replace("uses  = [\"desired.v1\"", "uses  = [\"desired.v2\"")
+            .replace("minor = 1", "minor = 2");
+        assert!(listed.contains("minor = 2") && listed.contains("\"desired.v2\""));
         listed
     })
 }
@@ -2655,6 +2662,349 @@ async fn s12_a_config_owners_re_mint_is_a_restart() {
     .await;
     svc.close().await.unwrap();
     asvc.close().await.unwrap();
+}
+
+// --- §16: both majors side by side -------------------------------------------------
+
+/// §16's author in runs A and B: v1's `tasking.v1` at minor 1, its `uses`
+/// moved to `desired.v2` (§2.18, "An author moves by a revision").
+fn tasking_v1_moved() -> Implementation {
+    copy_of("tasking.v1", |t| {
+        let moved = t.replace("minor = 0", "minor = 1").replace(
+            "uses  = [\"desired.v1\", \"freshness.v1\"]",
+            "uses  = [\"desired.v2\", \"freshness.v1\"]",
+        );
+        assert_eq!(moved.matches("desired.v2").count(), 1, "{moved}");
+        moved
+    })
+}
+
+/// §16's run C revision: `tasking.v2` in a revision whose `uses` lists
+/// `desired.v1`.
+fn tasking_v2_on_v1() -> Implementation {
+    copy_of("tasking.v2", |t| {
+        let back = t.replace(
+            "uses  = [\"desired.v2\", \"freshness.v2\"]",
+            "uses  = [\"desired.v1\", \"freshness.v2\"]",
+        );
+        assert_ne!(back, t);
+        back
+    })
+}
+
+/// §16's author on a client of `ep`, implementing `tasking`: its runs from
+/// a record of its own, its interface in its tokenless set.
+async fn author_of(ep: &str, tasking: Implementation, rec: &Records) -> AuthorUp {
+    let session = client(ep).await;
+    let iface = tasking.iface().clone();
+    let mut b = ServiceBuilder::new(&session, config(AUTHOR).tokenless(iface.clone()));
+    b.run_store(Arc::new(zenkey::run::FileRunStore::new(&rec.runs)))
+        .unwrap();
+    b.implement(tasking).unwrap();
+    let author = b
+        .desired_author(&iface, TASKS, AuthorStartup::default())
+        .await
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    AuthorUp {
+        session,
+        svc,
+        author,
+    }
+}
+
+/// §16's target on a client of `ep`: `worker`, its role `task` against
+/// `tasking`, on the owner example's drive (`v2`: worker.v2's lines).
+async fn target_of(
+    ep: &str,
+    worker: Implementation,
+    tasking: &Implementation,
+    v2: bool,
+    startup: TargetStartup,
+) -> (
+    zenoh::Session,
+    ServiceBuilder,
+    zenkey::Result<desired::Target>,
+    Arc<Drive>,
+) {
+    let session = client(ep).await;
+    let wi = worker.iface().clone();
+    let mut cfg = config(WORKER).bind(ROLE, &[AUTHOR]);
+    cfg.bindings.get_mut(ROLE).unwrap().params = [
+        ("system".to_owned(), "self.system".to_owned()),
+        ("service".to_owned(), "self.service".to_owned()),
+    ]
+    .into();
+    let mut b = ServiceBuilder::new(&session, cfg);
+    b.implement(worker).unwrap();
+    let run = b
+        .declare_state_writer(&wi, RUNNING, &Bindings::new())
+        .await
+        .unwrap();
+    run.put_value(&drive::baseline()).await.unwrap();
+    let d = Arc::new(if v2 {
+        Drive::new_v2(run)
+    } else {
+        Drive::new(run)
+    });
+    let target = b
+        .desired_target(
+            ROLE,
+            tasking,
+            TASKS,
+            ReportAt::new(wi, REPORT),
+            Arc::clone(&d) as Arc<dyn desired::Handler>,
+            startup,
+        )
+        .await;
+    (session, b, target, d)
+}
+
+/// §16's runs A and B: a target built for `desired.v1` (`worker.v1`, told
+/// `tasking.v1` at minor 0 and reading that word alone, as a target built
+/// before this major does) under `tasking.v1` at minor 1, which uses
+/// `desired.v2`, through R1 timestamping or not.
+async fn s16_a_target_built_before(timestamping: bool) {
+    const D1: &str = "zk2/lab/author/tasking.v1/state/tasks/lab/worker";
+    const RP1: &str = "zk2/lab/worker/worker.v1/state/desired/task";
+    let run = if timestamping { "run B" } else { "run A" };
+    let (r1, ep) = common::router_with(
+        None,
+        &[(
+            "timestamping/enabled",
+            if timestamping { "true" } else { "false" },
+        )],
+    )
+    .await;
+    let rec = records();
+    let s = record(&ep).await;
+    let a = author_of(&ep, tasking_v1_moved(), &rec).await;
+    assert_eq!(a.author.major(), Major::V2, "{run}: the author moved");
+    author_seen(&ep, true).await;
+    let (session, b, target, d) = target_of(
+        &ep,
+        imp("worker.v1"),
+        &imp("tasking.v1"),
+        false,
+        TargetStartup::default().by_word_alone(),
+    )
+    .await;
+    let target = target.unwrap();
+    assert_eq!(target.major(), Major::V1, "{run}: built for desired.v1");
+    let svc = b.start().await.unwrap();
+    eventually("the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Its seed acts on nothing: the author answers by snapshot, whose
+    // entry carries no Zenoh timestamp.
+    let seeded = target.last_seed().unwrap();
+    assert_eq!(seeded.revision, desired::AuthorRevision::NotRead, "{run}");
+    let baseline = zenkey::model::desired::Report::baseline(Some(D1.to_owned()));
+    assert_eq!(target.report().await, baseline, "{run}: the baseline's");
+    let v1_report =
+        |r: &Rec| zenkey::model::desired::decode(&r.payload).expect("a desired.v1.Report");
+
+    // 1. The author puts v1.
+    let mark = s.mark();
+    a.author.put(WORKER, bytes(&v(1))).await.unwrap();
+    eventually("the put at S", || async { !s.on(D1, mark).is_empty() }).await;
+    let put = s.on(D1, mark).remove(0);
+    let wait = Duration::from_secs(2);
+    if timestamping {
+        assert_eq!(
+            put.stamped_by,
+            Some(r1.zid().to_string()),
+            "run B: the put arrives with R1's Zenoh timestamp"
+        );
+        eventually("run B: converged on v1", || async {
+            let r = target.report().await;
+            r.outcome == Some(zenkey::model::desired::Outcome::Converged)
+                && r.observed.as_ref().is_some_and(|o| o.revision == Some(1))
+        })
+        .await;
+        let r = target.report().await;
+        let o = r.observed.expect("observed");
+        assert_eq!(
+            format!("{:x}", o.stamp.id),
+            r1.zid().to_string(),
+            "run B: under R1's id"
+        );
+        assert_eq!(v1_report(s.on(RP1, 0).last().unwrap()), r, "run B: put");
+    } else {
+        assert_eq!(put.stamped_by, None, "run A: no Zenoh timestamp");
+        tokio::time::sleep(wait).await;
+        assert_eq!(target.acts(), 0, "run A: acts on nothing");
+        assert_eq!(target.report().await, baseline, "run A: the baseline's");
+    }
+
+    // 2. The author puts v2.
+    a.author.put(WORKER, bytes(&v(2))).await.unwrap();
+    if timestamping {
+        eventually("run B: acts on v2", || async {
+            target
+                .report()
+                .await
+                .observed
+                .is_some_and(|o| o.revision == Some(2))
+                && d.with(|x| x.running.clone()) == v(2)
+        })
+        .await;
+    } else {
+        tokio::time::sleep(wait).await;
+        assert_eq!(target.acts(), 0, "run A: nothing");
+    }
+    let acts = target.acts();
+    let held = target.report().await;
+
+    // 3. The author deletes D.
+    let mark = s.mark();
+    a.author.delete(WORKER).await.unwrap();
+    eventually("the delete at S", || async {
+        s.on(D1, mark).iter().any(|r| r.delete)
+    })
+    .await;
+    assert_eq!(
+        s.on(D1, mark).iter().find(|r| r.delete).unwrap().stamped_by,
+        None,
+        "{run}: the delete arrives with no Zenoh timestamp"
+    );
+    tokio::time::sleep(wait).await;
+    assert_eq!(target.acts(), acts, "{run}: the delete is ignored");
+    assert_eq!(target.report().await, held, "{run}: the report as it was");
+    if timestamping {
+        assert_eq!(
+            d.with(|x| x.running.clone()),
+            v(2),
+            "run B: it runs a document its author deleted"
+        );
+    } else {
+        assert_eq!(target.report().await, baseline, "run A: inert");
+    }
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+    a.kill().await;
+}
+
+/// §16's run C: `worker.v2`'s target, whose contract declares the packed
+/// `Report` alone, told its author's revision of `tasking.v2` that uses
+/// `desired.v1`: it refuses to start, naming its role.
+async fn s16_run_c() {
+    let bus = one_router().await;
+    let s = record(&bus.ep1).await;
+    let (session, b, target, _) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking_v2_on_v1(),
+        true,
+        TargetStartup::default(),
+    )
+    .await;
+    refused_for(target, "role \"task\"", "run C: the role");
+    let svc = b.start().await;
+    refused_for(svc, "desired.v2 §2.18", "run C: the start");
+    // The other way (§2.18): `worker.v1`'s report alone, told runs A and
+    // B's author's revision, which uses desired.v2, refuses too.
+    let (other, b, target, _) = target_of(
+        &bus.ep1,
+        imp("worker.v1"),
+        &tasking_v1_moved(),
+        false,
+        TargetStartup::default(),
+    )
+    .await;
+    refused_for(target, "uses desired.v2", "run C, the other way: the role");
+    refused_for(
+        b.start().await,
+        "role \"task\"",
+        "run C, the other way: the start",
+    );
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        worker_tokens(&s),
+        0,
+        "run C: no instance token of lab/worker"
+    );
+    session.close().await.unwrap();
+    other.close().await.unwrap();
+}
+
+/// §16's run D: the same target, told the scenarios' `tasking.v2`, its
+/// author on run C's revision, whose descriptor reaches the target.
+async fn s16_run_d() {
+    let bus = one_router().await;
+    let rec = records();
+    let s = record(&bus.ep1).await;
+    let theirs = tasking_v2_on_v1();
+    let fingerprint = zenkey::model::canonical::Fingerprint::of(theirs.contract()).to_string();
+    let a = author_of(&bus.ep1, theirs, &rec).await;
+    assert_eq!(a.author.major(), Major::V1, "run D: the author's revision");
+    author_seen(&bus.ep1, true).await;
+
+    // 5. The target starts, and reads its author's descriptor: it starts,
+    //    says so where it says what its seed found, and Rp holds the
+    //    baseline's report.
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup::default(),
+    )
+    .await;
+    let target = target.expect("run D: its word names a revision it can report");
+    assert_eq!(target.major(), Major::V2);
+    let svc = b.start().await.expect("run D: the target starts");
+    eventually("run D: the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    assert_eq!(
+        target.last_seed().unwrap().revision,
+        desired::AuthorRevision::Stopped {
+            fingerprint,
+            major: Major::V1
+        },
+        "run D: its author's descriptor names one that uses desired.v1"
+    );
+    s.until("run D: the baseline's report", |r| *r == Report::baseline())
+        .await;
+
+    // 6. The author puts v1: the target acts on nothing, and Rp and Run
+    //    receive nothing.
+    let mark = s.mark();
+    let put = a.author.put(WORKER, bytes(&v(1))).await.unwrap();
+    assert!(matches!(put, Written::Put(_)), "a desired.v1 put: {put:?}");
+    eventually("run D: the put at S", || async {
+        !s.on(D, mark).is_empty()
+    })
+    .await;
+    assert!(
+        s.on(D, mark)[0].inband.is_some(),
+        "run D: the put carries an in-band stamp, which the target would order"
+    );
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(target.acts(), 0, "run D: acts on nothing");
+    assert!(s.on(RP, mark).is_empty(), "run D: Rp receives nothing");
+    assert!(s.on(RUN, mark).is_empty(), "run D: Run receives nothing");
+    assert_eq!(d.with(|x| x.running.clone()), drive::baseline());
+    assert_eq!(target.report_v2().await, Some(Report::baseline()));
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+    a.kill().await;
+}
+
+/// §16 Both majors side by side (§2.18): runs A to D, each on a router of
+/// its own, at once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_both_majors_side_by_side() {
+    tokio::join!(
+        s16_a_target_built_before(false),
+        s16_a_target_built_before(true),
+        s16_run_c(),
+        s16_run_d(),
+    );
 }
 
 /// `desired.v2` §2.16: `config.v2`'s owner `lab/rf0` as a target of an

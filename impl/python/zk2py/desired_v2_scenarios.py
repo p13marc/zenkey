@@ -883,20 +883,17 @@ def section4(rp: Report) -> None:
         rp.check(sec, "4. v4: converged on v4", _wait(lambda: target.report() == converged(s4, 4), 5.0))
         target.cmd("desired fail-next")
         s5 = author.put(TARGET, v(5, rate_hz=20, mode="halt"))
+        # 0.2 (F-592): "The report is source desired, outcome failed, the
+        # observed version s5, code apply, pointer 1 and detail out_of_range,
+        # and in_force none." Conventions: "A failed act points at /mode,
+        # index 1, where its drive stopped."
         want = {"source": "desired", "outcome": "failed", "last_known": False, "in_force": "none",
-                **observed(s5, 5), "code": "apply"}
-
-        def stated(rep: Any) -> Any:
-            # Expected 5 states no place and no line: a drive may give either
-            return {k: x for k, x in (rep or {}).items() if k not in ("pointer", "detail")}
-
-        ok = _wait(lambda: stated(target.report()) == want, 5.0)
+                **observed(s5, 5), "code": "apply", "pointer": 1, "detail": "out_of_range"}
+        ok = _wait(lambda: target.report() == want, 5.0)
         run = bus.run_doc() or {}
         rp.check(sec, "5. the drive fails after the rate: Run holds rate_hz 20 and mode run; failed, observed s5, "
-                      "code apply, in_force none", ok and run.get("rate_hz") == 20 and run.get("mode") == "run",
-                 f"{target.report()}, Run {run}")
-        extra = {k: x for k, x in (target.report() or {}).items() if k in ("pointer", "detail")}
-        rp.note(sec, f"step 5: beside the code, this target's report holds {extra or 'no place and no line'}")
+                      "code apply, pointer 1 (/mode) and detail out_of_range, in_force none",
+                 ok and run.get("rate_hz") == 20 and run.get("mode") == "run", f"{target.report()}, Run {run}")
         s6 = author.put(TARGET, v(4294967296))
         want = {"source": "desired", "outcome": "refused", "last_known": False, "in_force": "none",
                 **observed(s6), "code": "invalid", "pointer": 4, "detail": 2}
@@ -1234,8 +1231,10 @@ def section13(rp: Report) -> None:
                  len(mine) >= 2 and all(g[1] == held7 and g[2] == zk2c.ENCODING for g in mine)
                  and held7[0] == 0xE0 and len(held7) == 6 and target.acts() == acts0 and not bus.since(t1, RP)
                  and not bus.since(t1, RUN), f"{len(mine)} re-reads, {[g[1] and g[1].hex() for g in mine]}")
-        rp.note(sec, f"an unchanged reply is 6 bytes of payload where the v1 document P answered is {doc_len} "
-                     f"bytes, and {len(json.dumps(v(1), separators=(',', ':')))} with no space (the text: 44)")
+        compact = len(json.dumps(v(1), separators=(',', ':')))
+        rp.check(sec, "1. \"v1's document alone is 40, as its author puts it\" (0.2, F-584): v1 with no space, its "
+                      "author's canonical form", compact == 40,
+                 f"{compact} bytes with no space; P answered {doc_len}, spaced")
         n0 = p.count()
         p.script = [("snapshot", v(2), 9), ("held",)]
         ok = _wait(lambda: target.report() == converged(s9, 2), 6.0, 0.05)

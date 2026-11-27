@@ -526,7 +526,9 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   Invalid(Vec<ReportInvalid>), Declared { names, tables }}`,
   `is_report(&TypeId)`, `lint_contract` (each invalid declaration a
   `Lint { at, token, says }`, an error of `zk2 contract lint` and of
-  `zenkey-build`); `Tables { pointers, details }` with `place(pointer)`
+  `zenkey-build`; `zk2 contract lint` prints the contract's fingerprint
+  after a profile's errors, since it still loads, and exits 1, text 0.2
+  §2.2, F-583); `Tables { pointers, details }` with `place(pointer)`
   and `line(text)` → `Index::{At(u8), OutOfRange}` and
   `pointer`/`detail`/`word(table, index)` → `Word::{Entry, Number,
   OutOfRange}`; `layout()` (declared in the crate, held to

@@ -8,7 +8,8 @@ finished text, and computed each expectation again from the files'
 inputs. The two agree on every case. Both are kept out of the
 repository, and no file here was blessed.
 
-No implementation has run them yet.
+Later cases were written by hand from the text. Each was read against
+the reference. Each file's description names them.
 
 | File | Rules | What it pins |
 |---|---|---|

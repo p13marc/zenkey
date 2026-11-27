@@ -497,6 +497,9 @@ impl TargetInner {
             return;
         };
         self.seeds.fetch_add(1, Ordering::Relaxed);
+        if why.reads_revisions() {
+            self.read_revisions().await;
+        }
         let mut attempt = 0;
         let mut watch = false;
         let (got, author) = loop {
@@ -559,10 +562,12 @@ impl TargetInner {
         if let AuthorSeen::NotMade(why) = &author {
             tracing::info!(role = %self.role, "desired.v2: the author's presence was not read, so no absence is concluded and no archive read (core §8.1): {why}");
         }
+        let revision = self.revision_now().await;
         *self.last_seed.lock().expect("not poisoned") = Some(Seeded {
             answered,
             author,
             archive,
+            revision,
         });
     }
 
@@ -664,10 +669,26 @@ impl TargetInner {
                 };
                 self.put_report_v2(&report).await;
             }
-            Event::Sample(i) => self.judge_v2(v2, i).await,
+            Event::Sample(i) => {
+                // §2.18: never a version under a run whose revision the
+                // role's report cannot report.
+                if self.admits(i.inband.map(|s| s.run)).await {
+                    self.judge_v2(v2, i).await;
+                }
+            }
             Event::Read(read) => {
                 let (mut whole, mut unchanged) = (false, false);
                 for item in read.got.items {
+                    // §2.18: nothing under a run whose revision the role's
+                    // report cannot report is judged, nor confirmed.
+                    let run = match &item {
+                        Item::Entry(i) => i.inband.map(|s| s.run),
+                        Item::NoEntry { run, .. } => Some(*run),
+                        Item::Unchanged(s) | Item::NotSent(s) => Some(s.run),
+                    };
+                    if !matches!(item, Item::NotSent(_)) && !self.admits(run).await {
+                        continue;
+                    }
                     match item {
                         Item::Entry(i) => {
                             whole = true;

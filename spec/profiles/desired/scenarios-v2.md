@@ -4,13 +4,15 @@ The rules of [`v2.md`](v2.md) that a fixture cannot check, in the form of
 the core's scenarios ([`../../scenarios/README.md`](../../scenarios/README.md)):
 a setup, steps, and expected observations. §1 to §12 are
 [`desired.v1`'s scenarios](scenarios.md), restated where the version or
-the read changes. §13 to §15 are new. §9 is a tool's, and the others
+the read changes. §13 to §16 are new. §9 is a tool's, and the others
 the runtime's.
 
-**The reference runs them.** §1 to §8 and §10 to §15 are tests of
+**The reference runs them.** §1 to §8 and §10 to §16 are tests of
 `zenkey` (`zenkey/tests/profile_desired_v2.rs`, one test per section,
 named after it). §9 is a test of `zenctl` (`zenctl/tests/live_zk2.rs`,
-`desired_v2_s9_…`), T being `zenctl desired`.
+`desired_v2_s9_…`), T being `zenctl desired`. In §16's runs A and B,
+the reference's target reads its author's revision by the deployment's
+word alone, as one built before this major does.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v2.md's rules; `v1 §n`
@@ -80,6 +82,9 @@ named after it). §9 is a test of `zenctl` (`zenctl/tests/live_zk2.rs`,
   The worker refuses as v1's does: `rate_hz` above 100 is `invalid` at
   `/rate_hz`, index 2, with line 0. A member named `endpoint` is `reach`
   at `/endpoint`, index 3, with line 1.
+  - **A failed act** points at `/mode`, index 1, where its drive
+    stopped. Its line is the drive's, which the table does not hold:
+    `out_of_range` (§2.10).
 - **tasking.v2, watched** is `tasking.v2.toml` with `"freshness.ttl_s" =
   4`. §14 uses it. Its author sends a heartbeat covering `tasking.v2` at
   most every 2 s (`freshness.v2` §2.4), on
@@ -206,7 +211,8 @@ envelope it writes.
 4. The report is converged on v4.
 5. `Run` holds `rate_hz` 20 and `mode` `run`. The report is `source`
    `desired`, `outcome` `failed`, the observed version `s5`, `code`
-   `apply`, and `in_force` `none`.
+   `apply`, `pointer` 1 and `detail` `out_of_range`, and `in_force`
+   `none`.
 6. The target refuses v6 whole, `invalid`, at `/revision`: `pointer` 4
    and `detail` 2. The report's observed version is `s6`, and it carries
    no `revision`. `Run` is unchanged.
@@ -232,9 +238,9 @@ slice, holds a delete 5 s old that the author's record keeps.
    the put: `Run` receives nothing, and the report's observed version
    moves to it, still `converged`, `in_force` `observed`.
 2. The report is converged on v2, which the target acted on.
-3. The author's new run is a 32-bit one where its run's record went
-   with its documents' (core §4.3). S receives a put on `D` holding
-   v2's content under the new run: adopted. The report moves to that version, still
+3. The author's run's record went with its documents'. So it starts
+   with none, and its new run is a 32-bit one (core §4.3). S receives a
+   put on `D` holding v2's content under the new run: adopted. The report moves to that version, still
    `converged`, `revision` 2. A GET of `D2` draws a snapshot with no
    entry: its delete was lost with the record.
 4. The report is converged on v3.
@@ -254,20 +260,26 @@ GET of `D`.
 ## §9 A tool's questions (§2.17, §5)
 
 **Setup.** As v1's. T finds the target's report by `desired.report`
-(§2.10), and GETs `D` from the author.
+(§2.10), and GETs `D` from the author. T holds `tasking.v2` offline, as
+§2.17 allows. So it has the slice in step 4, its author absent. v1's
+slice from the target's requirement goes (§2.17).
 
 **Steps.** As v1's, 1 to 6, and:
 
 7. After §15's step 1, T asks.
 
-**Expected.** 1 to 5 as v1's.
+**Expected.** 1 to 5 as v1's. At 4, a T with no revision of
+`tasking.v2` in hand has no slice. It gives the same four answers, and
+shows no archive.
 
-6. Once: converged **not yet**, `behind`. Over the window, every reading
-   is not yet on v6: T finds the target behind v6 for at least 2 s. A
-   version has no time, so T finds nothing from one reading, whatever
-   clock it trusts.
+6. Once: converged **not yet**, `behind`. Refused: **no**, `converged`.
+   Last-known: **no**, `current`. In force: **yes**, `desired`. Over
+   the window, every reading is not yet on v6: T finds the target behind
+   v6 for at least 2 s. A version has no time, so T finds nothing from
+   one reading, whatever clock it trusts.
 7. Converged: **unobservable**, `author_silent`. The author answers a
-   snapshot with no entry under a run the report does not name. In
+   snapshot with no entry under a run the report does not name.
+   Refused: **no**, `converged`. Last-known: **no**, `current`. In
    force: **yes**, `desired`.
 
 ## §10 Last-known confirmed by its author; a present author's silence (§2.5, §2.9)
@@ -284,8 +296,10 @@ As v1's, with `tasking.v2` and `worker.v2`.
 
 ## §12 A `config.v1` or `config.v2` owner's re-mint is a restart (§2.7, §2.16)
 
-As v1's, the author's contract listing `desired.v2`. The owner's report
-is its own, in its view or its record.
+As v1's, with the author's `configs.v1` at minor 2: v1's
+`configs.v1.toml`, its `minor` 2 and its `uses` moved from `desired.v1`
+to `desired.v2` (§2.18). The owner's report is its own, in its view or
+its record.
 
 ## §13 A conditional re-read, and what a read waits (§2.5)
 
@@ -315,8 +329,8 @@ converged on v1. Its period is 2 s.
 **Expected.**
 1. Each re-read carries the 6 bytes `0xe0`, R and seq 7, under
    `zenoh/bytes`. The target acts on nothing, and `Rp` and `Run` receive
-   nothing. An unchanged reply is 6 bytes of payload where v1's
-   document was 44.
+   nothing. An unchanged reply is 6 bytes of payload. v1's document
+   alone is 40, as its author puts it.
 2. The target judges the entry: a higher seq of the held run. It acts on
    v2, and its report is converged on v2. The next re-read carries
    (R, 9).
@@ -405,3 +419,55 @@ author's run R.
    It reverts. The report is `reverted`, its observed version that
    delete's. A deployment heals the residual so, or by a terminal
    document (v1 §2.8).
+
+## §16 Both majors side by side (§2.18)
+
+**Setup.** One router, R1. The author is `lab/author`, implementing
+`tasking.v1` at minor 1: v1's `tasking.v1`, its `uses` moved to
+`desired.v2`. Its slice is v1's `D`. The target is built for
+`desired.v1`: v1's `worker.v1`, its role `task` bound as v1's is, its
+report v1's `Rp`. It starts after the author, and its seed acts on
+nothing: the author answers by snapshot, whose entry carries no Zenoh
+timestamp.
+- **Run A** sets R1's timestamping off.
+- **Run B** leaves it on, as a router's default is.
+- **Run C** has `worker.v2`'s target, whose contract declares the packed
+  `Report` alone. It is told its author's revision: `tasking.v2` in a
+  revision whose `uses` lists `desired.v1`.
+- **Run D** has the same target, told the scenarios' own `tasking.v2`.
+  Its author runs run C's revision, and the author's descriptor reaches
+  the target.
+
+**Steps.** In runs A and B:
+1. The author puts v1.
+2. The author puts v2.
+3. The author deletes `D`.
+
+In run C:
+
+4. The target starts.
+
+In run D:
+
+5. The target starts, and reads its author's descriptor.
+6. The author puts v1.
+
+**Expected.**
+1. **Run A:** the put arrives with no Zenoh timestamp. The target reads
+   it as unstamped (v1 §2.6), and acts on nothing. Its report stays
+   `{key: D, source: baseline}`. **Run B:** the put arrives with R1's
+   Zenoh timestamp. The target acts on v1, and its report is converged
+   on it, under R1's id.
+2. **Run A:** nothing. **Run B:** the target acts on v2.
+3. **Run A:** nothing. **Run B:** the delete arrives with no Zenoh
+   timestamp. The target ignores it, and keeps v2 in force: it runs a
+   document its author deleted. So a deployment binds no such target
+   through a router that timestamps (§2.18).
+4. **Run C:** the target refuses to start, and names its role `task`.
+   S sees no instance token of `lab/worker`.
+5. **Run D:** the target starts: its word names a revision it can
+   report. Its author's descriptor names one that uses `desired.v1`. The
+   target says so where it says what its seed found. `Rp` holds the
+   baseline's report.
+6. **Run D:** the target acts on nothing. `Rp` and `Run` receive
+   nothing.

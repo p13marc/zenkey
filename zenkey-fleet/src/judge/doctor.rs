@@ -894,6 +894,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
     let desired = if spec.asks_desired() {
         let mut ds = crate::bus::desired::DesiredSpec::new(t);
         ds.clocks_synced = spec.clocks_synced;
+        ds.catalogs = spec.catalogs.clone();
         // No check reads an archive's last-known: its presence read would
         // cost a third.
         ds.archives = false;

@@ -361,8 +361,13 @@ def read_near(tool: Any, address: str, *, listener: Listener | None = None, trus
             named = [e.get("contract") for e in doc.get("interfaces") or [] if e.get("contract")]
     info["tables"] = {k: h2.instance_table(k, named, held or {}) for k in h2.KINDS}
     info["catalog"] = None
-    if catalogs is not None:
-        e, why = epoch_of((info.get("descriptor") or {}).get("catalog"), catalogs)
+    named_catalog = (info.get("descriptor") or {}).get("catalog")
+    if catalogs is not None or named_catalog is not None:
+        # health.v2 0.3 §2.6 (F-610): "Core §8.6 refuses a time counted from
+        # a catalog the reader does not hold (unknown_catalog). A record that
+        # holds one is refused whole". A reader given no catalog holds none:
+        # an owner that names one is read so, never under 0 (round 125).
+        e, why = epoch_of(named_catalog, catalogs or [])
         info["catalog"] = why
         epoch = 0 if e is None else e
     status_key = f"zk2/{address}/{IFACE}/state/status"

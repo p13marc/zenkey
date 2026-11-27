@@ -2431,11 +2431,12 @@ async fn s13_two_faces_one_far_principal() {
 // ── link.v2's scenarios (`spec/profiles/link/scenarios-v2.md`; #988, L2) ──
 
 /// link.v2's scenarios' face policy: the radio's, with a 2 s lease and 4
-/// keep-alives, a keep-alive every 0.5 s.
+/// keep-alives, a keep-alive every 0.5 s, on stock zenoh 1.10.2 (link.v2
+/// 0.26, F-609; 1.10.1's protocols and timings, so it reads the same).
 const V2_POLICY: &str = r#"profile  = "link.v2"
 system   = "lab"
 services = ["radio-a"]
-binding  = "zenoh-1.10.1"
+binding  = "zenoh-1.10.2"
 
 [transport]
 lease_ms             = 2000

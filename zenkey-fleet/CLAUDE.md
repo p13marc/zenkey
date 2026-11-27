@@ -280,11 +280,21 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   (`every_v2_slice_reads_as_the_fixture`) and `v2/conclusions.json`
   through `judge` (`every_v2_conclusion_reads_as_the_fixture`), both as
   written; `report-fixtures`' `desired_v2_report` is a both-majors
-  deployment. Not done: a `desired.v2` report under a horizon is aged by
-  its Zenoh timestamp alone, as a `desired.v1.Report` on a `freshness.v2`
-  resource is (a snapshot entry's confirmation is not read here); an
-  unbound `desired.v2` role's baseline record is not read by `desired-
-  report`; and no `--across-face` word reaches `zenctl desired`.
+  deployment. Since `desired.v2` 0.2 (zk2py rounds 116–123): a
+  `desired.v2` report whose declaring contract uses `freshness.v2`
+  (`ReportWhere::aged`) is aged by its snapshot entry's confirmation
+  (§2.17 step 4): `reports_get` reads its pages by `reply_entries_aged`
+  under `DesiredSpec::catalogs` (zenctl's `--catalog`, the doctor's
+  `DoctorSpec::catalogs`) and the descriptors in hand, so
+  `PackedReply::stamp` is the confirmation under `owner_clock`; under
+  `freshness.v1` its Zenoh timestamp, as before
+  (`a_v2_report_under_freshness_v2_is_aged_by_its_confirmation`). An
+  unbound role's report key is read too (`RoleResolution::listed`), and
+  `desired-report` passes it only as the baseline's record (§2.12; the
+  live `desired_v2_s9_last_known_…`'s `lab/spare`). Not done: a
+  `desired.v1.Report` on a `freshness.v2` resource is still aged by its
+  Zenoh timestamp alone, and no `--across-face` word reaches `zenctl
+  desired`.
   `redundancy.v1` (#841, RC) runs through all four layers too.
   `bus::redundancy` makes two presence reads of the scope's `@zk/**` a
   grace apart (2 s) on a session with no liveliness subscriber, `cut_off`
@@ -868,7 +878,9 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `HealthTarget::state_selectors`, `get_of` per major), held apart
   (`HealthGet::{services, v2}`, `services_of`); a `health.v2` record is
   read under CH's tag (`packed_record`) and its owner's epoch
-  (`EntryEpochs::of`, an epoch not had reading `Undecodable`) into the
+  (`EntryEpochs::of`; with no epoch had, a record holding a time reads
+  `Undecodable` and one with none is read, `bus::health::undated`,
+  health.v2 0.3 §2.6, `a_v2_record_with_no_time_needs_no_epoch`) into the
   same `StatusValue`/`CheckValue`/`FaultValue` with a `word` (and
   `since_s`, `at_s`, `argument`), and each owner's pages again as one
   `zenkey_model::health::v2::Reading` (`ServiceGot::reading_v2`). The

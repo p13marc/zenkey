@@ -7,6 +7,46 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.26 — 2026-11-27: editorial: a `desired.v2` resource of a contract that uses `redundancy.v1` keeps its floor, the mode read alone decides a per-mode value, and the scenarios' N runs zenoh 1.10.2, no keyword changed (#986, #1165)
+
+zk2py's rounds 117 to 122 found four sentences or cases short
+(F-573, F-575, F-587 and F-591's second half, F-609). Case 50, in 0.24,
+answered F-591's first half.
+
+**What changed.**
+- **§2.11 (F-587).** "A `desired.v2` desired resource has no floor,
+  unless its template's first chunk is a parameter" now adds: "or its
+  contract uses `redundancy.v1`". Every state of such a contract is per
+  key, by §2.11's own list and core §4.2's. Both implementations' plans
+  already floored it. Core 0.116 says the same of §4.3's table.
+- **§2.19, "As data" (F-575).** A value per mode is read at the mode
+  read alone. A value zenoh refuses at another mode plays no part, and
+  neither does a member that names no mode. Both tools read so.
+- **`scenarios-v2.md`'s N (F-609)** runs zenoh 1.10.2, and the face
+  policy names `zenoh-1.10.2`. By core §0, its "zenoh 1.10.1" read as
+  1.10.2 too, so the policy named a zenoh its router did not run. The
+  two stock bindings read the same, so no Expected moves.
+
+**The cases, each written by reading this text.**
+- **`v2/plan.json`, case 52 (F-591):** case 49 with its revision's
+  `uses` grown by `redundancy.v1`. It keeps the floor, as case 33 and
+  case 50 do. 53 cases.
+- **`v2/transport.json`, cases 34 and 35 (F-575):** case 28's router
+  with the string at the peer's mode and `false` at its own, and with a
+  member `bogus` beside its own `false`. Neither draws a finding. 36
+  cases.
+- Each was read against the reference's `StatedTransport::stamps` and
+  its floor's `per_key_in`.
+
+**Not added (F-573).** A case of a collection the revisions disagree on,
+read `host`, beside an owner heartbeat. Its plan moves the denies, the
+evidence, the longest put and the horizon at once. It is drafted in the
+code half, to be derived by the reference and read by hand, as case 50
+was.
+
+**Deliberately not changed.** No keyword, plan or finding. The header is
+still written against core 0.108.
+
 ## link.v2 0.25 — 2026-11-27: the binding `zenoh-1.10.2`, stock zenoh 1.10.2: §2.4's list and §2.19's column, no keyword changed (#1165)
 
 The reference moves to zenoh 1.10.2, and core 0.114 is specified

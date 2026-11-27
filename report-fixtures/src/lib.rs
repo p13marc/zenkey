@@ -4667,6 +4667,7 @@ pub fn desired_v2_report() -> DesiredReport {
                 tables: tables.clone(),
             },
             horizon: zenkey_model::freshness::Horizon::Undeclared,
+            aged: false,
         });
         let mut role = RoleRead::new(res);
         role.author_seen = Some((seen_author, None));

@@ -1320,6 +1320,60 @@ def zepoch(report: Any) -> None:
         bus.close()
 
 
+def untimed(report: Any) -> None:
+    """health.v2 0.3 §2.6 (F-610), "A record with no time needs no catalog,
+    and is read": zk2py's owner under a catalog's later epoch, its status
+    and check timed, then (``untimed on``) put again with no time, read with
+    no catalog by ``zenctl health`` and by zk2py's reader. The owner example
+    has no word for a record with no time, so this runs with zk2py's
+    owner."""
+    hs = _hs()
+    sec = "a record with no time, read without the catalog (zk2py's owner)"
+    if hs.OWNER == "rust":
+        report.check(sec, "run", True, "the owner example writes every record with its time: this run is zk2py's "
+                                       "owner's (--owner zk2py)")
+        return
+    from . import health_v2_live as hl
+
+    epoch = 1767225600
+    bus = hs.Bus()
+    try:
+        path = os.path.join(bus.tmp, "catalog.json")
+        hs.make_catalog(path, epoch, [REPO / "spec" / "profiles" / "health" / "health.v2.toml"])
+        o = bus.owner("lab/cat", "--level", "degraded", "--reason", "serving", "--catalog", path,
+                      "--check", "disk=degraded:timeout", "--run-record", os.path.join(bus.tmp, "cat.run"))
+        time.sleep(1.0)
+        c0, d0, e0 = health(bus.endpoint, "lab/cat", "--clocks-synced")
+        r0 = row(d0, "lab/cat")
+        m0, i0 = hl.read_near(bus.t, "lab/cat")
+        report.check(sec, "timed, without the catalog: zenctl and zk2py's reader both refuse the status, unknown, "
+                          "never at its level (core §8.6, §2.6)",
+                     said(r0, "status", "level") != "degraded" and m0.status is not None
+                     and m0.status.level is None and i0.get("catalog") == "unknown_catalog",
+                     f"zenctl exit {c0}: {brief(r0)}; zk2py: {m0.status and m0.status.expect()}, {i0.get('catalog')}")
+        o.cmd("untimed on")
+        o.cmd("status failed check")
+        o.cmd("check disk failed refused")
+        time.sleep(1.0)
+        c1, d1, e1 = health(bus.endpoint, "lab/cat", "--clocks-synced")
+        r1 = row(d1, "lab/cat")
+        m1, i1 = hl.read_near(bus.t, "lab/cat")
+        report.check(sec, "untimed, without the catalog: zenctl reads the status at its level, failed, and the "
+                          "check at failed (\"A record with no time needs no catalog, and is read\")",
+                     said(r1, "status", "level") == "failed"
+                     and any(c.get("check") == "disk" and c.get("level") == "failed" for c in r1.get("checks") or []),
+                     f"exit {c1}: {brief(r1)}; {e1[-200:] if not r1 else ''}")
+        report.check(sec, "untimed, without the catalog: zk2py's reader reads the status at failed, and the check",
+                     m1.status is not None and m1.status.level == "failed"
+                     and any(c is not None and c.level == "failed" for c in (m1.checks or {}).values()),
+                     f"{m1.status and m1.status.expect()}, checks {[c.expect() for c in (m1.checks or {}).values()]}")
+    finally:
+        bus.close()
+
+
+SECTIONS["untimed"] = untimed
+
+
 def v1ahead(report: Any) -> None:
     """F-600: a service whose descriptor lists ``health.v1`` alone, its
     guard holding, read by ``zenctl health``: over a window that hears no

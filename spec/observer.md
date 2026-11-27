@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.35 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.36 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.108 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -69,8 +69,8 @@ cites what checks it.
 - Zenoh's behaviour that a rule rests on is core Appendix B's.
 
 **What it does not state.** What a participant puts on the wire, an
-owner's rules, the grants a deployment compiles (core §11) and the facts
-of zenoh 1.10.1 (core Appendix B) stay in the core. Where a rule here
+owner's rules, the grants a deployment compiles (core §11) and zenoh's
+facts (core Appendix B) stay in the core. Where a rule here
 needs one of them, it cites it.
 
 ---
@@ -675,6 +675,13 @@ and merge, a selector over several owners and "Observing S1" stay in core
     That is the bound's cost. A tool that marks neither the key nor that
     value shows the value as the key's latest, and only the count tells a
     person that the merge did not order every key.
+- **A body its user gave it.** A tool whose raw GET carries a payload
+  its user gave it holds no mutation for the member (core §4.2). It
+  shows each reply as what it is.
+  - A held stamp that is the payload its GET carried, on its one
+    concrete key, is the owner's answer. The tool shows it as unchanged:
+    the member's last mutation is that stamp. It never shows a value.
+  - Any other held stamp is no answer (`held`), as core §4.2 says.
 - **R6 and a tool's seed.** R6 binds a consumer: a consumer that
   seeds discards a reply or a sample whose key is not concrete, whichever
   path brought it. A tool's seed shows what arrived, as its subscription

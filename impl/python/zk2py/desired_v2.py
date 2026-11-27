@@ -808,9 +808,13 @@ class TargetRole:
         else:
             raise ValueError(f"an unknown end {f.how!r}")
         # §2.10 "The observed version is the last the target acted on or
-        # adopted in this process." "A revert on a snapshot with no entry has
-        # no observed version (§2.8)."
-        self.observed = None if h.version is None else (h.version, self._revision(h))
+        # adopted in this process." "A revert on a snapshot with no entry
+        # that ends `reverted` has no observed version. One that fails keeps
+        # the one it had (§2.8). A snapshot names no version." (0.2, F-577)
+        if h.version is not None:
+            self.observed = (h.version, self._revision(h))
+        elif how == DONE:
+            self.observed = None
         if how == DONE:
             self.in_force = None if revert else self.observed
         elif how == FAILED:
@@ -1209,9 +1213,12 @@ class ReportDeclaration:
 
 
 def _report_resource(r: ReportResource) -> bool:
-    """§0 "Report resource: a state resource of a target's contract whose
-    resolved annotations hold ``desired.report``.\""""
-    return r.holds_key and r.token in ("state", "@state")
+    """§0 "Report resource: a resource of a target's contract whose resolved
+    annotations hold ``desired.report``, of any kind (§2.10). Its declaration
+    is invalid unless it is ``state`` or ``@state``." (0.2, F-580: 0.1 named
+    a state resource alone.) §2.10 "Of any kind": "It still names its role,
+    to ``two_reports`` and to a tool's finding.\""""
+    return r.holds_key
 
 
 def declare_report(r: ReportResource, roles: Any, others: Any = ()) -> ReportDeclaration:
@@ -1314,8 +1321,8 @@ class ReportFound:
 def names_role(r: ReportResource, role: str) -> bool:
     """§2.10 "The report resources of a role are the resources of the
     contract that declares the role whose ``desired.report`` names it: by
-    its name, or by a parameter in braces." A report resource is "a state
-    resource" (§0)."""
+    its name, or by a parameter in braces." A report resource is one "of any
+    kind" (§0, 0.2)."""
     if not _report_resource(r) or r.named is None:
         return False
     form, name = r.named
@@ -1488,9 +1495,15 @@ def _converged(r: Reading, rep: dict[str, Any]) -> v1.Answer:
 def lint_contract(canonical: dict[str, Any]) -> list[dict[str, Any]]:
     """Every resource of one contract's canonical form that this profile
     reads, with its declaration: a desired resource's (§2.2) and a report
-    resource's (§2.10). "A contract linter SHOULD warn of one" that is
-    invalid (v1 §2.2). Only for a contract that lists ``desired.v2``: under
-    ``desired.v1`` the three keys this major adds are W105's (§4)."""
+    resource's (§2.10). Only for a contract that lists ``desired.v2``: under
+    ``desired.v1`` the three keys this major adds are W105's (§4).
+
+    §2.2 (0.2, F-583): "**What a linter reports.** A linter reports each
+    reason of an invalid declaration as an error, where v1 §2.2 says warn.
+    ... The core has no code for it. So the contract still loads, with its
+    fingerprint (core §9.2)." "The same holds of a report resource (§2.10)."
+    So an invalid row carries ``severity`` ``error``, and the contract's own
+    load is not this function's: its codes and fingerprint are core §9.2's."""
     if PROFILE not in canonical.get("uses", ()):
         return []
     rows = canonical["resources"]
@@ -1506,12 +1519,16 @@ def lint_contract(canonical: dict[str, Any]) -> list[dict[str, Any]]:
         name = f"{r['token']}/{r['template']}"
         if v1.KEY in ann:
             d = declare(r["token"], r["template"], ann, r.get("params") or {}, canonical["uses"])
-            out.append({"resource": name, "as": "desired", **d.expect()})
+            row0: dict[str, Any] = {"resource": name, "as": "desired", **d.expect()}
+            if d.declaration == v1.INVALID:
+                row0["severity"] = "error"
+            out.append(row0)
         if rr.holds_key:
             rd = declare_report(rr, roles, reports)
             row: dict[str, Any] = {"resource": name, "as": "report", "declaration": rd.declaration}
             if rd.declaration == v1.INVALID:
                 row["reasons"] = list(rd.reasons)
+                row["severity"] = "error"
             else:
                 row[rd.form or ""] = rd.name
             out.append(row)

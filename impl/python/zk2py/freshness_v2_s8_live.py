@@ -601,15 +601,21 @@ def steps12(report: Report, pairing: str, dump: str | None) -> None:
                 known = [x for x in read if any("refused" not in g for g in x.answer["read"]["groups"])]
                 before = [x for x in read if known and x.arrival_ns < known[0].arrival_ns]
                 runs = sorted({x.stamp.run_hex() for x in read if x.stamp is not None})
-                report.check(pairing, sec, "freshness.v2 0.11 §2.5, \"Where the id is\": a reader that holds the "
-                                           "catalog and is given no word, started before its owner, reads each "
-                                           "group of the puts heard before it knows unknown_catalog, reads its "
-                                           "owner's descriptors once, finds the one that states the puts' run, and "
-                                           "from then on reads every group through the catalog it names",
-                             bool(known) and 1 <= len(before) <= 6
-                             and all(g.get("refused") == "unknown_catalog" for x in before
-                                     for g in x.answer["read"]["groups"])
+                # 0.13 (round 125, F-574): started before its owner, its start
+                # read draws no reply, which "is no failure. The deployment's
+                # word stands for it": the one catalog it holds, the one it
+                # was provisioned. So it reads every group from the first put,
+                # and its read for the puts' run, the first put's, names the
+                # same catalog by the descriptor that states the run.
+                report.check(pairing, sec, "freshness.v2 0.13 §2.5, \"Where the id is\" and \"On the near side\": "
+                                           "a reader that holds the catalog and is given no word as such, started "
+                                           "before its owner, its start read silent, reads every group through the "
+                                           "catalog it was provisioned, none unknown_catalog; it reads its owner's "
+                                           "descriptors once for the puts' run, and the one that states that run "
+                                           "names the same catalog",
+                             bool(known) and len(before) == 0 and len(known) == len(read)
                              and all("refused" not in g for x in known for g in x.answer["read"]["groups"])
+                             and sn.naming.silences >= 1
                              and sn.naming.reads == 1 and len(runs) == 1 and (d or {}).get("run") == runs[0]
                              and sn.naming.known.get(runs[0]) == held.id,
                              f"{len(read)} read, {len(before)} before it knew; {sn.naming.reads} descriptor read; the "

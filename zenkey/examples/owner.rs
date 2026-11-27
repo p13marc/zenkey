@@ -14,7 +14,7 @@
 //!     [--desired-author] [--desired-record <file>] [--desired-window <s>]
 //!     [--desired-target <system>/<service>] [--desired-unbound] [--desired-archive <system>/<service>]
 //!     [--desired-watch] [--desired-reread-ms <ms>] [--desired-hold]
-//!     [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>]
+//!     [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>] [--desired-word-alone]
 //!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
@@ -503,6 +503,17 @@
 //! is held (`scenarios-v2.md` §15); and `desired watch` says what the
 //! target's watch holds.
 //!
+//! **Both majors** (`desired.v2` §2.18). A target reads its author's
+//! revision from its descriptor, under each version's run, and the
+//! deployment's word, the file given, where none reaches it. Given an
+//! author's revision of the other major than its report's, it refuses to
+//! start, naming the role. Learning one after its start, it acts on none
+//! of that author's versions under it: `desired seeds` says
+//! `revision=stopped:<major>:<fingerprint>`, and the report stays as it
+//! was. `--desired-word-alone` plays a target built before `desired.v2`:
+//! the file given alone, never the descriptor (`scenarios-v2.md` §16's
+//! runs A and B).
+//!
 //! Its commands, each answered by one line:
 //!
 //! ```text
@@ -541,7 +552,8 @@
 //! `desired gets <key> <n>`, the GETs the author's state queryables
 //! answered whose selector reaches the key, a document held or not
 //! (`scenarios.md` §8); `seeds` `desired seeds <n> answered=<n>
-//! author=<present|absent|incomplete|not-read|not-made> archive=<-|answered|nothing>`,
+//! author=<present|absent|incomplete|not-read|not-made> archive=<-|answered|nothing>
+//! revision=<given|another:<fp>|stopped:<major>:<fp>|word|unread|not-read>`,
 //! with ` because <why>` after a read not made, or `desired seeds 0 none`
 //! before the first (text 0.4, F-197: the replies the GET drew, the
 //! author's presence, read only when the GET drew nothing and it decides
@@ -804,6 +816,10 @@ pub struct Options {
     /// `--desired-hold`: the drive holds its first act until `desired
     /// release`.
     pub desired_hold: bool,
+    /// `--desired-word-alone`: the target reads its author's revision by
+    /// the file given alone, never its descriptor, as a target built
+    /// before desired.v2 does (desired.v2 §2.18).
+    pub desired_word_alone: bool,
     /// `--standby`, or implied by a redundancy option: `redundancy.v1` for
     /// every governed contract, on a reader and a watch session of the
     /// owner's own (#841).
@@ -854,7 +870,9 @@ pub struct Options {
     /// redundancy.v1 §2.10).
     pub hlc: bool,
     /// `--run-file <path>`: the record each instance's 16-bit run is taken
-    /// from (core §4.3), else a random 32-bit run.
+    /// from (core §4.3), else a random 32-bit run. A missing record reads
+    /// as a first start, so a deployment never hands it the path of one
+    /// that was lost or restored (core 0.116 §4.3, F-578).
     pub run_file: Option<PathBuf>,
     /// `--catalog <path>`: the deployment catalog it writes under (core
     /// §8.6), its id stated in the descriptor (§3.3) and its epoch the one
@@ -920,6 +938,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--desired-target <system>/<service>] [--desired-unbound]
     [--desired-archive <system>/<service>] [--desired-watch] [--desired-reread-ms <ms>]
     [--desired-hold] [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>]
+    [--desired-word-alone]
     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
@@ -1307,12 +1326,18 @@ desired.v1 (spec/profiles/desired/v1.md)
     desired acts <n> seeds=<n> held=<true|false>
     desired gets <key> <n>
     desired seeds <n> answered=<n> author=<present|absent|incomplete|not-read|not-made>
-      archive=<-|answered|nothing> [because <why>]
+      archive=<-|answered|nothing> revision=<given|another:<fp>|stopped:<major>:<fp>|
+      word|unread|not-read> [because <why>]
                                   the replies the last seed's GET drew; the author's
                                   presence, read when the GET drew nothing and it decides
                                   the archive or a retry (not-read otherwise; not-made,
                                   and why, for a read not made); the archive, read only
-                                  when a complete read shows the author absent;
+                                  when a complete read shows the author absent; the
+                                  author's revision its descriptors name (desired.v2
+                                  §2.18): the file given, another of its major, one of
+                                  the other major that stops the role, none reaching it
+                                  (word), a read that failed, or not read
+                                  (--desired-word-alone);
                                   desired seeds 0 none before the first
     desired fail-next|refuse-next <code>|hold|release|reread <ms>|off
     refused <line>: <why>
@@ -1339,6 +1364,15 @@ desired.v2 (spec/profiles/desired/v2.md)
   --desired-timeout-ms <ms>       the target's timeout of each read, 1000 by default:
                                   across a face, its reply timeout. A --desired-reread-ms
                                   below it refuses the start
+  --desired-word-alone            the target reads its author's revision by the file given
+                                  alone, never its descriptor: a target built before
+                                  desired.v2 (v2.md §2.18, scenarios-v2.md §16)
+
+  Both majors (v2.md §2.18): a target reads its author's revision from its
+  descriptor, the file given where none reaches it. Given an author's revision
+  of the other major than its report's, it refuses to start, naming the role;
+  learning one after its start, it acts on none of its versions:
+  desired seeds says revision=stopped:<major>:<fingerprint>.
 
   desired put|delete              answered with the version: desired put <key> <run>/<seq>
   desired delete-unheld <target>  author: a delete put though no document is held, which
@@ -1460,7 +1494,9 @@ timing.v1 (spec/profiles/timing/v1.md)
                                   it on whatever --clock-offset-ms, redundancy.v1
                                   §2.10)
   --run-file <path>               each instance's 16-bit run from this record (core
-                                  §4.3), else a random 32-bit run
+                                  §4.3), else a random 32-bit run. A missing record
+                                  reads as a first start: never give the path of a
+                                  record that was lost, nor of one restored
   --catalog <path>                the deployment catalog it writes under (core §8.6):
                                   its id stated in the descriptor, its epoch the one
                                   packed time fields count from
@@ -1616,6 +1652,7 @@ impl Options {
              [--desired-archive <system>/<service>] [--desired-watch] \
              [--desired-reread-ms <ms>] [--desired-hold] \
              [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>] \
+             [--desired-word-alone] \
              [--standby] [--election claim|external] [--instance-id <id>] [--name <word>] \
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
@@ -1665,6 +1702,7 @@ impl Options {
             desired_ttl_s: 0,
             desired_timeout_ms: None,
             desired_hold: false,
+            desired_word_alone: false,
             standby: false,
             election: None,
             instance_id: None,
@@ -1897,6 +1935,10 @@ impl Options {
                     o.desired_v2 = true;
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--desired-word-alone" => {
+                    o.desired_word_alone = true;
+                    rest = tail;
+                }
                 [flag, value, tail @ ..] if flag == "--desired-ttl" => {
                     o.desired_ttl_s = value
                         .parse()
@@ -2076,11 +2118,12 @@ impl Options {
             && (o.desired_archive.is_some()
                 || o.desired_watch
                 || o.desired_hold
+                || o.desired_word_alone
                 || o.desired_timeout_ms.is_some()
                 || o.desired_reread_ms.is_some())
         {
             return Err("--desired-archive, --desired-watch, --desired-reread-ms, \
-                 --desired-timeout-ms and --desired-hold are \
+                 --desired-timeout-ms, --desired-word-alone and --desired-hold are \
                  the target's: give --desired-target or --desired-unbound"
                 .to_owned());
         }
@@ -3155,6 +3198,7 @@ impl Ctx<'_> {
                 if let Some(ms) = opts.desired_timeout_ms {
                     st.timeout = Duration::from_millis(ms);
                 }
+                st.word_alone = opts.desired_word_alone;
                 st.watch = d.watch.clone();
                 target = Some(
                     b.desired_target(
@@ -3983,8 +4027,23 @@ fn desired_seeds(seeds: u64, last: Option<&desired::Seeded>) -> String {
         Some(true) => "answered",
         Some(false) => "nothing",
     };
+    // desired.v2 §2.18: what it read of its author's revision.
+    let revision = match &s.revision {
+        desired::AuthorRevision::NotRead => "not-read".to_owned(),
+        desired::AuthorRevision::Word => "word".to_owned(),
+        desired::AuthorRevision::Given => "given".to_owned(),
+        desired::AuthorRevision::Another(fp) => format!("another:{fp}"),
+        desired::AuthorRevision::Stopped { fingerprint, major } => format!(
+            "stopped:{}:{fingerprint}",
+            match major {
+                desired::Major::V1 => "desired.v1",
+                desired::Major::V2 => "desired.v2",
+            }
+        ),
+        desired::AuthorRevision::Unread => "unread".to_owned(),
+    };
     let mut out = format!(
-        "desired seeds {seeds} answered={} author={author} archive={archive}",
+        "desired seeds {seeds} answered={} author={author} archive={archive} revision={revision}",
         s.answered
     );
     if let Some(why) = why {

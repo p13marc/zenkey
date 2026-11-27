@@ -208,6 +208,7 @@ class ZenctlP:
     def __init__(self, ep: str, box: Path, tmp: str) -> None:
         self.ep, self.box, self.tmp, self.n = ep, box, Path(tmp), 0
         self.said: list[str] = []
+        self.rows: list[dict[str, Any]] = []
 
     def _run(self, *a: str) -> tuple[int, dict[str, Any], str]:
         p = subprocess.run([str(self.box / "zenctl"), *a], capture_output=True, text=True, timeout=60)
@@ -234,6 +235,9 @@ class ZenctlP:
         rc2, doc2, _ = self._run("get", "-c", self.ep, "--format", "json", "--contracts", str(GROUND), *body, selector)
         said = [str(x.get("decode_error") or x.get("type")) for x in doc2.get("rows", []) if x.get("row") == "answer"]
         self.said = said
+        #: the decoded rows whole (round 125: observer 0.36 §4.1, a held
+        #: stamp that answers the tool's own body shown as unchanged)
+        self.rows = [x for x in doc2.get("rows", []) if x.get("row") == "answer"]
         return raw, said
 
 
@@ -280,6 +284,19 @@ def steps_1_to_8(report: Report, sec: str, impl: str, ep: str, p: Any, record: s
                          and raw[0][1][0] == 0xE0 and verdict(reading, "unchanged"),
                          f"{kind} {raw[0][1].hex() if raw else None}" + (f"; the tool: {p.said}" if not py_reader
                                                                          else ""))
+            if not py_reader and not whole and getattr(p, "rows", None) is not None and not getattr(p, "old", False):
+                # observer 0.36 §4.1 (F-572): "A held stamp that is the
+                # payload its GET carried, on its one concrete key, is the
+                # owner's answer. The tool shows it as unchanged: the
+                # member's last mutation is that stamp. It never shows a
+                # value."
+                rows = p.rows
+                report.check(sec, f"expected {n}: zenctl get, whose body was that held stamp, shows the reply as "
+                                  "unchanged at the stamp's run and seq, and shows no value (observer §4.1, 0.36)",
+                             len(rows) == 1 and rows[0].get("unchanged") == {"run": format(stamp.run, "04x"),
+                                                                             "seq": stamp.seq}
+                             and "value" not in rows[0] and "decode_error" not in rows[0],
+                             json.dumps(rows)[:400])
 
         # -- step 1: plain -------------------------------------------------------------
         raw, reading = answer(PLAN)
@@ -655,12 +672,15 @@ def tool_reads_played(report: Report, sec: str, ep: str, box: Path, tmp: str, ol
         time.sleep(0.4)
         r9, r8 = InBand(16, 0x0102, 9), InBand(16, 0x0102, 8)
         said = {}
+        rows: dict[str, Any] = {}
         for name, sent, back in (("(R, 9) in answer to (R, 9)", r9, r9), ("(R, 8) in answer to (R, 9)", r9, r8),
                                  ("(R, 9) in answer to no payload", None, r9)):
             played.then(held.write(back), held.write(back))  # the tool GETs twice: raw, then decoded
             raw, _ = z.ask(PLAN, sent)
             said[name] = (raw[0][1].hex() if raw else None, z.said)
+            rows[name] = z.rows
         report.note(sec, f"zenctl get, a held stamp in answer: {said}")
+        report.note(sec, f"zenctl get's decoded rows: {json.dumps(rows, sort_keys=True)[:1500]}")
         if old:
             # §7.5's `short`, in the tool's words: "the body ends before a
             # byte a field needs"
@@ -669,9 +689,16 @@ def tool_reads_played(report: Report, sec: str, ep: str, box: Path, tmp: str, ol
                          all(h is not None and any("short" in s or "body ends before a byte a field needs" in s
                                                    for s in ss_) for h, ss_ in said.values()), str(said))
         else:
-            report.check(sec, "zenctl get shows each held stamp as a held stamp, never as a page cut short, and shows "
-                              "no value for it",
-                         all(h is not None and any("held stamp" in s for s in ss_) for h, ss_ in said.values()),
+            # observer 0.36 §4.1 (F-572): the held stamp its body carried is
+            # shown as unchanged; "Any other held stamp is no answer (held)"
+            own = rows["(R, 9) in answer to (R, 9)"]
+            others = [r for k, rs in rows.items() if k != "(R, 9) in answer to (R, 9)" for r in rs]
+            report.check(sec, "zenctl get shows the held stamp its own body carried as unchanged at that run and seq, "
+                              "with no value; each other held stamp as a held stamp, no answer: held; never as a page "
+                              "cut short (observer §4.1, 0.36)",
+                         len(own) == 1 and own[0].get("unchanged") == {"run": "0102", "seq": 9} and "value" not in own[0]
+                         and len(others) == 2 and all("no answer here: held" in str(r.get("decode_error"))
+                                                      and "unchanged" not in r for r in others),
                          str(said))
     finally:
         played.close()

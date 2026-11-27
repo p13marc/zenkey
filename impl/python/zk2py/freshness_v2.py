@@ -892,10 +892,19 @@ class Naming:
     as step 3 says. The owner heartbeat is still a read one." It holds no
     put.
 
-    - ``word``: "Where no descriptor answers, as across a constrained face,
-      the subscriber takes the deployment's word: the catalog it was
-      provisioned". Given, no descriptor is read, and every run reads
-      through it.
+    - ``word``: the deployment's word given as such, as across a
+      constrained face, where "no descriptor crosses". Given, no
+      descriptor is read, and every run reads through it.
+    - ``provisioned`` (0.13, F-574): "the catalog it was provisioned", the
+      one "its deployment names for that owner", which a read on the near
+      side takes "where no descriptor answers": "a read that draws no reply
+      cannot be told from a face: a tokenless owner's. So it is read as
+      one." "A read that draws no reply at all, and no error reply either,
+      is no failure. The deployment's word stands for it." Such a read
+      names it for its run,
+      and the start read's silence names it for every run no descriptor
+      has answered for. None where the subscriber holds no such word: its
+      silence then names nothing, as before.
     - :meth:`of` is the id a put of ``run`` is read through, None where
       none is known: each group is then ``unknown_catalog``.
     - :meth:`due` says whether to read the descriptors for ``run`` now: no
@@ -903,9 +912,15 @@ class Naming:
       ``ask_again_ns``. "A read that fails names no catalog. Neither does
       one whose descriptors all state another run. The subscriber asks
       again later, and not at every put."
-    - :meth:`answer` takes a read's descriptors, each a parsed document. A
-      descriptor of the run that states no ``catalog`` is an answer: its
-      owner names none (core §8.6), and the run is not asked again.
+    - :meth:`answer` takes a read's descriptors, each a parsed document,
+      and whether the read ended in an error reply. A descriptor of the run
+      that states no ``catalog`` is an answer: its owner names none (core
+      §8.6), and the run is not asked again. "A read that fails names no
+      catalog: one that ends in an error reply, and one whose descriptors
+      all state another run." "A read that ends in zenoh's ``Timeout``
+      error reply, its owner answering too late, is an error reply, and
+      fails." (F-616: zk2py read that one as no reply in round 125's first
+      writing, by the bullet that named "a slow one's".)
     - :meth:`begin` marks a read that asks for no run, the one a subscriber
       makes at its start. It reads every instance's descriptor, so while it
       is under way it covers every run: :meth:`due` asks for none, and a
@@ -915,6 +930,13 @@ class Naming:
 
     word: str | None = None
     ask_again_ns: int = int(ASK_AGAIN_S * 1e9)
+    provisioned: str | None = None
+    #: the start read drew no reply: the deployment's word stands for every
+    #: run no descriptor has named
+    silent: bool = False
+    #: reads that drew no reply, and reads that failed by an error reply
+    silences: int = 0
+    errors: int = 0
     known: dict[str, str | None] = field(default_factory=dict)
     failed: dict[str, int] = field(default_factory=dict)
     asking: set[str] = field(default_factory=set)
@@ -927,7 +949,15 @@ class Naming:
     def of(self, run: str | None) -> str | None:
         if self.word is not None:
             return self.word
-        return None if run is None else self.known.get(run)
+        if run is not None and run in self.known:
+            return self.known[run]
+        if run is not None and run in self.failed:
+            # §2.5: a run whose own read failed "waits for the next read,
+            # never for a guess", even after a silent start read made the
+            # deployment's word stand for runs no descriptor named
+            # (review-bot on #1171)
+            return None
+        return self.provisioned if self.silent else None
 
     def begin(self) -> bool:
         """A read for no run begins. False, and nothing begun, where the
@@ -950,16 +980,28 @@ class Naming:
         self.reads += 1
         return True
 
-    def answer(self, run: str | None, descriptors: Iterable[Any], now_ns: int) -> None:
+    def answer(self, run: str | None, descriptors: Iterable[Any], now_ns: int, error: bool = False) -> None:
+        descriptors = list(descriptors)
         for d in descriptors:
             r = d.get("run") if isinstance(d, dict) else None
             if isinstance(r, str):
                 c = d.get("catalog")
                 self.known[r] = c if isinstance(c, str) else None
+        # 0.13: "A read that draws no reply is no failure. The deployment's
+        # word stands for it."
+        silence = not descriptors and not error
+        if silence:
+            self.silences += 1
+        elif error and not descriptors:
+            self.errors += 1
         if run is None:
             self.starting = max(0, self.starting - 1)
+            if silence and self.provisioned is not None:
+                self.silent = True
         else:
             self.asking.discard(run)
+            if silence and self.provisioned is not None and run not in self.known:
+                self.known[run] = self.provisioned
             if run in self.known:
                 self.failed.pop(run, None)
             else:
@@ -971,15 +1013,33 @@ def descriptors_of(session: Any, address: str, timeout: float = 1.0) -> list[Any
     document: one GET of ``zk2/<address>/@zk/instance/*`` to every
     queryable (core §3.3 "The GET"), so a tokenless owner's is read too. A
     reply that is no JSON object is left out."""
+    return descriptor_read(session, address, timeout)[0]
+
+
+#: what zenoh delivers to a GET left unanswered at its timeout: the
+#: querier's own error reply, ``Timeout`` under ``zenoh/string``, or the
+#: router's under ``zenoh/bytes`` (zk2py.zenoh_facts' ``query_timeout``;
+#: round 125 measured it of a descriptor answered 1.6 s late: 11 of 12 the
+#: querier's, 1 the router's, on zenoh-python 1.10.2)
+TIMEOUT_PAYLOAD = b"Timeout"
+
+
+def descriptor_read(session: Any, address: str, timeout: float = 1.0) -> tuple[list[Any], list[bytes]]:
+    """:func:`descriptors_of`, with the error replies the read drew beside
+    (their payloads): §2.5 tells a read that draws no reply from one that
+    fails. zenoh's own ``Timeout`` is among them where it came."""
     import json
 
     import zenoh
 
     from . import live
 
-    out = []
+    out, errors = [], []
     for a in live._answers(session, f"zk2/{address}/@zk/instance/*", zenoh.QueryTarget.ALL, timeout):
-        if not a.ok or a.key is None or "*" in a.key:
+        if not a.ok:
+            errors.append(bytes(a.payload))
+            continue
+        if a.key is None or "*" in a.key:
             continue
         try:
             d = json.loads(a.payload)
@@ -987,7 +1047,17 @@ def descriptors_of(session: Any, address: str, timeout: float = 1.0) -> list[Any
             continue
         if isinstance(d, dict):
             out.append(d)
-    return out
+    return out, errors
+
+
+def failed_by_error(errors: Iterable[bytes]) -> bool:
+    """§2.5 (0.13): "A read that fails ... one that ends in an error
+    reply", and "A read that ends in zenoh's ``Timeout`` error reply, its
+    owner answering too late, is an error reply, and fails. It waits for
+    the next read, never for a guess." So any error reply fails the read,
+    zenoh's own ``Timeout`` among them (F-616, answered). "A read that
+    draws no reply at all, and no error reply either, is no failure.\""""
+    return any(True for _ in errors)
 
 
 def descriptor_catalog(session: Any, address: str, timeout: float = 1.0) -> str | None:
@@ -1023,18 +1093,26 @@ class Provider:
       the start, then at the first owner heartbeat of a run it knows no
       catalog for, and after a read that fails no sooner than
       ``ask_again_s`` later. Until then each group is ``unknown_catalog``;
+    - ``provisioned`` (0.13): the catalog the deployment names for this
+      owner, which a read that draws no reply takes; by default the one
+      catalog ``held``, where it holds one, and none where it holds
+      several ("A subscriber given several takes the one its deployment
+      names for that owner");
     - ``seed``: the interfaces seeded by their own S4 GET at the start."""
 
     def __init__(self, session: Any, address: str, revisions: Iterable[tuple[dict[str, Any], str, Any]],
                  held: Iterable[Any] = (), named: str | None = None, seed: Iterable[str] = (),
                  reread: bool = True, get_timeout: float = 1.0, wait_s: float = 0.2,
-                 ask_again_s: float = ASK_AGAIN_S, read_at_start: bool = True):
+                 ask_again_s: float = ASK_AGAIN_S, read_at_start: bool = True, provisioned: str | None = None):
         import zenoh
 
         self.session, self.address = session, address
         self.lock = threading.RLock()
+        held = list(held)
         self.reader = Reader(held, named)
-        self.naming = Naming(named, int(ask_again_s * 1e9))
+        if provisioned is None and len(held) == 1:
+            provisioned = held[0].id
+        self.naming = Naming(named, int(ask_again_s * 1e9), provisioned)
         self._get_timeout = get_timeout
         self.owner_heartbeats: list[OwnerHeartbeatRecord] = []
         self.closed = False
@@ -1066,12 +1144,14 @@ class Provider:
         """One read of the owner's descriptors, for ``run`` (None at the
         start, which asks for no run and so fails for none; the caller has
         marked it under way, :meth:`Naming.begin`)."""
+        error = False
         try:
-            got = descriptors_of(self.session, self.address, self._get_timeout)
+            got, errors = descriptor_read(self.session, self.address, self._get_timeout)
+            error = failed_by_error(errors)
         except Exception:  # noqa: BLE001 - a read that fails names no catalog
-            got = []
+            got, error = [], True
         with self.lock:
-            self.naming.answer(run, got, time.monotonic_ns())
+            self.naming.answer(run, got, time.monotonic_ns(), error)
 
     def _owner_beat(self, cls: str, sample: Any) -> None:
         at = time.monotonic_ns()

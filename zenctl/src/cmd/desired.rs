@@ -61,6 +61,9 @@ pub async fn run(cli: DesiredArgs) -> Result<()> {
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
     let window = for_secs.map(|s| ASKING.ask(super::positive_secs("--for", s)));
     let mut spec = DesiredSpec::new(dep.timeout());
+    // desired.v2 §2.17 step 4: the epoch a report under freshness.v2 is
+    // dated under (core §8.6), from `--catalog`.
+    spec.catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
     spec.window = window;
     spec.clocks_synced = clocks_synced;
     spec.role = role;

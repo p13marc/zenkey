@@ -1,5 +1,5 @@
 {
-  "description": "health.v2 §2.10, §4: words and their tables. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `profile`: the profile's three tables as this text has them, by kind (`reasons`, a status's reason; `details`, a check's detail; `codes`, a fault's code): the name at index i is the word i + 1. `declarations`: a contract's `uses` and each resource's resolved annotations, by kind token and template -> for each kind, the table the contract holds: a list, null where no resource carries the key (`health.reasons`, `health.details`, `health.codes`), or {invalid: reason}, the first of `not_used` (a resource carries the key, and uses does not list health.v2), `value` (a resource's value is not a list of at most 31 names, each [a-z][a-z0-9_]*, none twice) and `disagrees` (two resources carry two different lists). An invalid declaration holds no table. `instances`: the revisions an instance's descriptor `names`, and the tables of each revision the reader `holds` (as declarations reads them, an invalid one null) -> for each kind, the instance's table: the one list among the named revisions the reader holds, null where none holds one, or \"differ\" where two hold two different lists, which is no table. A revision that is held and not named adds nothing. `writes`: a kind, the word an owner has (a name, or null for none) and its instance's `own` table of that kind (null for none) -> the number it writes: 0 for no word, the profile's number, 32 plus the index in its own table, or \"out_of_range\". `reads`: a kind, a number (or \"out_of_range\") and the instance's `own` table as the reader holds it (null for none) -> {none: true} for 0; {name, of: \"profile\"} or {name, of: \"service\"}; {number} where no table in hand names it; {out_of_range: true}. `growth`: a table in one revision and in the next -> `same`, `appended` (the old list is a prefix of the new, so every number keeps its word) or `moved` (some number names another word, or none).",
+  "description": "health.v2 §2.10, §4: words and their tables. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `profile`: the profile's three tables as this text has them, by kind (`reasons`, a status's reason; `details`, a check's detail; `codes`, a fault's code): the name at index i is the word i + 1. `declarations`: a contract's `uses` and each resource's resolved annotations, by kind token and template -> for each kind, the table the contract holds: a list, null where no resource carries the key (`health.reasons`, `health.details`, `health.codes`), or {invalid: reason}, the first of `not_used` (a resource carries the key, and uses does not list health.v2), `value` (a resource's value is not a list of at most 31 names, each [a-z][a-z0-9_]*, none twice) and `disagrees` (two resources carry two different lists). An invalid declaration holds no table. `instances`: the revisions an instance's descriptor `names`, and the tables of each revision the reader `holds` (as declarations reads them, an invalid one null) -> for each kind, the instance's table: the one list among the named revisions the reader holds, null where none holds one, or \"differ\" where two hold two different lists, which is no table. A revision that is held and not named adds nothing. `writes`: a kind, the word an owner has (a name, or null for none) and its instance's `own` table of that kind (null for none) -> the number it writes: 0 for no word, the profile's number, 32 plus the index in its own table, or \"out_of_range\". `reads`: a kind, a number (or \"out_of_range\") and the instance's `own` table as the reader holds it (null for none) -> {none: true} for 0; {name, of: \"profile\"} or {name, of: \"service\"}; {number} where no table in hand names it; {out_of_range: true}. `growth`: a table in one revision and in the next -> `same`, `appended` (the old list is a prefix of the new, so every number keeps its word) or `moved` (some number names another word, or none). Instance 9, of text 0.3, was written by hand from the text and read against the reference's reading, not computed twice.",
   "profile": {
     "reasons": [
       "starting",
@@ -980,6 +980,32 @@
       },
       "expect": {
         "reasons": null,
+        "details": null,
+        "codes": null
+      }
+    },
+    {
+      "note": "an empty list beside another list: two different lists, so none (differ), and the owner writes out_of_range. An empty list is a table that names nothing, never no table. Written by hand for text 0.3",
+      "names": [
+        "empty.v1@7777",
+        "full.v1@8888"
+      ],
+      "holds": {
+        "empty.v1@7777": {
+          "reasons": [],
+          "details": null,
+          "codes": null
+        },
+        "full.v1@8888": {
+          "reasons": [
+            "tc_a"
+          ],
+          "details": null,
+          "codes": null
+        }
+      },
+      "expect": {
+        "reasons": "differ",
         "details": null,
         "codes": null
       }

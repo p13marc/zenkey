@@ -101,6 +101,11 @@ pub struct DesiredSpec {
     pub face: Option<FaceWord>,
     /// Read the archives' last-known of a slice whose author is absent.
     pub archives: bool,
+    /// The deployment's catalogs (core §8.6): the epoch a `desired.v2`
+    /// report's confirmation is dated under, where its target's contract
+    /// uses `freshness.v2` (§2.17 step 4). None: such a report is undated,
+    /// so its age is unobservable.
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 impl DesiredSpec {
@@ -113,6 +118,7 @@ impl DesiredSpec {
             role: None,
             face: None,
             archives: true,
+            catalogs: crate::model::deployment::Catalogs::default(),
         }
     }
 }
@@ -389,7 +395,7 @@ async fn observe_with(
         .filter(|(_, tr)| {
             tr.roles.iter().any(|r| {
                 !r.resolution.slice.is_empty()
-                    || (r.resolution.bound()
+                    || (r.resolution.listed()
                         && r.resolution.report_at.as_ref().is_some_and(|w| w.names()))
             })
         })
@@ -406,17 +412,25 @@ async fn observe_with(
                 !r.resolution.slice.is_empty() && matches!(r.author_seen, Some((Seen::Absent, _)))
             })
         });
+    // desired.v2 §2.17 step 4: under freshness.v2, a report's snapshot
+    // entry is dated by its confirmation, under the epoch its owner's
+    // descriptor names (core §8.6).
+    let epochs = match &read.presence {
+        Some(Ok(observed)) => crate::bus::query::EntryEpochs::observed(&spec.catalogs, observed),
+        _ => crate::bus::query::EntryEpochs::of_catalogs(&spec.catalogs),
+    };
     let reports = bounded(
         plans
             .into_iter()
             .map(|(i, plan)| {
                 let s = session.clone();
+                let epochs = epochs.clone();
                 Box::pin(async move {
                     (
                         i,
                         match plan {
                             Err(why) => Err(why),
-                            Ok(sels) => Ok(reports_get(&s, sels, t).await),
+                            Ok(sels) => Ok(reports_get(&s, sels, t, &epochs).await),
                         },
                     )
                 }) as BoxFuture<'static, (usize, Result<ReportsGet, String>)>
@@ -519,6 +533,9 @@ struct ReportSelector {
     horizon: zenkey_model::freshness::Horizon,
     /// The major its replies are read by.
     major: Major,
+    /// A `desired.v2` report whose target's contract uses `freshness.v2`:
+    /// aged by its snapshot entry's confirmation (§2.17 step 4).
+    aged: bool,
 }
 
 /// A target's report selectors, or why there are none to read.
@@ -772,19 +789,22 @@ fn report_selectors(t: &TargetRead, contracts: &Contracts, offline: &ContractSet
         selector,
         horizon: zenkey_model::freshness::horizon_of(r),
         major: Major::V1,
+        aged: false,
     };
-    // desired.v2 (§2.10): the key of each bound role's report, the member
-    // of the resource whose `desired.report` names the role.
+    // desired.v2 (§2.10): the key of each listed role's report, the member
+    // of the resource whose `desired.report` names the role; an unbound
+    // role's too, which holds the baseline's record (§2.12).
     let mut out: Vec<ReportSelector> = t
         .roles
         .iter()
-        .filter(|r| r.resolution.bound())
+        .filter(|r| r.resolution.listed())
         .filter_map(|r| r.resolution.report_at.as_ref())
         .filter_map(|w| {
             Some(ReportSelector {
                 selector: w.key()?,
                 horizon: w.horizon.clone(),
                 major: Major::V2,
+                aged: w.aged,
             })
         })
         .collect();
@@ -929,7 +949,12 @@ fn packed_replies(
 /// [`report_replies`]) or, on a `desired.v2` report's key, as the packed
 /// `Report` (v2 §2.10, [`packed_replies`]). A reply on a wildcard key is
 /// no member (R6).
-async fn reports_get(session: &Session, selectors: Vec<ReportSelector>, t: Duration) -> ReportsGet {
+async fn reports_get(
+    session: &Session,
+    selectors: Vec<ReportSelector>,
+    t: Duration,
+    epochs: &crate::bus::query::EntryEpochs,
+) -> ReportsGet {
     let mut out = ReportsGet {
         selectors: selectors.iter().map(|s| s.selector.clone()).collect(),
         complete: true,
@@ -946,8 +971,10 @@ async fn reports_get(session: &Session, selectors: Vec<ReportSelector>, t: Durat
                      selector: sel,
                      horizon,
                      major,
+                     aged,
                  }| {
                     let session = session.clone();
+                    let epochs = epochs.clone();
                     Box::pin(async move {
                         let mut replies_out = Vec::new();
                         let mut packed_out = Vec::new();
@@ -972,8 +999,18 @@ async fn reports_get(session: &Session, selectors: Vec<ReportSelector>, t: Durat
                                 continue;
                             }
                             // A snapshot's page is its entries (core §4.2;
-                            // #977's E3).
-                            samples.extend(crate::bus::query::reply_samples(sample));
+                            // #977's E3): under freshness.v2, each dated by
+                            // its confirmation (§2.17 step 4, freshness.v2
+                            // §2.6), what ages the report.
+                            if aged {
+                                samples.extend(
+                                    crate::bus::query::reply_entries_aged(sample, &epochs)
+                                        .into_iter()
+                                        .map(|e| e.sample),
+                                );
+                            } else {
+                                samples.extend(crate::bus::query::reply_samples(sample));
+                            }
                         }
                         match major {
                             Major::V1 => replies_out.extend(report_replies(samples, &horizon)),
@@ -1209,6 +1246,95 @@ mod tests {
             ));
         }
         s
+    }
+
+    /// desired.v2 0.2 §2.17 step 4 (J4's first leftover): a report whose
+    /// target's contract uses freshness.v2 carries no Zenoh timestamp
+    /// (core §4.3), so its snapshot entry's confirmation ages it, dated
+    /// under the deployment epoch and stamped under its owner's clock
+    /// (freshness.v2 §2.6): fresh within its horizon, stale past it. With
+    /// no epoch in hand, and under confirmation 0, it is undated, so its
+    /// age is unobservable, never fresh.
+    #[test]
+    fn a_v2_report_under_freshness_v2_is_aged_by_its_confirmation() {
+        use zenkey_model::collection::{Confirmation, Entry, Page, Time};
+        use zenkey_model::desired::v2::{self as d2, Report};
+        use zenkey_model::freshness::{Horizon, Verdict};
+        use zenkey_model::wire::{Run, Seq, Tag};
+        use zenoh::bytes::Encoding;
+        use zenoh::sample::{Sample, SampleBuilder};
+
+        const RP: &str = "zk2/lab/worker/worker.v2/state/desired/task";
+        const EPOCH: i64 = 1_767_225_600;
+        let page = |confirmation: Confirmation| -> Sample {
+            let p = Page {
+                tag: Tag::new(d2::TAG).unwrap(),
+                run: Run::U16(7),
+                asof: Seq::new(1).unwrap(),
+                time: Time::Known { s: 100, ms: 0 },
+                index: 0,
+                more: false,
+                coll: 0,
+                live: vec![Entry {
+                    id: String::new(),
+                    run: None,
+                    seq: Seq::new(1).unwrap(),
+                    confirmation,
+                    record: Report::baseline().write().unwrap().bytes,
+                }],
+                tombs: Vec::new(),
+            };
+            SampleBuilder::put(
+                zenoh::key_expr::KeyExpr::try_from(RP).unwrap(),
+                p.write().unwrap(),
+            )
+            .encoding(Encoding::ZENOH_BYTES)
+            .into()
+        };
+        let horizon = Horizon::Within(Duration::from_secs(60));
+        let read = |sample: &Sample, epoch: Option<i64>| -> PackedReply {
+            let dated: Vec<Sample> = crate::bus::query::reply_entries_at(sample, epoch)
+                .into_iter()
+                .map(|e| e.sample)
+                .collect();
+            let mut got = packed_replies(dated, RP, &horizon);
+            assert_eq!(got.len(), 1);
+            let p = got.remove(0);
+            assert_eq!(p.read.as_ref().unwrap().report, Some(Report::baseline()));
+            p
+        };
+        let built = std::time::UNIX_EPOCH + Duration::from_secs(EPOCH as u64 + 100);
+        let verdict = |p: &PackedReply, at: SystemTime| {
+            crate::model::desired::reply_freshness(
+                p.stamp.as_ref(),
+                &p.horizon,
+                at,
+                &crate::model::health::Trust::Word,
+            )
+            .verdict
+        };
+        // Confirmation 1: at the snapshot's time, under the owner's clock.
+        let p = read(&page(Confirmation::AtTime), Some(EPOCH));
+        let stamp = p.stamp.clone().expect("dated by its confirmation");
+        assert_eq!(stamp.time, built);
+        assert_eq!(stamp.clock, crate::bus::query::owner_clock(RP).to_string());
+        assert_eq!(verdict(&p, built + Duration::from_secs(30)), Verdict::Fresh);
+        assert_eq!(verdict(&p, built + Duration::from_secs(90)), Verdict::Stale);
+        // Confirmation 2: at its conf.
+        let at = Time::Known { s: 40, ms: 0 };
+        let p = read(&page(Confirmation::At(at)), Some(EPOCH));
+        assert_eq!(
+            p.stamp.unwrap().time,
+            std::time::UNIX_EPOCH + Duration::from_secs(EPOCH as u64 + 40)
+        );
+        // No epoch, and confirmation 0: undated, unobservable.
+        for p in [
+            read(&page(Confirmation::AtTime), None),
+            read(&page(Confirmation::None), Some(EPOCH)),
+        ] {
+            assert!(p.stamp.is_none());
+            assert_eq!(verdict(&p, built), Verdict::Unobservable);
+        }
     }
 
     /// desired.v1 0.14 §2.10 and observer §4.1 (zk2py round 112's F-545):

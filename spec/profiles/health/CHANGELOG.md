@@ -7,6 +7,71 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `health.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## health.v2 0.3 — 2026-11-27: zk2py's rounds 120 and 123: which owner heartbeats answer the clock, a record whose time no catalog in hand dates, `not_used` under `health.v1`, and what a linter reports (#986)
+
+zk2py's round 120 read 0.1 cold, and its round 123 ran it against the
+reference (F-593 to F-602, F-610, F-611). 0.2 resolved F-595, F-596 and
+F-602. This version answers the rest. F-597 is core §2.6's, answered in
+core 0.116.
+
+**Decided where the two implementations differ.**
+- **A record whose time no catalog in hand dates (F-610).** Core §8.6
+  refuses such a time, `unknown_catalog`. §2.6 now says the record is
+  refused whole, as core §7.6 refuses a record for one field. So its
+  status is unknown, `undecodable`. Both readers do so. A record with no
+  time needs no catalog, and is read. zk2py reads it. The reference
+  refuses every record of such an owner, and moves (the code half).
+- **Owner heartbeats, and a reader with no catalog (F-598).** An owner
+  heartbeat counts whatever became of its groups, as `freshness.v2` §2.5
+  says of a read one. Its time is read with no catalog. But such a
+  reader need not subscribe to an owner heartbeat key. zk2py subscribes
+  and answers yes, `ahead`. `zenctl health` does not, and answers
+  `nothing_heard`. Both are now as §2.5 says, and neither moves.
+- **The `link` class (F-598)** does not count. A reader subscribes to
+  the status's class, `host`. 0.2 already read so.
+
+**Corrected, with no rule changed.**
+- **`not_used` (F-593).** "A contract that loads cannot hold it (core
+  E020)" was wrong of a contract that lists `health.v1`. That contract
+  loads, with no W105 (core Appendix D), and holds no table. The
+  sentence now says so, as #984's `alarms.v2` draft says of a contract
+  that lists `alarms.v1`, where W105 does read.
+- **What a linter reports (F-594).** In a contract that lists
+  `health.v2`, `value` and `disagrees` are a linter's errors, as
+  `link.v2`'s `packed_required` is. The contract still loads. The
+  reference's `zk2 contract lint` does so, and zk2py's linter moves.
+  `not_used` under `health.v1` draws no core lint, and a linter MAY warn
+  of it.
+- **"In every other case" (F-600)** now says "under this major". A
+  descriptor that lists `health.v1` alone is asked `health.v1`'s
+  question, as §2.12 and `clock.json`'s case 29 say. Both readers read
+  it so.
+- **§9's T (F-611).** Expected 4 asks what a reader of records shows. T
+  and T2 are such readers, as §9 is the runtime's. A health tool
+  answers questions of now, and need not show a status since replaced.
+  The reference's `zenctl health` meets Expected 4 but for that.
+
+**The fixtures (F-599).**
+- `tables.json`, instance 9: an empty list beside another list is
+  `differ`. Both owners wrote `out_of_range` so, live.
+- `judgements.json`, case 60: no status read reaches step 3 with no
+  observation, unobservable.
+- Each was written by hand from the text, and read against the
+  reference's model. Their counts move in the reference's tests (the
+  code half).
+- **Not added.** `clock.json`'s owner heartbeat payloads, and a
+  `records.json` read under a catalog the reader does not hold. Each
+  needs its runner to read a new shape (the code half).
+
+**0.1's "Not verified" (F-601).** It said "The contract is not yet in
+`spec/profiles/.history/`". It was published there with Q1:
+`.history/health.v2/b447f613….bundle.json`, as §3 says. 0.1's entry
+stands as a record.
+
+**Deliberately not changed.** No fixture's reading, and no scenario
+under a catalog. The header is still written against core 0.113 and
+`freshness.v2` 0.12.
+
 ## health.v2 0.2 — 2026-11-27: editorial: three scenario texts zk2py's round 120 found wrong, and who runs the scenarios, no rule changed (#986)
 
 0.1's `scenarios-v2.md` had three steps no implementation could meet as

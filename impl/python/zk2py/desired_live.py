@@ -389,8 +389,12 @@ class Target:
     def __init__(self, address: str, endpoint: str, *, author: str = "lab/author", unbound: bool = False,
                  archive: str | None = None, watch: bool = False, reread_ms: int | None = None,
                  hold: bool = False, poll_ms: int = 500, timeout: float = 1.0, worker: Any = None,
-                 tasking: Any = None) -> None:
+                 tasking: Any = None, hlc: bool = False) -> None:
         self.address, self.endpoint, self.author = address, endpoint, author
+        #: a test rig's (round 125): the target's own session runs zenoh's
+        #: timestamping, which core Appendix B says stamps each put it
+        #: receives that carries no stamp
+        self.hlc = hlc
         self.unbound, self.archive, self.watch_mode = unbound, archive, watch
         self.reread_s = None if reread_ms is None else reread_ms / 1000
         self.poll_s, self.timeout = poll_ms / 1000, timeout
@@ -458,7 +462,7 @@ class Target:
         self.owner = Owner(system, service, [self.contract], connect=self.endpoint,
                            bindings={"task": [self.author]} if bound else {},
                            params={"task": {"system": "self.system", "service": "self.service"}} if bound else {},
-                           before_tokens=self._first_puts)
+                           before_tokens=self._first_puts, hlc=self.hlc or None)
         self.owner.start()
         if bound:
             s = self.owner.session

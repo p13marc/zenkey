@@ -91,7 +91,7 @@ pub(crate) async fn stray_reply_del(
 
 /// The revision of `iface` whose fingerprint is `fp`, retrieved (§8.4);
 /// `None` where it cannot be had.
-async fn retrieved(
+pub(crate) async fn retrieved(
     session: &zenoh::Session,
     iface: &zenkey_model::grammar::IfaceId,
     fp: &str,
@@ -149,46 +149,16 @@ pub async fn owner_revision(
         "{prefix}zk2/{}/{}/@zk/instance/*",
         addr.system, addr.service
     );
-    let rx = match session
-        .get(&selector)
-        .consolidation(ConsolidationMode::None)
-        .timeout(timeout)
-        .with(flume::unbounded::<Reply>())
-        .await
-    {
-        Ok(rx) => rx,
-        Err(e) => {
-            unread(
-                key,
-                &format!("the GET of {selector} could not be asked: {e}"),
-            );
+    let read = match descriptors(session, &selector, iface, timeout).await {
+        Ok(read) => read,
+        Err(why) => {
+            unread(key, &why);
             return OwnerRevision::Unread;
         }
     };
-    let iface = iface.to_string();
     let run = run.to_string();
-    let mut named: Vec<(Option<String>, String)> = Vec::new();
-    let mut heard = false;
-    let mut failed: Option<&str> = None;
-    while let Ok(reply) = rx.recv_async().await {
-        let Ok(sample) = reply.result() else {
-            failed = Some("an error reply, as at its timeout");
-            continue;
-        };
-        heard = true;
-        let bytes = sample.payload().to_bytes();
-        let d = std::str::from_utf8(&bytes)
-            .ok()
-            .and_then(|text| zenkey_model::descriptor::check(text, &[]).0);
-        let Some(d) = d else {
-            failed = Some("a descriptor that does not read");
-            continue;
-        };
-        if let Some(e) = d.interfaces.iter().find(|e| e.iface == iface) {
-            named.push((d.run.clone(), e.contract.clone()));
-        }
-    }
-    if let Some((_, fp)) = named
+    if let Some((_, fp)) = read
+        .named
         .iter()
         .find(|(r, _)| r.as_deref() == Some(run.as_str()))
     {
@@ -196,16 +166,99 @@ pub async fn owner_revision(
     }
     // Descriptors reach the reader and none states the run: no omission
     // rule applies over that snapshot (core §4.2, 0.102).
-    match (named.as_slice(), failed) {
+    match (read.named.as_slice(), read.failed) {
         (_, Some(why)) => {
             unread(key, why);
             OwnerRevision::Unread
         }
-        ([], None) if !heard => OwnerRevision::Unreached,
+        ([], None) if !read.heard => OwnerRevision::Unreached,
         _ => {
             unread(key, &format!("no descriptor names {iface} under run {run}"));
             OwnerRevision::Unread
         }
+    }
+}
+
+/// What a GET of an owner's descriptors drew ([`descriptors`]).
+#[derive(Debug, Default)]
+struct Descriptors {
+    /// Each descriptor naming the interface: the run it states, if any,
+    /// and the fingerprint it names.
+    named: Vec<(Option<String>, String)>,
+    /// A descriptor answered, whatever it named.
+    heard: bool,
+    /// Why one reply did not read: an error reply (zenoh's at its timeout
+    /// among them), or a descriptor that does not read.
+    failed: Option<&'static str>,
+}
+
+/// One GET of the descriptors at `selector`, each read for what it names
+/// of `iface` (core §3.3). `Err` where the GET could not be asked.
+async fn descriptors(
+    session: &zenoh::Session,
+    selector: &str,
+    iface: &zenkey_model::grammar::IfaceId,
+    timeout: Duration,
+) -> Result<Descriptors, String> {
+    let rx = session
+        .get(selector)
+        .consolidation(ConsolidationMode::None)
+        .timeout(timeout)
+        .with(flume::unbounded::<Reply>())
+        .await
+        .map_err(|e| format!("the GET of {selector} could not be asked: {e}"))?;
+    let iface = iface.to_string();
+    let mut out = Descriptors::default();
+    while let Ok(reply) = rx.recv_async().await {
+        let Ok(sample) = reply.result() else {
+            out.failed = Some("an error reply, as at its timeout");
+            continue;
+        };
+        out.heard = true;
+        let bytes = sample.payload().to_bytes();
+        let d = std::str::from_utf8(&bytes)
+            .ok()
+            .and_then(|text| zenkey_model::descriptor::check(text, &[]).0);
+        let Some(d) = d else {
+            out.failed = Some("a descriptor that does not read");
+            continue;
+        };
+        if let Some(e) = d.interfaces.iter().find(|e| e.iface == iface) {
+            out.named.push((d.run.clone(), e.contract.clone()));
+        }
+    }
+    Ok(out)
+}
+
+/// What an owner's descriptors name of one of its interfaces, each under
+/// the run it states (`desired.v2` §2.18, core §4.2): [`owner_revisions`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OwnerRevisions {
+    /// Each descriptor naming the interface: the run it states, where it
+    /// states one, and the fingerprint it names.
+    Named(Vec<(Option<String>, String)>),
+    /// No descriptor reaches the reader: the deployment's word decides.
+    Unreached,
+    /// A read that failed, or descriptors none of which names the
+    /// interface: no word.
+    Unread,
+}
+
+/// What the owner `owner` (`zk2/<system>/<service>`, in the session's
+/// namespace) names of `iface` in each descriptor it serves: what a
+/// target reads its author's revision by before it knows a version's run
+/// (`desired.v2` §2.18), as [`owner_revision`] reads one run's.
+pub(crate) async fn owner_revisions(
+    session: &zenoh::Session,
+    owner: &zenkey_model::grammar::Addr,
+    iface: &zenkey_model::grammar::IfaceId,
+    timeout: Duration,
+) -> OwnerRevisions {
+    let selector = format!("zk2/{}/{}/@zk/instance/*", owner.system, owner.service);
+    match descriptors(session, &selector, iface, timeout).await {
+        Ok(read) if !read.named.is_empty() => OwnerRevisions::Named(read.named),
+        Ok(read) if !read.heard && read.failed.is_none() => OwnerRevisions::Unreached,
+        Ok(_) | Err(_) => OwnerRevisions::Unread,
     }
 }
 

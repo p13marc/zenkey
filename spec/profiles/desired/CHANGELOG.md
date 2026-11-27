@@ -7,6 +7,140 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `desired.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## desired.v2 0.2 — 2026-11-27: zk2py's rounds 118 to 121: a target built before this major binds through no router that timestamps, a failed revert keeps its version, a report resource of any kind, and §9's T holds its author's revision (#986)
+
+zk2py's rounds 118, 119 and 121 read 0.1 cold, then ran it against the
+reference (F-576 to F-592, F-603 to F-606). This version answers each.
+F-578's rule is core 0.116's, and its scenario's step is here. F-587 is
+core 0.116's and `link.v2` 0.26's, and F-591 `link.v2` 0.26's. §9's
+step 4 was also the reference's J4 finding: its test runs both readings.
+
+**One rule changed, for a mixed deployment (F-588, a contradiction).**
+- **Before:** "Targets first. A target built before this major, bound to
+  an author of it, reads every version as unstamped. It acts on none.
+  That is safe, and inert."
+- **What was measured.** That holds through routers that stamp nothing.
+  Through a router that timestamps, a router's default, each put
+  arrives with the router's id (core §4.2, "Observing S1"). A
+  `desired.v1` target admits it and acts. Deletes and replies carry
+  none, so it never reverts. Each implementation's v1 target did so
+  under each one's v2 author, in all four pairings.
+- **Now (§2.18):** each case is said. A deployment MUST NOT bind such a
+  target to such an author where a router between the two, or the
+  target's own session, timestamps. `[Sc: §16]` That is the narrowest
+  rule that keeps the move safe. It binds only the deployments that 0.1's
+  claim misled.
+  - **The target's own session** was added after zk2py's round 125
+    (F-617, a gap in this entry's first draft). A v1 target whose session
+    timestamps stamps each put it receives with its own id, acts, and
+    never reverts, in all four pairings, whatever the routers do.
+- **Not taken:** a rule on the author, which cannot know its targets'
+  builds; and a new major of the author's interface, which v1's
+  requirement would not name. Both reach further than the fault.
+- **`scenarios-v2.md` §16** is new: runs A and B show both cases.
+
+**Decided where the two implementations differ, from the text's
+intent.**
+- **A failed revert on a snapshot with no entry (F-577).** 0.1 gave its
+  report no observed version, and its own `observed_outcome` then
+  refused that report. It now keeps the observed version it had, the
+  reverted document's, with its revision (§2.8, §2.10). A snapshot names
+  no version, so the last version acted on is still that one. The
+  reference did so. zk2py moves.
+- **A report resource of any kind (F-580).** §0 named a state alone.
+  §2.10's `not_state`, its `two_reports` and a tool's finding read
+  every resource that holds `desired.report`. §0 now says so. A stream
+  that names a role makes `two_reports` on both. The reference read it
+  so. zk2py moves.
+- **A failed act's place and line (F-592).** The scenarios' drive fails
+  after the rate and before the mode. So its act points at `/mode`,
+  index 1, and its line, the drive's, is `out_of_range`. The reference's
+  record held both. zk2py moves.
+- **What a linter reports (F-583).** An invalid declaration of this
+  major is an error, as `link.v2`'s `packed_required` is, and as
+  `health.v2` 0.3 says of its tables. v1 §2.2 said warn. The contract
+  still loads, with its fingerprint. zk2py's linter moves.
+- **Which revision a target reads (F-590).** "By its descriptor or the
+  deployment's word" now gives core §4.2's order: the descriptor's for
+  the version's run, the deployment's word where none reaches. Neither
+  implementation reads its author's descriptor. Both move.
+- **A role's major with no revision in hand (F-603).** §2.18 states the
+  rule the reference's tool uses. zk2py's differs in one corner: a
+  packed report that drew no reply beside a `desired.v1.Report` that
+  names the slice. zk2py moves.
+- **A target with one major's report, under the other's author
+  (F-589).** Its binding is invalid. Given that revision at its start,
+  a target MUST refuse to start, naming the role. `[Sc: §16]` Both
+  refused already. The reference's reason names no role (the code half).
+- **The same, learnt after its start (F-589, F-590).** A target that
+  reads such a revision from its author's descriptor MUST NOT act on a
+  version of that author's while the descriptor names it. `[Sc: §16]`
+  It says so, and its report stays as it was. That is the safe side, as
+  "Targets first" is. Both implementations acted in zk2py's measured
+  case, and both move. It is a default the maintainer may overrule
+  (#986).
+
+**Settled where both agree, and the text was silent.**
+- **The stamp around a snapshot with no entry (F-581):** none, while the
+  revert runs and after it, ended or failed (§2.5).
+- **A version at a remembered asof (F-582):** §2.6 step 4 now says what
+  §2.8 and `order.json`'s case 26 do. At a snapshot's asof, equal is
+  older.
+- **An author's presence possibly incomplete, with no slice (F-586):**
+  `author_presence_incomplete`, as v1's step 6 and `conclusions.json`'s
+  case 12 answer (§2.17).
+- **A report's age (step 4)** is read by the `freshness` major of the
+  target's contract, as §2.10 says of its horizon. Under `freshness.v2`
+  it is the report's confirmation. The reference's tool ages a v2 report
+  by its Zenoh timestamp alone (the code half).
+
+**Stated, with no rule changed.**
+- **After a revert on a snapshot with no entry (F-585),** a tool reads
+  `author_silent` until the author's next document. The report states
+  no version, so no run says the two agree. Appendix A's "What a tool
+  loses" names it. Not taken: the report keeping the run it reverted
+  under, which changes what every target writes.
+- **Every report reads back to its bytes (F-576)** is said of what a
+  target writes. A record with a later text's bits, and one whose `code`
+  is 5 or 6, read with no finding and do not write back.
+- **`scenarios-v2.md`.**
+  - §9's T holds `tasking.v2` offline, so step 4 has its slice. One that
+    holds none gives the same four answers and shows no archive (F-604).
+  - §9's Expected 6 and 7 state all four answers (F-605).
+  - §12 names its contract: `configs.v1` at minor 2 (F-606).
+  - §13's v1 document is 40 bytes, as its author puts it (F-584).
+    Appendix B's 44-byte document is W2's.
+  - §6's author starts with no run's record, by core 0.116's rule
+    (F-578). That rule binds the deployment, which knows what it lost.
+  - §16's run D is a target that learns its author's major after its
+    start.
+
+**The fixtures (F-579).** Each of the seven shapes zk2py named had no
+case. Six now do, written by hand from the text:
+- `order.json`, 69 cases: a snapshot whose asof is the held seq
+  reverts; a failed revert keeps its version;
+- `watch.json`, 27: a heartbeat not read moves no sequence; a seq 2^23
+  after the last read one's is older;
+- `declarations.json`, 38 report resources: `two_reports` after
+  `not_state`, `not_a_role`, `not_a_param` and `rest_param`;
+- `slices.json`, 17: a stream and a state that name one role.
+
+The seventh, a digest moved while no version is held, cannot occur. A
+target that holds no version expects no section (§2.5, "The answer").
+Each new case was read against the reference's model, not computed
+twice. Its counts move in the reference's tests (the code half).
+
+**Deliberately not changed.**
+- **Written against core 0.112,** still. No rule was read whole
+  against a later core.
+- **§2.12's unbound role** is put its baseline's record, before the
+  tokens. The reference's `desired-report` check does not read it (the
+  code half).
+
+**Not verified.**
+- No cargo was run. Each case was read against the reference's model.
+- The reference has no test of §16.
+
 ## desired.v2 0.1 — 2026-11-22: a new major: the version is the in-band stamp, a target re-reads conditionally or watches its author's heartbeat, and the report is a packed record (#986)
 
 `desired.v2` is `desired.v1` on a wire a far target can afford. It is a

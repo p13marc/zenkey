@@ -58,6 +58,10 @@ RATE_SUPPORTED = 100
 LINE_RATE = "above what the drive supports"
 LINE_REACH = "names how the worker reaches the bus"
 LINE_REVISION = "a revision above 4,294,967,295"
+#: scenarios-v2.md, Conventions (0.2, F-592): "A failed act points at
+#: `/mode`, index 1, where its drive stopped. Its line is the drive's, which
+#: the table does not hold: `out_of_range` (§2.10)."
+LINE_DRIVE = "the drive set the rate and stopped before the mode"
 
 canonical = desired.canonical_json
 
@@ -283,8 +287,27 @@ class Target:
                  presence_watch: bool = False, reread_ms: int | None = None, hold: bool = False, poll_ms: int = 500,
                  timeout: float = 1.0, across: bool = False, reply_timeout_ms: int | None = None, watch: bool = False,
                  moves: bool = True, worker: Any = None, tasking: Any = None, watched: bool = False,
-                 run_record: str | None = None, catalog: str | None = None, archive: str | None = None) -> None:
+                 run_record: str | None = None, catalog: str | None = None, archive: str | None = None,
+                 word_alone: bool = False) -> None:
         self.address, self.endpoint, self.author = address, endpoint, author
+        #: §2.18 (0.2, F-590): "A target reads its author's revision as core
+        #: §4.2 reads which resources are per key. It is the one the author's
+        #: descriptor names for the version's run. Where no descriptor
+        #: reaches the target, it is the deployment's word." ``word_alone``
+        #: reads the word alone, never a descriptor: a target built before
+        #: this major (scenarios-v2.md §16's runs A and B), as the
+        #: reference's ``--desired-word-alone`` does.
+        self.word_alone = word_alone
+        #: what the author's descriptors named, by the run each states
+        #: (``None`` for a descriptor that states none), in the reference's
+        #: words: ``given``, ``another:<fp>``, ``stopped:<major>:<fp>``
+        #: (F-589: "Learnt after its start, from its author's descriptor,
+        #: such a revision stops the role"), ``word`` (none reached it) or
+        #: ``unread`` (a read that failed); and the last said
+        self.revisions: dict[str | None, str] = {}
+        self.revision_said = "not-read" if word_alone else "word"
+        #: the runs whose descriptor a read is out for
+        self._asking: set[str] = set()
         #: v1 §2.9, which §2.9 keeps: "With its author absent, by a complete
         #: read without its instance token (core §8.1), ... a target MAY read
         #: its slice's last-known from an archive, through the key's archive
@@ -557,6 +580,18 @@ class Target:
                     and not any(p["live"] or p["tombs"] for p in h.pages.values())]
         unchanged = [h for h in st.held if h[2] == seed_held.UNCHANGED]
         if why in ("seed", "appearance", "again"):
+            # §2.18 (0.2): a seed reads the author's revision from its
+            # descriptor, of the run its reply states where it states one.
+            run = next((version_of(r.inband).run.text for r in mine if version_of(r.inband) is not None), None)
+            if run is None and no_entry:
+                run = d2.Run(no_entry[0].header["run_width"], no_entry[0].header["run"]).text
+            with self.lock:
+                # each seed reads the descriptor afresh: what an earlier one
+                # named stands no longer
+                self.revisions.clear()
+            said = self._read_revision(run)
+            with self.lock:
+                self.revision_said = said
             self.seeds += 1
             self._seeded(len(mine) + len(no_entry) + len(unchanged))
         if unchanged and sent is not None:
@@ -596,7 +631,76 @@ class Target:
 
     def _seeded(self, answered: int, author: str = "not-read", archive: str = "-", why: str = "") -> None:
         with self.lock:
-            self.last_seed = {"answered": answered, "author": author, "archive": archive, "why": why}
+            self.last_seed = {"answered": answered, "author": author, "archive": archive, "why": why,
+                              "revision": self.revision_said}
+
+    # -- the author's revision (§2.18) -----------------------------------------------
+
+    def _read_revision(self, run: str | None) -> str:
+        """§2.18 (0.2): the revision the author's descriptor names for
+        ``run`` (any present instance's where ``run`` is None), as the
+        reference's ``desired seeds`` words it: ``given``, ``another:<fp>``
+        of this major, ``stopped:desired.v1:<fp>`` for one that uses
+        ``desired.v1`` (the reference's words, round 125),
+        ``word`` where no descriptor reaches the target, ``unread`` where
+        the read failed, every descriptor stated another run, or the named
+        revision could not be retrieved (core §8.4). Its major is read from
+        the revision itself, its ``uses``, never from the descriptor's
+        ``profiles``, which are the instance's union."""
+        if self.word_alone:
+            return "not-read"
+        state, stated = self._descriptor_says(run)
+        with self.lock:
+            self.revisions[stated if stated is not None else run] = state
+        return state
+
+    def _descriptor_says(self, run: str | None) -> tuple[str, str | None]:
+        """What the author's descriptors name, and the run the one read
+        states."""
+        from . import freshness_v2 as f2
+
+        assert self.owner is not None and self.owner.session is not None
+        session = self.owner.session
+        try:
+            docs = f2.descriptors_of(session, self.author, self.timeout)
+        except Exception:  # noqa: BLE001 - a read that fails names nothing
+            return "unread", None
+        if not docs:
+            return "word", None
+        if run is not None:
+            docs = [d for d in docs if d.get("run") in (run, None)]
+            if not docs:
+                return "unread", None
+        stated = docs[0].get("run") if isinstance(docs[0].get("run"), str) else None
+        iface = self.author_contract.interface
+        fp = live.fingerprint_of(docs[0], iface)
+        if fp is None:
+            return "unread", stated
+        if fp == self.author_contract.fingerprint:
+            return "given", stated
+        got = live.retrieve_bundle(session, iface, fp, self.timeout)
+        if not got.available or got.verified is None:
+            return "unread", stated
+        uses = got.verified.contract.get("uses") or []
+        if d2.PROFILE not in uses and "desired.v1" in uses:
+            return f"stopped:desired.v1:{fp}", stated
+        return f"another:{fp}", stated
+
+    def _revision_of_run(self, run: str | None) -> str | None:
+        """What stands for ``run``: its descriptor's word, else a
+        descriptor's that stated no run, else the last read's."""
+        with self.lock:
+            if run in self.revisions:
+                return self.revisions[run]
+            if None in self.revisions:
+                return self.revisions[None]
+            return self.revision_said
+
+    def _stopped(self, run: str | None) -> bool:
+        """§2.18 (F-589): "While the descriptor names it, a target MUST NOT
+        act on a version of that author's.\""""
+        r = self._revision_of_run(run)
+        return r is not None and r.startswith("stopped:")
 
     def author_presence(self) -> tuple[str, str]:
         """The author's presence, by one read on the target's own session,
@@ -663,11 +767,38 @@ class Target:
             return
         # "No envelope: a sample whose payload carries no in-band stamp ...
         # ignores it (unstamped)": its stamp reads None, and the role says so.
-        self._receive(self._sample(desired.OWNER, sample.kind == zenoh.SampleKind.DELETE,
-                                   read.stamp if read.enveloped else None,
-                                   read.record if read.record is not None else b""), True)
+        s = self._sample(desired.OWNER, sample.kind == zenoh.SampleKind.DELETE,
+                         read.stamp if read.enveloped else None, read.record if read.record is not None else b"")
+        run = None if s.version is None else s.version.run.text
+        with self.lock:
+            # §2.18: the revision is "the one the author's descriptor names
+            # for the version's run". A run no descriptor was read for is
+            # read in the background, never in zenoh's callback (a GET on its
+            # own session there), and never ahead of the version: holding
+            # the sample would reorder it against the watch's reads (round
+            # 125's §14 step 5). Until that read answers, the last one stands
+            # (:meth:`_revision_of_run`), so a role stopped stays stopped.
+            ask = (not self.word_alone and run is not None and run not in self.revisions
+                   and run not in self._asking)
+            if ask:
+                self._asking.add(run)
+        if ask:
+            threading.Thread(target=self._read_run, args=(run,), daemon=True).start()
+        self._receive(s, True)
+
+    def _read_run(self, run: str) -> None:
+        said = self._read_revision(run)
+        with self.lock:
+            self.revision_said = said
+            self.revisions.setdefault(run, said)  # asked once per run, whatever it named
+            self._asking.discard(run)
 
     def _receive(self, s: d2.Sample, heard_live: bool) -> None:
+        if s.version is not None and self._stopped(s.version.run.text):
+            # §2.18 (F-589): the role stops while the descriptor names a
+            # revision of the other major: no version of that author's is
+            # acted on, and the report stays as it was.
+            return
         with self.lock:
             before = self.role.waiting if (self.role.running and self.role.waiting is not None) else self.role.current
             word = self.role.receive(s)
@@ -679,6 +810,8 @@ class Target:
         self._after(word)
 
     def _receive_no_entry(self, n: d2.NoEntry) -> None:
+        if self._stopped(n.run.text):
+            return
         with self.lock:
             word = self.role.receive_no_entry(n)
         self._after(word)
@@ -858,7 +991,7 @@ class Target:
                 return d2.Finish(d2.REFUSED, "invalid", "/rate_hz", LINE_RATE)
             if fail:
                 self._set_running({**self.running_doc, "rate_hz": doc["rate_hz"]})
-                return d2.Finish(d2.FAILED, "apply")
+                return d2.Finish(d2.FAILED, "apply", "/mode", LINE_DRIVE)
             self._set_running(h.payload.value)
             return d2.Finish(d2.DONE)
         except Exception as e:  # noqa: BLE001 - v1 §2.7: an act whose end is unknown is failed, apply

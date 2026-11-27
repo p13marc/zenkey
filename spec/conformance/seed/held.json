@@ -1,5 +1,5 @@
 {
-  "description": "core §4.2, a conditional read's reader: which held stamp it sends, and what it holds after its GET's answer. Computed twice, by two readings of the text that shared no code, never blessed. A stamp is `{width, run, seq}`, as `inband.json` writes one, and a page is as `snapshot/bodies.json` reads one. `asks`: what a reader holds for one member → the held stamp it may send, `expect.held` with its bytes in `expect.hex`, or `{\"held\": null}` where it sends none. `holds` is `null`, or `{key, sample, stamp, record}` as a `view` entry below; a value with no envelope has `stamp` `null` and its Zenoh timestamp in `zenoh`. A case may give instead `page`, a snapshot's page the reader read on `key`, with its bytes in `hex`, and `member`, an id: what it holds is that id's entry, live or tombstone, or nothing where the page lists none. The held stamp is the in-band stamp of the mutation held: the entry's own run or the header's, and the entry's seq, never the asof. `cases`: `collections`, `view`, `arrivals`, `expect.view` and `expect.snapshots` are `snapshot.json`'s, with its merge and its omission rule. `asked` is the GET: its `key`, the selector, and `held`, the held stamp it carried, or `null` for a GET with no payload. An arrival may be a held stamp, `held` with its bytes in `hex`. It is the owner's answer when it arrives by the GET, the GET carried a held stamp on one concrete key (a selector with no `*`), the arrival's key is that key, and its stamp is the one the GET carried, in width, run and seq. Any other is refused as `held`: it merges nothing, and counts as nothing heard. An answer merges nothing either, and the reader keeps what it holds. Where the reader holds the mutation the stamp names when the answer arrives, that mutation counts as heard after the GET was asked, for the omission rule's guard. Where it holds another value by then, that value stands. Where it holds nothing for the member by then, `expect.read_again` is true: the GET gave it no value. `expect.held`: each held stamp among the arrivals, in order: `unchanged` for the owner's answer, or `held`, the refusal's token.",
+  "description": "core §4.2, a conditional read's reader: which held stamp it sends, and what it holds after its GET's answer. Computed twice, by two readings of the text that shared no code, never blessed. A stamp is `{width, run, seq}`, as `inband.json` writes one, and a page is as `snapshot/bodies.json` reads one. `asks`: what a reader holds for one member → the held stamp it may send, `expect.held` with its bytes in `expect.hex`, or `{\"held\": null}` where it sends none. `holds` is `null`, or `{key, sample, stamp, record}` as a `view` entry below; a value with no envelope has `stamp` `null` and its Zenoh timestamp in `zenoh`. A case may give instead `page`, a snapshot's page the reader read on `key`, with its bytes in `hex`, and `member`, an id: what it holds is that id's entry, live or tombstone, or nothing where the page lists none. The held stamp is the in-band stamp of the mutation held: the entry's own run or the header's, and the entry's seq, never the asof. `cases`: `collections`, `view`, `arrivals`, `expect.view` and `expect.snapshots` are `snapshot.json`'s, with its merge and its omission rule. `asked` is the GET: its `key`, the selector, and `held`, the held stamp it carried, or `null` for a GET with no payload. An arrival may be a held stamp, `held` with its bytes in `hex`. It is the owner's answer when it arrives by the GET, the GET carried a held stamp on one concrete key (a selector with no `*`), the arrival's key is that key, and its stamp is the one the GET carried, in width, run and seq. Any other is refused as `held`: it merges nothing, and counts as nothing heard. An answer merges nothing either, and the reader keeps what it holds. Where the reader holds the mutation the stamp names when the answer arrives, that mutation counts as heard after the GET was asked, for the omission rule's guard. Where it holds another value by then, that value stands. Where it holds nothing for the member by then, `expect.read_again` is true: the GET gave it no value. `expect.held`: each held stamp among the arrivals, in order: `unchanged` for the owner's answer, or `held`, the refusal's token. Case 29, of core 0.116, was written by hand from the text and read against the reference's merge, not computed twice.",
   "asks": [
     {
       "note": "a put held with its envelope's stamp",
@@ -2490,6 +2490,115 @@
           "unchanged"
         ],
         "read_again": false
+      }
+    },
+    {
+      "note": "the answer finds nothing held, so the reader reads again: a put heard after it, before the GET ends, changes nothing of that. \"By then\" is when the answer arrives (core §4.2). Written by hand for core 0.116",
+      "collections": [
+        {
+          "coll": 0,
+          "template": "plans/{vehicle}",
+          "snapshot_key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans"
+        }
+      ],
+      "view": [
+        {
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "record": "7631"
+        }
+      ],
+      "asked": {
+        "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+        "held": {
+          "width": 16,
+          "run": 5,
+          "seq": 7
+        }
+      },
+      "arrivals": [
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "page": {
+            "tag": 0,
+            "run_width": 16,
+            "run": 6,
+            "asof": 3,
+            "time": {
+              "s": 3600,
+              "ms": 250
+            },
+            "index": 0,
+            "more": false,
+            "coll": 0,
+            "live": [],
+            "tombs": []
+          },
+          "hex": "e0000600000300000e1000fa00000000"
+        },
+        {
+          "via": "get",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "held": {
+            "width": 16,
+            "run": 5,
+            "seq": 7
+          },
+          "hex": "e00005000007"
+        },
+        {
+          "via": "subscription",
+          "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+          "sample": "put",
+          "stamp": {
+            "width": 16,
+            "run": 6,
+            "seq": 4
+          },
+          "record": "7633"
+        }
+      ],
+      "expect": {
+        "view": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "sample": "put",
+            "stamp": {
+              "width": 16,
+              "run": 6,
+              "seq": 4
+            },
+            "record": "7633"
+          }
+        ],
+        "snapshots": [
+          {
+            "key": "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01",
+            "coll": 0,
+            "run": {
+              "width": 16,
+              "run": 6
+            },
+            "asof": 3,
+            "pages": [
+              0
+            ],
+            "complete": true,
+            "omitted": [
+              "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/vehicle-01"
+            ]
+          }
+        ],
+        "held": [
+          "unchanged"
+        ],
+        "read_again": true
       }
     }
   ]
