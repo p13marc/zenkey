@@ -39,6 +39,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from .blackbox import BLACKBOX
@@ -57,8 +58,8 @@ class Archive:
     """The ``archive`` black box as a child process, its standard output
     kept line by line with the instant each came."""
 
-    def __init__(self, connect: str, system: str, service: str, records: list[str], peers: list[str] = (),
-                 window: int | None = None, flags: list[str] = ()) -> None:
+    def __init__(self, connect: str, system: str, service: str, records: list[str], peers: Sequence[str] = (),
+                 window: int | None = None, flags: Sequence[str] = ()) -> None:
         args = [str(BLACKBOX / "archive"), "--connect", connect, "--system", system, "--service", service,
                 *flags]
         if window is not None:

@@ -17,6 +17,7 @@ import textwrap
 import threading
 import time
 import traceback
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14077,8 +14078,8 @@ def _observer_06_readings(root: Path) -> list[tuple[str, Any, Any]]:
     return out
 
 
-def _offline_window(alarms: Any, ns: int, *, losses: list[int] = (), events: list[tuple[int, str]] = (),
-                    gets: list[tuple[int, bool]] = ()) -> tuple[float, bool, bool]:
+def _offline_window(alarms: Any, ns: int, *, losses: Sequence[int] = (), events: Sequence[tuple[int, str]] = (),
+                    gets: Sequence[tuple[int, bool]] = ()) -> tuple[float, bool, bool]:
     """An offline reader's window for ``lab/a`` at 100 s under zenoh's
     defaults, declared at 0 and its owner held from the start: (listened
     seconds, lossless, present throughout)."""

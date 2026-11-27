@@ -37,6 +37,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 from . import zk2c
@@ -960,7 +961,7 @@ def section9(ctx: Ctx) -> None:
     use_z = _zenctl_ready(rp, sec, 17)
     disagree: list[str] = []
 
-    def ask(bus: Bus, step: int, extra: list[str] = ()) -> tuple[Any, Any, Any]:
+    def ask(bus: Bus, step: int, extra: Sequence[str] = ()) -> tuple[Any, Any, Any]:
         mine = dt.read(bus.g1, TARGET, "task")
         rc, doc, err = zenctl(["desired", TARGET, "-c", bus.ep1, "--timeout", "1", *extra]) if use_z \
             else (None, None, "")
@@ -974,7 +975,7 @@ def section9(ctx: Ctx) -> None:
                 disagree.append(f"step {step}: zk2py {m}, zenctl {z}")
         return mine[0] if mine else None, doc, rc
 
-    def doctor(bus: Bus, extra: list[str] = ()) -> Any:
+    def doctor(bus: Bus, extra: Sequence[str] = ()) -> Any:
         rc, doc, _ = zenctl(["doctor", "-c", bus.ep1, "--timeout", "1", "--check", "desired-refused", "--check",
                              "desired-behind", "--check", "desired-last-known", *extra])
         return rc, doc
