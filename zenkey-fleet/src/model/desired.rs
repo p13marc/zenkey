@@ -195,6 +195,10 @@ pub struct ReportWhere {
     /// The report resource's horizon (v2 §2.10, "Its horizon"), when one
     /// resource names the role.
     pub horizon: Horizon,
+    /// The declaring contract uses `freshness.v2` (§2.17 step 4): the
+    /// report is aged by its confirmation, its snapshot entry's (core §4.3:
+    /// its put carries no Zenoh timestamp), never by a Zenoh timestamp.
+    pub aged: bool,
 }
 
 impl ReportWhere {
@@ -219,6 +223,7 @@ impl ReportWhere {
                 [one] => freshness::horizon_of(one),
                 _ => Horizon::Undeclared,
             },
+            aged: freshness::uses_v2(declaring),
         }
     }
 
@@ -258,6 +263,12 @@ impl RoleResolution {
     /// Whether the role is bound (§2.3), its kill switch off.
     pub fn bound(&self) -> bool {
         matches!(self.listing, Some(Listing::Listed { bound: true }))
+    }
+
+    /// Whether the role is listed, bound or the kill switch: a target
+    /// reports either before its tokens (`desired.v2` §2.10, §2.12).
+    pub fn listed(&self) -> bool {
+        matches!(self.listing, Some(Listing::Listed { .. }))
     }
 }
 
@@ -599,7 +610,11 @@ pub struct PackedReply {
     pub read: Result<d2::Read, PackedUnreadable>,
     /// Its put's in-band stamp, the target's own (core §4.3).
     pub inband: Option<wire::Stamp>,
-    /// Its Zenoh timestamp, where its resource's puts carry one.
+    /// What ages it (§2.17 step 4): its Zenoh timestamp, where its
+    /// resource's puts carry one; under `freshness.v2`, its snapshot
+    /// entry's confirmation instead, dated under the deployment epoch and
+    /// stamped under its owner's clock (`freshness.v2` §2.6), none where
+    /// the confirmation's time is unknown or no epoch is in hand.
     pub stamp: Option<Stamped>,
     /// Its resource's horizon (v2 §2.10).
     pub horizon: Horizon,
@@ -2377,7 +2392,7 @@ mod tests {
             .join("../spec/profiles/desired/conformance/v2/slices.json");
         let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         let cases = doc["cases"].as_array().unwrap();
-        assert_eq!(cases.len(), 16);
+        assert_eq!(cases.len(), 17);
         let unhex = |h: &str| -> Vec<u8> {
             (0..h.len())
                 .step_by(2)
@@ -2396,6 +2411,7 @@ mod tests {
                 .map(|n| n.as_str().unwrap())
                 .collect();
             struct Held {
+                kind: Kind,
                 template: Template,
                 token: KindToken,
                 is_report: bool,
@@ -2406,15 +2422,21 @@ mod tests {
                 .unwrap()
                 .iter()
                 .map(|x| {
-                    assert_eq!(x["kind"], "state", "{what}");
+                    // A report resource of any kind (text 0.2): its kind
+                    // and its token as the fixture writes them.
+                    let (kind, token) = match (x["kind"].as_str().unwrap(), x["explicit"] == true) {
+                        ("state", true) => (Kind::State, KindToken::ExplicitState),
+                        ("state", false) => (Kind::State, KindToken::State),
+                        ("stream", _) => (Kind::Stream, KindToken::Stream),
+                        ("event", _) => (Kind::Event, KindToken::Events),
+                        ("operation", _) => (Kind::Operation, KindToken::Op),
+                        (other, _) => panic!("{what}: kind {other:?}"),
+                    };
                     let ty = &x["type"];
                     Held {
+                        kind,
                         template: Template::parse(x["template"].as_str().unwrap()).unwrap(),
-                        token: if x["explicit"] == true {
-                            KindToken::ExplicitState
-                        } else {
-                            KindToken::State
-                        },
+                        token,
                         is_report: ty["kind"] == "packed"
                             && ty["name"] == d2::REPORT
                             && d2::is_published(ty["artifact"].as_str().unwrap()),
@@ -2430,7 +2452,7 @@ mod tests {
             let views: Vec<d2::ReportResource<'_>> = held
                 .iter()
                 .map(|h| d2::ReportResource {
-                    kind: Kind::State,
+                    kind: h.kind,
                     token: h.token,
                     template: &h.template,
                     is_report: h.is_report,

@@ -227,6 +227,25 @@ pub struct StatusValue {
     pub since_s: Option<i64>,
 }
 
+/// A `health.v2` record read under its owner's epoch (v2 0.3 §2.6, F-610):
+/// with one in hand, as `read` reads it; with none, read under any epoch
+/// (they all read it the same), and kept only where `time` finds it holds
+/// no time. A record that holds one, with no epoch to date it, is refused
+/// whole: `None`.
+fn undated<T, E>(
+    epoch: Option<i64>,
+    read: impl Fn(i64) -> Result<T, E>,
+    time: impl Fn(&T) -> Option<i64>,
+) -> Option<Result<T, E>> {
+    match epoch {
+        Some(e) => Some(read(e)),
+        None => match read(0) {
+            Ok(r) if time(&r).is_none() => Some(Ok(r)),
+            _ => None,
+        },
+    }
+}
+
 impl StatusValue {
     /// A status payload: `health.v1.Status`, or [`Read::Undecodable`].
     pub fn decode(bytes: &[u8]) -> StatusValue {
@@ -244,10 +263,12 @@ impl StatusValue {
 
     /// A `health.v2` status record under CH's `tag`, its `since` counted
     /// from the deployment epoch in force for its owner (core §7.6, §8.6):
-    /// a record the layout refuses, and one whose owner's epoch cannot be
-    /// had, is [`Read::Undecodable`], never a level (v2 §2.6).
+    /// a record the layout refuses is [`Read::Undecodable`], never a
+    /// level, and so is one that holds a `since` whose owner's epoch
+    /// cannot be had. One with no `since` needs no epoch, and is read
+    /// (v2 0.3 §2.6, F-610).
     pub fn decode_v2(tag: u8, record: &[u8], epoch: Option<i64>) -> StatusValue {
-        match epoch.map(|e| hv2::Status::read(tag, record, e)) {
+        match undated(epoch, |e| hv2::Status::read(tag, record, e), |s| s.since) {
             Some(Ok(s)) => StatusValue {
                 level: hv2::level_read(Ok(s.level)),
                 reason: String::new(),
@@ -298,9 +319,9 @@ impl CheckValue {
     }
 
     /// A `health.v2` check record, as [`StatusValue::decode_v2`] reads a
-    /// status.
+    /// status: one with no `at` needs no epoch.
     pub fn decode_v2(tag: u8, record: &[u8], epoch: Option<i64>) -> CheckValue {
-        match epoch.map(|e| hv2::Check::read(tag, record, e)) {
+        match undated(epoch, |e| hv2::Check::read(tag, record, e), |c| c.at) {
             Some(Ok(c)) => CheckValue {
                 level: hv2::level_read(Ok(c.level)),
                 detail: String::new(),
@@ -355,9 +376,9 @@ impl FaultValue {
     }
 
     /// A `health.v2` fault record, as [`StatusValue::decode_v2`] reads a
-    /// status.
+    /// status: one with no `at` needs no epoch.
     pub fn decode_v2(tag: u8, record: &[u8], epoch: Option<i64>) -> FaultValue {
-        match epoch.map(|e| hv2::Fault::read(tag, record, e)) {
+        match undated(epoch, |e| hv2::Fault::read(tag, record, e), |f| f.at) {
             Some(Ok(f)) => FaultValue {
                 code: String::new(),
                 level: hv2::level_read(Ok(f.level)),
@@ -1421,6 +1442,65 @@ async fn archived(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// health.v2 0.3 §2.6 (F-610): a record that holds a time, from an
+    /// owner whose catalog the reader does not hold, is refused whole,
+    /// unknown; one with no time needs no catalog, and reads as under any
+    /// epoch. A status, a check and a fault alike.
+    #[test]
+    fn a_v2_record_with_no_time_needs_no_epoch() {
+        const EPOCH: i64 = 1_767_225_600;
+        let at = Some(EPOCH + 100);
+        let status = |since| hv2::Status::starting(since).write(EPOCH).unwrap().bytes;
+        let tag = hv2::Status::tag();
+        let none = StatusValue::decode_v2(tag, &status(None), None);
+        assert_ne!(none.level, Read::Undecodable, "read with no epoch");
+        assert_eq!(
+            none,
+            StatusValue::decode_v2(tag, &status(None), Some(EPOCH))
+        );
+        assert_eq!(
+            StatusValue::decode_v2(tag, &status(at), None).level,
+            Read::Undecodable,
+            "a since no catalog in hand dates"
+        );
+        assert_eq!(
+            StatusValue::decode_v2(tag, &status(at), Some(EPOCH)).since_s,
+            at
+        );
+
+        let check = hv2::Check {
+            level: Some(hm::Level::Ok),
+            detail: hv2::write_word(hv2::Kind::Detail, None, None),
+            at: None,
+        };
+        let bytes = check.write(EPOCH).unwrap().bytes;
+        let read = CheckValue::decode_v2(hv2::Check::tag(), &bytes, None);
+        assert_eq!(
+            read,
+            CheckValue::decode_v2(hv2::Check::tag(), &bytes, Some(EPOCH))
+        );
+        assert_ne!(read.level, Read::Undecodable);
+        let timed = hv2::Check { at, ..check }.write(EPOCH).unwrap().bytes;
+        assert_eq!(
+            CheckValue::decode_v2(hv2::Check::tag(), &timed, None).level,
+            Read::Undecodable
+        );
+
+        let fault = hv2::Fault::clock_ahead(None, None);
+        let bytes = fault.write(EPOCH).unwrap().bytes;
+        let read = FaultValue::decode_v2(hv2::Fault::tag(), &bytes, None);
+        assert_eq!(
+            read,
+            FaultValue::decode_v2(hv2::Fault::tag(), &bytes, Some(EPOCH))
+        );
+        assert_ne!(read.level, Read::Undecodable);
+        let timed = hv2::Fault { at, ..fault }.write(EPOCH).unwrap().bytes;
+        assert_eq!(
+            FaultValue::decode_v2(hv2::Fault::tag(), &timed, None).level,
+            Read::Undecodable
+        );
+    }
 
     /// #819 TG (review of PR #835): a health window opens on proof only.
     /// Across a face, the first GET proves the owner holds the subscription

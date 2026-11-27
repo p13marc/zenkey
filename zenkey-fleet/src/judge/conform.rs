@@ -2349,19 +2349,34 @@ fn desired_target_cases(obs: &ConformObservation) -> Vec<ConformCase> {
                 // A desired.v2 role (#986's J4): its report is the member
                 // of the resource whose `desired.report` names it (v2
                 // §2.10), read as the packed record, never one whose key
-                // is its slice. An unbound role's is not read here.
+                // is its slice. An unbound role's is the baseline's record
+                // there, `000000`, which its target puts before its tokens
+                // (§2.10, §2.12).
                 if r.major == crate::model::desired::Major::V2 {
                     use crate::model::desired::PackedFound;
-                    let Some(w) = res.report_at.as_ref().filter(|_| res.bound()) else {
+                    let Some(w) = res.report_at.as_ref().filter(|_| res.listed()) else {
                         owed_none.push(res.role.clone());
                         continue;
                     };
+                    let unbound = !res.bound();
                     match crate::model::desired::packed_report_of(&w.at, &g.packed) {
                         // `One` is a reply that reads and `Unreadable` one
                         // that does not; each is judged by its own reading,
                         // so neither drops out of the verdict (review-bot
                         // on #1166).
                         PackedFound::One(p) | PackedFound::Unreadable(p) => match &p.read {
+                            Ok(x)
+                                if unbound
+                                    && x.findings.is_empty()
+                                    && x.report.as_ref()
+                                        != Some(&zenkey_model::desired::v2::Report::baseline()) =>
+                            {
+                                broken.push(format!(
+                                    "role {}: unbound, and its report on {} is not the \
+                                     baseline's record (desired.v2 §2.12)",
+                                    res.role, p.key
+                                ));
+                            }
                             Ok(x) if x.findings.is_empty() => {
                                 read_ok += 1;
                                 covered_by.push(format!("{} by {}", res.role, p.key));
