@@ -373,6 +373,15 @@ fn contract_lint_reads_desired_v2s_declarations() {
         stderr.contains("error[desired.v2 horizon_v1] state/tasks/{system}/{service}"),
         "{stderr}"
     );
+    // The contract still loads, with its fingerprint (desired.v2 0.2 §2.2,
+    // F-583): printed after the errors, as for any contract that loads.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let printed = format!("{}: tasking.v2 ", file.display());
+    assert!(
+        stdout.starts_with(&format!("{printed}sha256:"))
+            && stdout.trim_end().len() == printed.len() + "sha256:".len() + 64,
+        "{stdout}"
+    );
 }
 
 /// `zk2 contract lint` reads a service's own word tables (health.v2 §2.10,
