@@ -291,7 +291,11 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   name, exit 2; `--face-policy F --face N`, `zk2::across` →
   `Deployment::across`, `call`'s contract `timeout_ms` floored at the
   face's, `watch` through `zenkey_fleet::watch_resource_across`, the
-  runtime's `Consumer::across`), and `telemetry --across-face` the face
+  runtime's `Consumer::across`; since #1146 its `WatchReads` carry
+  `--timeout`, which the owner's descriptor read for its catalog and a
+  re-read wait, and `--across-face`, which reads no descriptor and takes
+  the last `--catalog` as the word: `live_zk2.rs`'s
+  `watch_waits_its_timeout_for_the_catalog_its_owner_names`), and `telemetry --across-face` the face
   pair beside it; #1087: `health --catalog` and `alarms --catalog`
   (`HealthSpec::catalogs`, `AlarmSpec::catalogs`) and `check conform`'s
   `--catalog` (`run_conform`'s `catalogs`), and the `alert-firing` rule

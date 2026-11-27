@@ -79,16 +79,17 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
         Some(s) => s,
         None => dep.session().await?,
     };
+    // #1146: every read the subscription makes waits --timeout, at least
+    // the face's reply timeout across one; and told the owner sits across
+    // a face, it reads no descriptor, the catalogs given the deployment's
+    // word. An owner heartbeat's groups are read through them (core §8.6).
+    let reads = zenkey_fleet::WatchReads {
+        far: dep.far(),
+        across_face: cli.face.across_face,
+        timeout: dep.timeout(),
+    };
     let mut watch = zenkey_fleet::watch_resource_across(
-        &session,
-        &revision,
-        &target,
-        r,
-        &values,
-        epoch,
-        dep.far(),
-        // An owner heartbeat's groups are read through them (core §8.6).
-        &catalogs,
+        &session, &revision, &target, r, &values, epoch, reads, &catalogs,
     )
     .await?;
 

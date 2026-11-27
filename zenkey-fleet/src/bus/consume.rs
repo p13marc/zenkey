@@ -571,17 +571,73 @@ pub async fn watch_in(
         r,
         values,
         epoch,
-        None,
+        WatchReads::default(),
         &crate::model::deployment::Catalogs::default(),
     )
     .await
 }
 
-/// [`watch_in`] across `far`, the face the target sits across (#990 V8):
-/// the consumer's reads floored at the face's reply timeout, and where the
-/// face says `arq = false` each subscriber with a horizon declared again
-/// after two horizons of silence (`zenkey::consumer::Consumer::across`,
-/// core §8.5). `None`: no face.
+/// A tool's consumer as its subscriptions read an owner (#1146): through
+/// `catalogs`, the ones the tool was given (core §8.6), each read the
+/// subscription makes waiting `timeout`, the tool's (§8.1: a re-read of a
+/// diverged collection, and the read of an owner's descriptor for the
+/// catalog it names); and, `across` a constrained face, where no
+/// descriptor crosses (§8.5), presence unavailable, so the last catalog
+/// given is the deployment's word and no descriptor is read
+/// (`freshness.v2` §2.5).
+pub(crate) fn tool_consumer(
+    consumer: zenkey::consumer::Consumer,
+    timeout: Duration,
+    across: bool,
+    catalogs: &crate::model::deployment::Catalogs,
+) -> zenkey::consumer::Consumer {
+    let consumer = consumer
+        .with_catalogs(catalogs.held().iter().cloned())
+        .with_reread_timeout(timeout)
+        .with_owner_catalog_timeout(timeout);
+    if across {
+        consumer.with_presence(zenkey::consumer::Presence::Unavailable)
+    } else {
+        consumer
+    }
+}
+
+/// How [`watch_across`]'s subscription reads its target's owner (#990 V8,
+/// #1146).
+#[derive(Debug, Clone, Copy)]
+pub struct WatchReads<'a> {
+    /// The face the target sits across: the consumer's reads floored at
+    /// its reply timeout, and where it says `arq = false` each subscriber
+    /// with a horizon declared again after two horizons of silence
+    /// (`zenkey::consumer::Consumer::across`, core §8.5). `None`: no face.
+    pub far: Option<&'a zenkey_model::link::FarSide>,
+    /// The operator's word that the owner sits across a constrained face,
+    /// where presence and descriptors do not cross (a tool's
+    /// `--across-face`; core §8.5): an owner heartbeat's groups are read
+    /// at once through the last catalog given, the deployment's word, and
+    /// no descriptor is read (core §8.6; `freshness.v2` §2.5).
+    pub across_face: bool,
+    /// How long each read the subscription makes waits (core §8.1: the
+    /// caller's, a tool's `--timeout`): a re-read of a diverged
+    /// collection, and the read of an owner's descriptor for the catalog
+    /// it names. At least the face's reply timeout across one.
+    pub timeout: Duration,
+}
+
+impl Default for WatchReads<'_> {
+    /// No face, and the runtime's own timeouts.
+    fn default() -> Self {
+        Self {
+            far: None,
+            across_face: false,
+            timeout: zenkey::consumer::OWNER_CATALOG_TIMEOUT,
+        }
+    }
+}
+
+/// [`watch_in`] as `reads` says: across the face the target sits across,
+/// the owner's descriptors read or not, and every read the subscription
+/// makes waiting `reads.timeout` (#990 V8, #1146).
 ///
 /// A watched collection's confirmations come from its provider's heartbeat
 /// and from its owner heartbeats alike (`freshness.v2` §2.5, "Both forms";
@@ -599,7 +655,7 @@ pub async fn watch_across(
     r: &Resource,
     values: &Bindings,
     epoch: impl Into<Dating>,
-    far: Option<&zenkey_model::link::FarSide>,
+    reads: WatchReads<'_>,
     catalogs: &crate::model::deployment::Catalogs,
 ) -> Result<Watch> {
     // The epoch in force and its catalog, which a date names (O8).
@@ -633,9 +689,9 @@ pub async fn watch_across(
         &params,
     )
     .map_err(|e| runtime("subscribe", address, e))?
-    .with_refused(on_refused)
-    .with_catalogs(catalogs.held().iter().cloned());
-    let consumer = match far {
+    .with_refused(on_refused);
+    let consumer = tool_consumer(consumer, reads.timeout, reads.across_face, catalogs);
+    let consumer = match reads.far {
         Some(f) => consumer.across(f),
         None => consumer,
     };

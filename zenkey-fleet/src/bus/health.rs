@@ -742,7 +742,9 @@ pub async fn observe(
     let t = spec.timeout;
     let fresh = presence.is_none();
     let window = match spec.window {
-        Some(_) => Some(Window::open(session, &target, t, &spec.catalogs).await),
+        Some(_) => {
+            Some(Window::open(session, &target, t, spec.face.is_some(), &spec.catalogs).await)
+        }
         None => None,
     };
     let presence = match (spec.face, presence) {
@@ -1139,11 +1141,15 @@ impl Window {
     /// heartbeats (`freshness.v2` §2.5, "Both forms"), a group read through
     /// `catalogs`, the ones the tool was given (core §8.6): with none, no
     /// group is read, and an owner that sends owner heartbeats alone has
-    /// its status unconfirmed.
+    /// its status unconfirmed. The catalog its owner names is read from
+    /// its descriptor within `timeout`, as a re-read is (#1146); `across`
+    /// a face none is read, and the last catalog given is the deployment's
+    /// word.
     async fn open(
         session: &Session,
         target: &HealthTarget,
         timeout: Duration,
+        across: bool,
         catalogs: &crate::model::deployment::Catalogs,
     ) -> Result<Window, String> {
         let provider = target.provider();
@@ -1154,7 +1160,7 @@ impl Window {
                 &[provider.as_str()],
                 &BTreeMap::new(),
             )
-            .map(|c| c.with_catalogs(catalogs.held().iter().cloned()))
+            .map(|c| crate::bus::consume::tool_consumer(c, timeout, across, catalogs))
             .map_err(|e| e.to_string())
         };
         let consumer = consumer_of(zenkey::health::implementation())?;

@@ -671,7 +671,13 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   held with no instance in hand; a reading is incomplete while
   `Views::is_lost`. The health and config windows and `watch_across`
   (a new last argument, `&Catalogs`) hand the catalogs to the runtime's
-  consumer, and `report::WatchConfirmation::group` is a group's index,
+  consumer (`bus::consume::tool_consumer` since #1146: each read the
+  subscription makes, a re-read and the descriptor read for the owner's
+  catalog, waits the tool's timeout, at least the face's; and across a
+  face, `HealthSpec::face`, `ConfigSpec::across_face` or
+  `WatchReads::across_face`, presence unavailable, so no descriptor is
+  read and the last catalog given is the word; `watch_across` takes
+  `WatchReads { far, across_face, timeout }` in place of its `far`), and `report::WatchConfirmation::group` is a group's index,
   its `key` the class key. `tests/owner_heartbeat.rs` runs the lens and
   the scope session-free. H2c, the tools' half: `inband::
   owner_heartbeat_lines` (a person's line per group),
