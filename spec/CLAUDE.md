@@ -1090,6 +1090,16 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   member kept at an equal seq and every other sample held alone, a token
   deciding no held sample, and the entry read. A linter's `value` and
   `disagrees`, v1 §2.2's SHOULD, were warned of by no linter before N1.
+  N2 (the runtime, #987): scenarios-v2.md's "Who runs them" names
+  `zenkey/tests/profile_redundancy_v2.rs` (§1–§11, §13–§15; §12 waits for
+  N3's tools), and `arbitration.v1` 0.7 reads §2.5's outcome 6 by either
+  major (by run under `redundancy.v2`, an unattributed sample
+  `not_incumbent`, the read it asks attributing the next), §2.12's view by
+  the one major its revisions list, its header naming both majors and
+  written against core 0.118, the index's row following; scenarios §11
+  runs again under `redundancy.v2` on `steer.v1` minor 2;
+  `arbitrations.json` is unchanged (`incumbent: false` is the fence's
+  word, either major's).
 
 **zk2py rounds 116 to 123, answered (#609, #986, #1165).** Core 0.116
 (298 rules: §4.3's new deployment MUST NOT, a run's record that was lost
