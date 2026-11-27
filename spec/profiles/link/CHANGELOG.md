@@ -7,6 +7,40 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.28 — 2026-11-28: §2.5: a device implementing an interface whose revision uses `redundancy.v2` is refused, `presence_required`, as one under `redundancy.v1` is (#987)
+
+`redundancy.v2` text 0.1 §2.13 forbids an owner on a first hop an
+interface that major governs, as core §8.1 forbids one `redundancy.v1`
+governs. A device is an owner on a first hop (§2.5). This text refused
+the second alone.
+
+**What changed.**
+- **§2.5, "What a device declares".** A generator MUST refuse a device
+  that implements `archive.v1`, or an interface a revision given of
+  which uses `redundancy.v1` or `redundancy.v2`. It cites core §8.1 for
+  the first two and `redundancy.v2` §2.13 for the third.
+- **§2.3's table,** the row of `presence_required`, says the same.
+
+**The case.** `v2/plan.json`'s case 54 is case 25's device implementing
+`gov.v1` alone, its revision using `redundancy.v2`: `presence_required`
+on the device's face, and no plan. It was written by reading this text,
+computed again by a second reading that shares no code with the first,
+and inserted as text. 55 cases.
+
+**What deliberately did not change.**
+- **§2.11's list** keeps "any state of a contract that uses
+  `redundancy.v1`". A state of a contract that uses `redundancy.v2` is
+  answered by snapshot, so it has a floor only by another item of the
+  list, as core §4.2's list reads it.
+- **No other case moved.** Case 25 and case 52 read `redundancy.v1`, as
+  before.
+- **The header** is still written against core 0.108. The new clause
+  restates core 0.118 and `redundancy.v2` 0.1.
+
+**Not verified.** The reference's generator reads `redundancy.v1` alone
+(`zenkey_model::link`'s governed interfaces). Its change is #987's model
+work, and case 54 fails until then.
+
 ## link.v2 0.28 — 2026-11-28: editorial: `v2/plan.json`'s case 54, a collection two revisions disagree on, read `host` for the horizon and the longest put, no keyword changed (#975)
 
 zk2py's round 117 filed F-573: none of the plan's cases drew
