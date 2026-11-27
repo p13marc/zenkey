@@ -7,6 +7,71 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `desired.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## desired.v2 0.3 — 2026-11-28: §2.18: a target judges nothing of its author's new run before it reads the descriptor stating that run, with §16's run E (#986)
+
+review-bot, on #1171, read 0.2's §2.18 against zk2py's target. §2.18
+binds a target "while the descriptor names" a revision of the other
+major, and said nothing of the interval before a new run's descriptor
+is read. An author that restarts on such a revision puts its first
+version just after its new descriptor (core §8.2). A target that judges
+it by its last read, the previous run's word, acts on it.
+
+**The two implementations.**
+- **The reference holds** (`zenkey/src/desired.rs`, `admits`): a version
+  under a run its last read did not state waits while the target reads
+  its author's descriptors for that run, once. So does a read's entry,
+  a snapshot with no entry, and an unchanged answer. A read that
+  reaches no descriptor, finds none stating the run, or fails, takes the
+  deployment's word.
+- **zk2py judges by the last read,** starting the read beside it, so as
+  not to reorder the put against the watch's reads (scenarios §14,
+  step 5).
+
+**The default taken: the reference's hold.** The text shows no hazard in
+the reorder.
+- **Within a run,** §2.6 orders by seq, whatever the order of arrival.
+  A put and a read's entry of one version, judged in either order, are
+  one admission and one `same_version`.
+- **Across runs,** a value of the old run that arrives during the wait is
+  judged before the new run's version: the order its author put them
+  in. That narrows §2.6's residual, and widens none.
+- **What §14 step 5 observes** can move. A read asked while the
+  descriptors' read runs carries v3's earlier stamp, and is answered
+  whole, not unchanged. One read either way, and `Run` receives nothing.
+- **Without the hold,** a target acts on the first version of a run its
+  role cannot report: the MUST NOT of §2.18 broken in the one interval
+  it most needs to hold.
+
+**Now.**
+- **§2.18, "A new run is read first".** A target MUST NOT judge a
+  version under a run whose descriptor it has not read, nor a snapshot
+  with no entry under it, before it reads its author's descriptors for
+  that run. `[Sc: §14, §16]` It reads them once. A read that names none
+  leaves the deployment's word. Two items say why, and what it costs.
+- **`scenarios-v2.md` §14, Expected 5.** The target reads its author's
+  descriptors before it judges the new run's put, and none crosses the
+  face. A read asked meanwhile may be answered whole; its entry is the
+  same version.
+- **`scenarios-v2.md` §16, run E.** Run D's target, its author on the
+  scenarios' own revision, which restarts on run C's from its record
+  and puts v1 again and then v2. The target judges nothing of the new
+  run before it reads that run's descriptor, stops the role, and acts
+  on neither put. `Rp` and `Run` receive nothing.
+
+**What deliberately did not change.**
+- **No exemption across a face.** A target that no descriptor reaches
+  still reads, and waits that read's timeout, the face's reply timeout
+  where one is stated (`link.v2` §2.20). The reference does so. A target
+  told by its deployment that no descriptor crosses could skip it; no
+  text says how it is told.
+- **Written against** core 0.112, still.
+
+**The code half.** The reference holds already. It has no test of §16,
+run E included. zk2py moves.
+
+**Not verified.** No implementation has run §16's run E, nor §14 step
+5 as now worded.
+
 ## desired.v2 0.2 — 2026-11-27: zk2py's rounds 118 to 121: a target built before this major binds through no router that timestamps, a failed revert keeps its version, a report resource of any kind, and §9's T holds its author's revision (#986)
 
 zk2py's rounds 118, 119 and 121 read 0.1 cold, then ran it against the
