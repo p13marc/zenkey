@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -119,6 +120,33 @@ def run_owner(endpoint: str, catalog_path: str) -> int:
                 # a test rig's: the instance's descriptor queryable undeclared, so
                 # that no descriptor answers a GET while the owner keeps putting
                 o._instance_entities[0].undeclare()
+            elif words[0] == "slow":
+                # a test rig's (round 125, deliverable 3): the descriptor
+                # queryable answers each GET, but only <ms> after it arrives,
+                # as a slow owner's would: a reader whose timeout is shorter
+                # draws what zenoh gives a GET left unanswered at its end
+                import zenoh
+
+                delay = int(words[1]) / 1000
+                o._instance_entities[0].undeclare()
+                key = o.instance_key
+                doc = o._docs.get(o.instance) if hasattr(o, "_docs") else None
+
+                def late(q: Any, key: str = key) -> None:
+                    def answer() -> None:
+                        time.sleep(delay)
+                        try:
+                            q.reply(key, o._docs.get(o.instance, doc) if hasattr(o, "_docs") else doc,
+                                    encoding="application/json")
+                        except Exception:  # noqa: BLE001 - its GET has ended: nothing to answer
+                            pass
+                        finally:
+                            q.drop()
+                    threading.Thread(target=answer, daemon=True).start()
+
+                assert o.session is not None
+                o._instance_entities[0] = o.session.declare_queryable(key, zenoh.handlers.Callback(late),
+                                                                      complete=True)
             elif words[0] == "report":
                 print("report " + json.dumps({
                     "owner_heartbeats": [[cls, ib.seq, sorted(v)] for cls, ib, v in o.owner_heartbeats_sent],
@@ -928,25 +956,30 @@ def run_reference() -> int:
     return 1 if failed else 0
 
 
-def run_silent() -> int:
-    """freshness.v2 0.11 §2.5, "The catalog its owner names", beside an owner
-    whose descriptor does not answer (round 117): zk2py's owner under a
-    catalog, sending owner heartbeats, its descriptor queryable undeclared
-    (a test rig's). On the near side, with no face:
+def run_silent(slow_ms: int | None = None, window: float = 9.0) -> int:
+    """freshness.v2 §2.5, "The catalog its owner names", beside an owner
+    whose descriptor does not answer (round 117), or answers ``slow_ms``
+    after each GET (round 125): zk2py's owner under a catalog, sending
+    owner heartbeats, its descriptor queryable undeclared or slowed (a test
+    rig's). On the near side, with no face:
 
-    - zk2py's subscriber that holds the catalog and was given no word reads
-      the descriptors, gets no reply, and reads each group
-      ``unknown_catalog``: "A read that fails names no catalog … The
-      subscriber asks again later, and not at every put. Until an answer
-      comes, each group is ``unknown_catalog``";
+    - zk2py's subscriber that holds the catalog and was given no word as
+      such: 0.13 "A read that draws no reply is no failure. The
+      deployment's word stands for it", "a tokenless owner's, or a slow
+      one's. So it is read as one." Round 117's subscriber read each group
+      ``unknown_catalog``; round 125's reads them through the one catalog
+      it holds, the one it was provisioned;
     - zk2py's subscriber given the deployment's word reads every group;
-    - the reference's consumer, ``zenctl watch --catalog`` (a black box):
-      what it prints. Its entry says "The deployment's word after silence
-      … It reads through the catalog it was provisioned" (F-574)."""
+    - the reference's consumer, ``zenctl watch --catalog --timeout 1`` (a
+      black box): what it prints.
+
+    With ``slow_ms``, a GET with a 1 s timeout draws what zenoh gives a GET
+    left unanswered at its end (deliverable 3): the rig's own GET says it."""
     from . import live
     from .blackbox import BLACKBOX, workdir
     from .live_interop import _r1
 
+    name = "--silent" if slow_ms is None else f"--slow {slow_ms}"
     rows: list[tuple[str, bool, str]] = []
 
     def check(name: str, ok: bool, detail: str = "") -> bool:
@@ -970,47 +1003,74 @@ def run_silent() -> int:
                 return 1
             for k in [STATUS, CONFIG, *PEERS, *ALARMS]:
                 child.command(f"put {k} v1")
-            child.command("mute")
+            child.command("mute" if slow_ms is None else f"slow {slow_ms}")
             time.sleep(0.3)
-            answered = fv2.descriptors_of(sessions[0], ADDRESS, 1.0)
-            check("the rig: the owner's descriptor answers no GET, and its owner heartbeats go on",
-                  answered == [], f"{len(answered)} descriptors")
+            t0 = time.monotonic()
+            answered, errors = fv2.descriptor_read(sessions[0], ADDRESS, 1.0)
+            took = time.monotonic() - t0
+            if slow_ms is None:
+                check("the rig: the owner's descriptor answers no GET, and its owner heartbeats go on: a GET draws "
+                      "no reply at all", answered == [] and errors == [], f"{len(answered)} descriptors, errors "
+                      f"{errors}, {took:.2f} s")
+            else:
+                check(f"the rig: the owner's descriptor answers {slow_ms} ms after each GET; a GET with a 1 s "
+                      "timeout draws no descriptor, and zenoh's error reply `Timeout` at its end (deliverable 3)",
+                      answered == [] and errors and all(e == fv2.TIMEOUT_PAYLOAD for e in errors),
+                      f"{len(answered)} descriptors, errors {errors}, {took:.2f} s")
             revs = [(c.canonical, c.fingerprint, None) for c in contracts]
-            window, again = 9.0, 2.0
+            again = 2.0
             p0 = fv2.Provider(sessions[0], ADDRESS, revs, held=[held], seed=[A, B, C], wait_s=0.0, reread=False,
-                              get_timeout=0.5, ask_again_s=again)
+                              get_timeout=0.5 if slow_ms is None else 1.0, ask_again_s=again)
             pw = fv2.Provider(sessions[1], ADDRESS, revs, held=[held], named=held.id, seed=[A, B, C], wait_s=0.0,
                               reread=False)
+            ready_ns = time.monotonic_ns()  # p0's start read has ended: puts heard during it were refused
             providers += [p0, pw]
             w = Watch(endpoint, A, "status", path, window, extra=("--timeout", "1")) \
                 if (BLACKBOX / "zenctl").is_file() else None
             time.sleep(window)
-            h0 = [h for h in p0.answers("link") if "read" in h.answer]
-            check("zk2py's subscriber, holding the catalog and given no word (§2.5 \"A read that fails names no "
-                  "catalog … Until an answer comes, each group is `unknown_catalog`\"): every owner heartbeat a "
-                  "read one, every group unknown_catalog, nothing confirmed by one",
-                  len(h0) >= 6 and all(g.get("refused") == "unknown_catalog" for h in h0 for g in _groups(h))
-                  and not any(sub.last_conf for sub in p0.subs.values()), f"{len(h0)} read")
-            check("and it asks again later, not at every put: a descriptor read at the first put of the run and "
-                  f"one each {again:g} s after a failure, zk2py's bound for this run",
-                  2 <= p0.naming.reads <= int(window / again) + 2 and p0.naming.reads < len(h0),
-                  f"{p0.naming.reads} reads over {len(h0)} puts in {window:g} s")
+            early = [h for h in p0.answers("link") if "read" in h.answer and h.arrival_ns < ready_ns]
+            h0 = [h for h in p0.answers("link") if "read" in h.answer and h.arrival_ns >= ready_ns]
+            if early:
+                print(f"NOTE {len(early)} owner heartbeats heard while zk2py's start read was out, each group "
+                      f"{sorted({g.get('refused', 'read') for h in early for g in _groups(h)})}: \"Before it "
+                      f"knows\", it refuses", flush=True)
+            check("zk2py's subscriber, holding the one catalog and given no word as such (0.13 §2.5: \"a read that "
+                  "draws no reply cannot be told from a face: a tokenless owner's, or a slow one's. So it is read as "
+                  "one\"): every owner heartbeat after its start read a read one, every group read through the "
+                  "catalog it holds, the members confirmed",
+                  len(h0) >= 6 and all("refused" not in g for h in h0 for g in _groups(h))
+                  and any(sub.last_conf for sub in p0.subs.values()),
+                  f"{len(h0)} read, {p0.naming.silences} silent reads, {p0.naming.errors} failed")
+            check("and the word stands for each run it read silent: one read at the start, one at the first put of "
+                  "the run, and none after", p0.naming.reads <= 1 and p0.naming.started == 1,
+                  f"{p0.naming.reads} reads for a run, {p0.naming.started} at the start, over {len(h0)} puts")
+
             hw = [h for h in pw.answers("link") if "read" in h.answer]
-            check("zk2py's subscriber given the deployment's word (§2.5 \"Where no descriptor answers … the "
-                  "subscriber takes the deployment's word\") reads every group through it, and reads no descriptor",
+            check("zk2py's subscriber given the deployment's word as across a face reads every group through it, "
+                  "and reads no descriptor",
                   len(hw) >= 6 and all("refused" not in g for h in hw for g in _groups(h))
                   and any(sub.last_conf for sub in pw.subs.values()) and pw.naming.reads == 0, f"{len(hw)} read")
             if w is not None:
-                w.wait()
+                w.wait(window + 40)
+                dump = Path(os.environ.get("ZK2PY_DUMP", "")) if os.environ.get("ZK2PY_DUMP") else None
+                if dump is not None:
+                    dump.write_text("\n".join(json.dumps(r) for r in w.rows) + "\n" + "".join(w.err))
                 conf = w.confirmations("link")
                 confirmed = [q for q, r in sorted(conf.items()) if r.get("confirmed") == [STATUS]]
-                print("NOTE the reference's consumer (zenctl watch --catalog, on the near side, its descriptor read "
-                      f"unanswered): {len(conf)} confirmation rows on the link key, {len(confirmed)} confirming "
-                      f"status; summary heartbeats {w.summary().get('heartbeats')}; stderr {w.err[:2]}", flush=True)
-                check("the reference's consumer beside the same owner reads its groups through the catalog it was "
-                      "given, as its entry says of silence (\"The deployment's word after silence\"): confirmation "
-                      "rows, where zk2py's reads each group unknown_catalog. The text gives the case both outcomes "
-                      "(F-574)", len(confirmed) >= 3, f"{len(confirmed)} rows confirm status")
+                print(f"NOTE the reference's consumer (zenctl watch --catalog --timeout 1, on the near side, its "
+                      f"descriptor read {'unanswered' if slow_ms is None else f'answered {slow_ms} ms late'}): "
+                      f"{len(conf)} confirmation rows on the link key, {len(confirmed)} confirming status; summary "
+                      f"heartbeats {w.summary().get('heartbeats')}; stderr {w.err[:2]}", flush=True)
+                if slow_ms is None:
+                    check("the reference's consumer beside the same owner reads its groups through the catalog it "
+                          "was given: confirmation rows, as zk2py's subscriber now does", len(confirmed) >= 3,
+                          f"{len(confirmed)} rows confirm status")
+                else:
+                    # measured, never judged: the text reads a slow owner's read two ways (F-616)
+                    print(f"NOTE beside an owner {slow_ms} ms late, the reference's consumer confirms status in "
+                          f"{len(confirmed)} rows and counts {w.summary().get('heartbeats')} heartbeats, where "
+                          f"zk2py's subscriber read every group after its start read through the catalog it holds "
+                          "(F-616)", flush=True)
     finally:
         for p in providers:
             p.close()
@@ -1020,7 +1080,7 @@ def run_silent() -> int:
             x.close()
         router.close()
     failed = [r for r in rows if not r[1]]
-    print(f"owner_heartbeat_live --silent: {len(rows) - len(failed)}/{len(rows)}", flush=True)
+    print(f"owner_heartbeat_live {name}: {len(rows) - len(failed)}/{len(rows)}", flush=True)
     return 1 if failed else 0
 
 
@@ -1136,6 +1196,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="another form on a heartbeat's own key, beside each owner's heartbeats (core §7.5)")
     ap.add_argument("--silent", action="store_true",
                     help="an owner whose descriptor does not answer: zk2py's subscribers and zenctl watch (a black box)")
+    ap.add_argument("--slow", type=int, metavar="MS",
+                    help="an owner whose descriptor answers MS after each GET: zk2py's subscribers and zenctl "
+                         "watch beside it (round 125, deliverable 3)")
+    ap.add_argument("--window", type=float, default=9.0, help="--silent and --slow: the readers' window, in s")
     ap.add_argument("--owner", nargs=2, metavar=("ENDPOINT", "CATALOG"), help="run the owner process")
     ap.add_argument("--reference", action="store_true",
                     help="zk2py's owner with the reference's readers, zenctl watch and zenctl echo (black boxes)")
@@ -1147,7 +1211,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.forms:
         return run_forms()
     if args.silent:
-        return run_silent()
+        return run_silent(None, args.window)
+    if args.slow is not None:
+        return run_silent(args.slow, args.window)
     return run()
 
 

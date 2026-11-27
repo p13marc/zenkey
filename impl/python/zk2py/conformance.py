@@ -5357,6 +5357,42 @@ def _round125_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                "`undecodable`. A record with no time needs no catalog, and is read."),
                 ["unknown_catalog", None, "undecodable", "degraded"]))
 
+    # -- freshness.v2 0.13 --------------------------------------------------------------
+    def naming(provisioned: Any, steps: list[tuple[str | None, list[Any], bool]], probe: str = "0009") -> list[Any]:
+        """Each read's answer, then the id a put of its run (``probe`` for
+        the start read's) is read through; a run's read is asked by ``due``
+        first."""
+        n = f2.Naming(ask_again_ns=10, provisioned=provisioned)
+        n.begin()
+        got: list[Any] = []
+        for run, docs, error in steps:
+            if run is not None:
+                got.append(n.due(run, 1))
+            n.answer(run, docs, 2, error)
+            got.append(n.of(run or probe))
+        return got
+
+    out.append(("freshness.v2 0.13 §2.5 (F-574): a read on the near side that draws no reply takes the deployment's "
+                "word, the catalog the subscriber was provisioned, for every run no descriptor named; a read that "
+                "ends in an error reply fails, each group unknown_catalog until an answer; a descriptor's catalog "
+                "stands over the word; a subscriber given no word, or several catalogs and none named for the owner, "
+                "reads nothing through silence; zenoh's own Timeout is read as no reply (a slow owner's), any other "
+                "error reply fails",
+                [naming("aabbccdd", [(None, [], False)]), naming("aabbccdd", [(None, [], True)]),
+                 naming("aabbccdd", [(None, [{"run": "0007", "catalog": "11223344"}], False), ("0007", [], False)],
+                        "0007"),
+                 naming(None, [(None, [], False)]), naming("aabbccdd", [(None, [], True), ("0009", [], False)]),
+                 [f2.failed_by_error([b"Timeout"]), f2.failed_by_error([]), f2.failed_by_error([b"denied"]),
+                  f2.failed_by_error([b"Timeout", b"denied"])],
+                 f2.Provider.__init__.__defaults__ is not None]
+                + missing(fv2, "- **On the near side,** a read that draws no reply cannot be told from a face: a "
+                               "tokenless owner's, or a slow one's. So it is read as one.",
+                          "- **A read that fails** names no catalog: one that ends in an error reply, and one whose "
+                          "descriptors all state another run.",
+                          "- A read that draws no reply is no failure. The deployment's word stands for it (above)."),
+                [["aabbccdd"], [None], ["11223344", False, "11223344"], [None], [None, True, "aabbccdd"],
+                 [False, False, True, True], True]))
+
     # -- core 0.115 and observer 0.36 ---------------------------------------------------
     out.append(("core 0.115 and observer 0.36, the answers with no rule of zk2py's to move: §4.3's record that is "
                 "gone binds the deployment (F-578), §4.2's raw body (F-572) and observer §4.1's held stamp, §8.5's "
