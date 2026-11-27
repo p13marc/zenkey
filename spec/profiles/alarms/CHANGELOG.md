@@ -74,6 +74,9 @@ two, F-613 and F-614.
 **Not verified.** No implementation has run the Conventions as now
 worded. The reference's tool has not run on the copy since it moves.
 
+- **A revision not in hand** gives no horizon, so the owner's alarms' freshness is unobservable, never 900 s. Reading a shorter horizon at the standard one would call a stale alarm fresh. The lead's default, from the code half's question.
+
+
 ## alarms.v2 0.1 — 2026-11-27: a new major: an alarm in a slot, a transition in one packed record, words by table, a resolve with no delete, and "nothing fires" from one snapshot (#984)
 
 **Half of what #984 set out to remove is already gone, and that is said
