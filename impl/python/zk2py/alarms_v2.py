@@ -1276,3 +1276,178 @@ class SlotView:
         doc = read_words(self.words)
         assert doc is not None
         return {"words": doc, "alert_key": key_hex(v["key"])}
+
+
+# -- §2.6 and §2.16, reading a slot's puts by identity ------------------------------------------
+
+RAISED, ESCALATED, REFRESHED, CONFIRMED, RETIRED, UNREADABLE_PUT = (
+    "raised", "escalated", "refreshed", "confirmed", "retired", "unreadable")
+REBOUND, REPLACED, DROPPED = "rebound", "replaced", "dropped"
+DELETE = "delete"
+#: §2.4's fields, "Equal is equal in every field §2.4 names".
+FIELDS = ("state", "severity", "rule", "at", "labels", "argument", "key")
+
+
+def identity_of(table: Table, value: dict[str, Any]) -> tuple[str, Any]:
+    """A record's identity for §2.6's "One identity": its alert key where
+    the reader has one (a record by words its ``key``, a named table's rule
+    the key the reader derives), else ("unnamed", (rule, labels or None))."""
+    n = name_record(table, value)
+    if n.alert_key is not None:
+        return ("key", n.alert_key)
+    return ("unnamed", (value.get("rule"), value.get("labels")))
+
+
+def same_identity(table: Table, a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """§2.6: "each has an alert key, and the two are equal …; or either is
+    unnamed, and their ``rule`` and their ``labels`` are equal, an absent
+    ``labels`` equal only to an absent one"."""
+    ia, ib = identity_of(table, a), identity_of(table, b)
+    if ia[0] == "key" and ib[0] == "key":
+        return ia[1] == ib[1]
+    return (a.get("rule"), "labels" in a, a.get("labels")) == (b.get("rule"), "labels" in b, b.get("labels"))
+
+
+def _equal(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    return all((f in a, a.get(f)) == (f in b, b.get(f)) for f in FIELDS)
+
+
+def _against(held: dict[str, Any], put: dict[str, Any]) -> str:
+    """The same identity's rows of §2.6's table."""
+    hf, pf = held["state"] == FIRING, put["state"] == FIRING
+    if hf and pf:
+        if put["severity"] != held["severity"]:
+            return ESCALATED
+        if ("at" in put, put.get("at")) != ("at" in held, held.get("at")):
+            return RAISED
+        return CONFIRMED if _equal(held, put) else REFRESHED
+    if hf and not pf:
+        return RESOLVED
+    if pf:
+        return RAISED
+    if ("at" in put, put.get("at")) != ("at" in held, held.get("at")):
+        return RESOLVED
+    return CONFIRMED if _equal(held, put) else REFRESHED
+
+
+@dataclass(frozen=True)
+class Step:
+    """One put's reading on a slot (§2.6): the held record's fate where it
+    was another identity's (``rebound``, ``replaced``, ``dropped``), and the
+    put's own transition."""
+
+    held: str | None
+    put: str
+    #: the identity whose record the held fate is about, and the put's
+    held_identity: Any = None
+    identity: Any = None
+
+    def expect(self) -> list[str]:
+        return ([self.held] if self.held else []) + [self.put]
+
+
+class SlotReader:
+    """One slot's samples "in the owner's order", each read "against the
+    record it holds on that slot, as this table and the fixture do. … It
+    holds each record with the run of the put that carried it: its
+    envelope's, or its snapshot entry's (core §7.5)." A run is compared in
+    width and value (core §3.3)."""
+
+    def __init__(self, table: Table = NO_TABLE) -> None:
+        self.table = table
+        self.held: dict[str, Any] | None = None
+        self.run: Any = None
+
+    def step(self, sample: Any, run: Any = None) -> Step:
+        """``sample`` is :data:`DELETE` (a delete or a tombstone), a
+        :class:`Read`, or a record's JSON reading."""
+        held, held_run = self.held, self.run
+        if sample == DELETE:
+            self.held, self.run = None, None
+            hid = None if held is None else identity_of(self.table, held)
+            return Step(None, RESOLVED if held is not None and held["state"] == FIRING else RETIRED, None, hid)
+        r = sample if isinstance(sample, Read) else Read(sample)
+        if not r.reads or r.value is None:
+            self.held, self.run = None, None
+            return Step(None, UNREADABLE_PUT)
+        put = r.value
+        self.held, self.run = put, run
+        pid = identity_of(self.table, put)
+        if held is None:
+            return Step(None, RAISED if put["state"] == FIRING else RESOLVED, None, pid)
+        hid = identity_of(self.table, held)
+        if same_identity(self.table, held, put):
+            return Step(None, _against(held, put), None, pid)
+        fate = DROPPED if held_run != run else (REBOUND if held["state"] == FIRING else REPLACED)
+        return Step(fate, RAISED if put["state"] == FIRING else RESOLVED, hid, pid)
+
+
+def read_slot(samples: list[Any], table: Table = NO_TABLE) -> list[list[str]]:
+    rd = SlotReader(table)
+    return [rd.step(s, run).expect() for s, run in samples]
+
+
+@dataclass(frozen=True)
+class Notice:
+    """One report of a notifier (§2.16): the alarm's reference (system,
+    service, alert key), or for an unnamed alarm its owner, its slot and its
+    ``at``; its answer after the change; the severity while it fires; the
+    change that moved it."""
+
+    reference: tuple[Any, ...]
+    answer: str
+    severity: str | None
+    change: str
+    unnamed: bool = False
+
+
+class Notifier:
+    """§2.16 over one owner's slots: "``rebound`` is a resolve to report",
+    "A record ``replaced`` or ``dropped`` is no change of its alarm to
+    report by itself", "A notice's identity is the reference, never the key
+    and never the slot … So it tells nothing twice when a service moves
+    from ``alarms.v1``, or when an alarm comes back on another slot." v1
+    §2.16 holds: a change is the answer moving between yes and no, or the
+    severity moving while yes; a refresh and a confirmation are none; a
+    first answer is reported where it is yes."""
+
+    def __init__(self, system: str, service: str, table: Table = NO_TABLE) -> None:
+        self.system, self.service = system, service
+        self.table = table
+        self.readers: dict[int, SlotReader] = {}
+        self.told: dict[tuple[Any, ...], tuple[str, str | None]] = {}
+
+    def _ref(self, slot: int, value: dict[str, Any]) -> tuple[tuple[Any, ...], bool]:
+        n = name_record(self.table, value)
+        if n.alert_key is not None:
+            return (self.system, self.service, n.alert_key), False
+        return (self.system, self.service, slot, value.get("at")), True
+
+    def _tell(self, ref: tuple[Any, ...], unnamed: bool, answer: str, severity: str | None,
+              change: str) -> list[Notice]:
+        now = (answer, severity if answer == "yes" else None)
+        last = self.told.get(ref)
+        if last is None and answer != "yes":
+            return []
+        if last == now:
+            return []
+        self.told[ref] = now
+        return [Notice(ref, answer, now[1], change, unnamed)]
+
+    def put(self, slot: int, sample: Any, run: Any = None) -> list[Notice]:
+        rd = self.readers.setdefault(slot, SlotReader(self.table))
+        before = rd.held
+        st = rd.step(sample, run)
+        out: list[Notice] = []
+        if st.held == REBOUND and before is not None:
+            ref, un = self._ref(slot, before)
+            out += self._tell(ref, un, "no", None, REBOUND)
+        if rd.held is None:
+            if sample == DELETE and before is not None:
+                ref, un = self._ref(slot, before)
+                out += self._tell(ref, un, "no", None, st.put)
+            return out
+        ref, un = self._ref(slot, rd.held)
+        firing = rd.held["state"] == FIRING
+        out += self._tell(ref, un, "yes" if firing else "no", rd.held["severity"] if firing else None, st.put)
+        return out
