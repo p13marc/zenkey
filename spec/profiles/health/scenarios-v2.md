@@ -324,10 +324,15 @@ its own, `tc.v1`, which lists `health.v2` in `uses` and declares on
 
 A second owner, `lab/plain`, implements `health.v2` and declares no
 table. T holds `tc.v1`'s revision, the one `lab/tc`'s descriptor names.
-T2 is a tool that holds an earlier revision of `tc.v1` alone, whose
+T2 is a reader that holds an earlier revision of `tc.v1` alone, whose
 `health.reasons` is `["tc_qdisc_missing", "tc_netns_gone"]`. T and T2
 each subscribe to both owners' `health.v2/**` before step 1. A later
 read answers no status since replaced, and no fault.
+- **T and T2 are readers of records,** as the runtime's test is: §9 is
+  the runtime's. Each keeps what it heard.
+- **A health tool** answers §5's questions of now. It shows the last
+  status it read and the faults it heard. It meets Expected 4 but for
+  step 1's status, which it need not show.
 
 **Steps.**
 1. `lab/tc` puts status `degraded` with its own reason `tc_netns_gone`,
@@ -345,8 +350,9 @@ read answers no status since replaced, and no fault.
 2. The record carries `out_of_range`, the code 63. The words are in
    `lab/tc`'s log.
 3. `lab/plain` has no table, so its record carries `out_of_range` too.
-4. T shows `lab/tc`'s reason as `tc_netns_gone` and its fault's code as
-   `tc_netns_restarted`, with the argument 3. It shows step 2's status
+4. T shows the reason of `lab/tc`'s step 1 status, as it heard it, as
+   `tc_netns_gone`. It shows its fault's code as `tc_netns_restarted`,
+   with the argument 3. It shows step 2's status
    as a word no table names, never as a name and never as no word.
    - T2 does not hold the revision `lab/tc`'s descriptor names. It shows
      the reason as the number 32, never as `tc_qdisc_missing`, the name

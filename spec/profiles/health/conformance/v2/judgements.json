@@ -1,5 +1,5 @@
 {
-  "description": "health.v2 §2.11, §2.12: one reading of one service -> the answer to \"is this service healthy?\". Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A case gives presence: \"present\", \"absent\" (a complete read without its instance token), \"incomplete\" (its token not seen, and the read possibly incomplete or refused) or \"across_face\" (across a constrained face, where presence and descriptors do not cross). descriptor, read only when present: null when it could not be read, or {\"interfaces\": the interface ids it lists, \"token\": false where health.v2 is in the tokenless set}; the interface token plays no part. deployment, given only across a face: the major the deployment's word names. face, read only across a face: {\"status_crosses\": whether the face lets state/status cross}. status: null where the case reads none, else {\"freshness\": the verdict and the reason freshness.v2 gives the observations of state/status at the standard contract's horizon, 60 s, as freshness's own judgements.json computes them (fresh; stale: beyond_horizon or no_delivery; unobservable: listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon or no_observation; not_asked: last_known, only an archive read, or deleted), \"record\": the latest status read, {\"tag\": CH's tag, \"hex\": the record's bytes}, or null where no value was read}. checks: null when not read, or the checks the owner answered with a record, [{\"check\", \"tag\", \"hex\"}]. A record is read by core §7.6 as records.json reads it, under epoch 1767225600: one it refuses is unknown, `undecodable`, and one at the level `unknown` is unknown, `unknown_level`; a check that is either bounds nothing. expect.major is the major the reading is judged under: 2; 1, where the descriptor lists health.v1 and not health.v2, or the deployment's word names it, and then the case expects nothing more, health.v1's own judgements.json being the evidence; or null where no descriptor decides. expect.verdict is healthy, unhealthy, stale, unobservable or not_asked; expect.reason its class: ok, degraded, failed, inconsistent, check, unknown_level, undecodable, deleted, presence_incomplete, no_descriptor, face_closed, nothing_crossed, absent, not_listed, last_known, or freshness's own reason for a stale or unobservable status; expect.level is the level the verdict rests on, ok, degraded or failed, for healthy and unhealthy, and null otherwise.",
+  "description": "health.v2 §2.11, §2.12: one reading of one service -> the answer to \"is this service healthy?\". Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A case gives presence: \"present\", \"absent\" (a complete read without its instance token), \"incomplete\" (its token not seen, and the read possibly incomplete or refused) or \"across_face\" (across a constrained face, where presence and descriptors do not cross). descriptor, read only when present: null when it could not be read, or {\"interfaces\": the interface ids it lists, \"token\": false where health.v2 is in the tokenless set}; the interface token plays no part. deployment, given only across a face: the major the deployment's word names. face, read only across a face: {\"status_crosses\": whether the face lets state/status cross}. status: null where the case reads none, else {\"freshness\": the verdict and the reason freshness.v2 gives the observations of state/status at the standard contract's horizon, 60 s, as freshness's own judgements.json computes them (fresh; stale: beyond_horizon or no_delivery; unobservable: listened_too_short, incomplete, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon or no_observation; not_asked: last_known, only an archive read, or deleted), \"record\": the latest status read, {\"tag\": CH's tag, \"hex\": the record's bytes}, or null where no value was read}. checks: null when not read, or the checks the owner answered with a record, [{\"check\", \"tag\", \"hex\"}]. A record is read by core §7.6 as records.json reads it, under epoch 1767225600: one it refuses is unknown, `undecodable`, and one at the level `unknown` is unknown, `unknown_level`; a check that is either bounds nothing. expect.major is the major the reading is judged under: 2; 1, where the descriptor lists health.v1 and not health.v2, or the deployment's word names it, and then the case expects nothing more, health.v1's own judgements.json being the evidence; or null where no descriptor decides. expect.verdict is healthy, unhealthy, stale, unobservable or not_asked; expect.reason its class: ok, degraded, failed, inconsistent, check, unknown_level, undecodable, deleted, presence_incomplete, no_descriptor, face_closed, nothing_crossed, absent, not_listed, last_known, or freshness's own reason for a stale or unobservable status; expect.level is the level the verdict rests on, ok, degraded or failed, for healthy and unhealthy, and null otherwise. Case 60, of text 0.3, was written by hand from the text and read against the reference's judge, not computed twice.",
   "cases": [
     {
       "note": "absent: presence's word, not a level (§2.1). No record takes part",
@@ -1734,6 +1734,26 @@
       "checks": null,
       "expect": {
         "major": 1
+      }
+    },
+    {
+      "note": "present and listed, and no status read at all: step 3 reaches freshness with no observation, unobservable, never stale. Written by hand for text 0.3",
+      "presence": "present",
+      "descriptor": {
+        "interfaces": [
+          "freshness.v2",
+          "health.v2"
+        ],
+        "token": true
+      },
+      "face": null,
+      "status": null,
+      "checks": null,
+      "expect": {
+        "major": 2,
+        "verdict": "unobservable",
+        "reason": "no_observation",
+        "level": null
       }
     }
   ]
