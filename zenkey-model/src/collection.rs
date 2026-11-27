@@ -1123,7 +1123,9 @@ pub fn is_member(resource: &Resource, key: &str) -> bool {
 ///   stamp);
 /// - a metric resource of `telemetry.v1` or `telemetry.v2` (a key of its
 ///   vocabulary), of a revision that uses one;
-/// - every state of a revision that uses `redundancy.v1`.
+/// - every state of a revision that uses `redundancy.v1`; a state of one
+///   that uses `redundancy.v2` is a collection like any other
+///   (`redundancy.v2` §2.6, core 0.118).
 ///
 /// Its owner answers each member a GET reaches with a reply of its own,
 /// and one it deleted within the window with a `reply_del` (S2, S3). Every
