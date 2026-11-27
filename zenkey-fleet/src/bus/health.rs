@@ -160,7 +160,11 @@ pub struct HealthSpec {
     /// The operator's word that this host's clock and the owners' agree
     /// within the HLC delta (`freshness.v1` §2.6, ground 1).
     pub clocks_synced: bool,
-    /// The service sits across a constrained face (§2.8).
+    /// The service sits across a constrained face (§2.8): the operator's
+    /// word, `zenctl health --across-face` and nothing else. Presence is
+    /// not read, and an owner heartbeat's groups are read through the
+    /// catalogs given with no descriptor read, as `WatchReads::across_face`
+    /// and `ConfigSpec::across_face` mean (#1146).
     pub face: Option<AcrossFace>,
     /// The deployment catalogs given (`--catalog`, core §8.6): a GET's
     /// entry is dated under the epoch of the catalog its owner's descriptor
@@ -1160,7 +1164,7 @@ impl Window {
                 &[provider.as_str()],
                 &BTreeMap::new(),
             )
-            .map(|c| crate::bus::consume::tool_consumer(c, timeout, across, catalogs))
+            .map(|c| crate::bus::consume::tool_consumer(c, Some(timeout), across, catalogs))
             .map_err(|e| e.to_string())
         };
         let consumer = consumer_of(zenkey::health::implementation())?;

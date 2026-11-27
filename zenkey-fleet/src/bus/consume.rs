@@ -587,14 +587,19 @@ pub async fn watch_in(
 /// (`freshness.v2` §2.5).
 pub(crate) fn tool_consumer(
     consumer: zenkey::consumer::Consumer,
-    timeout: Duration,
+    timeout: Option<Duration>,
     across: bool,
     catalogs: &crate::model::deployment::Catalogs,
 ) -> zenkey::consumer::Consumer {
-    let consumer = consumer
-        .with_catalogs(catalogs.held().iter().cloned())
-        .with_reread_timeout(timeout)
-        .with_owner_catalog_timeout(timeout);
+    let consumer = consumer.with_catalogs(catalogs.held().iter().cloned());
+    // `None`: each read keeps the runtime's own default, never one taken
+    // from the other's constant (review-bot on #1169).
+    let consumer = match timeout {
+        Some(t) => consumer
+            .with_reread_timeout(t)
+            .with_owner_catalog_timeout(t),
+        None => consumer,
+    };
     if across {
         consumer.with_presence(zenkey::consumer::Presence::Unavailable)
     } else {
@@ -620,8 +625,11 @@ pub struct WatchReads<'a> {
     /// How long each read the subscription makes waits (core §8.1: the
     /// caller's, a tool's `--timeout`): a re-read of a diverged
     /// collection, and the read of an owner's descriptor for the catalog
-    /// it names. At least the face's reply timeout across one.
-    pub timeout: Duration,
+    /// it names. At least the face's reply timeout across one. `None`:
+    /// each keeps the runtime's own default
+    /// ([`zenkey::consumer::REREAD_TIMEOUT`],
+    /// [`zenkey::consumer::OWNER_CATALOG_TIMEOUT`]).
+    pub timeout: Option<Duration>,
 }
 
 impl Default for WatchReads<'_> {
@@ -630,7 +638,7 @@ impl Default for WatchReads<'_> {
         Self {
             far: None,
             across_face: false,
-            timeout: zenkey::consumer::OWNER_CATALOG_TIMEOUT,
+            timeout: None,
         }
     }
 }

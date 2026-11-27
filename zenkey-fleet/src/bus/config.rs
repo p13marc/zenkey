@@ -847,7 +847,8 @@ impl Window {
             &BTreeMap::new(),
         )
         .map_err(|e| e.to_string())?;
-        let consumer = crate::bus::consume::tool_consumer(consumer, timeout, across, catalogs);
+        let consumer =
+            crate::bus::consume::tool_consumer(consumer, Some(timeout), across, catalogs);
         let mut selectors = Vec::new();
         for r in [config_v1::VIEW, config_v1::STATUS, config_v1::CHANGE] {
             selectors.extend(
@@ -925,7 +926,8 @@ impl Window {
         )
         .map_err(|e| e.to_string())?
         .with_deployment_epoch(target.epoch);
-        let consumer = crate::bus::consume::tool_consumer(consumer, timeout, across, catalogs);
+        let consumer =
+            crate::bus::consume::tool_consumer(consumer, Some(timeout), across, catalogs);
         let mut selectors = Vec::new();
         for r in [zenkey::config_v2::RECORD, zenkey::config_v2::CHANGE] {
             selectors.extend(

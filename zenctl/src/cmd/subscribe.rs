@@ -86,7 +86,7 @@ pub async fn run(cli: crate::cli::WatchArgs) -> Result<()> {
     let reads = zenkey_fleet::WatchReads {
         far: dep.far(),
         across_face: cli.face.across_face,
-        timeout: dep.timeout(),
+        timeout: Some(dep.timeout()),
     };
     let mut watch = zenkey_fleet::watch_resource_across(
         &session, &revision, &target, r, &values, epoch, reads, &catalogs,

@@ -723,6 +723,78 @@ async fn past_the_bound_an_owner_heartbeat_keeps_its_place_behind_those_held() {
     );
 }
 
+/// review-bot on #1169: what a slow read holds is bounded by count,
+/// whatever the put rate and the caller's timeout. Past `OWNER_HELD` an
+/// owner heartbeat is dropped unread and counted, and its key reads the
+/// gap at the next put read: the members it would have confirmed go stale,
+/// never fresh.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn past_what_it_may_hold_an_owner_heartbeat_is_dropped_and_its_key_reads_a_gap() {
+    use zenkey::consumer::OWNER_HELD;
+    let (_r1, ep) = router(None).await;
+    let os = client(&ep).await;
+    let rs = client(&ep).await;
+    let held: Arc<Mutex<Vec<zenoh::query::Query>>> = Arc::default();
+    let h = Arc::clone(&held);
+    let _descriptor = os
+        .declare_queryable("zk2/lab/trio/@zk/instance/*")
+        .callback(move |q| h.lock().unwrap().push(q))
+        .await
+        .unwrap();
+    let read: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
+    let seen = Arc::clone(&read);
+    let sub = bare_consumer(&rs)
+        .with_owner_catalog_timeout(Duration::from_secs(60))
+        .subscribe_heartbeats(
+            STATUS,
+            |_: Delivery| {},
+            move |h: HeartbeatRead| seen.lock().unwrap().push(h),
+        )
+        .await
+        .unwrap();
+    let host = owner_key("lab", "trio", Class::Host);
+    let publisher = os.declare_publisher(host).await.unwrap();
+    eventually("the class key is matched", || async {
+        publisher.matching_status().await.unwrap().matching()
+    })
+    .await;
+    let past = 3;
+    let total = OWNER_HELD as u32 + past;
+    for seq in 0..total {
+        publisher.put(bare_heartbeat(seq)).await.unwrap();
+    }
+    eventually("those past what it may hold are dropped", || async {
+        sub.owner_heartbeats_dropped() == u64::from(past)
+    })
+    .await;
+    assert_eq!(sub.owner_heartbeats(), 0, "none read while the read runs");
+
+    let q = held.lock().unwrap().pop().expect("the read");
+    zenoh::Wait::wait(q.reply(
+        "zk2/lab/trio/@zk/instance/000000000000000a",
+        bare_descriptor(),
+    ))
+    .unwrap();
+    drop(q);
+    eventually("every one held is read", || async {
+        sub.owner_heartbeats() == OWNER_HELD as u64
+    })
+    .await;
+    // The next put follows the dropped ones: its key reads them lost.
+    publisher.put(bare_heartbeat(total)).await.unwrap();
+    eventually("the next is read", || async {
+        sub.owner_heartbeats() == OWNER_HELD as u64 + 1
+    })
+    .await;
+    let last = read.lock().unwrap().last().cloned().expect("one");
+    assert_eq!(
+        (last.heartbeat.seq.get(), last.lost),
+        (total, true),
+        "{last:?}"
+    );
+    assert_eq!(sub.owner_heartbeats_dropped(), u64::from(past));
+}
+
 /// #1146: told its owner sits across a constrained face (presence
 /// unavailable, R7), where no descriptor crosses (core §8.5), a reader
 /// given a catalog takes it as the deployment's word at once (§8.6;

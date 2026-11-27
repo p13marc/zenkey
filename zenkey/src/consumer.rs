@@ -419,6 +419,8 @@ struct Seen {
     /// Owner heartbeats heard past [`OWNER_QUEUE`], their owner's catalog
     /// not known: each read in its turn with none.
     owner_unqueued: AtomicU64,
+    /// Owner heartbeats dropped with [`OWNER_HELD`] already held.
+    owner_dropped: AtomicU64,
     /// The groups read, waiting for the callback.
     outbox: Mutex<Outbox>,
     /// The providers whose collection a re-read is running for, and the
@@ -501,6 +503,16 @@ pub struct OwnerGroup {
 /// for want of a read, and never read ahead of the puts held on its key,
 /// whose sequence it would move (#1146).
 pub const OWNER_QUEUE: usize = 64;
+
+/// How many owner heartbeats of one subscription may be held at all while
+/// a descriptor's read runs: [`OWNER_QUEUE`] waiting for it, and past
+/// them those decided without it, each holding its body until its turn.
+/// One more is dropped, never read and counted
+/// ([`Subscription::owner_heartbeats_dropped`]), so what a slow read
+/// holds stays bounded whatever the put rate and the caller's timeout
+/// (review-bot on #1169). Its key then reads a gap at its next put read:
+/// the members it would have confirmed go stale, never fresh.
+pub const OWNER_HELD: usize = 4 * OWNER_QUEUE;
 
 /// How long a read of an owner's descriptor that failed stands for its
 /// run before the next one is made: its owner heartbeats meanwhile read no
@@ -1612,6 +1624,9 @@ impl Consumer {
                         // (`freshness.v2` §2.5). Past the bound it waits
                         // for no read of its own: it is read through the
                         // catalog known now, or with none, and counted.
+                        (_, n, Some(_)) if n >= OWNER_HELD => {
+                            reader.seen.owner_dropped.fetch_add(1, Ordering::Relaxed);
+                        }
                         (known, n, Some(tx)) => {
                             beat.decided = match known {
                                 None if n >= OWNER_QUEUE => {
@@ -2645,6 +2660,14 @@ impl Subscription {
     #[must_use]
     pub fn owner_heartbeats_unqueued(&self) -> u64 {
         self.seen.owner_unqueued.load(Ordering::Relaxed)
+    }
+
+    /// Owner heartbeats dropped unread, [`OWNER_HELD`] being held behind a
+    /// descriptor's read. Each leaves a gap its key reads at the next put
+    /// read, so the members it would have confirmed go stale.
+    #[must_use]
+    pub fn owner_heartbeats_dropped(&self) -> u64 {
+        self.seen.owner_dropped.load(Ordering::Relaxed)
     }
 
     /// The last heartbeat of `key`'s provider that vouched for it, with
