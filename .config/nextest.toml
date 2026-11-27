@@ -111,6 +111,8 @@ test-threads = 12
 #     each measured.
 #   - the tests #1028 lists as passing only on a retry under load, and
 #     `zenkey::archive_example`, which polls a black box every 200 ms.
+#   - `profile_alarms_v2`'s §2, which counts the heartbeats of a 7 s
+#     window at most 2 s apart (#984's S2).
 #
 # `heavy`: tests that compute where the rest wait. Two at once leaves two
 # of a lane's four cores to the tests that are waiting on a clock.
@@ -157,6 +159,7 @@ binary_id(zenkey-fleet::link_face)
 | (binary_id(zenkey::frames) & test(=s6_a_late_joiner))
 | (binary_id(zenkey::profile_arbitration) & test(=s11_a_governed_commanders_standby))
 | (binary_id(zenkey::profile_telemetry_v2) & test(=a_config_v2_owners_device_reset_is_a_new_instance))
+| (binary_id(zenkey::profile_alarms_v2) & test(=s2_escalate_refresh_and_confirm))
 """
 test-group = "timing"
 priority = 60
@@ -181,5 +184,6 @@ binary_id(zenctl::live_zk2)
 | binary_id(zenkey::profile_config)
 | binary_id(zenkey::profile_config_v2)
 | binary_id(zenkey::profile_alarms)
+| binary_id(zenkey::profile_alarms_v2)
 """
 priority = 40

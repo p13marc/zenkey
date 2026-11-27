@@ -1,0 +1,62 @@
+# alarms.v2's scenarios (#984's S2; spec/profiles/alarms/scenarios-v2.md):
+# §5's later revision of `tc.v1`: T1 with `disk_full` appended at index 6,
+# its one label `mount` of the values `/var` and `/home`. Every index of
+# the earlier revision keeps its rule (v2.md §4, "a table grows by
+# appending").
+[interface]
+name  = "tc"
+major = 1
+minor = 2
+uses  = ["alarms.v2"]
+
+[[defaults.annotations."alarms.rules"]]
+name = "hot"
+category = "sensor_health"
+summary = "Temperature {argument} C"
+argument = { minimum = "-40", resolution = "0.1" }
+
+[[defaults.annotations."alarms.rules"]]
+name = "link_down"
+summary = "Link to {peer} on {port} is down"
+labels = [
+  { name = "peer", values = ["r1", "r2", "r3"] },
+  { name = "port", values = ["eth0", "eth1"] },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name = "sensor_lost"
+summary = "Sensor {sensor} lost"
+labels = [
+  { name = "sensor", minimum = 0, maximum = 63 },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name = "door_open"
+summary = "Enclosure door open"
+
+[[defaults.annotations."alarms.rules"]]
+name = "rack_temp"
+category = "sensor_health"
+summary = "Rack {rack}: {argument} C over"
+argument = { minimum = "0", resolution = "0.5" }
+labels = [
+  { name = "rack", minimum = -2, maximum = 5 },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name = "fan"
+summary = "Fan {unit} stopped"
+labels = [
+  { name = "unit", values = ["only"] },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name = "disk_full"
+summary = "{mount} is full"
+labels = [
+  { name = "mount", values = ["/var", "/home"] },
+]
+
+[resources.qdisc]
+kind = "state"
+type = { raw = "text/plain" }

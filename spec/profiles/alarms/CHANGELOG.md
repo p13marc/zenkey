@@ -213,7 +213,8 @@ from the two choices just above, and computed once.
 - **No `alarms.v2` byte has crossed a wire.** Every figure is computed.
 - **The 5-byte frame and the 2-byte key suffix** are inferred from
   `alarms.v1`'s measured totals, as the design says.
-- **No owner or reader on a bus runs this text yet.** The reference's
+- **No reader on a bus runs this text yet.** The reference's runtime
+  runs the owner's scenarios on real sessions: §1 to §7, §9 and §12. Its
   model runs every case of the ten files as written, and its linter
   reads `alarms.rules` by major. Revision 2.0 is published in
   `../.history/alarms.v2/`.
