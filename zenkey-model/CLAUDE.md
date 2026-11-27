@@ -51,7 +51,9 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   same module, #988 L1: `parse` reads a `profile = "link.v2"` policy
   beside a `link.v1` one, `Profile`, `Binding` (`protocols()` in place of
   `LINK_PROTOCOLS`, `narrowed` over it, and `defaults()`, the fork's
-  `wait_before_close` 10 s where 1.10.1's is 5 s), `Transport` and
+  `wait_before_close` 10 s where stock zenoh's is 5 s; `Zenoh1_10_2`,
+  link.v2 0.25 and #1165, is stock 1.10.2 with 1.10.1's list,
+  `STOCK_PROTOCOLS`, and defaults), `Transport` and
   `TransportKey` (the policy's key, zenoh's path, the value in zenoh's
   units), a v2 face's `batch_bytes`/`lease_ms` filled from
   `[transport]`, `FacePlan::reply_timeout_ms`, the lints
