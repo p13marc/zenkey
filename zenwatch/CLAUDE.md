@@ -41,7 +41,17 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   is only the reader's sight leaves the key at its last word, a loss is
   the rule's `observer`'s once, and an owner's absence is a refresh's
   presence read, never a token's withdrawal alone; an alarm firing at the
-  first look is told; alarms.v1 §2.16, text 0.4). They are **not**
+  first look is told; alarms.v1 §2.16, text 0.4; #984's S3: the feed
+  reads `alarms.v2` too, and a notice's identity is the alarm's reference,
+  `<rule_id>:<system>/<service>/<alert_key>` (`alarms::identity`; an
+  unnamed v2 alarm its slot's key), each owner told by the major its
+  descriptor lists (`of_its_major`), `rebound` a resolve, a v2 alarm's
+  document built from its words and record (`v2_document`), `recheck`
+  and `reconcile` over `AlarmBook::v2_rows` too; the state file's
+  `alerts` ids written by `alarms.v1` key are read onto references at
+  `Discipline::restore` (`alarms::migrate_id`); `tests/alerts.rs`'
+  `a_notice_is_its_alarms_reference_across_both_majors_and_a_restart`
+  and `alert_firing_reads_an_alarms_v2_owner_by_its_snapshot`). They are **not**
   `Condition`s: a `Condition` is one state per rule, these are one state
   per address, token or alarm. `presence.rs`
   reads FL1's live projection (a `PresenceFeed` on its own monitor; patterns

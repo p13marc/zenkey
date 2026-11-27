@@ -335,7 +335,17 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   judgement beside `health` (exit 1 an alarm firing at or above the floor,
   0 none with every owner asked known whole and the presence read that
   found them complete, 2 otherwise), and `check
-  conform`'s `alarm-key` and `alarm-document` (21 cases). #819's TC added
+  conform`'s `alarm-key` and `alarm-document` (21 cases). #984's S3:
+  `alarms` reads `alarms.v2` beside v1, each owner by the major its
+  descriptor lists, whichever major the selector spells (`--contracts`
+  for an owner's table, the word for one never described); a v2 row is
+  drawn `<owner> slot <n> · <rule> <labels>` (or its alert key, or `rule
+  i, labels c` unnamed) with an `alarms.v2:` detail line, a displaced
+  alarm `no slot`, its owner row `alarms.v2: … one slot each: …`;
+  `render.rs`' `an_alarms_v2_reading_names_each_slot_by_its_words`, and
+  `live_zk2.rs`' `alarms_v2_s8_*`, `alarms_v2_s10_*` (step 3 on the
+  fleet's live reader, which holds what it read), `alarms_v2_s11_*` (T1
+  the model's v1 judges) and `check_conform_reads_an_alarms_v2_owners_alarm_cases`. #819's TC added
   `telemetry [SELECTOR] [--for SECS] [--across-face] [--settle SECS]`, a root judgement
   over `telemetry.v1` (exit 1 a sample that does not conform or a decrease
   within an established epoch, 0 everything asked answered clean, 2
@@ -416,7 +426,8 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   none of through `zrec_excluded` and the timed streams or metric
   resources of the owners in scope it misses; a note, and stderr through
   `cmd::zk2::scope_note`, observer.md §8.2); `alarms` needs none, every
-  alarms.v1 key being plain state, and `arbitration` offers no wildcard.
+  alarms.v1 and alarms.v2 key being plain state, and `arbitration` offers
+  no wildcard.
   grammar.md §1 step 5 runs as `live_zk2.rs`'s
   `grammar_s1_a_tools_wildcard_scope_names_what_it_excludes`, and
   operations.md §5 step 2 (O3 judged from outside, `--calls-granted` or
