@@ -862,3 +862,217 @@ def collection_of(system: str, service: str) -> str | None:
     if not (is_plain_chunk(system) and is_plain_chunk(service)):
         return None
     return f"zk2/{system}/{service}/{IFACE}/{TOKEN}/{ALARMS}/**"
+
+
+# -- §2.2, §2.8 and §2.9, the owner's slots ----------------------------------------------------
+
+REFUSED = "refused"
+
+
+@dataclass
+class Held:
+    """What an instance holds on one slot (§0 "Holds: an instance holds a
+    record on a slot from its put of it, until it puts another identity's
+    there"): the identity and whether its record fires."""
+
+    identity: str
+    firing: bool
+
+
+class Slots:
+    """The slots one instance holds, for §2.2's rule: "The identity takes:
+    1. the slot on which its instance holds a record of that identity,
+    firing or resolved; 2. else the lowest slot on which its instance holds
+    no firing record: one it holds nothing on, or one whose record is
+    resolved." The bound is 256, or the descriptor's (§2.8). "Where every
+    slot fires, the raise is refused." An identity is its alert key, or any
+    value two unnamed records share."""
+
+    def __init__(self, bound: int = CARDINALITY) -> None:
+        self.bound = bound
+        self.held: dict[int, Held] = {}
+
+    def slot_of(self, identity: str) -> int | None:
+        for s, h in self.held.items():
+            if h.identity == identity:
+                return s
+        return None
+
+    def take(self, identity: str) -> int | None:
+        """The slot §2.2 gives ``identity`` now, or None where every slot
+        below the bound fires for another."""
+        s = self.slot_of(identity)
+        if s is not None:
+            return s
+        for s in range(self.bound):
+            h = self.held.get(s)
+            if h is None or not h.firing:
+                return s
+        return None
+
+    def raise_(self, identity: str) -> int | str:
+        """A raise (or an escalation, or a refresh): the slot it is put on,
+        or :data:`REFUSED` at the bound. "It MUST NOT resolve a firing alarm
+        to make room, nor put over one" (§2.8)."""
+        s = self.take(identity)
+        if s is None:
+            return REFUSED
+        self.held[s] = Held(identity, True)
+        return s
+
+    def resolve(self, identity: str) -> int | None:
+        """A resolve: "the record, and no delete" on the identity's slot,
+        which it then holds resolved; None where the identity holds no
+        firing record (nothing to resolve)."""
+        s = self.slot_of(identity)
+        if s is None or not self.held[s].firing:
+            return None
+        self.held[s] = Held(identity, False)
+        return s
+
+    def firing(self) -> dict[int, str]:
+        return {s: h.identity for s, h in sorted(self.held.items()) if h.firing}
+
+
+# A restart's adoption (§2.9), slot by slot: "For each slot it finds, in this order".
+FREE_RESOLVED, FREE_UNREADABLE, PUT_RESOLVED, ADOPT, PAST_BOUND, FREE_TWICE = (
+    "free_resolved", "free_unreadable", "put_resolved", "adopt", "past_bound", "free_duplicate")
+
+
+@dataclass(frozen=True)
+class Kept:
+    """One slot of an owner's persistent record (§2.9 "What the record
+    holds": "by slot, each record as put, its alarm's words and its alert
+    key, a resolved one included"). ``record`` is the record's JSON reading,
+    or None where it does not read; ``rule`` and ``labels`` the words (the
+    rule's name and each label's text, host-scoped ones of an alarm by words
+    included); ``alert_key`` as stored."""
+
+    slot: int
+    record: dict[str, Any] | None
+    rule: str | None
+    labels: dict[str, str] | None
+    alert_key: str | None
+    summary: str | None = None
+    category: str | None = None
+
+
+def derives(k: Kept) -> bool:
+    """Whether a kept slot's words derive its alert key: v1's recipe, through
+    the sanitizing step, over the words gives the stored alert key; for an
+    alarm by words, the record's ``key`` too."""
+    from . import alarms as v1
+
+    if k.rule is None or k.alert_key is None:
+        return False
+    key = v1.derive(k.rule, k.labels).key
+    if key != k.alert_key:
+        return False
+    if k.record is not None and by_words(k.record) and k.record.get("key") != key_int(key):
+        return False
+    return True
+
+
+@dataclass(frozen=True)
+class Adoption:
+    """What a restart does with one kept slot: ``action``, and for a put the
+    record put (written by the new table where it names the words, else by
+    words)."""
+
+    slot: int
+    action: str
+    record: dict[str, Any] | None = None
+
+
+def adopt(kept: list[Kept], evaluates: Any, table: Table, bound: int = CARDINALITY) -> list[Adoption]:
+    """§2.9's four steps, slot by slot in slot order:
+    1. resolved: nothing is put, the slot is free;
+    2. it does not read, or its words do not derive its alert key: nothing;
+    3. firing, under a rule the owner no longer evaluates: put resolved on
+       its slot;
+    4. firing otherwise: adopted, put again on its slot, ``at`` kept.
+
+    "One identity firing on two slots of the record breaks §2.2. The owner
+    adopts it on the lowest of them, by the steps above, and puts nothing on
+    the others: they are free." "Past a lowered bound, a slot at or above
+    the new bound is neither put nor resolved." "By name, never by index":
+    each put is written by the new table where it names the words, else by
+    words. ``evaluates`` is a predicate on a rule's name, or the set of the
+    names the new instance evaluates."""
+    ev = evaluates if callable(evaluates) else (lambda name, s=set(evaluates): name in s)
+    out: list[Adoption] = []
+    seen: set[str] = set()
+    for k in sorted(kept, key=lambda x: x.slot):
+        r = k.record
+        if r is not None and r.get("state") == RESOLVED:
+            out.append(Adoption(k.slot, FREE_RESOLVED))
+            continue
+        if r is None or undecodable_by_key(r) is not None or not derives(k):
+            out.append(Adoption(k.slot, FREE_UNREADABLE))
+            continue
+        assert k.alert_key is not None and k.rule is not None
+        if k.alert_key in seen:
+            out.append(Adoption(k.slot, FREE_TWICE))
+            continue
+        seen.add(k.alert_key)
+        if k.slot >= bound:
+            out.append(Adoption(k.slot, PAST_BOUND))
+            continue
+        w = write_by(table, k.rule, k.labels, None, k.summary, k.category)
+        rec = {key: v for key, v in r.items() if key not in ("rule", "labels", "argument", "key")}
+        rec.update(w.fields())
+        if not w.by_words and not by_words(r) and _declares_argument(table, k.rule):
+            # The record's argument code is kept where the new table's rule
+            # declares an argument: the text says only "its at kept".
+            rec["argument"] = r.get("argument", NOT_AVAILABLE)
+        if ev(k.rule):
+            out.append(Adoption(k.slot, ADOPT, rec))
+        else:
+            rec["state"] = RESOLVED
+            out.append(Adoption(k.slot, PUT_RESOLVED, rec))
+    return out
+
+
+def _declares_argument(table: Table, rule: str) -> bool:
+    i = table.index_of(rule)
+    return i is not None and table.rules is not None and "argument" in table.rules[i]
+
+
+# -- §2.6, the reader's slot for one identity --------------------------------------------------
+
+@dataclass(frozen=True)
+class SlotSeen:
+    """One slot a reader holds for an identity: its slot, and the run and
+    seq of the put (or snapshot entry) that carried it."""
+
+    slot: int
+    run: int
+    seq: int
+
+
+def reader_slot(seen: list[SlotSeen], present_run: int | None) -> int | None:
+    """§2.6 "One identity on two slots": "A reader takes the record under
+    the run its owner's present descriptor states (core §3.3). Where no slot
+    is under that run, it takes none … Two under that one run break §2.2.
+    The reader takes the later by seq … A slot is taken only under the
+    present run. So a reader with no run stated, as across a face, takes no
+    slot." Read for one slot too: one under another run is taken by
+    none."""
+    if present_run is None:
+        return None
+    under = [x for x in seen if x.run == present_run]
+    if not under:
+        return None
+    return max(under, key=lambda x: x.seq).slot
+
+
+def one_slot_each(slots: dict[int, tuple[str | None, int]], present_run: int | None, established: bool) -> str:
+    """§5 "Does this owner hold each identity on one slot?": yes, "No two
+    slots of its present run name one alert key"; no where two do;
+    unobservable where "its alarms are not established". ``slots`` maps a
+    slot to its alarm's alert key (None for an unnamed one, "not compared")
+    and its record's run."""
+    if not established:
+        return "unobservable"
+    keys_ = [k for k, run in slots.values() if k is not None and run == present_run]
+    return "yes" if len(keys_) == len(set(keys_)) else "no"
