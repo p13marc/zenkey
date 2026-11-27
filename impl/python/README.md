@@ -9593,7 +9593,7 @@ PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.owner_heartbeat_tools_
 |---|---|
 | The survey: every packed document under `spec/`, `examples/zk2/` and `zenkey/tests/contracts/` | 287 clean declarations in 97 files, the entry's count. At 0: the two cases' types, `Tick`, and `derive.json` case 2's derived `Record` (F-619) |
 | `zk2 contract lint` beside zk2py, 304 contract files | the errors agree on each; `e001-interface` alone differs, by zk2py's W107 |
-| `derive.json` case 2's groups in a contract | `zk2 config derive` writes its `Record` at 0; both linters refuse it, E051 |
+| `derive.json` case 2's groups in a contract | `zk2 config derive` writes its `Record` at 0. Before the mend, both linters refused it, E051 (F-619); after it and the reference's half, both load it |
 | A type at 0 on an explicit stream or an attachment | E044 and E051 at both; E047 beside E044 at both (F-618) |
 | A frame at CH tag 0, its declaration not held | `zenctl echo` and zk2py show it by its envelope, never sniffed |
 | `owner_heartbeat_denied`, seven deployments | zk2py's plan, `acl gen` and `check face` warn alike: 21 of 21 |
