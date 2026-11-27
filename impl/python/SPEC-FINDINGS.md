@@ -32207,4 +32207,354 @@ Neither takes "no slot" as `slots.json`'s last view does.
 - **Open:** F-437 to F-441, F-569 to F-594, F-597 to F-601 and F-603 to
   F-615.
 
+## At desired.v2 0.2, health.v2 0.3, core 0.115 and observer 0.36
+
+Round 125 read this tree at 7b385d2f (#986), its black boxes built from
+7b385d2f: the answers to F-569 to F-611, texts and fixtures. Six text
+versions moved: `desired.v2` 0.2, `health.v2` 0.3, `link.v2` 0.26,
+`freshness.v2` 0.13, core 0.115 and observer 0.36. Each changelog entry
+was read first, then each hunk it names.
+
+### The entries, read against the tree
+
+zk2py diffed `spec/`, `examples/zk2/` and `zenkey/tests/contracts/`
+between round 123's merge (d82c1078) and this tree. 28 files moved
+under `spec/`, and none elsewhere. `spec/CLAUDE.md` is among them, and
+stays unread.
+- **Every count an entry states holds:** `seed/held.json` 30 cases;
+  `desired.v2`'s `order.json` 69, `watch.json` 27, `declarations.json`
+  38 report resources and `slices.json` 17; `link.v2`'s `plan.json` 53
+  and `transport.json` 36; `health.v2`'s `judgements.json` 61 and
+  `tables.json` 10 instances. `RULES.md` lists 298 rules, the deployment
+  19: core §4.3's new MUST NOT, under S7.
+- **The walk's 310 rows keep their verdicts.** The new row is a
+  deployment's, a role zk2py claims no class of.
+- **Core's header says 0.115.** The walk reads it as "0.115 or later",
+  so a renumbering at the merge moves no reading.
+
+### The walk, before and after
+
+- **Before any line of zk2py moved,** the readings family crashed: a
+  changed reader of round 118's (F-579) could not run `order.json`'s new
+  case 68. The order runner now fails such a case and runs the next.
+- **Re-keyed** (c37741fd): 46 readings quoted a sentence or a count the
+  texts moved. Each now quotes the new one. **8138 of 8142.** Of the 15
+  new cases, 13 passed as zk2py stood. The four failures were zk2py's to
+  move: `order.json`'s case 68, twice (F-577); `slices.json`'s case 16
+  (F-580); and the reading of F-579, which reads zk2py's target on them.
+- **After the moves:** `just py-conformance` **8152 of 8152**, with
+  `_round125_readings`.
+
+### Each answer, read cold
+
+Every answer was read where it is stated, and pinned by a reading where
+zk2py's code gives it.
+
+| Finding | Class | Holds | The answer, quoted |
+|---|---|---|---|
+| F-569 | ambiguity | yes | Core §4.2: "Where the reader holds another value when the answer arrives", twice, and "A value heard after the answer, before the GET ends, changes nothing of that." `held.json`'s case 29. zk2py decided so already, and passes it. |
+| F-570 | minor | yes | "an unchanged answer saves the member's page but for the held stamp. That is its record and 16 bytes more"; "costs its own bytes and 3 more: 9"; "it pays where the member is unchanged in more than 9 reads of every 16 + n". Recomputed. |
+| F-571 | gap | yes | Appendix B itemizes the 12 (2 + 1 + 2 + 2 + 3 + 2) and the 94 (2 + 61 + 2 + 20 + 2 + 7). The final is 4 by its layout and 6 as W2 measured it. 119 is one SDU's, 138 two. `desired.v1`'s 222 is 31 and 191, its reply 166: the unchanged reply's 87 beside the payload's 1 + 52 and a 26-byte timestamp. Each recomputed. |
+| F-572 | ambiguity | yes | Core §4.2: "The rule binds the held stamp a reader sends of its own. The user's is no reader's". Observer §4.1: "The tool shows it as unchanged ... It never shows a value." "Any other held stamp is no answer (`held`)". zk2py has no raw tool. Live below. |
+| F-573 | minor | **no** | "Not added (F-573) ... It is drafted in the code half". No case holds such a collection still. |
+| F-574 | ambiguity | yes, in its words | §2.5: "On the near side, a read that draws no reply cannot be told from a face: a tokenless owner's, or a slow one's. So it is read as one." "A read that fails names no catalog: one that ends in an error reply". "A subscriber given several takes the one its deployment names". zk2py moved. But zenoh gives a slow owner's GET an error reply (F-616). |
+| F-575 | ambiguity | yes | §2.19: "Per mode, the mode read alone decides. A value zenoh refuses at another mode plays no part, nor does a member that names no mode." Cases 34 and 35 pass as zk2py stood. |
+| F-576 | minor | yes | §2.10: "Every report a target writes reads back to its bytes", and the two records that do not, named. |
+| F-577 | ambiguity | yes | §2.8: "One that fails is `failed`, `source` `baseline`. It keeps the observed version it had, with its revision". `order.json`'s case 68. zk2py moved. |
+| F-578 | gap | yes | Core §4.3: "A deployment MUST NOT start an owner on a record's path where that owner's record was lost". §6 step 3 starts its author with none, as zk2py's runner did since round 118. |
+| F-579 | minor | yes | Six cases. The seventh "cannot occur. A target that holds no version expects no section": §2.5's "The answer" gives "expects none" for every answer but an unchanged one "where it still holds the version it sent". A reader that moves while holding none passes every file, as it should. |
+| F-580 | ambiguity | yes | §0: "a resource ... whose resolved annotations hold `desired.report`, of any kind (§2.10)". §2.10: "It still names its role, to `two_reports` and to a tool's finding". `slices.json`'s case 16. zk2py moved. |
+| F-581 | ambiguity | yes | §2.5: "A snapshot with no entry it admitted is no version (§2.6). The target sends none while that revert runs. It sends none after it either, ended or failed." Both did so. |
+| F-582 | minor | yes | §2.6 step 4: "At a snapshot's asof it reverted on, equal is older too (§2.8)." |
+| F-583 | ambiguity | yes | §2.2: "A linter reports each reason of an invalid declaration as an error ... So the contract still loads, with its fingerprint". zk2py's lint moved. `zk2 contract lint` of 7b385d2f prints the error, then the fingerprint, exit 0; zk2py's load gives the same fingerprint, three contracts of three. |
+| F-584 | minor | yes | §13 Expected 1: "v1's document alone is 40, as its author puts it." Appendix B: "The document is W2's, not the scenarios'". |
+| F-585 | gap | yes, by a statement | §2.17: "a tool answers `author_silent` beside such a snapshot, until the author's next document." Appendix A's "What a tool loses" says so, and the entry why the report keeps no run. The narrowing is now said where a reader looks. |
+| F-586 | minor | yes | §2.17: "possibly incomplete: **unobservable**, `author_presence_incomplete`". |
+| F-587 | minor | yes | Core §4.3: "carries none, unless its contract uses `redundancy.v1`". `link.v2` §2.11 the same, and `plan.json`'s case 52. |
+| F-588 | contradiction | in part | §2.18: "Where one timestamps, as a router does by default, each put arrives with the router's id. The target acts on it." "So a deployment MUST NOT bind such a target to such an author where a router between the two timestamps." It names routers alone. A target's own session that timestamps does the same (F-617). |
+| F-589 | gap | yes | §2.18: "A target given such an author's revision at its start MUST refuse to start ... It names the role." "Learnt after its start ... While the descriptor names it, a target MUST NOT act on a version of that author's." §16 runs C and D. |
+| F-590 | ambiguity | yes | §2.18: "It is the one the author's descriptor names for the version's run. Where no descriptor reaches the target, it is the deployment's word." zk2py moved. |
+| F-591 | minor | yes | `plan.json`'s case 52, a resource of a contract that uses `redundancy.v1`, floored. Both halves answered. |
+| F-592 | minor | yes | Conventions: "A failed act points at `/mode`, index 1, where its drive stopped. Its line is the drive's ... `out_of_range`". Expected 5 states both. zk2py's drive moved. |
+| F-593 | minor | yes | §2.10: "A contract that lists no major of `health` does not load (core E020). One that lists `health.v1` loads, with no W105 (core Appendix D), and holds none". |
+| F-594 | gap | yes | §2.10: "a linter reports `value` and `disagrees` as errors ... the contract still loads, with its fingerprint ... Under `health.v1`, `not_used` draws no core lint. A linter MAY warn of it." zk2py's lint moved, and takes the MAY. |
+| F-595, F-596, F-602 | | resolved at 0.2 | |
+| F-597 | minor | yes | Core §2.6: "It is unknown while §4.3's clock guard holds, and where the owner does not trust its clock. A heartbeat's carries the ahead time under the guard (§7.5). An event's has no such code." |
+| F-598 | ambiguity | yes | §2.5: "It counts with no group for `health.v2`, with that group of another revision, and with every group `unknown_catalog`." "A reader that holds no catalog need not subscribe". "The `link` class's owner heartbeat does not count." Each reader is now as §2.5 says. `clock.json`'s owner heartbeat payloads were not added. |
+| F-599 | minor | yes | `tables.json`'s instance 9 and `judgements.json`'s case 60. Both pass. |
+| F-600 | ambiguity | yes | §2.5: "A descriptor that lists `health.v1` alone is asked `health.v1`'s question (§2.12). In every other case under this major the heartbeats answer". |
+| F-601 | minor | yes | Core 0.115's, `freshness.v2` 0.13's and `health.v2` 0.3's entries each correct the earlier "Not verified" line, which stands as a record. |
+| F-603 | gap | yes | §2.18: "A role a `desired.report` names is this major's. It is `desired.v1`'s where its packed report drew no reply and a `desired.v1.Report` names its slice by `key`. Any other role is `desired.v1`'s." zk2py moved, in that corner. |
+| F-604 | contradiction | yes | §9: "T holds `tasking.v2` offline, as §2.17 allows. So it has the slice in step 4". "At 4, a T with no revision of `tasking.v2` in hand has no slice. It gives the same four answers, and shows no archive." Live below. |
+| F-605 | minor | yes | Expected 6 and 7: "Refused: **no**, `converged`. Last-known: **no**, `current`." |
+| F-606 | minor | yes | §12: "`configs.v1` at minor 2: v1's `configs.v1.toml`, its `minor` 2 and its `uses` moved". zk2py's copy carried a `summary` v1's has not. It now does not. |
+| F-607 | ambiguity | yes | Core §0: "Where a text names zenoh 1.10.1, it says what was read or measured in zenoh's own crates there ... A binding's release ... names that binding's facts in that release alone." Each binding's fact names its release. Observer: "zenoh's facts (core Appendix B)". |
+| F-608 | gap | yes | Core §8.5: "One exception is a 1.10.1 router's QUIC link of mixed reliability. Its best-effort companion runs this end's configured size". The rule now states its exception, so no lint is needed. |
+| F-609 | minor | yes | Conventions: "N is the near router, zenoh 1.10.2"; `binding = "zenoh-1.10.2"`. |
+| F-610 | ambiguity | yes | `health.v2` §2.6: "A record that holds one is refused whole ... So such a status is unknown, `undecodable`. A record with no time needs no catalog, and is read." Core §8.6: "and so a time counted from its epoch". zk2py did so since round 123, but where its reader was given no catalog at all. It now holds none there. |
+| F-611 | minor | yes | §9: "T and T2 are readers of records ... A health tool answers §5's questions of now ... It meets Expected 4 but for step 1's status". |
+
+**zk2py disagrees with two answers, in one part each:**
+- **F-574.** The rule is sound, but its two sentences part at zenoh's
+  level. A slow owner's read ends in zenoh's error reply `Timeout`. The
+  text calls such a read one that draws no reply, and its definition of
+  a failed read catches it. The two implementations now differ there
+  (F-616).
+- **F-588.** The rule closes the hazard where a router stamps. A
+  target's own session that stamps opens it as well, by core Appendix
+  B's own fact, and the rule does not name it (F-617).
+
+### What zk2py moved
+
+Each move was read from the text before its case was opened, and
+committed per text.
+- **`desired.v2` 0.2** (5113fba7):
+  - F-577: a failed revert on a snapshot with no entry keeps the
+    observed version it had;
+  - F-580: a report resource of any kind;
+  - F-583: `lint_contract`'s invalid rows are errors, and the contract
+    loads;
+  - F-592: the scenarios' drive points a failed act at `/mode`, its line
+    `out_of_range`;
+  - F-590 and F-589: the target reads its author's revision from the
+    descriptor that states the version's run, the deployment's word
+    where none answers, and its major from the revision's `uses`,
+    retrieved by core §8.4 where it holds another. While a descriptor
+    names one of `desired.v1`, it acts on none of that author's
+    versions. `desired seeds` says `revision=`, in the reference's
+    words. `--desired-word-alone` plays a target built before this
+    major;
+  - F-603: `role_major`, the corner where a packed report drew no reply
+    beside a `desired.v1.Report` that claims the slice.
+- **`health.v2` 0.3** (fd8e0563): `lint_contract`, errors for `value`
+  and `disagrees`, and a warning for `not_used` under `health.v1` (the
+  MAY); a reader given no catalog holds none, and refuses a timed
+  record of an owner that names one.
+- **`freshness.v2` 0.13** (a467a9bc): a read that draws no reply takes
+  the catalog the subscriber was provisioned, the one it holds or the
+  one named for the owner; an error reply fails; zenoh's own `Timeout`
+  is read as no reply (F-616).
+- **Found live, and mended** (4648f9c9): the first writing of F-590
+  held a version of an unread run while its descriptor was read. A
+  heartbeat heard meanwhile made the target read with the stamp it held
+  before, and §14 step 5 drew two GETs with the reference's author (119
+  of 120). The read now runs beside the version, and the last read's
+  word stands until it answers.
+
+### Live
+
+The black boxes are `owner`, `archive`, `consume`, `zenctl` and `zk2` of
+7b385d2f, run and never read. Every router is zenoh-python 1.10.2's, and
+every listener took port 0. Each party is a process of its own.
+
+**`scenarios-v2.md` §16** (`desired_v2_mixed --only s16`), **36 of 36**,
+in all four pairings of author and target:
+
+| Run | What each target did | Expected |
+|---|---|---|
+| A, the router stamping nothing | no act after two puts and a delete; `{key: D, source: baseline}` | 1 to 3 met |
+| B, the router's default | acted on v1 and on v2 under R1's id; ignored the delete, which carried no timestamp; ran the deleted v2 | 1 to 3 met |
+| C, told the other major's revision | refused to start, exit 1, no instance token. zk2py: "role 'task': its author's revision of tasking.v2 does not use desired.v2 …"; the reference: "role \"task\": …" | 4 met: both name the role |
+| D, told the scenarios' own | started; `desired seeds … revision=stopped:desired.v1:sha256:84c32c7f…`, the same token in both; Rp the baseline's; after the author's v1, no act, nothing on Rp or Run | 5 and 6 met |
+
+- **The reference's target in runs A and B** had `--desired-word-alone`,
+  as the intro says. zk2py's `desired.v1` target reads no descriptor.
+- **zk2py says it after six seeds, the reference after one:** zk2py's
+  target seeds at each appearance, and again soon after one that drew
+  nothing.
+
+**The whole of `scenarios-v2.md`,** each cross pairing: the reference's
+author and zk2py's target **121 of 121** after the mend (119 of 120
+before it, §14 step 5); zk2py's author and the reference's target **119
+of 119**. §6 step 1's clock, a target that does not move what it
+expects, and §12, are not run where the implementation has no word for
+them, as in round 119.
+
+**§9's step 4 as answered,** in both pairings: with `tasking.v2` held
+offline, both tools take D from it (`offline_contract`) and show
+`lab/archive` at `0000/1`, confirmed, as last-known. With none in hand,
+neither has a slice or shows an archive, and both give the four
+answers. Expected 6 and 7, all four answers each, met by both tools.
+
+**The start refusal and the stop, both ways:** runs C and D above, each
+target under each author.
+
+**`health.v2`'s record with no time** (`health_v2_pairings --owner zk2py
+--only untimed`), 3 of 3. zk2py's owner under a catalog's later epoch:
+- timed, `zenctl health` with no `--catalog` shows the status and the
+  check `undecodable`, unobservable `no_stamp`; zk2py's reader refuses
+  both, `unknown_catalog`;
+- then, with `untimed on`, a status `failed` and a check `failed` put
+  with no time: `zenctl health` shows the status `failed`, reason
+  `check`, and the check `failed`, `refused`, still unobservable,
+  `no_stamp`, by its freshness; zk2py's reader reads both at `failed`.
+- **The reference moved as its entry says.** The other way was not run:
+  the owner example's usage names no record with no time.
+
+**The held stamp a tool's body draws** (`conditional_live --pairing
+py-rust`, 19 of 19; the four pairings 96 of 96). `zenctl get <key>
+--body @FILE`, the body the member's held stamp, against zk2py's owner:
+at expected 2, 3 and 7 its row carries `"unchanged": {"run": "0000",
+"seq": n}`, and no `value` and no `decode_error`. Played answers: (R, 9)
+to its own (R, 9) is `unchanged`; (R, 8) to (R, 9), and (R, 9) to no
+payload, "no answer here: held". That is observer §4.1 as 0.36 words
+it. Round 116's `zenctl` showed the first as held.
+
+**Other runs on this tree, after the moves:**
+
+| Runner | Result |
+|---|---|
+| `desired_v2_edges`, each target | 9 of 9 each. zk2py's failed revert is 12 bytes, `188020a00000f000000010c0`: the observed `0041/7`, revision 1, no finding. The reference's is the same and `detail` `out_of_range`, 13 bytes. A tool concludes the same of both. |
+| `desired_v2_mixed --only hlc` | F-617, four runs |
+| `owner_heartbeat_live`, `--reference`, `--silent` | 27 of 27, 16 of 16, 6 of 6 |
+| `owner_heartbeat_live --slow 2500`, `4500`, `6000`, `30000` | 5 of 5 each, zk2py's checks; the reference's rows are notes, the table below (F-616) |
+| `freshness_v2_s8_live` | 99 of 99: a reader started before its owner now reads every group by its catalog, its start read silent |
+| `desired_v2_scenarios --only 12` | 14 of 14, on §12's contract as 0.2 names it |
+| `zenoh_facts --only late_reply`, new | holds: 12 of 12 late-answered GETs draw one `Timeout`, 12 with no queryable draw nothing |
+
+### A GET its owner answers late (deliverable 3)
+
+**What zenoh delivers.** zenoh-python 1.10.2, one router, a queryable
+that answers 1.6 s after each GET, GETs of 1 s:
+- **Answered too late:** one error reply, `Timeout`, at 1.00 s, in 24 of
+  24 GETs: 19 the querier's own, under `zenoh/string`, and 5 the
+  router's, under `zenoh/bytes`. The late reply is dropped.
+- **No queryable:** no reply at all; the GET ends at once.
+- **In time:** the reply.
+
+So **the two cases differ on the wire.** A slow owner's GET draws an
+error reply, and a tokenless or silent one's draws none.
+
+**What the reference's reader does** (`owner_heartbeat_live --silent`
+and `--slow <ms> --window <s>`: zk2py's owner under a catalog, its
+descriptor queryable undeclared or answering late; `zenctl watch
+--catalog --timeout 1` beside it, on the near side):
+
+| The descriptor | `zenctl watch --catalog` | zk2py's subscriber |
+|---|---|---|
+| answers no GET | 8 of 10 rows confirm `status` over 9 s | every group read through the catalog it holds |
+| 2.5 s late | 6 of 9 confirm | the same |
+| 4.5 s late | 16 confirm, 21 heartbeats over 20 s | the same |
+| 6 s late | **no row, 0 heartbeats** over 20 s | the same |
+| 30 s late | **no row, 0 heartbeats** over 40 s; stderr: zenoh's "Didn't receive final reply for query …: Timeout(5s)!" | the same |
+
+- **The reference's descriptor read waits about 5 s,** whatever
+  `--timeout`: 4.5 s late, it reads the descriptor; 6 s late, it does
+  not.
+- **So it does not treat the two alike.** No reply is the deployment's
+  word to it. A read its owner answers too late ends in `Timeout`, and
+  it reads no group for as long as it watched.
+- **zk2py treats them alike,** by the text's bullet: "a tokenless
+  owner's, or a slow one's. So it is read as one."
+- **Does "no reply" cover both? No.** The text means it to, since it
+  names a slow owner. But "A read that fails ... ends in an error
+  reply", and zenoh's `Timeout` is one. The reference reads the letter,
+  and zk2py the bullet (F-616).
+
+### F-616 · contradiction · `freshness.v2` §2.5: a slow owner's read draws zenoh's error reply, which §2.5 calls a failure
+
+> "**On the near side,** a read that draws no reply cannot be told from
+> a face: a tokenless owner's, or a slow one's. So it is read as one."
+> "**A read that fails** names no catalog: one that ends in an error
+> reply, and one whose descriptors all state another run. ... Until an
+> answer comes, each group is `unknown_catalog`." "A read that draws no
+> reply is no failure. The deployment's word stands for it (above)."
+
+- **The contradiction.** A slow owner answers after the GET's timeout.
+  zenoh then ends that GET with an error reply, `Timeout`: the querier's
+  own, or the router's. So a slow owner's read "ends in an error reply".
+  The first sentence reads it as silence, the second as a failure.
+- **Measured** (above): 24 of 24 late-answered GETs draw one `Timeout`;
+  a GET no queryable matches draws nothing.
+- **The two implementations differ on a bus.** Beside an owner whose
+  descriptor answers 6 s or 30 s late, `zenctl watch --catalog` reads no
+  owner heartbeat over 20 s and 40 s. zk2py's subscriber reads every
+  group through the catalog it holds.
+- **What zk2py does:** the bullet. zenoh's own `Timeout` is read as no
+  reply, and any other error reply as a failure
+  (`freshness_v2.failed_by_error`).
+- **Fix:** one of these. "an error reply, zenoh's `Timeout` at the GET's
+  end aside"; or "a slow one's" taken out of the bullet, with a sentence
+  that a slow owner's read fails. And how long a read waits: the
+  reference's waits 5 s whatever its tool's timeout.
+- **Changes:** whether a subscriber beside a slow owner confirms its
+  members.
+
+### F-617 · gap · `desired.v2` §2.18: a target's own session that timestamps
+
+> §2.18: "**Where none timestamps,** each put arrives with no Zenoh
+> timestamp. The target reads it as unstamped, and acts on none."
+> "**Where one timestamps,** as a router does by default, each put
+> arrives with the router's id. The target acts on it." "**So a
+> deployment MUST NOT bind** such a target to such an author where a
+> router between the two timestamps."
+> Core Appendix B: "It stamps from its own HLC each put it routes that
+> carries no stamp ... Measured by the second implementation, a client
+> whose HLC is on received 20 of 20 samples of an unstamped owner,
+> through a router that stamps nothing, stamped with its own zid."
+
+- **The gap.** The MUST NOT names routers. A target whose own session
+  runs zenoh's timestamping stamps its author's puts as it receives
+  them, and not its deletes, whatever the routers do. The hazard the
+  rule closes is then open, and no sentence names it.
+- **Measured, four runs** (`desired_v2_mixed --only hlc`): run A's
+  router, timestamping off; the `desired.v1` target's own session with
+  timestamping on (zk2py's `--hlc`, the owner example's `--hlc` with
+  `--desired-word-alone`). S heard each put with no timestamp. **Each
+  target, under each author, acted on v1 and on v2 under a stamp of its
+  own, ignored the delete, and ran the deleted v2:** run B's outcome,
+  through a router that stamps nothing.
+- **Why it matters.** Core §8.2 asks an owner's session to run with
+  timestamping off, and a target is an owner. But §16's runs A and B
+  decide by the routers alone, and a deployer who checks its routers
+  believes the move safe.
+- **What zk2py does:** its target's session runs with timestamping off,
+  unless a test rig asks.
+- **Fix:** "where a node between the two, or the target's own session,
+  timestamps", citing core §8.2's posture; or the MUST NOT stated of
+  the target's session too.
+- **Changes:** whether a deployment that checked its routers moved its
+  author safely.
+
+### F-569 to F-611 after this round
+
+| Finding | Status |
+|---|---|
+| F-569 to F-572 | **Resolved** by core 0.115 and observer 0.36. F-572 live: `zenctl get` shows the held stamp its body carried as unchanged. |
+| F-573 | **Open.** No case holds a collection the revisions disagree on; the entry says it is drafted in the code half. |
+| F-574 | **Resolved** as a rule. Its edge at zenoh's level is F-616. |
+| F-575 | **Resolved** by `link.v2` 0.26, cases 34 and 35. |
+| F-576 to F-587 | **Resolved** by `desired.v2` 0.2, core 0.115 and `link.v2` 0.26. F-577 live: zk2py's failed revert now keeps its version, as the reference's does. |
+| F-588 | **Resolved** where a router stamps. Its other half is F-617. |
+| F-589 to F-592 | **Resolved.** §16's runs C and D in each pairing; §4 Expected 5 met with both targets' bytes. |
+| F-593, F-594, F-597 to F-601 | **Resolved** by `health.v2` 0.3 and core 0.115. |
+| F-595, F-596, F-602 | Resolved at `health.v2` 0.2 (round 123). |
+| F-603 to F-611 | **Resolved.** §9's step 4 both ways, live. |
+
+### Not run
+
+- **The other way of the untimed record:** the owner example's usage
+  names no record with no time.
+- **F-573's case:** not in the tree.
+- **A `link.v2` face** under §16, and a QUIC face (F-608).
+- **A stock zenohd:** `bin/current` holds none. Every router was
+  zenoh-python's.
+- **A report's age under `freshness.v2`, and the reference's
+  `desired-report` on an unbound role's baseline:** the changelog names
+  both as the reference's code half. zk2py's tool asks no report's age:
+  no report resource of the scenarios declares a horizon.
+
+### Counts at desired.v2 0.2, health.v2 0.3, core 0.115 and observer 0.36
+
+613 entries on this branch: F-612 to F-615 are round 124's, on
+another.
+- **New: F-616 and F-617:** one contradiction, F-616, and one gap,
+  F-617. Neither is a blocker. F-617 is the one to settle first: it
+  bears on a deployment's safety, as F-588 did.
+- **Resolved this round:** F-569 to F-572, F-574 to F-594, F-597 to
+  F-601 and F-603 to F-611: 39 of the 43. F-595, F-596 and F-602 were
+  resolved at `health.v2` 0.2.
+- **Open:** F-437 to F-441; F-573; F-612 to F-615, round 124's, which
+  are not on this branch; F-616 and F-617.
+
   F-365 stays open as #965's.

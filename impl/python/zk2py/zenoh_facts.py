@@ -392,6 +392,54 @@ def fact_query_timeout(trials: int = 12) -> Fact:
                 f"{trials} GETs at 1 s and 2 s, the error replies each drew: {shapes}", {"shapes": shapes}, "measured")
 
 
+def fact_late_reply(trials: int = 12) -> Fact:
+    """A GET its queryable answers after the GET's timeout, beside one no
+    queryable matches (round 125, freshness.v2 0.13 §2.5, F-616): the first
+    ends with an error reply ``Timeout``, the querier's or the router's,
+    and the late reply is dropped; the second ends at once with no reply."""
+    r, ep = router()
+    a, b = client(ep), client(ep)
+    late: list[list[tuple[str, str]]] = []
+    none: list[int] = []
+    try:
+        def slow(query: Any) -> None:
+            def answer() -> None:
+                time.sleep(1.6)
+                try:
+                    query.reply("zk2py/facts/late/a", b"late")
+                except Exception:  # noqa: BLE001 - its GET has ended
+                    pass
+                finally:
+                    query.drop()
+            threading.Thread(target=answer, daemon=True).start()
+
+        q = a.declare_queryable("zk2py/facts/late/a", slow, complete=True)
+        time.sleep(0.3)
+        for _ in range(trials):
+            got = []
+            for rep in b.get("zk2py/facts/late/*", timeout=1.0):
+                got.append(("value", "") if rep.err is None else
+                           (rep.err.payload.to_bytes().decode("utf-8", "replace"), str(rep.err.encoding)))
+            late.append(got)
+            none.append(len(list(b.get("zk2py/facts/nobody/*", timeout=1.0))))
+            time.sleep(0.8)
+        q.undeclare()
+    finally:
+        a.close()
+        b.close()
+        r.close()
+    shapes: dict[str, int] = {}
+    for g in late:
+        k = "+".join("own" if x == ("Timeout", "zenoh/string") else "router's" if x == ("Timeout", "zenoh/bytes")
+                     else repr(x) for x in g) or "none"
+        shapes[k] = shapes.get(k, 0) + 1
+    holds = all(g and all(x[0] == "Timeout" for x in g) for g in late) and not any(none)
+    return Fact("late_reply", "round 125: a GET answered after its timeout ends with an error reply `Timeout`, "
+                "and one no queryable matches with no reply", holds,
+                f"{trials} GETs answered 1.6 s late at 1 s: {shapes}; {trials} with no queryable: "
+                f"{sum(none)} replies", {"late": shapes, "none": sum(none)})
+
+
 def fact_starved() -> Fact:
     """F-47: a bounded liveliness subscriber nobody drains starves a
     callback GET on its session (1.10.1: 257 of 2,002, at the timeout)."""
@@ -724,7 +772,7 @@ FACTS: dict[str, Callable[[], Fact]] = {
     "get_timeout": fact_get_timeout, "query_timeout": fact_query_timeout, "attachment": fact_attachment,
     "client_hlc": fact_client_hlc, "wire": fact_wire, "withdrawals_first": fact_withdrawals_first,
     "starved": fact_starved, "history_race": fact_history_race, "best_matching": fact_best_matching,
-    "receive_threads": fact_receive_threads,
+    "receive_threads": fact_receive_threads, "late_reply": fact_late_reply,
 }
 
 

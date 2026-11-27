@@ -9413,6 +9413,55 @@ width (zk2py's, core §3.3). None was the text's error.
 
 **`just py-conformance`: 8641 of 8641.**
 
+## `desired.v2` 0.2, `health.v2` 0.3, `link.v2` 0.26, `freshness.v2` 0.13, core 0.115 and observer 0.36: F-569 to F-611 answered (round 125)
+
+Round 125 read this tree at 7b385d2f (#986), its black boxes built from
+7b385d2f. Six text versions moved, each answering findings of rounds 116
+to 123. The reference moved too: a target reads its author's revision
+from its descriptor and refuses the other major's report at its start,
+`zenctl get` shows a held stamp that answers its own body as
+`unchanged`, `zenctl desired` takes `--catalog`, `zk2 contract lint`
+prints the fingerprint after a profile's errors, and the owner example
+has `--desired-word-alone`. zk2py learnt each from its `--help`.
+
+**`just py-conformance`: 8152 of 8152.** Before any line moved, the
+readings family crashed on `order.json`'s new case 68. Re-keyed, the
+walk stood at 8138 of 8142: 13 of the 15 new cases passed as zk2py
+stood, and the four failures were F-577's and F-580's, zk2py's to move.
+`RULES.md` lists 298 rules, the new one a deployment's, and the walk's
+310 rows keep their verdicts. `_round125_readings` pins each answer
+that moved zk2py.
+
+### What changed in zk2py
+
+- **`desired_v2`:** a failed revert on a snapshot with no entry keeps
+  its observed version (F-577); a report resource of any kind (F-580);
+  `lint_contract`'s invalid rows are errors (F-583).
+- **`desired_v2_live`'s target:** reads its author's revision from the
+  descriptor that states the version's run, the deployment's word where
+  none answers, its major from the revision's `uses`; while a
+  descriptor names one of `desired.v1` it acts on none of that author's
+  versions (F-589, F-590). A new run's descriptor is read beside the
+  version, never ahead of it. `desired seeds` says `revision=`, and
+  `--desired-word-alone` plays a target built before this major. The
+  scenarios' drive points a failed act at `/mode` (F-592).
+- **`desired_v2_tool`:** `role_major`, a role's major with no revision
+  in hand (F-603).
+- **`health_v2`:** `lint_contract`, errors and a warning (F-594). A
+  reader given no catalog holds none, and refuses a timed record of an
+  owner that names one (F-610).
+- **`freshness_v2`:** a read that draws no reply takes the catalog the
+  subscriber was provisioned; an error reply fails; zenoh's own
+  `Timeout` is read as no reply (F-574, F-616). `descriptor_read` and
+  `failed_by_error`.
+- **Live runners:** `desired_v2_mixed --only s16|hlc`;
+  `desired_v2_s9`, §9 as 0.2 answers it; `health_v2_pairings --only
+  untimed`, with `health_v2_owner`'s `untimed`; `owner_heartbeat_live
+  --slow <ms> [--window <s>]`; `conditional_live` reads `zenctl get`'s
+  rows whole; `zenoh_facts`' `late_reply`; zk2py's `desired.v1` target
+  takes `--hlc`, a test rig's. §12's contract is v1's, its minor and
+  `uses` moved (F-606).
+
 ### Live
 
 ```bash
@@ -9468,6 +9517,41 @@ PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.alarms_v2_scenarios \
 - **`contract.py`:** W105's `alarms.v2` table.
 - **`interop/alarms-v2/`:** the reference's `tc.v1` and its earlier and
   later revisions, copied.
+
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.desired_v2_mixed --only s16 --only hlc
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.desired_v2_scenarios --author zk2py|rust --target zk2py|rust
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.health_v2_pairings --owner zk2py --only untimed
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.owner_heartbeat_live --silent | --slow <ms> [--window <s>]
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.conditional_live --pairing py-rust
+```
+
+The black boxes are `owner`, `archive`, `consume`, `zenctl` and `zk2` of
+7b385d2f. Every router is zenoh-python 1.10.2's.
+
+| Run | Result |
+|---|---|
+| §16, runs A to D, the four pairings | 36 of 36. B acts on the puts under R1's id and runs the deleted v2; C refuses, naming `task`; D starts and says `revision=stopped:desired.v1:…`, then acts on nothing |
+| The whole of `scenarios-v2.md` | the reference's author and zk2py's target 121 of 121; zk2py's author and the reference's target 119 of 119 |
+| §9's step 4, revision held offline and none in hand | both tools, both pairings: the slice and the archive with it; no slice and no archive without; four answers the same |
+| A `desired.v1` target's own session stamping, routers not | 4 of 4 pairings act on both puts and ignore the delete (F-617) |
+| A record with no time, no catalog | 3 of 3: `zenctl health` and zk2py read `failed`; timed, both refuse |
+| `zenctl get --body`, the held stamp | 19 of 19: its own held stamp `unchanged`, any other `held` |
+| A slow owner's descriptor | `zenctl watch --catalog` reads nothing from 6 s late on; zk2py reads through its catalog (F-616) |
+| `desired_v2_edges`, `freshness_v2_s8_live`, `owner_heartbeat_live` | 9 and 9; 99 of 99; 27, 16 and 6 |
+
+**What zenoh gives a GET answered too late:** one error reply,
+`Timeout`, 24 of 24, the querier's 19 times and the router's 5. A GET no
+queryable matches draws nothing. So freshness.v2 0.13's "no reply" does
+not cover a slow owner, though its bullet names one (F-616).
+
+**Not run:** the reference's owner writing a record with no time (its
+usage names none); a `link.v2` face under §16; a QUIC face; zenohd.
+
+Round 125 resolves 39 of F-569 to F-611 (F-595, F-596 and F-602 were
+resolved at `health.v2` 0.2). F-573 stays open: its case is drafted in
+the code half. It files F-616 (a contradiction) and F-617 (a gap). See
+"At desired.v2 0.2, health.v2 0.3, core 0.115 and observer 0.36" in
+`SPEC-FINDINGS.md`.
 
 ## What it does not cover
 
@@ -9719,7 +9803,8 @@ impl/python/
                                 text 0.9's Reader over an owner heartbeat, a sequence per class key in front of
                                 the views, written from the text before apply.json's cases were opened, and
                                 Provider, both forms on a session (round 113); Naming, the catalog an owner
-                                names by its run, asked again later and not at every put (text 0.11, round 117)
+                                names by its run, asked again later and not at every put (text 0.11, round 117);
+                                a read that draws no reply takes the catalog provisioned (text 0.13, round 125)
     owner_heartbeat_live.py freshness.v2 0.9 §2.4, §2.5, §3: an owner heartbeat between two zk2py processes, three
                                 interfaces in one put, one lost, a divergence in one group, a host collection
                                 never on the link key, a reader with no catalog, an owner with none (round 113);
@@ -9727,7 +9812,7 @@ impl/python/
                                 and not, zk2py's reader and echo tool beside them (observer 0.34); zenctl
                                 watch's line given no catalog, a reader that knows no catalog at its first
                                 owner heartbeat, and --silent, an owner whose descriptor does not answer
-                                (text 0.11, round 117)
+                                (text 0.11, round 117); --slow, one whose descriptor answers late (round 125)
     freshness_v2_scenarios.py freshness.v2 scenarios-v2.md §1–§7 in three pairings: zk2py's owner and readers, the
                                 Rust owner with zk2py's, zk2py's owner with zenctl watch and get state (round 96)
     freshness_v2_s8_live.py freshness.v2 scenarios-v2.md §8 as worded (text 0.10, round 115), in the same three
@@ -9747,7 +9832,8 @@ impl/python/
                       reference's (`--owner rust`, round 123), and an owner under a catalog's epoch
                       (`--only epoch`, `epoch-oh`)
     health_v2_pairings.py health.v2 the owner example as RustProc, and §1 to §9 with zenctl health, the doctor
-                      and check conform as the tools; both owners' bytes side by side; words by table (round 123)
+                      and check conform as the tools; both owners' bytes side by side; words by table (round 123);
+                      a record with no time read without the catalog (`--only untimed`, round 125)
     ahead_live.py     core §7.5's ahead time in both directions with the reference (round 120)
     config.py         config.v1 time, values, the orders of refusals, desired state, redaction, Core,
                                 ConfigOwner (fed through desired.v1 too, its re-mint a restart or refused), SimDevice,
@@ -9814,7 +9900,8 @@ impl/python/
                                 both majors through desired_v2_s9 (round 121)
     desired_v2_edges.py desired.v2 four edges against each implementation: a revert on a snapshot with no entry,
                                 done, failed and held; a version at the asof; a run's record gone (round 119)
-    desired_v2_mixed.py desired.v2 §2.18 on a bus: a v1 target under a v2 author, and the reverse (round 119)
+    desired_v2_mixed.py desired.v2 §2.18 on a bus: a v1 target under a v2 author, and the reverse (round 119);
+                                scenarios-v2.md §16's runs A to D, and a target's own session stamping (round 125)
     desired_v2_tool.py desired.v2 §2.17's tool on a bus: each role by its author's major, the report by
                                 desired.report, the slice from a revision in hand, a window (round 121)
     desired_v2_s9.py  desired.v2 scenarios-v2.md §9 with zenctl and zk2py's tool side by side, §11, §12 on
