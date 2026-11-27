@@ -7,7 +7,7 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `alarms.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
-## alarms.v2 0.1 — 2026-11-22: a new major: an alarm in a slot, a transition in one packed record, words by table, a resolve with no delete, and "nothing fires" from one snapshot (#984)
+## alarms.v2 0.1 — 2026-11-27: a new major: an alarm in a slot, a transition in one packed record, words by table, a resolve with no delete, and "nothing fires" from one snapshot (#984)
 
 **Half of what #984 set out to remove is already gone, and that is said
 first.** The issue's "What happens" lists a firing alarm put again every
@@ -195,16 +195,22 @@ the design, which the maintainer saw and did not overrule.
   refusal of `labels` under `not_available`,
   the order of a reader's reasons for taking no words, and a reader
   with no slot under the present run were each stated after it.
+- **What the reference's model found,** running every case. §4's
+  example table was no TOML 1.0, since its inline tables spanned lines:
+  it is now a list of TOML tables, and loads. §4 said a contract that
+  loads cannot hold `not_used`: one that lists `alarms.v1` loads, with
+  W105, and §4 now says so. `v2/conclusions.json` wrote a fresh
+  verdict's reason `fresh`, where `freshness`'s own is `within_horizon`:
+  the fixture now writes `freshness`'s. No expectation changed.
 
 **Not verified.**
 - **No `alarms.v2` byte has crossed a wire.** Every figure is computed.
 - **The 5-byte frame and the 2-byte key suffix** are inferred from
   `alarms.v1`'s measured totals, as the design says.
-- **No implementation runs this text.** The standard contract lints
-  with the reference's `zk2 contract lint`, which also accepts a table
-  as a list of TOML tables. It still warns W105 for `alarms.rules`.
-- **The revision is not published** in `../.history/`. The reference's
-  lane publishes it.
+- **No owner or reader on a bus runs this text yet.** The reference's
+  model runs every case of the ten files as written, and its linter
+  reads `alarms.rules` by major. Revision 2.0 is published in
+  `../.history/alarms.v2/`.
 
 ## 0.14 — 2026-11-07: a GET's alarm attributed by its snapshot's run (#977, #609)
 
