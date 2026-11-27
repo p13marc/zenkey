@@ -1727,28 +1727,127 @@ def major_of(interfaces: Any) -> str | None:
     return None
 
 
-def judge(r: Any, question: str | None = None, horizon: Any = None) -> Any:
-    """§2.14 "v1 §2.14's six steps hold, read over this major's records":
-    :func:`zk2py.alarms.judge` over a :class:`zk2py.alarms.Reading` whose
-    ``descriptor`` ``lists`` says the descriptor lists ``alarms.v2`` (or,
-    for an owner read by v1's text, ``alarms.v1``), with step 5's one answer
-    more: "The alarm's record was ``rebound`` (§2.6): **no**, ``rebound``."
-    ``latest`` is then ``rebound``; "A record ``replaced`` or ``dropped``
-    leaves the reader holding nothing of its alarm", so ``latest`` None.
-    "Is this firing alarm past its horizon" answers ``rebound`` "beside a
-    resolved record: not asked, ``not_firing``". Step 6 is freshness.v2's
-    at 900 s, its observations as :mod:`zk2py.freshness` reads them."""
+@dataclass
+class Reading:
+    """One reading of one alarm (§2.14), with its slot's freshness already
+    judged: ``freshness`` is ``freshness.v2``'s verdict over the slot's
+    observations at 900 s, a (verdict, reason) pair, or None where nothing
+    was observed. ``latest``: firing, resolved, ``rebound``, deleted,
+    undecodable, or None (nothing held: never read, or its record
+    ``replaced`` or ``dropped``). ``descriptor`` is None where it could not
+    be read, else whether it lists ``alarms.v2`` (``lists``); the rest is
+    v1's :class:`zk2py.alarms.Reading`."""
+
+    presence: str
+    descriptor: dict[str, Any] | None = None
+    face: dict[str, Any] | None = None
+    freshness: tuple[str, str] | None = None
+    latest: str | None = None
+    lost: bool = False
+    previous_instance: bool = False
+    held_whole: bool = False
+    left_out: bool = False
+
+
+def judge_reading(r: Reading, question: str | None = None) -> Any:
+    """§2.14: "v1 §2.14's six steps hold, read over this major's records",
+    with step 5's one answer more: "The alarm's record was ``rebound``
+    (§2.6): **no**, ``rebound``", and "Is this firing alarm past its
+    horizon" answering it "beside a resolved record: not asked,
+    ``not_firing``".
+    1. presence: absent, presence_incomplete; across a face, face_closed,
+       and for the second question across_face;
+    2. the descriptor: no_descriptor, not_listed;
+    3. an archive alone: last_known;
+    4. a loss no read since answered: incomplete (healed by ``left_out``
+       where the alarms are established);
+    5. the latest sample: deleted, resolved, rebound; none: not_held where
+       established, else not_read (nothing_crossed across a face);
+       previous_instance;
+    6. its freshness at 900 s."""
     from . import alarms as v1
 
     q = v1.Q_FIRING if question is None else question
+    stale_q = q == v1.Q_STALE
+    across = r.presence == "across_face"
+    A = v1.Answer
+    if r.presence == "absent":
+        return A(v1.NOT_ASKED, "absent")
+    if r.presence == "incomplete":
+        return A(v1.UNOBSERVABLE, "presence_incomplete")
+    if across:
+        if not (r.face or {}).get("reachable"):
+            return A(v1.UNOBSERVABLE, "face_closed")
+        if stale_q:
+            return A(v1.UNOBSERVABLE, "across_face")
+    elif r.presence == "present":
+        if r.descriptor is None:
+            return A(v1.UNOBSERVABLE, "no_descriptor")
+        if not r.descriptor.get("lists"):
+            return A(v1.NOT_ASKED, "not_listed")
+    else:
+        raise ValueError(f"presence {r.presence!r}")
+    fv = r.freshness
+    if fv is not None and fv[0] == "not_asked" and fv[1] == "last_known":
+        return A(v1.NOT_ASKED, "last_known")
+    healed = r.left_out and r.held_whole
+    if r.lost and not healed:
+        return A(v1.UNOBSERVABLE, "incomplete")
+    latest = None if healed else r.latest
+    not_firing = A(v1.NOT_ASKED, "not_firing")
+    if latest == "deleted":
+        return not_firing if stale_q else A(v1.NO, "deleted")
+    if latest == RESOLVED:
+        return not_firing if stale_q else A(v1.NO, RESOLVED)
+    if latest == REBOUND:
+        return not_firing if stale_q else A(v1.NO, REBOUND)
+    if latest is None:
+        if r.held_whole:
+            return not_firing if stale_q else A(v1.NO, "not_held")
+        if across:
+            return A(v1.UNOBSERVABLE, "nothing_crossed")
+        return A(v1.UNOBSERVABLE, "not_read")
+    if r.previous_instance:
+        return A(v1.NOT_ASKED, "previous_instance")
+    verdict, reason = fv if fv is not None else ("unobservable", "no_observation")
+    if stale_q:
+        if latest != FIRING:
+            return A(v1.UNOBSERVABLE, "undecodable")
+        if verdict == "stale":
+            return A(v1.YES, "stale")
+        if verdict == "fresh":
+            return A(v1.NO, "fresh")
+        return A(v1.UNOBSERVABLE, reason)
+    if verdict == "fresh":
+        return A(v1.YES, FIRING) if latest == FIRING else A(v1.UNOBSERVABLE, "undecodable")
+    if verdict == "stale":
+        if across and reason == "no_delivery":
+            return A(v1.UNOBSERVABLE, "nothing_crossed")
+        return A(v1.UNOBSERVABLE, "stale")
+    return A(v1.UNOBSERVABLE, reason)
+
+
+def judge(r: Any, question: str | None = None, horizon: Any = None) -> Any:
+    """:func:`judge_reading` over a :class:`zk2py.alarms.Reading` of live
+    observations: their freshness judged first, at the contract's horizon,
+    as :func:`zk2py.alarms.judge` judges it, an archive alone read as
+    ``not_asked``, ``last_known``; ``lost`` from a subscription's loss no
+    GET or snapshot answered since."""
+    from . import alarms as v1
+    from . import freshness as fr
+
     h = v1.HORIZON if horizon is None else horizon
-    if r.latest == REBOUND:
-        probe = v1.Reading(**{**r.__dict__, "latest": RESOLVED})
-        a = v1.judge(probe, q, h)
-        if (a.answer, a.reason) == (v1.NO, RESOLVED):
-            return v1.Answer(v1.NO, REBOUND, "its slot was retaken by another identity under the same run (§2.6)")
-        return a
-    return v1.judge(r, q, h)
+    obs = list(r.observations)
+    if obs and all(isinstance(o, fr.Archive) for o in obs):
+        fv: tuple[str, str] | None = ("not_asked", "last_known")
+    else:
+        v = fr.judge("state", h, obs)
+        fv = (v.verdict, v.reason)
+    lost = any(isinstance(o, fr.Subscription) and not o.complete for o in obs)
+    reseeded = any((isinstance(o, fr.Get) and o.reply is not None)
+                   or (isinstance(o, fr.Snapshot) and o.entry is not None) for o in obs)
+    return judge_reading(Reading(r.presence, r.descriptor, r.face, fv, r.latest, lost and not reseeded,
+                                 r.previous_instance, r.held_whole, r.left_out), question)
 
 
 @dataclass(frozen=True)

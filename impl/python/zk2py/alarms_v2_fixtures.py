@@ -397,6 +397,74 @@ def acks(path: Path) -> list[Result]:
     return out
 
 
+# -- conclusions.json (§2.1, §2.11, §2.13 to §2.15, §5) --------------------------------------------
+
+def _major(c: dict[str, Any]) -> int | None:
+    """The major a reader reads the owner by: the descriptor's, across a face
+    the deployment's word (alarms.v2), None where no descriptor decides."""
+    if c["presence"] == "across_face":
+        return 2
+    if c["presence"] != "present" or c.get("descriptor") is None:
+        return None
+    m = a2.major_of(c["descriptor"]["interfaces"])
+    return {a2.IFACE: 2, a2.V1: 1}.get(m) if m else None
+
+
+def _lists(c: dict[str, Any]) -> dict[str, Any] | None:
+    d = c.get("descriptor")
+    return None if d is None else {"lists": a2.major_of(d["interfaces"]) == a2.IFACE}
+
+
+def conclusions(path: Path) -> list[Result]:
+    from . import alarms as v1
+
+    data = _load(path)
+    out: list[Result] = []
+    for i, c in enumerate(data["majors"]):
+        m = a2.major_of(c["descriptor"]["interfaces"])
+        out.append(_check(f"v2 conclusions, major #{i}: {c['note']}", {a2.IFACE: 2, a2.V1: 1}.get(m) if m else None,
+                          c["expect"]))
+    for i, c in enumerate(data["readings"]):
+        major = _major(c)
+        got: dict[str, Any] = {"major": major}
+        if major != 1:
+            fv = None if c["freshness"] is None else (c["freshness"]["verdict"], c["freshness"]["reason"])
+            r = a2.Reading(c["presence"], _lists(c), c.get("face"), fv, c["latest"], bool(c["lost"]),
+                           bool(c["previous_instance"]), bool(c["held_whole"]), bool(c["left_out"]))
+            got["firing"] = a2.judge_reading(r, v1.Q_FIRING).pair()
+            got["stale_firing"] = a2.judge_reading(r, v1.Q_STALE).pair()
+        out.append(_check(f"v2 conclusions, reading #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(data["owner_sets"]):
+        major = _major(c)
+        got = {"major": major}
+        if major != 1:
+            rd = c["read"]
+            runs = None
+            if rd is None:
+                read = None
+            elif not rd["complete"]:
+                read = a2.Read2(True, False)
+            elif rd["snapshot"] is None:
+                read = a2.Read2(True, True, False)
+            else:
+                sn = rd["snapshot"]
+                runs = {"stated": ["0001"], "other": ["0001"], "unstated": []}[sn["run"]]
+                read = a2.Read2(True, True, bool(sn["complete"]), {"stated": "0001", "other": "0002",
+                                                                   "unstated": "0002"}[sn["run"]])
+            since = c.get("since")
+            v = a2.established(c["presence"], _lists(c), c.get("face"), read,
+                               lost=since is not None and not since["lossless"],
+                               gap=since is not None and not since["present_throughout"], runs=runs)
+            got.update(v.expect())
+        out.append(_check(f"v2 conclusions, owner set #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(data["any_firing"]):
+        owners = [v1.OwnerRead(o["set"]["verdict"], tuple(v1.AlarmRead(x["answer"], x["severity"]) for x in o["alarms"]))
+                  for o in c["owners"]]
+        got = a2.any_firing(c["at_least"], owners, scope_whole=bool(c["scope_whole"]))
+        out.append(_check(f"v2 conclusions, any firing #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
 FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "schema.json": schema,
     "records.json": records,
@@ -407,6 +475,7 @@ FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
     "transitions.json": transitions,
     "confirmations.json": confirmations,
     "acks.json": acks,
+    "conclusions.json": conclusions,
 }
 
 
