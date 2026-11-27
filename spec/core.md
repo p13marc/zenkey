@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.113** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.114** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -61,10 +61,13 @@ and §8.
   a setup, steps and expected observations;
 - `[F: pending]` would mark a fixture still owed. None is, in this version.
 
-**Zenoh.** zk2 is specified against Zenoh **1.10.1**. Facts about Zenoh that
-the rules depend on are listed in Appendix B. A participant uses only stable
-Zenoh API in the core; unstable features are opt-in and never change a key's
-shape.
+**Zenoh.** zk2 is specified against Zenoh **1.10.2**. Facts about Zenoh that
+the rules depend on are listed in Appendix B. Each was read in 1.10.2 and in
+1.10.1, whose routers stay in the field, and says where the two differ.
+Where a text names 1.10.1, it says what was read or measured there, and
+1.10.2 does the same unless Appendix B says otherwise. A participant uses
+only stable Zenoh API in the core; unstable features are opt-in and never
+change a key's shape.
 
 **Spikes.** "Spike Sn" refers to a measurement in the spike report. State
 rules are named S1–S7 in §4, and operation rules O1–O7 in §5.
@@ -5389,16 +5392,27 @@ These are reasons, not rules. Each was a real bug or outage in v1.
 | No type hash in keys, no central schema registry, no per-sample schema id. | §7, §8.4 |
 | Core participants use only stable Zenoh API. | §0 |
 
-## Appendix B. Zenoh 1.10.1 facts relied on
+## Appendix B. Zenoh 1.10.2 facts relied on
 
 The sourced list, with file and line, is `docs/zk2/architecture.md`
-Appendix B. These are the ones the rules above cite:
+Appendix B. These are the ones the rules above cite.
+
+**1.10.1 and 1.10.2.** Each fact was read in both sources side by side.
+It holds in both unless it says otherwise. Four say what differs:
+`BestMatching`, a link's batch, a push that closes a transport, and a
+process's receive threads. A defect 1.10.2 fixes keeps its rule, since
+1.10.1's routers stay in the field. A file and line are 1.10.2's. Past
+its line 650, `resource.rs` is one line longer in 1.10.1. The facts:
 - Liveliness tokens carry no payload, and routers hold every token.
 - Liveliness and data are separate key spaces.
 - `*` and `**` never match a verbatim chunk.
 - A put on a wildcard key is legal, and subscribers receive the publisher's
   key.
 - `BestMatching` reaches the nearest `complete` queryable on each router.
+  A face's queryables on one resource count as `complete` when any of
+  them is (`hat/broker/queries.rs`, `register_queryable`). In 1.10.1, on
+  a router's south-bound face, a client's among them, the last one
+  declared decided (zenoh#2845).
 - A router stamps only puts, where its timestamping is enabled, and
   never a delete or a reply: `treat_timestamp` reads a `PushBody::Put`
   alone (`dispatcher/pubsub.rs`). It re-stamps a future-dated put beyond
@@ -5423,8 +5437,8 @@ Appendix B. These are the ones the rules above cite:
   feature. Without it a put is sent `Reliability::DEFAULT`, which is
   `Reliable`. A publisher declared without a reliability is reliable too
   (`api/session.rs`, `declare_publisher` and `resolve_put`;
-  zenoh-protocol's `core/mod.rs`; §2.4). This is read from zenoh 1.10.1's
-  source, not measured. The reference builds zenoh with `unstable` (the workspace's
+  zenoh-protocol's `core/mod.rs`; §2.4). This is read from the source of
+  both, not measured. The reference builds zenoh with `unstable` (the workspace's
   `Cargo.toml`), and sets it on every publisher and every event's put.
 - The admin space is disabled by default (`adminspace.enabled: false`).
 - A zid is written in lowercase hexadecimal without leading zeros.
@@ -5531,7 +5545,10 @@ Appendix B. These are the ones the rules above cite:
   default.
 - A client connects to one endpoint at a time.
 - A link's batch is the minimum of the configured size, the MTU and the
-  other end's.
+  other end's. On a QUIC link of mixed reliability, its best-effort
+  companion takes the negotiated batch, and a 1,150-byte datagram MTU
+  (`unicast/establishment/open.rs`, `accept.rs`). In 1.10.1 it took this
+  end's configured size, and not the other end's (zenoh#2870).
 - A query timeout arrives as a reply error. A liveliness GET's too: one
   that reaches its timeout ends with the error reply `Timeout` (encoding
   `zenoh/string`), and one the routers finished ends with none.
@@ -5541,8 +5558,8 @@ Appendix B. These are the ones the rules above cite:
   (`dispatcher/queries.rs`, `QueryCleanup`). The querier's own session
   ends a query at its timeout with `Timeout` under `zenoh/string`
   (`api/session.rs`). The `zenoh` crate and its storage manager send no
-  other reply error of their own. This is read from zenoh 1.10.1's
-  source, not measured. §5.2 tells both from an owner's.
+  other reply error of their own. This is read from the source of both,
+  not measured. §5.2 tells both from an owner's.
 - A client's or a peer's runtime ends a liveliness GET its routers have
   not finished at `routing/interests/timeout` (10 s by default) with the
   final reply alone and no error reply, before the GET's own timeout when
@@ -5599,18 +5616,18 @@ Appendix B. These are the ones the rules above cite:
 - Under `allow`, allow rules are not evaluated, and access control works by
   inclusion.
 
-**Keys across a face** (§8.5, observer §7.5). Read in zenoh 1.10.1's
-`src/`, each with its file and line:
+**Keys across a face** (§8.5, observer §7.5). Read in zenoh's `src/`,
+each with its file and line:
 1. **A put toward a face** rides the deepest key expression either end
    declared on that face for a prefix of its key, and sends the rest as
    text. Where neither end declared one, it carries the whole key.
    - The route's key is `Resource::get_best_key`'s
-     (`net/routing/dispatcher/resource.rs:740`). A data route calls it
+     (`net/routing/dispatcher/resource.rs:739`). A data route calls it
      toward a client (`hat/broker/pubsub.rs:268`) and toward a peer
      (`hat/peer/pubsub.rs:258`).
    - A declaration the far side made wins over the router's own at the
      same resource: `get_wire_expr` reads `remote_expr_id` before
-     `local_expr_id` (`resource.rs:742–758`).
+     `local_expr_id` (`resource.rs:741–757`).
    - A scope id is a varint, 1 byte below 128 and 2 below 16,384
      (zenoh-codec's `core/wire_expr.rs:42`).
 2. **A session declares a key expression on its own face** for three
@@ -5626,13 +5643,13 @@ Appendix B. These are the ones the rules above cite:
 3. **A router declares a prefix toward a face** only while it propagates
    a subscriber, a queryable or a token there. It does so only toward a
    north-bound face, or one whose remote asked for key expressions in an
-   interest (`Resource::decl_key`, `resource.rs:661–729`). No router
+   interest (`Resource::decl_key`, `resource.rs:660–728`). No router
    propagates a publisher, so none declares a stream's key toward the far
    side. Under link.v1's two attachments the far side is south or a
    client, and its own declarations are the prefixes that exist there.
 4. **Cached routes.** A prefix the far side declares disables the cached
    data and query routes of its resource and its matches (`register_expr`,
-   `resource.rs:1005`). So does a subscriber's registration
+   `resource.rs:1004`). So does a subscriber's registration
    (`dispatcher/pubsub.rs:72`). A prefix the router declares itself
    (`decl_key`) disables none. A put whose route was computed before that
    declaration keeps its text for the route's life.
@@ -5659,7 +5676,7 @@ Appendix B. These are the ones the rules above cite:
      does not heal a queryable whose declaration was lost.
 
 **A lost declaration and a late reply** (§8.1, §8.5, observer §7.5).
-Read in zenoh 1.10.1's `src/`, and in `zenoh-transport`'s:
+Read in zenoh's `src/`, and in `zenoh-transport`'s:
 1. **A declaration is sent once.** A session sends a subscriber's
    declaration on its face once, with no acknowledgement
    (`api/session.rs:1788`). A transport's receiver takes a frame whose
@@ -5676,7 +5693,7 @@ Read in zenoh 1.10.1's `src/`, and in `zenoh-transport`'s:
    session's runtime declares a subscription's non-wild prefix toward its
    router the first time it propagates one there. It keeps the mapping
    in the face's `local_mappings` (`Resource::decl_key`,
-   `net/routing/dispatcher/resource.rs:661–729`). That reference keeps
+   `net/routing/dispatcher/resource.rs:660–728`). That reference keeps
    the resource from ever being cleaned (`Resource::clean`, `:535–561`).
    So a lost `DeclareKeyExpr` is never sent again on that transport.
    - Measured by the reference: a subscriber undeclared and declared
@@ -5702,8 +5719,7 @@ Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §8 and
 - one whose `DeclareKeyExpr` the proxy dropped stayed silent, declared
   again.
 
-**A first hop's declarations** (§8.1, §8.4). Read in zenoh 1.10.1's
-`src/`:
+**A first hop's declarations** (§8.1, §8.4). Read in zenoh's `src/`:
 1. **A client's runtime sends its declarations unasked.** A session
    declares a token by sending it to its own runtime
    (`declare_liveliness_inner`, `api/session.rs:1997–2012`). A client's
@@ -5730,8 +5746,8 @@ Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §7
 - a GET's reply carried its whole key, though the far client had
   subscribed to it exactly.
 
-**A conditional read's bytes** (§4.2). Computed from zenoh 1.10.1's
-layouts through the wire baseline's model
+**A conditional read's bytes** (§4.2). Computed from zenoh's layouts,
+which zenoh-codec 1.10.2 keeps as 1.10.1's, through the wire baseline's model
 ([`wire-baseline`](../docs/zk2/measurements/wire-baseline/README.md)).
 None was measured:
 1. **A query's payload rides an extension:** a byte of header, its
@@ -5861,9 +5877,9 @@ None was measured:
   full queue makes its push wait, and one it cannot queue within
   `wait_before_close` closes the transport (`unicast/universal/tx.rs`).
   A best-effort sample, or one with `drop`, is droppable once
-  `wait_before_drop` passes. zenoh 1.10.1's defaults are 5 s and 1 ms.
-  Through two routers in processes of their own, to a reader that took
-  2 ms over each 16 KiB sample:
+  `wait_before_drop` passes. zenoh's defaults are 5 s and 1 ms.
+  Through two routers in processes of their own, on 1.10.1, to a reader
+  that took 2 ms over each 16 KiB sample:
   - reliable, `block`: 1,000 of 1,000 arrived in order, and the owner's
     put waited;
   - best effort, `drop`: 695–832 of 1,000 were lost, and nothing the
@@ -5882,13 +5898,19 @@ None was measured:
     runs. Each time its ticker saw a gap of 7.0–7.1 s on its first tick
     after, its session read its transport's close (0.35–0.51 s later in
     the 4 runs that timed it), and it saw the token withdrawn.
+- **After that close, 1.10.2 differs.** It fails every later push to the
+  transport at once, where 1.10.1 made each wait `wait_before_close`
+  again. It drops the transport without sending a `Close` (zenoh#2709).
+  The far end sees its link close either way. The first push's wait and
+  the close are as above.
 - **Another binding's default.** zm-1.10.2-r1, the zenoh fork that
   zenoh-modem builds on, defaults `wait_before_close` to 10 s, its lease.
   A 7 s stall falls inside both there. Measured on 2026-11-01, a reader
   stuck 7 s lost none of 1,000, and no transport closed, in 3 of 3 runs.
   With the routers stating 5 s, the stuck reader lost 653 and the stopped
   one 876, each with its transport closed. So `budget.md` §1's routers
-  state their `wait_before_close`.
+  state their `wait_before_close`. The fork's 10 s is its own change:
+  stock 1.10.2 keeps 5 s.
 - A transport that closes withdraws the tokens learned through it, between
   routers and on a client's own link alike. The withdrawal reaches the
   reader within 1–2 ms when the link closes, and one lease after a link
@@ -5952,14 +5974,17 @@ None was measured:
   default (`ZENOH_RUNTIME`). With two routers and a reader whose callback
   blocks in one process, 3 of 6 runs lost 674–970 of 1,000 reliable,
   `block` samples. The routers' transport closes stalled, and no token was
-  withdrawn while the runs lasted.
+  withdrawn while the runs lasted. That was 1.10.1. 1.10.2's failing push
+  ("After that close") is aimed at that stall (zenoh#1876, zenoh#2581), and was not
+  measured here. What a deployment provides (observer §5.2) stands.
 
 **A liveliness GET beside a liveliness subscriber.** Measured
 on 2026-10-24 by the zenoh-only reproduction in
 [`docs/zk2/upstream/liveliness-get-repro/`](../docs/zk2/upstream/liveliness-get-repro/),
 61,920 trials per version on zenoh 1.10.1 and on zenoh's main branch at
 `766b455`, each a fresh process with a router, a token holder and a
-reader, clients, some under CPU load:
+reader, clients, some under CPU load. 1.10.2 holds `766b455`, and only
+four QUIC, SHM and TLS changes after it:
 - A complete liveliness GET from a session holding liveliness subscribers
   that covered the live tokens missed one or more of them:
   - history subscribers on the reading session: 1,656 of 23,040 (1.10.1),

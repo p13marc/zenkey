@@ -1362,6 +1362,13 @@ replies  = "many"
 
 ## Appendix B: Zenoh facts relied on (1.10.1 source; r4: measured)
 
+*Checked against 1.10.2 for core 0.114 (#1165).* Every row holds in
+1.10.2. Its lines differ in `DEFAULT_CONFIG.json5` (`:54`, `:227`,
+`:258–281`) and in zenoh-shm's `shm/unix.rs` (`:293`). Core Appendix B
+says what 1.10.2 changed: `BestMatching` over a face's queryables on one
+resource, a QUIC link's best-effort batch, and a push to a transport
+that is closing.
+
 | Fact | Source |
 |---|---|
 | Liveliness tokens carry no payload | `commons/zenoh-protocol/src/network/declare.rs` |
