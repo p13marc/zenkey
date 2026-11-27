@@ -1,0 +1,15 @@
+# The lab router's link.v1 face to the ground (link.v1 §2.1; #1145),
+# carrying the two beacons of beacon.enrollment.toml.
+system   = "lab"
+services = ["b1", "b2"]
+
+[face.rf]
+far          = "ground"
+attach       = "client"
+select       = { link_protocols = ["unixsock-stream"] }
+class        = "constrained"
+expose       = "link"
+interval_s   = 60
+max_outage_s = 600
+batch_bytes  = 1000
+link_bps     = 2400

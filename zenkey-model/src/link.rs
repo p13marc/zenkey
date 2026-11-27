@@ -1036,6 +1036,11 @@ pub enum Code {
     /// the advanced publisher's source info across the face, and its
     /// history stays home (§2.8).
     HistoryOnFrame,
+    /// A listed service whose owner heartbeats the deployment turns on,
+    /// implementing an interface whose heartbeat crosses a `link.v1` face:
+    /// no owner heartbeat crosses one, so its far readers may hear no
+    /// confirmation (§2.3, §2.9; #1145).
+    OwnerHeartbeatDenied,
     /// A listed owner's tombstone window below the outage (§2.11).
     WindowUnderOutage,
     /// A block whose denies leave a pair of `@zk` open (§2.15).
@@ -1171,6 +1176,7 @@ impl Code {
             Self::FrameOverInterval => "frame_over_interval",
             Self::FrameOverBatch => "frame_over_batch",
             Self::HistoryOnFrame => "history_on_frame",
+            Self::OwnerHeartbeatDenied => "owner_heartbeat_denied",
             Self::WindowUnderOutage => "window_under_outage",
             Self::ZkNotDenied => "zk_not_denied",
             Self::WildcardDownsampling => "wildcard_downsampling",
@@ -1224,6 +1230,7 @@ impl Code {
             | Self::FrameOverInterval
             | Self::FrameOverBatch
             | Self::HistoryOnFrame
+            | Self::OwnerHeartbeatDenied
             | Self::KeepAliveFlaps
             | Self::SequenceWindow
             | Self::OpenUnderHandshake
@@ -3011,6 +3018,12 @@ pub struct Deployment {
     /// §11.1): a face the near router opens binds none of them, so a
     /// link.v2 plan refuses one whose far principal is (v2 §2.5).
     pub users: BTreeSet<String>,
+    /// The listed services, by name, whose owner heartbeats the deployment
+    /// turns on (`freshness.v2` §2.4; §2.3, #1145). A `link.v1` plan warns
+    /// of each that implements an interface whose heartbeat crosses a face
+    /// (`owner_heartbeat_denied`, §2.9); a link.v2 plan reads none of it,
+    /// its `link` owner heartbeat crossing where a heartbeat does.
+    pub owner_heartbeats: BTreeSet<String>,
 }
 
 impl Deployment {
@@ -3920,6 +3933,19 @@ fn plan_face(
             .filter(|(i, r)| crosses(i, r) && horizon(r).ttl().is_some())
             .map(|(i, r)| res_name(i, r))
             .collect();
+        // An owner that turns its owner heartbeats on behind a `link.v1`
+        // face: none crosses, and an interface they cover sends no
+        // heartbeat of its own, so its far readers may hear no confirmation
+        // (§2.9, #1145). Once for the service: the plan cannot tell which
+        // interfaces its catalog lets them cover.
+        if !v2
+            && deployment.owner_heartbeats.contains(s.key)
+            && ifaces
+                .iter()
+                .any(|i| heartbeat_crosses.get(i.as_str()) == Some(&true))
+        {
+            findings.push(Finding::new(Code::OwnerHeartbeatDenied, Some(name), s.key));
+        }
         // A crossing heartbeat is evidence too (§2.12): its horizon is the
         // shortest of the collections it covers (`freshness.v2` §2.4).
         evidence.extend(

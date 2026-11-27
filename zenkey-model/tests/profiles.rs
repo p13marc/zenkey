@@ -1958,6 +1958,12 @@ fn link_deployment(case: &Value) -> Option<link::Deployment> {
             .get("users")
             .map(|u| serde_json::from_value(u.clone()).expect("users"))
             .unwrap_or_default(),
+        // The listed services whose owner heartbeats the deployment turns
+        // on (link.v1 §2.3, 0.21; #1145).
+        owner_heartbeats: case
+            .get("owner_heartbeats")
+            .map(|u| serde_json::from_value(u.clone()).expect("owner_heartbeats"))
+            .unwrap_or_default(),
         ..link::Deployment::default()
     };
     for p in case

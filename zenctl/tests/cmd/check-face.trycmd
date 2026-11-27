@@ -464,3 +464,20 @@ Error: tests/cmd/fixtures/link/router-zm-rf0-unread.json5: read as data under zm
 check face: the question could not be asked — exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)
 
 ```
+
+The same plan's warnings come with a verdict. The lab router running the
+block `acl gen` wrote for `beacon.face.toml` guards its face as planned:
+exit 0. The enrollment turns `lab/b1`'s owner heartbeats on behind a
+`link.v1` face, and the plan warns of it (`owner_heartbeat_denied`,
+`link.v1` §2.3, §2.9; #1145). A warning is the plan's, never the block's,
+so the verdict stands.
+
+```console
+$ zenctl check face tests/cmd/fixtures/link/router-beacon.json5 --face-policy tests/cmd/fixtures/link/beacon.face.toml --enrollment tests/cmd/fixtures/link/beacon.enrollment.toml --contracts tests/cmd/fixtures/link/beacon.v2.toml --contracts ../spec/profiles/freshness/freshness.v2.toml --format table
+face rf: owner_heartbeat_denied b1: the enrollment turns this service's owner heartbeats on, and a heartbeat of an interface it implements crosses the face: no owner heartbeat crosses a link.v1 face, and an interface they cover sends no heartbeat of its own, so its far readers may hear no confirmation and read its members stale; leave the option off behind a link.v1 face, or move the face to link.v2 (§2.9)
+tests/cmd/fixtures/link/router-beacon.json5: face rf (far ground): 9 deny rule(s) across subject(s) ground; 0 downsampling rule(s) on its transports
+PASS
+judged against the config file tests/cmd/fixtures/link/router-beacon.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
+tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
+
+```
