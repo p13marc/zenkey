@@ -7,11 +7,12 @@ a setup, steps, and expected observations. §1 to §12 are
 the read changes. §13 to §16 are new. §9 is a tool's, and the others
 the runtime's.
 
-**The reference runs them.** §1 to §8 and §10 to §15 are tests of
+**The reference runs them.** §1 to §8 and §10 to §16 are tests of
 `zenkey` (`zenkey/tests/profile_desired_v2.rs`, one test per section,
 named after it). §9 is a test of `zenctl` (`zenctl/tests/live_zk2.rs`,
-`desired_v2_s9_…`), T being `zenctl desired`. The reference has no
-test of §16 yet.
+`desired_v2_s9_…`), T being `zenctl desired`. In §16's runs A and B,
+the reference's target reads its author's revision by the deployment's
+word alone, as one built before this major does.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.7) are v2.md's rules; `v1 §n`

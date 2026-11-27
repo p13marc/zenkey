@@ -1068,5 +1068,16 @@ held catalog dates is refused whole, one with no time read; owner
 heartbeats count whatever their groups; `not_used` under `health.v1`
 loads with no W105. `link.v2` 0.26: case 52 and transport cases 34–35;
 N on 1.10.2. `freshness.v2` 0.13: a near-side read with no reply takes
-the deployment's word. The Rust half is
-`/srv/dev/scratch/zenkey/p/answers-r123-code.md`.
+the deployment's word. The Rust half ran every new case as written, and
+all pass. The reference's target reads its author's revision from its
+descriptor under each version's run, refuses at its start a role whose
+report is the other major's, naming it, and stops one whose author's
+descriptor names the other major after its start; `scenarios-v2.md` §16
+runs A to D (`s16_both_majors_side_by_side`, A and B with the target
+playing one built before the major, `TargetStartup::word_alone`).
+`zenctl get --body` shows a held stamp that answers its own body as
+unchanged; `desired` ages a `freshness.v2` target's report by its
+confirmation; `check conform` reads an unbound role's baseline record;
+`health` reads a `health.v2` record with no time from an owner whose
+catalog it lacks; `zk2 contract lint` prints the fingerprint after a
+profile's errors.
