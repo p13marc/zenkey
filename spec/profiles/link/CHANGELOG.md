@@ -7,6 +7,35 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.27 — 2026-11-28: §0 and §2.9: `link.v1` 0.21's `owner_heartbeat_denied` is no link.v2 plan's, no keyword changed (#1145)
+
+`link.v1` 0.21 warns of a listed service whose owner heartbeats the
+deployment turns on behind a face (below). The warning's row is in
+`link.v1` §2.3, which this text holds. Its rule is in `link.v1` §2.9's
+"No owner heartbeat crosses", which this text replaces.
+
+**What changed.**
+- **§0, "By reference."** The replaced item takes the warning with it.
+- **§2.9, "Whichever form a service sends".** A new item says that the
+  deployment's word changes nothing here: the `link` key crosses wherever
+  a heartbeat does, so no plan draws `owner_heartbeat_denied`. "The plan
+  cannot tell" an owner's form becomes "does not tell": the deployment
+  may now say it.
+
+**What deliberately did not change.**
+- **No rule.** A link.v2 plan still lets both forms cross, and lists
+  both as evidence.
+- **No case moved.** The deployment's word is new, and no case gave it.
+- **The header** is still written against core 0.108.
+
+**The case.** `v2/plan.json`'s case 53 is case 46 with the deployment
+turning `node-a`'s owner heartbeats on. Its plan is case 46's, written
+by hand from it. 54 cases, after 0.26's case 52.
+
+**Why.** A deployment that states the option for its link.v1 faces
+states it for its link.v2 faces too. The text says that it warns there
+of nothing, rather than leave a reader to infer it.
+
 ## 0.21 — 2026-11-28: §2.3 and §2.9: the plan warns of a service whose owner heartbeats the deployment turns on behind a face, `owner_heartbeat_denied`, no keyword changed (#1145)
 
 Found by review-bot on #1144 (#1110's H3). Under this text no owner
