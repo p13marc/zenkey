@@ -306,10 +306,8 @@ class Target:
         #: ``unread`` (a read that failed); and the last said
         self.revisions: dict[str | None, str] = {}
         self.revision_said = "not-read" if word_alone else "word"
-        #: live samples held while the descriptor of their run is read, in
-        #: order of arrival
-        self._pending: list[tuple[Any, bool]] = []
-        self._pending_reader = False
+        #: the runs whose descriptor a read is out for
+        self._asking: set[str] = set()
         #: v1 §2.9, which §2.9 keeps: "With its author absent, by a complete
         #: read without its instance token (core §8.1), ... a target MAY read
         #: its slice's last-known from an archive, through the key's archive
@@ -642,7 +640,8 @@ class Target:
         """§2.18 (0.2): the revision the author's descriptor names for
         ``run`` (any present instance's where ``run`` is None), as the
         reference's ``desired seeds`` words it: ``given``, ``another:<fp>``
-        of this major, ``stopped:1:<fp>`` for one that uses ``desired.v1``,
+        of this major, ``stopped:desired.v1:<fp>`` for one that uses
+        ``desired.v1`` (the reference's words, round 125),
         ``word`` where no descriptor reaches the target, ``unread`` where
         the read failed, every descriptor stated another run, or the named
         revision could not be retrieved (core §8.4). Its major is read from
@@ -684,14 +683,18 @@ class Target:
             return "unread", stated
         uses = got.verified.contract.get("uses") or []
         if d2.PROFILE not in uses and "desired.v1" in uses:
-            return f"stopped:1:{fp}", stated
+            return f"stopped:desired.v1:{fp}", stated
         return f"another:{fp}", stated
 
     def _revision_of_run(self, run: str | None) -> str | None:
+        """What stands for ``run``: its descriptor's word, else a
+        descriptor's that stated no run, else the last read's."""
         with self.lock:
             if run in self.revisions:
                 return self.revisions[run]
-            return self.revisions.get(None)
+            if None in self.revisions:
+                return self.revisions[None]
+            return self.revision_said
 
     def _stopped(self, run: str | None) -> bool:
         """§2.18 (F-589): "While the descriptor names it, a target MUST NOT
@@ -769,35 +772,26 @@ class Target:
         run = None if s.version is None else s.version.run.text
         with self.lock:
             # §2.18: the revision is "the one the author's descriptor names
-            # for the version's run": a version of a run no descriptor was
-            # read for waits, in order, while one is read (never in zenoh's
-            # callback, which would make a GET on its own session there).
-            unread = (not self.word_alone and run is not None and run not in self.revisions
-                      and None not in self.revisions)
-            if unread or self._pending:
-                self._pending.append((s, run))
-                if not self._pending_reader:
-                    self._pending_reader = True
-                    threading.Thread(target=self._drain, daemon=True).start()
-                return
+            # for the version's run". A run no descriptor was read for is
+            # read in the background, never in zenoh's callback (a GET on its
+            # own session there), and never ahead of the version: holding
+            # the sample would reorder it against the watch's reads (round
+            # 125's §14 step 5). Until that read answers, the last one stands
+            # (:meth:`_revision_of_run`), so a role stopped stays stopped.
+            ask = (not self.word_alone and run is not None and run not in self.revisions
+                   and run not in self._asking)
+            if ask:
+                self._asking.add(run)
+        if ask:
+            threading.Thread(target=self._read_run, args=(run,), daemon=True).start()
         self._receive(s, True)
 
-    def _drain(self) -> None:
-        while True:
-            with self.lock:
-                if not self._pending:
-                    self._pending_reader = False
-                    return
-                s, run = self._pending[0]
-                known = self.word_alone or run is None or run in self.revisions or None in self.revisions
-            if not known:
-                said = self._read_revision(run)
-                with self.lock:
-                    self.revision_said = said
-                    self.revisions.setdefault(run, said)  # asked once per run, whatever it named
-            with self.lock:
-                self._pending.pop(0)
-            self._receive(s, True)
+    def _read_run(self, run: str) -> None:
+        said = self._read_revision(run)
+        with self.lock:
+            self.revision_said = said
+            self.revisions.setdefault(run, said)  # asked once per run, whatever it named
+            self._asking.discard(run)
 
     def _receive(self, s: d2.Sample, heard_live: bool) -> None:
         if s.version is not None and self._stopped(s.version.run.text):
