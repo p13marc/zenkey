@@ -5492,7 +5492,8 @@ def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple
     tag = _load_json(root / "contracts" / "schemas" / "packed" / "tag.json")
     out.append(("core 0.117 §7.6 \"Never 0\", §9.2's E051 per type and cascade 7's clause, as zk2py reads them: "
                 "tag.json's Zero and Unnamed draw E051, Fine at 11 none; a file with E028 draws none; Grow at its "
-                "maximum of 100 has the tag 11, and at 127 had 0",
+                "maximum of 100 has the tag 11, and at 127 had 0; since the mend after round 126 the row, the "
+                "clause, the odds and observer §7.3 set a type a profile derives aside",
                 [[w.split(": ")[1] for _, w in packed.tag_zero(packed.lint(tag), "tag.json")],
                  packed.lint(tag).types["Fine"].tag,
                  load_contract(root / "contracts" / "e028-packed-tag.toml").codes,
@@ -5500,16 +5501,21 @@ def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple
                                                           packed.MARKER]}}}).types["G"].tag for m in (100, 127)]]
                 + missing(core, "- **Never 0.** A type whose tag is 0 is E051 (§9.2).",
                           "| E051 | a packed type whose layout tag is 0 (§7.6), the tag a record of any other kind "
-                          "carries (§7.5) | per type |",
+                          "carries (§7.5); a type a profile derives aside | per type |",
                           "- E051 reads a type with none of E038 to E045, in a file without E028. Only such a type "
                           "has a layout form whose JCS bytes every implementation agrees on (§9.6). It reads every "
-                          "type the file defines, whether a resource names it or not, as E038 to E045 do.",
+                          "type the file defines, whether a resource names it or not, as E038 to E045 do, but a "
+                          "type a profile derives (§7.6).",
                           "- **Its tag may be 0.** One revision in 16 has the tag 0, which an owner heartbeat's CH "
                           "and a record of any other kind carry too. No lint refuses it, as E051 refuses a packed "
                           "type at 0 (§9.2).",
-                          "still matches its tag 1 time in 15: a type's tag is from 1 to 15.")
-                + missing(obs, "A record of any other kind carries 0, and no packed type's does: a contract that "
-                               "declares a packed type at the tag 0 is invalid (core §9.2, E051)."),
+                          "still matches its tag 1 time in 15: a type a contract writes has a tag from 1 to 15. A "
+                          "derived type's is from 0 to 15, so it matches 1 time in 16.")
+                + missing(obs, "A record of any other kind carries 0, and no packed type a contract writes does: one "
+                               "that declares such a type at the tag 0 is invalid (core §9.2, E051). A type a "
+                               "profile derives may, one in 16, and a tool that holds no contract sniffs its record "
+                               "too (core §7.6).",
+                          "and another packed type 1 time in 15, or 1 in 16 for a derived one (core §7.5, §7.6)."),
                 [["Unnamed", "Zero"], 11, ["E028"], 11, 0]))
     # F-618: E044 is a reference's, and takes no type out of E051.
     e044 = load_contract(root / "contracts" / "e044-packed-place.toml").codes
@@ -5528,11 +5534,12 @@ def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple
     stated = [(r["file"].split("/")[-1], r["at"]) for r in s["stated"] if r["tag"] == 0]
     out.append(("core 0.117's survey, recomputed over spec/, examples/zk2/ (its .history) and "
                 "zenkey/tests/contracts/: 287 declarations with no finding of their own in 97 files, the entry's "
-                "count; at the tag 0, the two cases' types and frame/layouts.json's Tick, as the entry says; and one "
-                "the entry does not name, derive.json case 2's derived Record (F-619)",
+                "count; at the tag 0, the two cases' types and frame/layouts.json's Tick, as the entry says; and "
+                "derive.json case 2's derived Record (F-619), which the entry names since the mend after round 126",
                 [len(clean), len({r["file"] for r in clean}), zero, stated]
                 + missing(log, "287 declarations in 97 files, each published bundle's included.",
-                          "- **`frame/layouts.json`'s `Tick`** has it."),
+                          "- **`frame/layouts.json`'s `Tick`** has it.",
+                          "`config.v2`'s `derive.json` case 2 derives one at 0, and its contract loads."),
                 [287, 97, [("layouts.json", "Tick", False), ("tag-unsafe.json", "Zero", True),
                            ("tag.json", "Unnamed", False), ("tag.json", "Zero", False)],
                  [("derive.json", "/cases[2]/expect/derived/Record")]]))
@@ -5542,20 +5549,42 @@ def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple
     # the group's bound moved, 12 to 13: the Record's tag moves with it
     moved = {"types": {**der["schema"]["types"], "Modulation": {"fields": [
         {**der["schema"]["types"]["Modulation"]["fields"][0], "maximum": 13}]}}}
-    out.append(("F-619 (round 126): config.v2's derive.json case 2 declares a contract group alone, whose derived "
-                "Record has the tag 0, so a contract that carries it is E051 (the reference's zk2 config derive "
-                "writes it, and zk2 contract lint refuses it: packed_tag_live); config.v2 names no E051, and the "
-                "derivation fixes the form core §7.6's fixes would change: a bound is the device's wire",
+    # F-619, resolved by core 0.117's "A derived type may be 0" and config.v2
+    # 0.6 §3 (the mend after round 126): case 2's contract, its derived types
+    # zk2py's own derivation, loads; a type at 0 no profile derives does not.
+    import tempfile
+
+    from .packed_tag_live import case2_contract
+
+    derived = {n: {"fields": f} for n, f in c2.derive(decl).items()}
+    zero = tag["types"]["Zero"]
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        loads = [load_contract(case2_contract(base, spec.parent, derived)).codes]
+        for kw in ({"extra": {"Copy": derived["Record"]}}, {"extra": {"Zero": zero}, "config_type": "Zero"},
+                   {"without_profile": True}):
+            loads.append(load_contract(case2_contract(base, spec.parent, derived, **kw)).codes)
+    out.append(("F-619, resolved (the mend after round 126): config.v2's derive.json case 2 derives a Record at the "
+                "tag 0, and moving modulation's bound to 13 moves it to 10; core §7.6 and config.v2 0.6 §3 say E051 "
+                "does not read a type a profile derives. zk2py tells one by §3's comparison: a type a §3 resource "
+                "names in a derived role and equal to its derivation field by field. Case 2's contract loads; the "
+                "Record copied under a name no resource gives, config's type a written one at 0, and the contract "
+                "without config.v2 each draw E051",
                 [decl.valid, c2.layouts(c2.derive(decl))["Record"]["tag"],
                  c2.layouts(c2.derive(c2.read_groups(der["cases"][2]["groups"], c2.Docs([("schema", moved)]))))[
-                     "Record"]["tag"], "E051" in v2c]
+                     "Record"]["tag"], loads]
                 + missing(v2c, "**The derived types** live in the contract's packed files.",
                           "The lint compares each with its derivation, field by field, names and descriptions of "
-                          "the types aside.",
-                          "**A bound is the wire.** Moving one is a breaking revision (core §9.8).")
-                + missing(core, "An author moves it by changing the form: two fields of different forms swapped, a "
-                                "bound moved, a reserved code or a marker added."),
-                [True, 0, 10, False]))
+                          "the types aside. One in 16 has the layout tag 0, and E051 does not read it: its author "
+                          "writes no field of it (core §7.6, §9.2).")
+                + missing(core, "- **A derived type may be 0.** A type a profile derives from the contract's "
+                                "declaration, as `config.v2`'s `Record` and each `Set<T>` (`config.v2` §3), has no "
+                                "form its author writes: the derivation fixes it, and one in 16 has the tag 0. E051 "
+                                "does not read it.",
+                          "One that holds none sniffs it (observer §7.3), and that residual is accepted.")
+                + missing(flat("profiles/config/CHANGELOG.md"), "## config.v2 0.6 — 2026-11-28: editorial: a "
+                                                                "derived type may have the layout tag 0"),
+                [True, 0, 10, [[], ["E051"], ["E051"], ["E020", "E051"]]]))
     # The open question: a frame's own tag at 0 (frame/layouts.json's tick-pow2).
     lay = _load_json(root / "frame" / "layouts.json")
     frame0 = zk2c.write("frame", 16, 0x1234, 7, 0, bytes.fromhex("0000000a00301bc080"))
@@ -5615,8 +5644,9 @@ def _round126_owner_heartbeats(root: Path, flat: Any, missing: Any) -> list[tupl
                               "does."),
                 [[18], ["b1"], [], True, [53]]))
     lv1 = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", l1)
-    out.append(("F-620 (round 126, resolved in its PR): link.v2's header restates link.v1 at text 0.21, as link.v1 is, and "
-                "link.v2 0.27's §0 names 0.21's warning; the earlier entries move that line with each link.v1 rule "
+    out.append(("F-620 (round 126, resolved in its PR): link.v2's header restates link.v1 at text 0.21, as "
+                "link.v1 is, and link.v2 0.27's §0 names 0.21's warning; the earlier entries move that line with "
+                "each link.v1 rule "
                 "(\"The header restates link.v1 text 0.20\", at link.v2 0.19)",
                 [lv1.group(1) if lv1 else None, "It restates [`link.v1`](v1.md), text 0.21, by reference (§0)." in l2]
                 + missing(l2, "- §2.9's \"No owner heartbeat crosses\" is replaced, and with it the warning "

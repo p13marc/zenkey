@@ -564,6 +564,41 @@ def lint(resources: dict[str, dict[str, Any]], uses: list[str], docs: Docs,
     return out
 
 
+def derived_types(value: Any, docs: Docs, named: dict[str, dict[str, tuple[str, str]]]) -> set[tuple[str, str]]:
+    """The packed types the declaration ``value`` derives, each ``(stem,
+    name)``: core 0.117 §7.6, "A type a profile derives from the contract's
+    declaration, as config.v2's Record and each Set<T> (config.v2 §3), has
+    no form its author writes: the derivation fixes it", and config.v2 0.6
+    §3, "One in 16 has the layout tag 0, and E051 does not read it".
+
+    zk2py tells a derived type from a written one as §3's lint does: "The
+    lint compares each with its derivation, field by field". A type is
+    derived where a §3 resource names it in a derived role (``named``: a
+    template's ``type``, ``request``, ``response`` or ``error``, each
+    ``(stem, name)``) and its fields equal that role's derivation. A type
+    no such resource names, or one that differs from its derivation, is the
+    author's, and E051 reads it. An invalid declaration derives none."""
+    decl = read_groups(value, docs)
+    if not decl.valid:
+        return set()
+    d = derive(decl)
+    want: dict[tuple[str, str], list[Any]] = {("config", "type"): d["Record"]}
+    for g in decl.groups:
+        if g.settable:
+            want[(f"set/{g.name}", "request")] = d[f"Set{g.type_name}"]
+            want[(f"set/{g.name}", "response")] = d["Record"]
+            want[(f"set/{g.name}", "error")] = d["Error"]
+    for t in ("confirm", "cancel", "extend", "persist"):
+        want.update({(t, "request"): d["Control"], (t, "response"): d["Record"], (t, "error"): d["Error"]})
+    out: set[tuple[str, str]] = set()
+    for (tmpl, role), fields in want.items():
+        at = named.get(tmpl, {}).get(role)
+        raw = docs.raw(at) if at is not None and at[0] in dict(docs.docs) else None
+        if isinstance(raw, dict) and isinstance(raw.get("fields"), list) and same_fields(raw["fields"], fields):
+            out.add(at)  # type: ignore[arg-type]
+    return out
+
+
 def resolved(contract: Any) -> tuple[dict[str, dict[str, Any]], list[str], Docs]:
     """A loaded :class:`zk2py.contract.Contract` in the shape :func:`lint`
     reads: its resources by template, a packed type as ``packed:<stem>#<name>``,

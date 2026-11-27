@@ -792,7 +792,10 @@ def tag_zero(linted: Linted, where: str = "") -> list[tuple[str, str]]:
     E045, in a file without E028 ... It reads every type the file defines,
     whether a resource names it or not, as E038 to E045 do." So it reads
     :attr:`Linted.types`, the types with no finding of their own; the caller
-    gives it a file with no E028 alone (:mod:`zk2py.schemas`).
+    gives it a file with no E028 alone (:mod:`zk2py.schemas`), and the
+    contract's loader sets aside each type a profile derives ("but a type a
+    profile derives (§7.6)", the mend after round 126:
+    :func:`zk2py.config_v2.derived_types`).
 
     E044 is a reference's, never a declaration's, so it takes no type out
     here: zk2py reads "none of E038 to E045" as cascade 8's "a packed

@@ -6,7 +6,7 @@ A contract's ``[schemas]`` lists JSON Schema, protobuf and, since core 0.75
 Schema or packed document, the FileDescriptorSet bytes of a protobuf file.
 This module loads them, reports the per-file lints (E024 stems and ids, E028
 at load, E029, E032, E037, and a packed file's E038 to E043 and E045,
-and E051 in a file without E028, :mod:`zk2py.packed`), and resolves type references (E023, E024).
+and E051's candidates in a file without E028, :mod:`zk2py.packed`), and resolves type references (E023, E024).
 """
 
 from __future__ import annotations
@@ -133,6 +133,11 @@ class SchemaSet:
     packed_files: list[Artifact] = field(default_factory=list)
     #: Each loaded packed file's reading (§7.6), by its listed path.
     packed_read: dict[str, packed.Linted] = field(default_factory=dict)
+    #: §9.2 E051's candidates, (artifact, type name, message): each clean type
+    #: at the layout tag 0 of a packed file with no E028. The contract's
+    #: loader reports each one no profile derives (core 0.117 §7.6, "A
+    #: derived type may be 0"), since only its resources say which those are.
+    tag_zero: list[tuple[Artifact, str, str]] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     #: core.md §9.2 cascade 2: "E029 for one schema kind suppresses E023 for
     #: that kind".
@@ -242,13 +247,15 @@ class SchemaSet:
         linted = packed.lint(doc, listed)
         for code, where in linted.findings:
             self._err(code, where)
+        art = Artifact(PACKED, stem(listed), art_id, doc, listed)
         # §9.2 E051 (core 0.117), cascade 7: "E051 reads a type with none of
-        # E038 to E045, in a file without E028."
+        # E038 to E045, in a file without E028 ... but a type a profile
+        # derives (§7.6)": a candidate here, judged by the contract's loader.
         if not big:
-            for code, where in packed.tag_zero(linted, listed):
-                self._err(code, where)
+            names = sorted(n for n, r in linted.types.items() if r.tag == 0)
+            self.tag_zero += [(art, n, w) for n, (_, w) in zip(names, packed.tag_zero(linted, listed))]
         self.packed_read[listed] = linted
-        self.packed_files.append(Artifact(PACKED, stem(listed), art_id, doc, listed))
+        self.packed_files.append(art)
 
     def _check_refs(self) -> None:
         """§9.4: a ``$ref``'s file part resolves relative to the referencing

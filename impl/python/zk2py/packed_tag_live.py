@@ -16,7 +16,9 @@
 - **A derived type at 0.** ``config.v2``'s ``derive.json`` case 2 derives
   a ``Record`` whose tag is 0. The reference's ``zk2 config derive`` is run
   on a contract that declares that case's groups, the derived types it
-  writes are put in the contract's packed file, and both linters read it.
+  writes are put in the contract's packed file, and both linters read it:
+  since core 0.117's "A derived type may be 0", zk2py loads it (the mend
+  after round 126), and the reference's codes are printed.
 - **A type an explicit stream names** (E044), at the tag 0: the two
   linters' codes.
 - **A frame at the tag 0, live:** ``zenctl echo`` and zk2py's echo row,
@@ -153,12 +155,15 @@ minor = 0
 '''
 
 
-def derived_at_zero(repo: Path = REPO) -> list[Result]:
+def case2_contract(base: Path, repo: Path = REPO, derived: dict[str, Any] | None = None, *,
+                   extra: dict[str, Any] | None = None, config_type: str | None = None,
+                   without_profile: bool = False) -> Path:
     """``derive.json`` case 2's groups (one contract group, ``modulation``)
     in ``rfcfg.v1``'s contract, its ``set/<group>`` operations left out, as
-    no group is settable: the reference's ``zk2 config derive`` writes the
-    derived types, they join the group's type in the packed file, and both
-    linters read the contract that carries them."""
+    no group is settable, written under ``base``: the group's type and
+    ``derived`` (the derived types, ``{name: record}``) in its packed file,
+    with ``extra`` types beside them. ``config_type`` names another type
+    for ``config``; ``without_profile`` drops ``config.v2`` from ``uses``."""
     data = json.loads((repo / "spec/profiles/config/conformance/v2/derive.json").read_text(encoding="utf-8"))
     case = data["cases"][2]
     rf = (repo / "spec/profiles/config/conformance/contracts/rfcfg.v1.toml").read_text(encoding="utf-8")
@@ -168,16 +173,34 @@ def derived_at_zero(repo: Path = REPO) -> list[Result]:
     text = re.sub(r'\[resources\."set/[a-z]+"\][^\[]*', "", text)
     text = text.replace('name    = "rfcfg"', 'name    = "modcfg"').replace('"rfcfg.json"', '"modcfg.json"')
     text = text.replace('"../../config.v2.json"', '"config.v2.json"')
+    if config_type is not None:
+        text = text.replace('[resources.config]\nkind = "state"\ntype = "packed:Record"',
+                            f'[resources.config]\nkind = "state"\ntype = "packed:{config_type}"')
+    if without_profile:
+        text = text.replace('uses    = ["config.v2", "freshness.v2"]', 'uses    = ["freshness.v2"]')
+    (base / "config.v2.json").write_text((repo / "spec/profiles/config/config.v2.json").read_text(
+        encoding="utf-8"), encoding="utf-8")
+    names = [g["type"].split(":", 1)[1] for g in case["groups"]]
+    types = {n: data["schema"]["types"][n] for n in names}
+    (base / "modcfg.json").write_text(json.dumps({"types": {**types, **(derived or {}), **(extra or {})}}, indent=1),
+                                      encoding="utf-8")
+    contract = base / "modcfg.v1.toml"
+    contract.write_text(text, encoding="utf-8")
+    return contract
+
+
+def derived_at_zero(repo: Path = REPO) -> list[Result]:
+    """``derive.json`` case 2's contract (:func:`case2_contract`): the
+    reference's ``zk2 config derive`` writes the derived types, they join
+    the group's type in the packed file, and both linters read the contract
+    that carries them. Core 0.117 and config.v2 0.6 (the mend after round
+    126): "E051 does not read it", so zk2py loads it; the reference's answer
+    is printed, its half to follow. Beside it, zk2py alone, three types at
+    the tag 0 that no profile derives."""
     out: list[Result] = []
     with workdir("zk2py-e051-") as d:
         base = Path(d)
-        (base / "config.v2.json").write_text((repo / "spec/profiles/config/config.v2.json").read_text(
-            encoding="utf-8"), encoding="utf-8")
-        schema = {"types": {g["type"].split(":", 1)[1]: data["schema"]["types"][g["type"].split(":", 1)[1]]
-                            for g in case["groups"]}}
-        (base / "modcfg.json").write_text(json.dumps(schema, indent=1), encoding="utf-8")
-        contract = base / "modcfg.v1.toml"
-        contract.write_text(text, encoding="utf-8")
+        contract = case2_contract(base, repo)
         p = subprocess.run([str(BLACKBOX / "zk2"), "config", "derive", str(contract)], capture_output=True,
                            text=True, timeout=60)
         out.append(("zk2 config derive on derive.json case 2's groups writes the derived types",
@@ -186,21 +209,30 @@ def derived_at_zero(repo: Path = REPO) -> list[Result]:
             types = json.loads(p.stdout)["types"]
         except (ValueError, KeyError, TypeError):
             return out
+        data = json.loads((repo / "spec/profiles/config/conformance/v2/derive.json").read_text(encoding="utf-8"))
         rec = packed.lint({"types": {"R": types["Record"]}}).types.get("R") if "Record" in types else None
-        want = case["expect"]["layouts"]["Record"]
+        want = data["cases"][2]["expect"]["layouts"]["Record"]
         out.append(("the reference's derived Record is derive.json case 2's, the tag 0 and its sha256, by zk2py's "
                     "reading", rec is not None and [rec.tag, rec.layout_sha256()] == [want["tag"], want["sha256"]],
                     "" if rec is None else f"{rec.tag} {rec.layout_sha256()}"))
         tags = {n: (packed.lint({"types": {n: r}}).types.get(n) or packed.Record(n, [])).tag for n, r in types.items()}
         print(f"NOTE derived: {sorted(types)}, tags {tags}")
-        (base / "modcfg.json").write_text(json.dumps({"types": {**schema["types"], **types}}, indent=1),
-                                          encoding="utf-8")
+        contract = case2_contract(base, repo, types)
         ref, text_out = reference_codes(contract)
         mine = zk2py_codes(contract)
-        print("NOTE zk2 contract lint on it:", text_out.strip()[:1500])
-        out.append((f"the contract carrying them: zk2py {mine}, zk2 contract lint {ref}", mine == ref, ""))
-        out.append(("both read E051 for the derived Record", "E051" in mine and "E051" in ref,
-                    f"zk2py {mine}, reference {ref}"))
+        print(f"NOTE zk2 contract lint on case 2's contract: {ref}: {text_out.strip()[:900]}")
+        out.append((f"case 2's contract loads in zk2py, its derived Record at 0 read by no E051 (zk2py {mine}; "
+                    f"the reference's, its half to follow: {ref})", mine == [], ""))
+        zero = json.loads((repo / "spec/conformance/contracts/schemas/packed/tag.json").read_text(
+            encoding="utf-8"))["types"]["Zero"]
+        for label, kw, want_codes in (
+                ("the derived Record copied under another name, which no resource names", {"extra": {
+                    "Copy": types["Record"]}}, ["E051"]),
+                ("config's type a written one at 0 (tag.json's Zero), which is no derivation",
+                 {"extra": {"Zero": zero}, "config_type": "Zero"}, ["E051"]),
+                ("the same contract without config.v2 in uses", {"without_profile": True}, ["E020", "E051"])):
+            mine = zk2py_codes(case2_contract(base, repo, types, **kw))
+            out.append((f"case 2's contract, {label}: zk2py {mine}", mine == want_codes, f"want {want_codes}"))
     return out
 
 
