@@ -26,6 +26,11 @@ The reference device (W2, §2.2) on zenoh-modem's 2,400 bit/s RF link sends **18
 | **Total** | **18,367** | **669** | **674** | **25× less measured, 27× modelled** |
 | Heartbeat, as one owner heartbeat (#1110) | — | 177 | 176 | One put per class of exposure every 28.5 s, a group per interface: a 35-B payload in a 58-B SDU. An option, under a catalog its readers hold too |
 | **Total with it** | **18,367** | **610** | **612** | **27× less measured, 30× modelled** |
+| alarms, under alarms.v2 (#984) | — | 0.45 | 0.45 | Ten transitions, each a 9-B record in one 45-B SDU; the heartbeat confirms them as before |
+| desired re-reads, under desired.v2 (#986) | — | 45.2 | 45.8 | Each re-read conditional, an unchanged slice answered by its held stamp: 40 B up, 117 B down, every 300 s |
+| the same, by the watch at a 600-s horizon | — | 11.5 | 12.1 | The author's heartbeat, a 40-B SDU every 285 s toward the target, and no read while its section stays put; 7 in the window where the rate gives 7.4 |
+
+The last three rows are the v2 profiles' runs (§9; the wire baseline's "W2 with desired.v2 and alarms.v2"), on 16-bit runs, bare and decoded, with the lean stack's 16 B an SDU added, each against its design's figure. Each replaces the measured row of its element above, and the watch replaces the conditional read. With alarms.v2 and the conditional read, W2's day measured 633.3 KB under the lean stack, 2.44 % of RF and 35.5 KB less than the 669 KB above; the watch would take about 27 KB more.
 
 The today column is Appendix A's model, corrected to today's wire as measured across zenoh-modem's simulated RF and LoRa ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). The zk2c columns are the same baseline's zk2c runs, on RF at link.v2's transport, and Appendix A's model corrected to them (its section 10). Appendix A asserts each tolerance. The measured column gives each element from the bare run's decode, with the lean stack's 16 B an SDU added (32-bit runs, 695 KB in all); its total is the lean run's counters, with 16-bit runs. The two owner-heartbeat rows are the second pair of runs' (§9), on 16-bit runs under the lean stack, where the three heartbeats measured 227 KB.
 
@@ -418,7 +423,7 @@ Each element is given as today's wire, what must be kept, the compact layout, th
   - The resolved record is terminal: no delete follows.
   - Acknowledgement identity is t32 plus seq.
   - "Nothing fires" is established by one snapshot, with no 900-s window.
-- **After.** About 0.4 KB a day for W2.
+- **After.** About 0.4 KB a day for W2. Measured under `alarms.v2` (§9): 0.45 KB, each transition a 9-byte record in one 45-B SDU, with no binding record (#984).
 - **Risk.** The transition time drops to 1-s resolution, declared, with a +1 bump to stay strictly increasing. Summaries outside the templates need the escape.
 
 ### 5.13 health.v1
@@ -474,6 +479,7 @@ Each element is given as today's wire, what must be kept, the compact layout, th
   - **Report**: role 4 · source 2 · outcome 3 · last-known 1 · reserved 6, then in_force 40 · observed 40 · revision 16 · refusal code 3 · pointer index 8 · detail index 8 · reserved 5 = **17 bytes**.
   - The re-read becomes a **conditional GET** carrying the held version; an unchanged slice answers in about 35 bytes, 20 of them the reply's responder id.
 - **After.** 27 KB a day for W2. It falls to nearly zero where the author's heartbeat crosses the face, since the target then reads only when the author's high-water seq moves. Measured (§9), the reference's re-read is still today's GET, its reply the whole document: 64 KB a day.
+- **Measured under `desired.v2`** (§9, #986): the conditional re-read is 45.2 KB a day at 300 s, not 27, because the unchanged reply still names its key in text (61 B) and its replier (20 B). The watch, the author's heartbeat at a 600-s horizon, is 11.5 KB as the window held it and 12.1 KB at its rate, and no read was made while its section stayed put. The report is 18 B of payload, where `desired.v1.Report`'s was 294 B.
 
 ### 5.16 redundancy.v1
 
@@ -593,6 +599,7 @@ It then measured zk2c the same way (its "zk2c on RF, and W1-73 at LoRa SF7"), wi
 - at SF9 the uplink took 746 s a day, 86 % of the duty, and at SF12 864.5 s, all of it, with the keep-alives each sent beside its frames;
 - W2 on RF: **669 KB a day, 2.6 % of the channel, 25 times less than today's 16.5 MB**;
 - W2 on RF again, its owner sending one owner heartbeat (its "W2 with owner heartbeats", #1110): **610 KB a day, 2.35 %, 27 times less**. The heartbeat element went from 227 KB to 177 KB a day on 16-bit runs, 5,349 SDUs to 3,045, and the uplink's steady window differs from the first run's by those SDUs alone;
+- W2 on RF with its desired target on desired.v2 and its alarms on alarms.v2 (its "W2 with desired.v2 and alarms.v2", #986's J5, #984's S4), each figure against its design's: a conditional re-read 157 B under the lean stack, 45.2 KB a day at 300 s where the design said 45.8 KB, and no answer crossed after its read had ended at rf0's 15-s reply timeout; the watch at a 600-s horizon 11.5 KB, 12.1 KB at its rate, no read while its section stayed put nor after a change of document; an alarm's transition one 45-B SDU, 0.45 KB a day for W2's ten, byte for byte the design's; a late joiner's read 36 B up and 291 B down, where the design priced the alarms' snapshot alone and missed the words' empty one, 112 B; and W2's day **633.3 KB, 2.44 %**, under the lean stack;
 - the four guarantees, through the tools across rf0's face.
 
 Appendix A is corrected to it:
@@ -648,7 +655,7 @@ For each remaining run:
 
 ## Appendix A. Reproduce every figure
 
-Run with Python 3 (`python3 -I`); it needs no third-party package and asserts the figures the text quotes. Today's wire is the model corrected to the wire baseline ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). Each correction cites the finding and the run it rests on. The measured figures are constants in the code, and each tolerance is an assertion against them. The rest of the Zenoh model follows the 1.10.1 codec layouts read for this review, the layer sizes follow zenoh-modem's READMEs, and the airtime follows the Semtech formula with zenoh-modem's simulator parameters. Gauge widths for W1 and the per-minute change counts are illustrative assumptions, marked in the code. The baseline's `model.py` runs this script; its committed `results/model.json` is from before the correction. Section 10 checks the zk2c column against the baseline's zk2c runs (its "zk2c on RF, and W1-73 at LoRa SF7") and corrects it where the model, not the wire, missed: W1's 73 readings at zenoh-modem's ranges, W2's heartbeats, desired re-reads and reconnects, and, since the LoRa SF9 and SF12 runs, the keep-alives an uplink sends beside its frames, a range by link.v2 §2.16. The text quotes the corrected figures and the measured ones; section 6's zk2c rows stay the first model, and `model.py --zk2c` writes `results/model-zk2c.json` from them.
+Run with Python 3 (`python3 -I`); it needs no third-party package and asserts the figures the text quotes. Today's wire is the model corrected to the wire baseline ([`measurements/wire-baseline/`](measurements/wire-baseline/README.md)). Each correction cites the finding and the run it rests on. The measured figures are constants in the code, and each tolerance is an assertion against them. The rest of the Zenoh model follows the 1.10.1 codec layouts read for this review, the layer sizes follow zenoh-modem's READMEs, and the airtime follows the Semtech formula with zenoh-modem's simulator parameters. Gauge widths for W1 and the per-minute change counts are illustrative assumptions, marked in the code. The baseline's `model.py` runs this script; its committed `results/model.json` is from before the correction. Section 10 checks the zk2c column against the baseline's zk2c runs (its "zk2c on RF, and W1-73 at LoRa SF7") and corrects it where the model, not the wire, missed: W1's 73 readings at zenoh-modem's ranges, W2's heartbeats, desired re-reads and reconnects, and, since the LoRa SF9 and SF12 runs, the keep-alives an uplink sends beside its frames, a range by link.v2 §2.16. Since #986's J5 and #984's S4 it also asserts desired.v2's conditional re-read and watch, and alarms.v2's transitions, heartbeat and late joiner's read, measured on W2's path; `sdus16` takes the 5-byte frame of a priority other than `data` for alarms.v2's puts. The text quotes the corrected figures and the measured ones; section 6's zk2c rows stay the first model, and `model.py --zk2c` writes `results/model-zk2c.json` from them.
 
 ```python
 """Reproduce every figure of the bandwidth-first redesign report. Standard library only.
@@ -919,7 +926,8 @@ ab["health"] = sdus([put(HEALTH_STATUS, suffix=HEALTH_SUFFIX, hlc=True, enc=1, q
 rows["health"] = (ab["health"], 4 * sdus([put(B(MUT_HDR + HEALTH_REC), qos=True)], RF_MTU)[1],
                   None)
 # Alarms: 3 firing, each confirmed every 427.5 s (express, block, interactive_high); 10
-# transitions a day.
+# transitions a day. zk2c's 8-B transition is the first model's; alarms.v2's 9-B record, measured
+# in one 45-B SDU on the face's 5-byte frame, is section 10's (#984's S4).
 ap = 3 * DAY / 427.5
 ab["alarms"] = sdus([put(ALARM_REFRESH, suffix=ALARM_SUFFIX, hlc=True, enc=1, qos=True)],
                     RF_MTU, qos=True)[1] * (ap + 10)
@@ -943,6 +951,8 @@ rows["config"] = (ab["config"],
 # Desired target: a GET every 300 s (W2's assumption) on the expression its subscription to the
 # slice declared; the reply names the key in text, with a stamp and a 100-byte JSON document.
 # zk2c: a conditional GET carrying the held version; an unchanged slice answers a 3-byte record.
+# desired.v2's, measured, is section 10's (#986's J5): a 21-B request, and a 94-B reply whose key
+# is text, 45.2 KB a day where this row says 27.4 KB; its watch is 12.1 KB.
 req, rep = request(), reply(100, DESIRED_KEY) + FINAL
 creq, crep = request() + 1 + 5, reply(3, hlc=False, enc=0) + FINAL
 ab["desired"], ba["desired"] = sdus([req], RF_MTU)[1] * 288, sdus([rep], RF_MTU)[1] * 288
@@ -1209,28 +1219,30 @@ FRAME16 = 1 + 2
 ENV16, ENV32 = 1 + 2 + 3, 1 + 4 + 3
 
 
-def sdu_list16(messages, layers=LEAN, mtu=RF_MTU):
-    """sdu_list() on a link.v2 face: its 3-byte frame, no QoS extension on the frame."""
-    cap = mtu - layers - FRAME16
+def sdu_list16(messages, layers=LEAN, mtu=RF_MTU, qos=False):
+    """sdu_list() on a link.v2 face: its 3-byte frame. qos: a priority other than `data`,
+    whose frame carries the QoS extension too, 5 bytes (alarms.v2's puts, below)."""
+    frame = FRAME16 + (QOS if qos else 0)
+    cap = mtu - layers - frame
     out, used = [], None
     for m in messages:
         if m > cap:
             rest = m + FIRST_FRAG
             while rest > 0:
-                out.append(min(cap, rest) + FRAME16 + layers)
+                out.append(min(cap, rest) + frame + layers)
                 rest -= cap
             used = None
             continue
         if used is None or used + m > cap:
-            out.append(FRAME16 + layers)
+            out.append(frame + layers)
             used = 0
         out[-1] += m
         used += m
     return out
 
 
-def sdus16(messages, layers=LEAN, mtu=RF_MTU):
-    s = sdu_list16(messages, layers, mtu)
+def sdus16(messages, layers=LEAN, mtu=RF_MTU, qos=False):
+    s = sdu_list16(messages, layers, mtu, qos)
     return len(s), sum(s)
 
 
@@ -1471,6 +1483,95 @@ print(f"W2 zk2c on RF with one owner heartbeat: {w2_zk2c_ohb / 1e3:.0f} KB/day m
       f"{W2O['heartbeat'] / 1e3:.1f} KB measured, {hb3_lean1 / 1e3:.1f} KB as three")
 assert (round(w2_zk2c_ohb / 1e3), round(W2O_LEAN / 1e3), round(today / w2_zk2c_ohb)) == (612, 610, 30)
 assert (round(16_494.8e3 / W2O_LEAN), round(16_494.8e3 / W2Z_LEAN)) == (27, 25)
+# W2 with desired.v2 and alarms.v2 (#986's J5, #984's S4). Baseline, "W2 with desired.v2 and
+# alarms.v2": zk2c-w2-v2-bare-1, W2 zk2c with the device's desired target on desired.v2 (its
+# 300-s period, each read waiting rf0's 15-s reply timeout) and its alarms on alarms.v2 (a table's
+# rule each, no label), no layers, 16-bit runs, decoded; the lean stack 16 B an SDU more. The
+# designs' figures (#986's §1.3 and §5, #984's §1.2 and §4) were computed through this appendix;
+# here they meet the wire.
+# desired.v2's re-read is conditional (desired.v2 §2.5): the GET's payload carries the held
+# stamp, 6 B and 3 B of payload header, so the request is 21 B; answered unchanged by the held
+# stamp alone, a 94-B reply, its key's text 61 B and the replier's id 20 B, then the final. Both
+# measured byte for byte: a 24-B SDU up, and the reply and its 4-B final in one 101-B SDU down,
+# where the design priced a 6-B final, the zk2c run's measured one. So a re-read is 157 B under
+# the lean stack, the design's 159 B less 2, and 45.2 KB a day at 300 s where desired.v1's GET
+# cost 63.9 KB. The window held 7 re-reads; the relay dropped one's answer, and that GET ended at
+# 15 s with no verdict (core O5). No answer crossed after its GET had ended.
+CREQ16 = request() + 3 + ENV16
+TASKS2_KEY = len("zk2/fleet/desired/tasking.v2/state/tasks/h-3fa9c2d41b7e/rf0")
+assert reply(ENV16, TASKS2_KEY, hlc=False, enc=0) == 94
+cread = sdus16([CREQ16])[1] + sdus16([94, FINAL])[1]
+assert (CREQ16, sdus16([CREQ16])[1], sdus16([94, FINAL])[1], cread) == (21, 40, 117, 157)
+W2V2 = {"reread_ab": 6_912 + LEAN * 288, "reread_ba": 29_088 + LEAN * 288}   # a day, lean
+assert 288 * cread == W2V2["reread_ab"] + W2V2["reread_ba"] == 45_216
+assert round(288 * cread / des, 2) == 0.71
+# The target's report (desired.v2 §2.10) is a packed record: 3 B at the baseline, a 9-B payload,
+# and 12 B converged with a 16-bit run and a revision, an 18-B payload and, a state's `block`
+# putting the QoS extension on it, a 24-B put: 43 B alone in its SDU on the lean stack, the
+# design's. desired.v1's was 294 B of payload in two SDUs.
+assert (ENV16 + 3, ENV16 + 12, put(ENV16 + 12, qos=True), sdus16([put(ENV16 + 12, qos=True)])[1]) \
+    == (9, 18, 24, 43)
+# alarms.v2 (§3): a transition is a 9-B record under the envelope, a 15-B payload, its put on the
+# scope its far reader declared, the slot `/<n>` 2 B of suffix: 24 B. Its priority,
+# interactive_high, puts the QoS extension on the face's frame too, 5 bytes: every raise, refresh
+# and resolve decoded a 29-B SDU, so 45 B lean, the design's (it inferred the frame from
+# alarms.v1's totals, and the frame is as it inferred). W2's ten transitions are 450 B a day,
+# where alarms.v1's JSON cost 2.0 KB (zk2c-w2-bare-1, lean derived).
+ALARM_V2 = ENV16 + 9
+alarm_sdu = sdus16([put(ALARM_V2, suffix=2, qos=True)], qos=True)[1]
+assert (ALARM_V2, put(ALARM_V2, suffix=2, qos=True), alarm_sdu - LEAN, alarm_sdu) == (15, 24, 29, 45)
+assert 10 * alarm_sdu == 450
+# The alarms' heartbeat, 3 firing: a 17-B payload in a 24-B SDU bare, 40 B lean, every 427.5 s,
+# 8.1 KB a day; the window held 5 where the rate gives 4.9.
+assert sdus16([put(17)])[1] == 40 and round(DAY / 427.5 * 40 / 1e3, 1) == 8.1
+# A late joiner (alarms.v2 §2.15) GETs `…/alarms.v2/state/**` and draws two snapshots. The alarms',
+# 3 firing and the transient's resolved record kept, was a 160-B reply: the design's 138 B for 3
+# firing, and 22 B a resolved record kept; with all four resolved, 178 B, a resolved entry 6 B
+# more than a firing one. The words', which holds no member when every rule is a table's, was an
+# 89-B reply, then the 4-B final: a second SDU the design did not price. The read is 36 B up and
+# 179 + 112 B down under the lean stack, where the design said 163 B in one SDU.
+SNAP_ALARMS = {"3 firing": 138, "kept resolved": 22, "firing": 16}
+assert SNAP_ALARMS["3 firing"] + SNAP_ALARMS["kept resolved"] == 160
+assert SNAP_ALARMS["3 firing"] - 3 * SNAP_ALARMS["firing"] + 4 * SNAP_ALARMS["kept resolved"] == 178
+late = sdus16([160])[1] + sdus16([89, FINAL])[1]
+assert (sdus16([160])[1], sdus16([89, FINAL])[1], late) == (179, 112, 291)
+# The watch (desired.v2 §2.5; zk2c-w2-v2-watch-bare-1, tasking.v2 at a 600-s horizon): the
+# author's heartbeat toward the target, a 17-B payload for its one live member, a 21-B put in a
+# 24-B SDU, 40 B lean, every 285 s: 12.1 KB a day, the design's. The window held 7 where the rate
+# gives 7.4, within one put, #1110's tolerance. The target read once, at its first heartbeat
+# after its start (it expects no section then), and never again: not while the section stayed
+# put, and not after the change of document, for which it moved the digest it expects itself.
+# A lost heartbeat costs one read (step 3), and none of the 7 was lost: at RF's 5 % that is 15
+# reads a day, 2.4 KB, which the design did not price.
+watch_day = DAY / (0.475 * 600) * sdus16([put(17)])[1]
+assert (put(17), sdus16([put(17)])[1], round(watch_day / 1e3, 1)) == (21, 40, 12.1)
+W2V2_WATCH = {"heartbeats": 7, "window_s": 2_100}
+assert abs(W2V2_WATCH["heartbeats"] - W2V2_WATCH["window_s"] / (0.475 * 600)) < 1
+lost = round(LOSS * DAY / (0.475 * 600))
+assert (lost, round(lost * cread / 1e3, 1), round((watch_day + lost * cread) / 1e3, 1)) \
+    == (15, 2.4, 14.5)
+# W2's day, measured under the lean stack (zk2c-w2-v2-lean-1, the period, 16-bit runs) as W2
+# makes it: the steady window's counters, 672,686 B A->B and 56,283 B B->A a day; gen's 1,440
+# events cut to W2's 15 (77 B each); the acts at their daily counts, 648 B and 618 B; and 4
+# reconnects, 5,857 B and 6,928 B (zk2c-w2-v2-bare-1, decoded). 2.44 % of RF, 35.5 KB under
+# zk2c-w2-lean-1's 668.8 KB, where #986's and #984's designs said 19.5 KB: they priced today's
+# re-read by this model's 63.9 KB, and that run's re-reads crossed more, its timed-out GETs'
+# replies among them.
+W2V2_LEAN = (672_686 - 1_440 * 77 + 15 * 77 + 648 + 5_857) + (56_283 + 618 + 6_928)
+assert (W2V2_LEAN, round(100 * W2V2_LEAN / RF_DAY_BYTES, 2)) == (633_295, 2.44)
+assert round((W2Z_LEAN - W2V2_LEAN) / 1e3, 1) == 35.5
+# The corrected model with the v2 rows: the conditional re-read and alarms.v2's transitions in
+# place of the GET and the 8-B transitions, and the three heartbeats as zk2c-w2-lean-1 measured
+# them on 16-bit runs, 226.8 KB, in place of the bare run's 238.0 KB on 32-bit ones. It is 1.7 %
+# over the run: the heartbeats pair into SDUs differently from run to run, and this one's placed
+# 222.0 KB. So the tolerance is 2 %, wider than the owner heartbeat's 1 %, whose layout fixed its
+# SDUs.
+w2_v2 = (w2_zk2c - hb_lean + hb3_lean1 - des + 288 * cread
+         - rows["alarms"][1] + 10 * alarm_sdu)
+assert within(w2_v2, W2V2_LEAN, 0.02) and round(w2_v2 / 1e3) == 644
+print(f"W2 zk2c on RF with desired.v2 and alarms.v2: {W2V2_LEAN / 1e3:.1f} KB/day measured, "
+      f"{w2_v2 / 1e3:.0f} KB modelled; a re-read {cread} B, an alarm's transition {alarm_sdu} B, "
+      f"the watch {watch_day / 1e3:.1f} KB/day")
 print("all assertions hold")
 ```
 
