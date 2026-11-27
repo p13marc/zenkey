@@ -760,6 +760,25 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   (`zenkey/tests/profile_freshness_v2.rs`). `health.v1` 0.11 is
   editorial: `heartbeat_held` is a time that is no instant, ahead or
   unknown, and no answer of `clock.json` moved.
+  Core 0.114 (#1165) is specified against zenoh 1.10.2. §0: each
+  Appendix B fact was read in 1.10.2 and in 1.10.1 (whose routers stay in
+  the field) and says where they differ, and a text that names 1.10.1
+  holds of 1.10.2 unless Appendix B says otherwise, so observer.md's and
+  the profiles' mentions stay. Four facts differ: `BestMatching` over a
+  router's south-bound face's queryables on one resource (zenoh#2845), a
+  QUIC mixed-reliability companion's batch (#2870), a push to a transport
+  closing as unresponsive failing fast with no `Close` (#2709), and the
+  receive threads a process shares (measured on 1.10.1 only). No rule
+  moved: a defect 1.10.2 fixes keeps its rule, and removals are #936's.
+  File and line are 1.10.2's: `resource.rs` is one line shorter past 650
+  (739, 741–757, 660–728, 1004). Measurements stay 1.10.1's;
+  `docs/zk2/upstream/` keeps its pinned versions. `link.v2` 0.25 adds the
+  binding `zenoh-1.10.2`: 1.10.1's nine protocols and §2.19's column
+  (the fork's 10 s `wait_before_close` is its own change, stock 1.10.2
+  keeps 5 s); `v2/lints.json`'s case 20 now names `zenoh-1.10.0` as the
+  unnamed binding, with cases 75–76, `v2/transport.json` 32–33, and
+  `v2/plan.json` 51 (after #986 J4's 50), each written by reading the
+  text.
 - **`link.v2`** (#988 L1–L2, text 0.1, `experimental` until an adopter's
   mapping lists it) sits beside `link.v1` in `spec/profiles/link/`:
   `v2.md`, `scenarios-v2.md`, `conformance/v2/{lints,plan,transport}.json`

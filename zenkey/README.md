@@ -188,7 +188,7 @@ participant use only stable Zenoh API, and names the few places where
 one opts into more (§2.4, §2.5); an opt-in never changes a key's shape.
 This crate opts into each of them, and into nothing else:
 
-| Unstable in zenoh 1.10.1 | Where | Why |
+| Unstable in zenoh 1.10.1 and 1.10.2 | Where | Why |
 |---|---|---|
 | `zenoh_ext::AdvancedPublisher`, `AdvancedPublisherBuilderExt`, `CacheConfig`, `MissDetectionConfig` | `writer` | A resource whose contract declares `history` (core §2.5): the publisher's cache and its sample-miss detection. A resource without `history` is written by a plain publisher. |
 | `PublisherBuilder::reliability`, `PublicationBuilder::reliability`, `zenoh::qos::Reliability` | `writer`, `service`, `qos` | The contract's declared `reliability`, on every publisher and every event's put (core §2.4). Without it every sample would go reliable, which §2.4 allows, and a `best_effort` stream would cost what a reliable one does. |
