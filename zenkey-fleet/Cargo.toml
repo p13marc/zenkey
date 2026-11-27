@@ -61,8 +61,8 @@ schemars = { workspace = true }
 json5 = { workspace = true }
 serde_yaml = { workspace = true }
 # A router config's own tree, for which transport keys it states (link.v2
-# §2.19): read by its extension with the very parsers zenoh 1.10.1's
-# `Config::from_file` used (`RouterConfig::stated_tree`).
+# §2.19): read by its extension with the very parsers zenoh 1.10.2's
+# `Config::from_file` uses, 1.10.1's too (`RouterConfig::stated_tree`).
 json5-zenoh = { workspace = true }
 toml-zenoh = { workspace = true }
 # The `.zrec` row dialect carries wire payloads lossless (RFC 09 §5.2) —
