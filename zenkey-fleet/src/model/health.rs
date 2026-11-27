@@ -218,6 +218,13 @@ pub fn reading(
 /// current together; *no* in the last reading alone is unobservable;
 /// otherwise the last reading's answer.
 pub fn agreement_over(readings: &[Agreement]) -> HealthAnswer {
+    agreement_over_in(readings, "health.v1")
+}
+
+/// [`agreement_over`], its finding citing `profile`'s §2.2: both majors
+/// state the rule there (review-bot on #1168: a v2 answer named it by
+/// rewriting v1's words, which a rewording would have left citing v1).
+fn agreement_over_in(readings: &[Agreement], profile: &str) -> HealthAnswer {
     let Some(last) = readings.last() else {
         return answer(
             HealthAnswerToken::NotAsked,
@@ -232,7 +239,7 @@ pub fn agreement_over(readings: &[Agreement]) -> HealthAnswer {
                 Reason::Inconsistent.as_str(),
                 &format!(
                     "a current check is worse than its fresh status in each of {} readings: its \
-                     owner breaks health.v1 §2.2",
+                     owner breaks {profile} §2.2",
                     readings.len()
                 ),
             )
@@ -275,11 +282,7 @@ pub fn agreement_over_v2(readings: &[Agreement], one_instant: &[bool]) -> Health
              its two snapshots under one run and one asof with no entry above it: its owner \
              breaks health.v2 §2.2",
         ),
-        _ => {
-            let mut a = agreement_over(readings);
-            a.says = a.says.replace("health.v1 §2.2", "health.v2 §2.2");
-            a
-        }
+        _ => agreement_over_in(readings, "health.v2"),
     }
 }
 

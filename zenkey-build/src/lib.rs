@@ -327,17 +327,18 @@ impl Config {
                     // is an invalid table of words in one that lists
                     // health.v2 (health.v2 §2.10): an owner would write no
                     // word of it, and a reader would show numbers.
-                    Some(c) if !table_lints(&c).is_empty() => {
-                        let findings = table_lints(&c)
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>();
-                        return Err(Error::Lint {
-                            file: shown,
-                            report: findings.join("\n"),
-                        });
+                    Some(c) => {
+                        let lints = table_lints(&c);
+                        if !lints.is_empty() {
+                            let findings =
+                                lints.iter().map(ToString::to_string).collect::<Vec<_>>();
+                            return Err(Error::Lint {
+                                file: shown,
+                                report: findings.join("\n"),
+                            });
+                        }
+                        out.push((f, c));
                     }
-                    Some(c) => out.push((f, c)),
                     None => {
                         let errors: Vec<String> =
                             l.report.errors().map(ToString::to_string).collect();
