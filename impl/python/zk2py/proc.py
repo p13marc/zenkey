@@ -1,6 +1,8 @@
 """Helper processes for the budget measurements (``scenarios/budget.md``
 §1–§3): ``python -m zk2py.proc router …``, ``… publish …`` and, for §1 step
-4 (0.27), ``… consume …``, a consumer whose whole process is stopped.
+4 (0.27), ``… consume …``, a consumer whose whole process is stopped. Since
+round 122, ``… shared …``: core Appendix B's two routers and a blocked
+reader in one process (:func:`zk2py.zenoh_facts.fact_receive_threads`).
 
 §1 needs each router in a process of its own: "The sessions of one process
 share zenoh's receive threads … That is a measurement of the process, not
@@ -124,6 +126,66 @@ def consume(args: argparse.Namespace) -> None:
     s.close()
 
 
+def shared(args: argparse.Namespace) -> None:
+    """Core Appendix B's "receive threads" (round 122): two routers and a
+    reader whose callback blocks, all in this one process. R1 listens on
+    ``--listen``, R2 on ``--listen2`` and links to R1, and the reader is a
+    client of R1 that takes 2 ms over each sample and blocks 7 s on sample
+    ``--stop-at``. It prints ``token`` once the owner's token has reached
+    it, and, once no sample has arrived for 9 s, ``result <json>``: what
+    arrived, the withdrawals it heard, and the transport closes the reader
+    and R1 heard, each in ms from the block's start."""
+    import zenoh
+
+    from .budget import StallWatch
+
+    r1 = zenoh.open(_config("router", args.listen, [], None, True))
+    r2 = zenoh.open(_config("router", args.listen2, [args.listen], None, True))
+    s = zenoh.open(_config("client", None, [args.listen], None, False))
+    watch, watch_r1 = StallWatch(s), StallWatch(r1)
+    got: list[int] = []
+    withdrawn: list[float] = []
+    last = [time.monotonic()]
+    blocked = [0.0]
+
+    def on_sample(sample) -> None:
+        i = int.from_bytes(sample.payload.to_bytes()[:4], "big")
+        got.append(i)
+        last[0] = time.monotonic()
+        if i == args.stop_at and not blocked[0]:
+            blocked[0] = time.monotonic()
+            time.sleep(7.0)
+        else:
+            time.sleep(0.002)
+
+    lv = s.liveliness().declare_subscriber(args.token, zenoh.handlers.Callback(
+        lambda smp: withdrawn.append(time.monotonic()) if smp.kind == zenoh.SampleKind.DELETE else None),
+        history=True)
+    sub = s.declare_subscriber(args.key, zenoh.handlers.Callback(on_sample))
+    print("ready", flush=True)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if any(r.ok is not None for r in s.liveliness().get(args.token, timeout=1.0)):
+            break
+        time.sleep(0.1)
+    print("token", flush=True)
+    last[0] = time.monotonic()
+    while time.monotonic() - last[0] < 9.0 and len(got) < args.count:
+        time.sleep(0.1)
+    t0 = blocked[0] or time.monotonic()
+    ms = lambda ns: [round(x / 1e6 - t0 * 1000) for x in ns]  # noqa: E731
+    print("result " + json.dumps({"got": len(got), "withdrawn": [round((w - t0) * 1000) for w in withdrawn],
+                                  "reader_closes": ms(watch.closes), "r1_closes": ms(watch_r1.closes),
+                                  "blocked": bool(blocked[0])}), flush=True)
+    sys.stdin.read()
+    for x in (sub, lv):
+        x.undeclare()
+    watch.close()
+    watch_r1.close()
+    for x in (s, r2, r1):
+        x.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.proc")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -145,8 +207,15 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--token", required=True)
     c.add_argument("--count", type=int, default=1000)
     c.add_argument("--stop-at", type=int, default=100)
+    sh = sub.add_parser("shared")
+    sh.add_argument("--listen", required=True)
+    sh.add_argument("--listen2", required=True)
+    sh.add_argument("--key", required=True)
+    sh.add_argument("--token", required=True)
+    sh.add_argument("--count", type=int, default=1000)
+    sh.add_argument("--stop-at", type=int, default=100)
     args = ap.parse_args(argv)
-    {"router": router, "publish": publish, "consume": consume}[args.cmd](args)
+    {"router": router, "publish": publish, "consume": consume, "shared": shared}[args.cmd](args)
     return 0
 
 

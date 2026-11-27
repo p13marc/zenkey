@@ -985,7 +985,8 @@ throughout: `--for 905` listens that long, then the longer of `--lease` and
 `--wait-before-close`, and the timeout, more while the owners are watched
 (observer §5.2). Both default to the routers' `--face-policy`'s
 `[transport]`, else to the defaults of the zenoh `--binding` names
-(`zm-1.10.2-r1` waits 10 s), else to zenoh 1.10.1's 10 s and 5 s; `check
+(`zm-1.10.2-r1` waits 10 s, `zenoh-1.10.1` and `zenoh-1.10.2` 5 s), else to
+zenoh 1.10.1's 10 s and 5 s; `check
 conform`, `telemetry`, `timing` and `arbitration` resolve them alike. The **owners in scope** are those
 presence finds, and those an archive's keys name — absent, so not asked, and
 never "nothing fires". A reply's stamp is aged against a trusted clock:

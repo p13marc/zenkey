@@ -680,7 +680,7 @@ Four more runs:
     - With the admin space off, the check is unobservable.
     - With it on, read-only, a router with no storage is clean.
     - **Who answered (0.12).** An answer counts only when its replier id
-      (`Reply.replier_id`, which zenoh-python 1.10.1 exposes) is the zid
+      (`Reply.replier_id`, which zenoh-python 1.10.1 and 1.10.2 expose) is the zid
       its key names, and that zid is a verified router.
       - Verified routers grow outward (0.13): the session's routers and
         the session itself, then every `router` session a verified
@@ -811,8 +811,9 @@ is declaring").
   and filters by the ULID's time, so the consumer applies the retention
   even against a storage that ignores `_time`. zenoh-python routers run no
   storage manager, so the storage's own pruning is not measured.
-- **Appendix B.** `Reply.replier_id` is unstable in zenoh-python 1.10.1:
-  it is marked in the stub, and present at run time. With it absent
+- **Appendix B.** `Reply.replier_id` is unstable in zenoh-python 1.10.1,
+  and in 1.10.2 (round 122): it is marked in the stub, and present at run
+  time. With it absent
   (simulated by `live.READ_REPLIER = False`), every admin answer is
   unverified, and S4 and S1 are unobservable, never clean.
 
@@ -1041,7 +1042,7 @@ described below.
   by default, 750 ms for a 1 s lease). `reader_stalled` is second in the
   reasons, after `reader_lost`.
 - **`budget.StallWatch`** is how zk2py reads its own stall. zenoh-python
-  1.10.1 exposes transport events
+  1.10.1 and 1.10.2 expose transport events
   (`Session.info.declare_transport_events_listener`, unstable), so it
   records every transport of the session that closes, and a ticker thread
   (every 50 ms) records the longest gap. Every `Window` runs one from
@@ -2544,7 +2545,8 @@ zk2py read it cold in round 54, and implemented it from the text:
 - **A read not made** (`zk2py.live`). `list_presence` makes no read
   through a session that holds no link to another node: since 0.38 it
   checks the session's links (`Session.info.links()`, which zenoh-python
-  1.10.1 has), never its transports, which can still list a closing one.
+  1.10.1 and 1.10.2 have), never its transports, which can still list a
+  closing one.
   Nor does it make one on a session that has held a liveliness subscriber
   zk2py declared (`declare_liveliness_subscriber` marks it for its life).
   It reports each **not made**, with its reason (`Presence.kind`, a third
@@ -9023,6 +9025,172 @@ Round 121 found F-603 to F-606: one contradiction, one gap and two minor
 errors. None is a blocker. F-569 to F-602 stay open. See "At link.v2
 0.24, against the reference's tools" in `SPEC-FINDINGS.md`.
 
+## Core 0.114 and `link.v2` 0.25: zk2py on zenoh 1.10.2 (round 122)
+
+Round 122 read this tree at 32662a0f (#1165), its black boxes built from
+32662a0f. Core 0.114 specifies zk2 against zenoh 1.10.2, and reads each
+Appendix B fact in 1.10.2 and in 1.10.1. `link.v2` 0.25 adds the binding
+`zenoh-1.10.2`. No keyword moved, and `RULES.md` is unchanged: 297 rules,
+and the walk's 310 rows keep their verdicts.
+
+### The binding and the walk
+
+- **`zenoh-1.10.2`, from the text:** §2.4's list is "the same nine, in
+  the same order", and §2.19's column is 1.10.1's, its 5 s
+  `wait_before_close` included. `link_v2.BINDINGS` and `DEFAULTS` take
+  it. Before that line each of the five new cases drew `bad_value` at
+  `binding` alone. With it every one passes as written: `v2/lints.json`'s
+  75 and 76, `v2/transport.json`'s 32 and 33, `v2/plan.json`'s 51.
+- **The entry's account of each case agrees** with the cases it names
+  (`_round122_readings`): case 20 names `zenoh-1.10.0` and draws
+  `bad_value` alone; 75 is 21 with its binding moved; 76 is 22 under
+  1.10.2 on `unixsock-stream`; 32 is case 4's policy with its binding
+  moved, and draws case 4's three; 33 is case 1's, and draws its six; 51
+  differs from case 0 at `/binding` alone.
+- **The walk re-keyed:** the three files' counts are 77, 34 and 52,
+  §2.19's `null` sentence and Appendix B's "Computed from zenoh's
+  layouts" are read as 0.25 and 0.114 word them, and the `link.v2`
+  header check takes 0.24 or later.
+
+**`just py-conformance`: 8119 of 8119**, on eclipse-zenoh 1.10.1 and on
+1.10.2. Before any line of this round it failed 15 of 8112: ten readings
+and the five new cases.
+
+### The pin
+
+`requirements.txt` pins `eclipse-zenoh==1.10.2`, its comment core §0's.
+`bootstrap.py` installed it into `target/py-venv`. protobuf is 7.36.2,
+as since round 121's base; the Dependencies table said 6.33.5, and now
+says 7.36.2. zenoh-python 1.10.2's four stubs are 1.10.1's byte for
+byte: the API is the same, and only the compiled module moved.
+
+### Live
+
+On the black boxes of 32662a0f. Every router is zenoh-python 1.10.2's.
+92 runs of 46 runners, every pairing each has, about 4,970 checks.
+
+| Runner | Pairings | On 1.10.2 | Moved against its last run on 1.10.1 |
+|---|---|---|---|
+| `live_interop` | the owner example, `consume`, `zenctl` | 490/490 after the mend; 489/490 first | One check, zk2py's: its held heartbeats' time was still "unknown", which `freshness.v2` 0.12 made the ahead time (round 120 moved `health_scenarios` alone). The owner example's heartbeats carried `ahead` on both releases: `--only health` 25/25 on each |
+| `presence_scenarios` | zk2py's owner and reader; the owner example; `zenctl` as reader with each owner | 103/103, 97/97, 38/38, 37/37 | nothing (round 111: the same four) |
+| `budget_scenarios` | the owner example for §4 to §7 | 41/41 | nothing judged. §1's losses, three runs each beside this one: step 3 lost 237–436 on 1.10.2 and 1–177 on 1.10.1, step 4 295–425 and 56–249 |
+| `state_scenarios` | zk2py's owner, the owner example, `zenctl` doctor and storage readers | 62/62, 52/52, 64/64, 64/64 | nothing |
+| `state_pairings`, `snapshot_live`, `conditional_live` | py-py, rust-py, py-rust | 50, 40, 28; 17, 16, 7; 36, 20, 16 | nothing (118 and 40 as round 111) |
+| `stray_live`, `events_live`, `archive_live` | | 7/7, 27/27, 11/11 | nothing |
+| `forms_live`, `packed_live` | py-py, py-rust, zenctl-py; rust-py, py-rust | 53, 26, 49; 12, 15 | nothing (128 and 27) |
+| `observer_scenarios`, `security_scenarios` | both owners; `zenctl acl gen`'s block too | 50/50, 33/33 | nothing |
+| `constrained_live`, `far_side_live`, `first_hop_live`, `across_live` | each device | 14, 16, 11 and 11, 8 | nothing. `far_side_live`'s policy names `zenoh-1.10.2` now, the zenoh its routers run |
+| `ahead_live`, `heartbeat_epoch_live`, `owner_heartbeat_live` | each owner; `--forms`, `--silent`, `--reference` | 15/15; 4, 4; 27, 4, 6, 16 | nothing |
+| `hostid_scenarios`, `freshness_scenarios`, `health_scenarios`, `health_v2_scenarios` | | 35, 23, 31, 55 | nothing |
+| `config_scenarios`, `config_remint_live`, `config_v2_scenarios` | zk2py's owner and the owner example; py-py, rust-py, py-zenctl | 52, 52; 4; 60, 58, 54 and 1 not run | nothing (172 as round 111) |
+| `alarms_scenarios`, `telemetry_scenarios` | zk2py's owner, the owner example; `zenctl telemetry` beside | 80, 80; 57, 164, 163 | nothing |
+| `telemetry_v2_scenarios`, `frames_scenarios`, `freshness_v2_scenarios`, `freshness_v2_s8_live` | py-py, rust-py, py-zenctl | 30, 30, 35; 43, 43, 40; 41, 41, 30; 34, 35, 30 | nothing. `freshness_v2_s8_live`'s policy names `zenoh-1.10.2` |
+| `link_scenarios`, `link_v2_live`, `link_v2_frames_live` | | 89, 130, 20 | `link_v2_live` holds 25 new checks: `zenctl check face` under `zenoh-1.10.2`, each the answer it gives under `zenoh-1.10.1` |
+| `stamp_live` | near and far | 15/15 on a rerun; 14/15 first | One batch, beside the two lanes' load: the control's fault occurrence rode a 123-byte batch with `oper`. Run again alone, three times on each release: 70 B, 26 over the block's 44, as round 109 |
+| `redundancy_scenarios` | zk2py's pair; the owner example as A, as B | 105, 103, 104 | nothing |
+| `desired_scenarios` | zk2py's parties; the owner example as author, as target | 213; 86 and 2 not run; 86 and 2 not run | nothing |
+| `desired_v2_scenarios`, `desired_v2_edges`, `desired_v2_mixed` | zk2py's author and target, the reference's author, the reference's target | 134, 120, 119; 8, 8, 8; 28 | nothing (134 and 120 as round 121) |
+| `arbitration_scenarios`, `timing_interop`, `timing_scenarios` | py:py, rs:py, py:rs | 83, 82, 82; 75, 75, 75; 28 | nothing |
+
+- **No step passes or fails differently** for zenoh's sake. The two
+  first-pass failures were zk2py's check and a batch's timing; both are
+  above, each with what was sent.
+- **Two lanes ran at once** on cores 4 and 5. Each runner was run whole
+  once; a failure was run again alone, on each release.
+
+### zk2py's own Zenoh facts, on 1.10.2
+
+`python -m zk2py.zenoh_facts` runs each fact the README or Appendix B
+names of zenoh-python 1.10.1, on the zenoh-python it is installed with.
+It ran on 1.10.2 (`target/py-venv`) and on a copy of round 121's 1.10.1
+venv, the same host and minute.
+
+| Fact | Where it is named | 1.10.1 | 1.10.2 |
+|---|---|---|---|
+| The API: the four stubs | the README's Dependencies | the stubs zk2py was written against | 1.10.1's byte for byte |
+| No unbounded handler; `Callback` | §8.1's handler rule; Appendix B | holds | holds |
+| `Reliability`, `Reply.replier_id` and the transport events listener marked unstable; `Session.put` takes no reliability | Appendix B; "Since 0.16 and 0.17" | holds | holds |
+| A publisher declared without a reliability reads back reliable, `drop`, `data` | Appendix B | holds | holds |
+| An open session has no configuration accessor | Appendix B; core 0.41 | holds | holds |
+| `history=` is keyword-only | round 99's mend | holds | holds |
+| An NTP64 from seconds and nanoseconds, a 1 ns step | Appendix B | holds | holds |
+| A `null` at seven of `link.v2` §2.19's keys refused at load, at `routing/interests/timeout` loaded | round 112 | holds | holds |
+| A session with no transport: no link, every liveliness GET answered at once with the final reply alone | Appendix B; core 0.38 | 0.09–0.4 ms | 0.08–0.34 ms |
+| `replier_id` names the session that answered | 0.12 | holds | holds |
+| A callback GET's drop function marks completion; a finished read has no error reply | §8.1 | 20 of 20 tokens | 20 of 20 |
+| A liveliness GET that reaches its timeout ends with `Timeout` under `zenoh/string` | 0.8; Appendix B | holds | holds |
+| `b""` for an empty attachment and `None` for none, on a put and a delete | Appendix B | holds | holds |
+| A client whose HLC is on stamps an unstamped owner's puts with its own zid, through a router that stamps nothing | Appendix B | 20 of 20 | 20 of 20 |
+| What a put adds to its batch: a stamp 26 B (16-byte zid), `application/json` 1 B, `zenoh/bytes` none, an attachment 2 B over its own | Appendix B | 27, 53, 28, 27, 31, 29 B | the same bytes |
+| F-47: a bounded subscriber nobody drains starves a callback GET on its session | Appendix B (observer §3.1) | 257 of 2,002, at its timeout | 257 of 2,002 |
+| A GET right after a history liveliness subscriber on its session can miss the token | Appendix B | held in 19 and 24 of 60 | held in 10 and 20 of 60 |
+
+Every one holds on 1.10.2. Measured beside them, and never judged, each
+varying from run to run on both releases:
+- **A close's withdrawals before its transport event**, as a Python
+  callback sees them: 10 of 10 and 8 of 10 cuts on 1.10.1, 9 of 10 and 10
+  of 10 on 1.10.2, an inversion 0.02 to 1.6 ms. The two callbacks run on
+  zenoh's threads and each takes the GIL before it reads the clock. zk2py
+  reads a move by its links (`arbitration_live`), never by that order.
+- **A call no queryable answers in time:** its own `Timeout` under
+  `zenoh/string` in 10 and 12 of 12 GETs on 1.10.1, 7 and 11 of 12 on
+  1.10.2; the router's under `zenoh/bytes` in the rest, once both on one
+  GET. Either is silence (core §5.2).
+- **`BestMatching`** (Appendix B's first difference), the one that moved:
+  A declares a complete queryable and an incomplete one on one key, B a
+  complete one, C calls 40 times. On 1.10.1, A's complete one declared
+  first: B answers 40 of 40; declared last: A, 40 of 40. On 1.10.2, A
+  answers 40 of 40 either way. "The last one declared decided", as
+  Appendix B says. Where A answered, both of its queryables did.
+- **A process's receive threads** (Appendix B's fourth), two routers and
+  a blocked reader in one process (`proc shared`), the owner a process
+  of its own, 12 runs each. On 1.10.1, 11 runs lost 71–966 of 1,000, in
+  6 no transport close was heard by the reader or by R1, and three
+  withdrawals came 9.8–12.4 s after the block. On 1.10.2, 11 lost
+  76–784, in 2 no close was heard, and every withdrawal came within
+  8.3 s. The stall Appendix B names showed on 1.10.1, and less on
+  1.10.2, as zenoh#2709 aims. Twelve runs do not measure observer §5.2's
+  premise away.
+
+### Appendix B, read cold
+
+- **A reader on 1.10.2 can build from the four.** `BestMatching` holds
+  as worded, on both releases, measured. A push that closes a transport:
+  §2.7's bound and observer §5.2 rest on the first push, and every
+  budget check passed on 1.10.2. §1's steps 3 and 4 lost more there,
+  which "fails every later push to it at once" would explain; nothing
+  judges the count. A link's batch: no QUIC face was run (F-608). The
+  receive threads: measured above, the stall rarer on 1.10.2.
+- **No fact was removed.** 0.114 rewords seven sentences ("Read in
+  zenoh's `src/`" three times, "read from the source of both" twice,
+  "Computed from zenoh's layouts", "zenoh's defaults are 5 s and 1 ms")
+  and moves five line numbers.
+- **"1.10.2 does the same unless Appendix B says otherwise"** reads every
+  "1.10.1" in the texts. Three kinds are not zenoh's behaviour read or
+  measured: the bindings' own releases, observer.md's name for the
+  appendix (F-607), and `scenarios-v2.md`'s N and its `binding` (F-609).
+- **One rule's fact now carries an exception the rule does not:** §8.5's
+  and `link.v1` §2.1's batch, on a 1.10.1 router's QUIC link (F-608).
+
+### What changed in zk2py
+
+- **`link_v2`:** the binding `zenoh-1.10.2`, its list and its column.
+- **`conformance`:** the walk re-keyed, and `_round122_readings`.
+- **`zenoh_facts`, new:** the facts above, each run, and four of
+  Appendix B's measured. **`proc shared`, new:** two routers and a
+  blocked reader in one process.
+- **`link_v2_live`:** `check face` under both stock bindings, and its
+  check names the zenoh-python it loads.
+- **`far_side_live`, `freshness_v2_s8_live`:** their policies name
+  `zenoh-1.10.2`.
+- **`live_interop`'s health run:** the held heartbeats' time is the ahead
+  time (`freshness.v2` 0.12), the stale check mended.
+- **`requirements.txt`:** `eclipse-zenoh==1.10.2`.
+
+Round 122 found F-607 to F-609: one ambiguity, one gap and one minor
+error. None is a blocker. F-569 to F-606 stay open. See "At core 0.114
+and link.v2 0.25, on zenoh 1.10.2" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -9123,6 +9291,10 @@ errors. None is a blocker. F-569 to F-602 stay open. See "At link.v2
   - `desired.v2` under `redundancy.v1`, and a `config.v2` owner as a
     target. §12 ran with zk2py's `config.v1` owner alone: the reference's
     owner example has no `config` owner fed through either major.
+- **Of zenoh 1.10.2** (core 0.114, round 122): a QUIC face, whose
+  best-effort batch is Appendix B's second difference (F-608); a stock
+  zenohd, which `bin/current` does not hold; and zenoh-pico 1.10.2's
+  facts, which zk2py cannot run (F-607).
 - **A collection's snapshot** (core 0.97, round 103): zk2py reads, writes
   and cuts pages, and its echo tool shows one. Its owners answer a GET
   per key and its readers read with `Latest`, as S2 to S4 still say: no
@@ -9159,10 +9331,10 @@ errors. None is a blocker. F-569 to F-602 stay open. See "At link.v2
 |---|---|---|
 | Python | ≥ 3.11 | `tomllib` (TOML 1.0) |
 | `rfc8785` | 0.1.4 | RFC 8785 (JCS) bytes. It refuses integers outside ±(2^53−1) and non-finite floats, which matches §9.5's restrictions. |
-| `protobuf` | 6.33.5 | parsing `FileDescriptorSet`s, for the classifier and the §9.7 identity. It never produces artifact bytes. |
+| `protobuf` | 7.36.2 | parsing `FileDescriptorSet`s, for the classifier and the §9.7 identity. It never produces artifact bytes. |
 | protoc | 3.21.12 | artifact bytes (§9.4). §9.5 "Portability" says the protobuf fixtures assume protoc 3.21.12 with `--include_imports` and without source info. |
 | pip | 25.2 | installed into the venv from its own wheel |
-| `eclipse-zenoh` | 1.10.1 | the live half. zk2 is specified against Zenoh 1.10.1 (§0). The abi3 manylinux x86_64 wheel is used. |
+| `eclipse-zenoh` | 1.10.2 | the live half. zk2 is specified against Zenoh 1.10.2 (§0, 0.114), each Appendix B fact read in 1.10.2 and in 1.10.1. The abi3 manylinux x86_64 wheel is used. Its four stubs are 1.10.1's byte for byte, and every zenoh-python fact zk2py relies on was run again on it (round 122). |
 
 **Why the system protoc rather than `grpcio-tools`.** The spec pins the
 compiler, not a Python package. `grpcio-tools` bundles whatever protoc its
@@ -9469,7 +9641,10 @@ impl/python/
                                 /srv/dev/scratch/zenkey/bin/current (the mend, round 103); workdir, a runner's
                                 working directory under $ZK2PY_SCRATCH or the temporary directory, removed at its
                                 end (the mend, round 110)
-    proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops
+    proc.py                     helper processes for the measurements: a router, a publisher, a consumer that stops,
+                                and two routers beside a blocked reader in one process (round 122)
+    zenoh_facts.py              zk2py's own Zenoh facts, each run on the zenoh-python installed: its API, what it
+                                puts on the wire, and Appendix B's 1.10.1 and 1.10.2 differences measured (round 122)
     checks.py                   a live runner's checks: known failures by identity, XFAIL and XPASS, the exit
   interop/            zk2py's own interop contracts: probe, echo, needs, bringup, tc, scan, sysinfo,
                       sysinfo_x, tracker, order, order_b, budget, plans, epoch (presence.md §3); freshness/ holds beacon.v1 and zk2py_fresh.v1, budget/ budget.v1 and zk2py_stall.v1; freshness/ also zk2py_ohb_a.v1, _b and _c, three interfaces under one owner heartbeat (round 113), and dial.v1 and pulse.v1, scenarios-v2.md §8's two, copied from the text (round 115); config/ zk2py_author.v1;

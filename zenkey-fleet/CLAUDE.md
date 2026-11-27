@@ -587,7 +587,8 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `ConfigDialect`, json5 0.4.1 and toml 0.9 beside serde_yaml, each
   stated key's value the one zenoh's loader read; `RouterConfig::read`,
   `stated_tree`, `from_json5`). Under a binding whose zenoh is not stock
-  (#1044, `report::ConfigRead::of`) it is read as data instead,
+  (#1044, `report::ConfigRead::of`; `zenoh-1.10.1` and `zenoh-1.10.2`
+  are, #1165) it is read as data instead,
   `RouterConfig::read_data` (`model/acl/data.rs`): zenoh 1.10.1's shapes
   mirrored with `deny_unknown_fields`, required fields, non-empty lists,
   canonical key exprs and the binding's link protocols, every key that

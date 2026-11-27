@@ -4669,15 +4669,16 @@ mod tests {
             fork.acl.subjects[0].link_protocols.as_deref(),
             Some(&["tcp".to_owned(), "unixsock-dgram".to_owned()][..])
         );
-        let stock = RouterConfig::read_data(&block("unixsock-dgram"), link::Binding::Zenoh1_10_1)
-            .unwrap_err();
-        assert!(
-            stock.contains(
-                "access_control.subjects (id \"local\"): \"unixsock-dgram\" is not a link \
-                 protocol of zenoh-1.10.1"
-            ),
-            "{stock}"
-        );
+        for b in [link::Binding::Zenoh1_10_1, link::Binding::Zenoh1_10_2] {
+            let stock = RouterConfig::read_data(&block("unixsock-dgram"), b).unwrap_err();
+            assert!(
+                stock.contains(&format!(
+                    "access_control.subjects (id \"local\"): \"unixsock-dgram\" is not a link \
+                     protocol of {b}"
+                )),
+                "{stock}"
+            );
+        }
         assert!(zenoh::Config::from_json5(&block("unixsock-dgram").to_string()).is_err());
 
         let broken = serde_json::json!({

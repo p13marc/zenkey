@@ -125,10 +125,12 @@ pub const DEFAULT_LEASE_MS: u64 = 10_000;
 /// The core's tombstone window when a deployment configures none (core S3).
 pub const DEFAULT_WINDOW_S: u64 = 60;
 
-/// zenoh 1.10.1's link protocol names (`InterceptorLink`, kebab-case), the
-/// values `select.link_protocols` takes (§2.1); `zm-1.10.2-r1` adds
-/// `unixsock-dgram` after `unixsock-stream` (v2 §2.4).
-const ZENOH_1_10_1_PROTOCOLS: &[&str] = &[
+/// Stock zenoh's link protocol names (`InterceptorLink`, kebab-case), the
+/// values `select.link_protocols` takes (§2.1): 1.10.1's nine, and 1.10.2's,
+/// the same (`zenoh-config`'s `lib.rs`, line 317 in 1.10.1 and 320 in
+/// 1.10.2); `zm-1.10.2-r1` adds `unixsock-dgram` after `unixsock-stream`
+/// (v2 §2.4).
+const STOCK_PROTOCOLS: &[&str] = &[
     "tcp",
     "udp",
     "tls",
@@ -231,13 +233,19 @@ pub enum Binding {
     /// Stock zenoh 1.10.1.
     #[default]
     Zenoh1_10_1,
+    /// Stock zenoh 1.10.2 (#1165): 1.10.1's link protocols and defaults.
+    Zenoh1_10_2,
     /// `zm-1.10.2-r1`, the fork zenoh-modem builds on.
     Zm1_10_2R1,
 }
 
 impl Binding {
     /// Every binding, in the order v2 §2.4 lists them.
-    pub const ALL: [Binding; 2] = [Binding::Zenoh1_10_1, Binding::Zm1_10_2R1];
+    pub const ALL: [Binding; 3] = [
+        Binding::Zenoh1_10_1,
+        Binding::Zenoh1_10_2,
+        Binding::Zm1_10_2R1,
+    ];
 
     /// Every binding's name, in [`Binding::ALL`]'s order: the one list a
     /// refusal offers ([`UnknownBinding`], and `Deserialize`'s).
@@ -256,6 +264,7 @@ impl Binding {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Zenoh1_10_1 => "zenoh-1.10.1",
+            Self::Zenoh1_10_2 => "zenoh-1.10.2",
             Self::Zm1_10_2R1 => "zm-1.10.2-r1",
         }
     }
@@ -271,21 +280,22 @@ impl Binding {
     #[must_use]
     pub fn protocols(self) -> &'static [&'static str] {
         match self {
-            Self::Zenoh1_10_1 => ZENOH_1_10_1_PROTOCOLS,
+            Self::Zenoh1_10_1 | Self::Zenoh1_10_2 => STOCK_PROTOCOLS,
             Self::Zm1_10_2R1 => ZM_1_10_2_R1_PROTOCOLS,
         }
     }
 
     /// What a router of this binding runs for a transport key its
-    /// configuration omits (v2 §2.19; `zenoh-config`'s `defaults.rs`): the
-    /// fork's `wait_before_close` is its lease, 10 s, where 1.10.1's is 5 s.
+    /// configuration omits (v2 §2.19; `zenoh-config`'s `defaults.rs`, the
+    /// same in 1.10.1 and 1.10.2): the fork's `wait_before_close` is its
+    /// lease, 10 s, its own change, where stock zenoh's is 5 s.
     #[must_use]
     pub fn defaults(self) -> Transport {
         Transport {
             lease_ms: 10_000,
             keep_alive: 4,
             wait_before_close_ms: match self {
-                Self::Zenoh1_10_1 => 5_000,
+                Self::Zenoh1_10_1 | Self::Zenoh1_10_2 => 5_000,
                 Self::Zm1_10_2R1 => 10_000,
             },
             sequence: Sequence::Bit32,
@@ -4851,12 +4861,13 @@ mod tests {
             assert_eq!(read, b);
             assert_eq!(serde_json::to_value(b).unwrap(), Value::from(b.as_str()));
         }
-        let e = serde_json::from_value::<Binding>(Value::from("zenoh-1.10.2"))
+        let e = serde_json::from_value::<Binding>(Value::from("zenoh-1.10.0"))
             .unwrap_err()
             .to_string();
         assert!(
-            e.contains("zenoh-1.10.2")
+            e.contains("zenoh-1.10.0")
                 && e.contains("`zenoh-1.10.1`")
+                && e.contains("`zenoh-1.10.2`")
                 && e.contains("`zm-1.10.2-r1`"),
             "{e}"
         );
@@ -4873,16 +4884,63 @@ mod tests {
             assert_eq!(b.as_str().parse::<Binding>(), Ok(b));
             assert_eq!(b.to_string().parse::<Binding>(), Ok(b));
         }
-        let e = "zenoh-1.10.2".parse::<Binding>().unwrap_err();
-        assert_eq!(e, UnknownBinding("zenoh-1.10.2".to_owned()));
+        let e = "zenoh-1.10.0".parse::<Binding>().unwrap_err();
+        assert_eq!(e, UnknownBinding("zenoh-1.10.0".to_owned()));
         assert_eq!(
             e.to_string(),
-            "not a binding; one of: zenoh-1.10.1, zm-1.10.2-r1"
+            "not a binding; one of: zenoh-1.10.1, zenoh-1.10.2, zm-1.10.2-r1"
         );
         assert!("".parse::<Binding>().is_err());
         assert!(
             "Zenoh-1.10.1".parse::<Binding>().is_err(),
             "names are exact"
+        );
+    }
+
+    /// Stock 1.10.2 reads as 1.10.1 (v2 §2.4, §2.19; #1165): one list of
+    /// link protocols, `unixsock-dgram` not among them, and one column of
+    /// defaults, whose 5 s `wait_before_close` is not the fork's 10 s. A
+    /// policy names it all the same, and its plan carries it.
+    #[test]
+    fn zenoh_1_10_2_is_a_binding_that_reads_as_1_10_1() {
+        let (stock, next, fork) = (
+            Binding::Zenoh1_10_1,
+            Binding::Zenoh1_10_2,
+            Binding::Zm1_10_2R1,
+        );
+        assert_eq!(Binding::ALL, [stock, next, fork], "v2 §2.4's order");
+        assert_eq!(next.protocols(), stock.protocols());
+        assert!(!next.protocols().contains(&"unixsock-dgram"));
+        assert!(fork.protocols().contains(&"unixsock-dgram"));
+        assert_eq!(next.defaults(), stock.defaults());
+        assert_eq!(next.defaults().wait_before_close_ms, 5_000);
+        assert_ne!(next.defaults(), fork.defaults());
+        assert_eq!(
+            Binding::default(),
+            stock,
+            "a link.v1 policy reads as 1.10.1"
+        );
+
+        let policy = |protocol: &str| {
+            format!(
+                "profile = \"link.v2\"\nsystem = \"lab\"\nservices = []\n\
+                 binding = \"zenoh-1.10.2\"\n[transport]\nlease_ms = 10000\nkeep_alive = 4\n\
+                 wait_before_close_ms = 10000\nsequence = \"16bit\"\nbatch_bytes = 222\n\
+                 [face.rf]\nfar = \"ground\"\nattach = \"client\"\n\
+                 select = {{ link_protocols = [\"{protocol}\"] }}\n\
+                 class = \"constrained\"\nexpose = \"none\"\nmax_outage_s = 3600\n\
+                 link_bps = 2400\nloss_ppm = 0\narq = true\nreply_timeout_ms = 15000\n"
+            )
+        };
+        let read = parse(&policy("unixsock-stream"));
+        assert!(read.findings.is_empty(), "{:?}", read.findings);
+        assert_eq!(read.policy.map(|p| p.binding), Some(next));
+        let refused = parse(&policy("unixsock-dgram"));
+        assert_eq!(
+            refused.findings.iter().map(|f| f.code).collect::<Vec<_>>(),
+            [Code::UnknownProtocol],
+            "{:?}",
+            refused.findings
         );
     }
 

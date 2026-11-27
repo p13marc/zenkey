@@ -6,6 +6,18 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — zenoh 1.10.2, and the binding `zenoh-1.10.2` (#1165)
+
+Core 0.114 §0 and Appendix B; `link.v2` 0.25 §2.4, §2.19. zenctl links
+zenoh 1.10.2. No exit code changed, and no rule moved.
+
+| Before | Now | Notes |
+|---|---|---|
+| built on zenoh 1.10.1 | built on zenoh 1.10.2 (the lock) | its `Config::from_file` and parsers are 1.10.1's, so a `--zenoh-config` file reads as before |
+| `--binding zenoh-1.10.2`, on every verb that takes it: refused, exit 2, "not a binding; one of: zenoh-1.10.1, zm-1.10.2-r1" | taken: stock 1.10.2, with 1.10.1's 10 s lease, 4 keep-alives and 5 s `wait_before_close`. The refusal of another name lists `zenoh-1.10.1, zenoh-1.10.2, zm-1.10.2-r1` | `routers-binding.trycmd` refuses `zenoh-1.10.0` now |
+| `acl gen`, `check face`: a face policy whose `binding` is `zenoh-1.10.2`, `bad_value` at `binding` | read: 1.10.1's nine link protocols, and `unixsock-dgram` is `unknown_protocol`. `check face` reads the router's file through zenoh's own loader, and an omitted key at 1.10.2's default | `check-face.trycmd`'s case on `tests/cmd/fixtures/link/rf-1102.face.toml`: `wait_before_close` left out runs 5 s, not the fork's 10 s |
+| `doctor`'s `router-version-skew` warning: "the core relies on zenoh 1.10.1's behaviour (Appendix B)" | "the core relies on zenoh 1.10.2's behaviour, read beside 1.10.1's (Appendix B)" | a mesh of 1.10.1 and 1.10.2 routers still draws it |
+
 ## Unreleased (`main`, zk2) — `desired` reads `desired.v2` (#986's J4)
 
 `desired.v2` 0.1 §2.10, §2.17, §2.18, §5. `desired`, the doctor's

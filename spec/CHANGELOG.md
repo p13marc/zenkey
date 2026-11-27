@@ -3,6 +3,79 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.114 — 2026-11-27: §0 and Appendix B: zk2 is specified against zenoh 1.10.2, each fact read in 1.10.1 beside it, no keyword changed (#1165)
+
+The reference's lock moves zenoh from 1.10.1 to 1.10.2. Adopters
+already resolve 1.10.2: the crates ask for `zenoh = "1.10"`. 1.10.1's
+routers stay in the field, so both are read here.
+
+**What changed: §0.**
+- **"Zenoh."** zk2 is specified against 1.10.2. Each fact of Appendix B
+  was read in 1.10.2 and in 1.10.1, and says where the two differ.
+- **A text that names 1.10.1** says what was read or measured there.
+  1.10.2 does the same unless Appendix B says otherwise. That covers
+  this text's other mentions, observer.md's and the profiles'.
+
+**What changed: Appendix B.**
+- **Its title** is "Zenoh 1.10.2 facts relied on". A new paragraph,
+  "1.10.1 and 1.10.2", says how it was read: both sources side by
+  side, the files diffed, and each fact holding in both unless it says
+  otherwise.
+- **A file and line are 1.10.2's.** `resource.rs` is one line shorter
+  past its line 650 (zenoh#2838 rewrote `split_first_chunk`). "Keys
+  across a face" and "A lost declaration" cite 739, 741–757, 660–728
+  and 1004, where they cited 740, 742–758, 661–729 and 1005. Every other
+  file they cite is the same in both.
+- **Four facts say what differs.**
+  - **`BestMatching`.** A face's queryables on one resource count as
+    `complete` when any of them is. In 1.10.1, on a router's south-bound
+    face, a client's among them, the last one declared decided
+    (zenoh#2845). O1's owner declares each operation's queryable
+    `complete`, so its guarantee is the same on both.
+  - **A link's batch.** A QUIC link of mixed reliability bounds its
+    best-effort companion by the negotiated batch, and a 1,150-byte
+    datagram MTU. In 1.10.1 it took this end's configured size alone
+    (zenoh#2870). No face runs QUIC.
+  - **A push that closes a transport.** The first push to fail still
+    waits `wait_before_close`, and closes the transport. 1.10.2 then
+    fails every later push to it at once, and drops it without a
+    `Close` (zenoh#2709). The far end sees its link close either way.
+    §2.7's bound and observer §5.2's watch rest on the first push,
+    which is unchanged.
+  - **A process's receive threads.** Measured on 1.10.1, a router
+    beside a blocked callback lost samples, and its closes stalled.
+    zenoh#2709 is aimed at that stall. It was not measured on 1.10.2.
+- **Two facts gain a sentence.** zm-1.10.2-r1's 10 s
+  `wait_before_close` is the fork's own change: stock 1.10.2 keeps 5 s.
+  The liveliness reproduction's `766b455` is in 1.10.2's history, with
+  only four QUIC, SHM and TLS changes after it.
+- **"Read in zenoh 1.10.1's"** becomes "Read in zenoh's", and "read
+  from zenoh 1.10.1's source" becomes "read from the source of both".
+
+**What deliberately did not change.**
+- **No rule.** Every fact holds in 1.10.2 as the rules read it. A defect
+  1.10.2 fixes keeps its rule, since 1.10.1's routers stay in the
+  field. Whether one can go is #936's question.
+- **What a deployment provides** (observer §5.2): routers in processes
+  of their own. zenoh#2709 may make that premise unnecessary on 1.10.2.
+  Nothing measured it, and 1.10.1 needs it.
+- **Measurements** stay as they were taken, on 1.10.1. Each rests on
+  code that 1.10.2 keeps, but the receive threads' above.
+- **Other mentions of 1.10.1** in this text, in observer.md and in the
+  profiles stay. §0's new sentence reads them.
+- **`docs/zk2/upstream/`** keeps its versions: each reproduction pins
+  one on purpose.
+- **zenoh-pico's and zenoh-python's facts** are those bindings'.
+  zk2py's move to 1.10.2 is its own round.
+- **`RULES.md`** is unchanged: no keyword moved.
+
+**Why.** A text specified against a zenoh the reference no longer runs
+says nothing of the zenoh it does. Each fact was diffed, file by file,
+between the two releases. `docs/zk2/architecture.md` Appendix B, the
+sourced list, says where 1.10.2's lines differ. `link.v2` 0.25 adds the
+binding `zenoh-1.10.2`
+([`profiles/link/CHANGELOG.md`](profiles/link/CHANGELOG.md)).
+
 ## 0.113 — 2026-11-22: §7.5: a heartbeat's time says "ahead" while its owner's clock guard holds (#986)
 
 An owner whose clock guard holds wrote its heartbeat's time as unknown,

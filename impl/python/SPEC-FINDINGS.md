@@ -31368,3 +31368,229 @@ other way.
 - **Open:** F-437 to F-441; F-569 to F-606.
 
   F-365 stays open as #965's.
+
+## At core 0.114 and link.v2 0.25, on zenoh 1.10.2
+
+Round 122 read this tree at 32662a0f (#1165), its black boxes built from
+32662a0f. **Two text versions moved, and no keyword:** core 0.114, which
+specifies zk2 against zenoh 1.10.2 and reads each Appendix B fact in
+both releases, and `link.v2` 0.25, which adds the binding
+`zenoh-1.10.2`. zk2py's pin moved to eclipse-zenoh 1.10.2 in the same
+round.
+- **What moved in the texts zk2py reads:** core's header, §0's
+  "Zenoh." paragraph and Appendix B; `link.v2`'s header, §2.1's
+  `binding` row, §2.4's list and its four items, §2.19's table and its
+  `null` sentence and reference note; `v2/lints.json`'s case 20 and its
+  cases 75 and 76, `v2/transport.json`'s 32 and 33, `v2/plan.json`'s 51;
+  both CHANGELOGs' top entries; `profiles/README.md`'s row. `RULES.md` is
+  unchanged.
+- **How that was checked.** zk2py diffed `spec/` and `examples/zk2/`
+  between round 121's tree and this one: nine files under `spec/`, none
+  under `examples/zk2/`. It read every hunk of the texts, and compared
+  the three fixture files case by case: only lints.json's case 20 moved
+  among the old ones. `spec/CLAUDE.md` is outside the barrier, unread.
+
+### The binding and its cases: zk2py agrees
+
+- **From the text:** "`zenoh-1.10.2`: the same nine, in the same order"
+  (§2.4), and §2.19's column, 1.10.1's but for nothing. zk2py's tables
+  took both before its cases ran.
+- **Each case as its entry tells it**, read against the cases it names:
+  lints.json's 20 names `zenoh-1.10.0` and draws `bad_value` alone; 75 is
+  21 with its binding moved, `unknown_protocol`; 76 is 22 under 1.10.2 on
+  `unixsock-stream`, no finding. transport.json's 32 is case 4's policy
+  with its binding moved, over case 3's empty router, and draws case 4's
+  three; 33 is case 1's, and draws its six. plan.json's 51 is case 0's
+  but its binding, and its plan differs at `/binding` alone.
+- **`just py-conformance`: 8119 of 8119**, on 1.10.1 and on 1.10.2.
+- **Live:** the reference's `zenctl check face` under `zenoh-1.10.2`
+  gives each answer it gives under `zenoh-1.10.1`: a refusal through
+  zenoh's loader at each of the seven `null`s, a string lease, a `mode`
+  that is none, a file that is no JSON5, the far end's three refused
+  files, and nine `mode` and `timestamping` shapes. 25 checks, each
+  passed (`link_v2_live --only null --only peer --only mode`, 95 of 95).
+
+### The live suites on 1.10.2
+
+92 runs of 46 runners, every pairing each has, against the reference's
+owner, archive, consume and zenctl of 32662a0f. Every router is
+zenoh-python 1.10.2's. README's "Live" for round 122 has each count.
+- **Every check passed,** after one mend of zk2py's and one rerun:
+  - `live_interop`'s health run still asked a held heartbeat's time to
+    be unknown, which `freshness.v2` 0.12 made the ahead time. The owner
+    example sent `ahead` on both releases; mended, 25 of 25 on each;
+  - `stamp_live`, beside two lanes' load, once read the control's fault
+    occurrence in a 123-byte batch beside `oper`. Alone, three runs on
+    each release: 70 B, 26 over the block's 44.
+- **What moved, unjudged:** budget.md §1's losses. Steps 3 and 4 lost
+  237–436 and 295–425 on 1.10.2, 1–177 and 56–249 on 1.10.1, three runs
+  each, every Expected met on both. Appendix B's "fails every later push
+  to it at once" would account for it.
+
+### zk2py's own Zenoh facts on 1.10.2
+
+`zk2py.zenoh_facts` ran each zenoh-python fact the README and Appendix
+B name, on 1.10.2 and on round 121's 1.10.1 venv. The four stubs are
+1.10.1's byte for byte. Every fact zk2py relies on holds on 1.10.2:
+the handlers, what is marked unstable, a publisher's defaults, no
+configuration accessor, the NTP64's 1 ns step, the `null`s refused at
+load, a lone session's GETs, `replier_id`, a callback GET's end, a
+liveliness GET's `Timeout`, an empty attachment from none, a client HLC
+stamping an unstamped owner, a put's bytes (26 for a stamp, 1 for
+`application/json`, none for `zenoh/bytes`, 2 over an attachment's own),
+F-47's 257 of 2,002, and a GET beside a fresh history subscriber that
+can miss its token.
+
+Measured, never judged: `BestMatching`, as Appendix B says (on 1.10.1,
+a face whose complete queryable was declared before an incomplete one
+was passed over, 40 of 40; on 1.10.2 it was chosen, 40 of 40); the
+receive threads, two routers and a blocked reader in one process, 12
+runs each (no close heard in 6 on 1.10.1 and 2 on 1.10.2; a withdrawal
+past 9 s in 3 on 1.10.1 and none on 1.10.2); a close's withdrawals
+before its transport event as Python callbacks see them, inverted by
+0.02–1.6 ms in 0 to 2 of 10 cuts on either release; and which `Timeout`
+a call left unanswered draws, the router's in 0 to 5 of 12 on either.
+
+### Appendix B, read cold
+
+- **The four that differ.**
+  - **`BestMatching`:** buildable as worded, and measured as worded on
+    both releases. No rule declares an incomplete queryable beside a
+    complete one on one resource of one face, so none rests on it.
+  - **A link's batch:** buildable on 1.10.2. "takes the negotiated
+    batch, and a 1,150-byte datagram MTU" reads, with the fact's first
+    sentence, as the least of the two. On 1.10.1 it says the rule's own
+    statement fails, and the rule does not say so (F-608).
+  - **A push that closes a transport:** buildable. §2.7's bound and
+    observer §5.2's watch rest on the first push, as the entry says,
+    and every budget check passed on 1.10.2.
+  - **A process's receive threads:** "not measured on 1.10.2". zk2py's
+    measurement above is the first: the stall was rarer there.
+- **"A defect 1.10.2 fixes keeps its rule"** is a reader's instruction
+  that needs no measurement: zk2py's rules are unchanged.
+- **No fact was removed.** Seven sentences are reworded ("Read in
+  zenoh's `src/`" three times, "read from the source of both" twice,
+  "Computed from zenoh's layouts", "zenoh's defaults are 5 s and 1 ms"),
+  five line numbers moved, and two facts gained a sentence. No rule rests on a fact the appendix
+  no longer states. One rests on a fact that now states an exception
+  for 1.10.1 the rule does not carry (F-608).
+- **§0's "1.10.2 does the same unless Appendix B says otherwise"** reads
+  every "1.10.1" in the texts. Three kinds are not zenoh's behaviour read
+  or measured (F-607, F-609).
+
+### F-607 · ambiguity · core §0: which mentions of 1.10.1 "1.10.2 does the same" reaches
+
+> §0: "Where a text names 1.10.1, it says what was read or measured
+> there, and 1.10.2 does the same unless Appendix B says otherwise."
+> Appendix B, "One binding's facts": "zenoh-pico 1.10.1 has no session
+> namespaces (§1.6)." "zenoh-python 1.10.1 has no unbounded handler".
+> "zenoh-python 1.10.1 marks `Reliability` unstable too, and
+> `Session.put` takes none." "zenoh-python 1.10.1 gives an open session
+> no accessor for it".
+> `observer.md`, "What it does not state": "the facts of zenoh 1.10.1
+> (core Appendix B) stay in the core."
+> `CHANGELOG.md` 0.114: "**zenoh-pico's and zenoh-python's facts** are
+> those bindings'. zk2py's move to 1.10.2 is its own round."
+
+- **The ambiguity.** §0 names no kind of mention, so it reads every
+  "1.10.1". A reader then takes zenoh-pico 1.10.2 to have no session
+  namespaces, and zenoh-python 1.10.2 no unbounded handler. The entry
+  says those are the bindings' own and that nothing read them on 1.10.2,
+  and only the entry says so. observer.md's "the facts of zenoh 1.10.1
+  (core Appendix B)" is neither a reading nor a measurement: it names
+  the appendix, whose title is now 1.10.2's.
+- **Measured:** zenoh-python 1.10.2's four facts hold
+  (`zk2py.zenoh_facts`), and its stubs are 1.10.1's byte for byte.
+  Nobody the texts name read zenoh-pico 1.10.2.
+- **Fix:** §0, "Where a text names zenoh 1.10.1"; each of "One binding's
+  facts" naming the release it was read in, with "not read in 1.10.2"
+  where none was; observer.md, "zenoh's facts (core Appendix B)".
+- **Changes:** what a reader on zenoh-pico 1.10.2 may count on, and
+  which facts a release move must read again.
+
+### F-608 · gap · core §8.5 and `link.v1` §2.1: a link's batch, which Appendix B now says a 1.10.1 router's QUIC link does not run
+
+> Core §8.5: "A link's batch is the minimum of the configured size, the
+> link's MTU and the other end's."
+> `link.v1` §2.1, `batch_bytes`: "The batch the face's link runs with:
+> the least of the configured `batch_size`, the link's MTU and the other
+> end's (core §8.5 and its Appendix B)."
+> Appendix B (0.114): "On a QUIC link of mixed reliability, its
+> best-effort companion takes the negotiated batch, and a 1,150-byte
+> datagram MTU (`unicast/establishment/open.rs`, `accept.rs`). In 1.10.1
+> it took this end's configured size, and not the other end's
+> (zenoh#2870)." And: "A defect 1.10.2 fixes keeps its rule, since
+> 1.10.1's routers stay in the field."
+> `link.v2` §2.4: "`zenoh-1.10.1`: `link.v1` §2.1's nine, `tcp`, `udp`,
+> `tls`, `quic`, …". `CHANGELOG.md` 0.114: "No face runs QUIC."
+
+- **The gap.** §8.5 and `link.v1`'s meaning state the fact's first
+  sentence as a rule. Appendix B now says a 1.10.1 router's QUIC link
+  does not meet it: its best-effort companion ran this end's size,
+  whatever the other end's. The rule still speaks for 1.10.1's routers,
+  and says nothing of that.
+- **"No face runs QUIC" is the entry's alone.** Both stock bindings list
+  `quic`, and `select.link_protocols` takes it. zk2py's linter accepts a
+  `zenoh-1.10.1` face on `quic`, and its plan weighs `batch_bytes` there
+  as the link's batch (`batch_over_lease`, `block_over_batch`).
+- **On 1.10.2** a reader takes the companion's batch as the least of the
+  negotiated batch and 1,150 bytes: the first sentence, with the MTU
+  given. The text could say so outright.
+- **Not run:** a QUIC face on either release.
+- **Fix:** §8.5's bullet, "on every link but a 1.10.1 router's QUIC link
+  of mixed reliability (Appendix B)", and `link.v1`'s meaning by
+  reference; or a lint on a `quic` face under `zenoh-1.10.1`.
+- **Changes:** whether a policy's `batch_bytes` bounds what a 1.10.1
+  router's QUIC face sends best effort.
+
+### F-609 · minor · `link.v2` `scenarios-v2.md`, Conventions: N is zenoh 1.10.1, and its policy names it
+
+> Conventions: "**The bus.** N is the near router, zenoh 1.10.1, with
+> `usrpwd` authentication". The face policy: `binding  = "zenoh-1.10.1"`.
+> §2.4: "A policy names the zenoh its router runs." "**A claim no check
+> observes.** The zenoh a router runs is not on the bus".
+> Core §0: "Where a text names 1.10.1, it says what was read or measured
+> there, and 1.10.2 does the same".
+
+- **The error.** The reference runs N on 1.10.2 now (`zenctl` links it,
+  §2.19's reference note), and zk2py's N is zenoh-python 1.10.2. By §0
+  the setup's "zenoh 1.10.1" reads as 1.10.2 too, and the policy then
+  names a zenoh its router does not run: §2.4's claim no check observes,
+  in the text's own scenarios.
+- **What zk2py ran:** the policy as written, and with `zenoh-1.10.2`,
+  under `zenctl check face`: the same answers. The two stock bindings
+  read the same, so no verdict moves.
+- **Fix:** `binding = "zenoh-1.10.2"` and "N is the near router, zenoh
+  1.10.2", or "the binding of the zenoh N runs".
+
+### Open findings the runs touched
+
+| Finding | What round 122 showed |
+|---|---|
+| F-571 | Its quote moved: Appendix B now says "Computed from zenoh's layouts, which zenoh-codec 1.10.2 keeps as 1.10.1's, through the wire baseline's model". The model is still outside `spec/`, and the gap stands. Open. |
+| F-578 | Run again on 1.10.2 with each party the reference's in turn: once the record went, the author's v3 is at 0000/0, the same run again, as before. Open. |
+| F-581 | Run again: zk2py's target's re-reads carry no stamp around a snapshot with no entry, as before. Open. |
+| F-585 | Run again in each pairing: both tools answer case 20's way, as in round 121. Open. |
+| The others | Nothing of this round bears on them. Open. |
+
+### Not run
+
+- **A QUIC face,** on either release (F-608).
+- **zenoh-pico 1.10.2,** whose fact zk2py cannot run (F-607).
+- **A stock zenohd 1.10.2:** `bin/current` holds none. Every router was
+  zenoh-python's.
+- **The reference's routers on 1.10.1:** its black boxes are 1.10.2's
+  alone, so the 1.10.1 controls ran zenoh-python 1.10.1 beside them.
+
+### Counts at core 0.114 and link.v2 0.25, on zenoh 1.10.2
+
+609 entries.
+- **New: F-607 to F-609:**
+  - one ambiguity: F-607;
+  - one gap: F-608;
+  - one minor error: F-609.
+  None is a blocker. F-608 is the one to settle first: it is the one
+  rule whose fact now names an exception.
+- **Open:** F-437 to F-441; F-569 to F-609.
+
+  F-365 stays open as #965's.

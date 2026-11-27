@@ -37,7 +37,7 @@ Options:
           The routers' wait_before_close, seconds (spec §2.7, 0.27): this reader may stall no longer than it, nor than --lease less one of the routers' keep-alive intervals. Default: across a face, the `[transport]` of --face-policy, which here is given only with --across-face and --face; else --binding's; else zenoh 1.10.1's 5 s
 
       --binding <NAME>
-          The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. Its defaults are those of --lease and --wait-before-close, and its keep-alives the stall bound's, where no flag and no --face-policy states them (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, zenoh 1.10.1 5 s. Omitted, zenoh 1.10.1's
+          The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1, zenoh-1.10.2 or zm-1.10.2-r1. Its defaults are those of --lease and --wait-before-close, and its keep-alives the stall bound's, where no flag and no --face-policy states them (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, stock zenoh, 1.10.1 and 1.10.2, 5 s. Omitted, zenoh 1.10.1's
 
       --across-face
           The one owner the selector names sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements the contracts --contracts holds. No presence is read, so only an in-band epoch establishes one (telemetry.v1 §2.14), and a decrease without one reads as a reset

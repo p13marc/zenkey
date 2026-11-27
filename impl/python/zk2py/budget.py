@@ -296,7 +296,7 @@ class StallWatch:
     receive path from before the window opens until the watch after it
     ends:
     - its transports, from zenoh's transport events. zenoh-python 1.10.1
-      exposes them (``Session.info.declare_transport_events_listener``,
+      and 1.10.2 expose them (``Session.info.declare_transport_events_listener``,
       unstable): a transport of its session that closed is a stall;
     - a monotonic ticker on a thread of its own: the greatest gap between
       two ticks, the one still open when it is read included, longer than

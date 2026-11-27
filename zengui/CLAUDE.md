@@ -106,7 +106,8 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   group by group as the runtime's owner writes them, the `host` key's
   second after one lost and with `pulse.v1`'s group out of step;
   the routers' zenoh (#1011): `--binding` (`Settings::binding`, launch
-  only, `zenkey_model::link::Binding`) gives `Settings::routers`,
+  only, `zenkey_model::link::Binding`, `zenoh-1.10.2` among its names
+  since #1165) gives `Settings::routers`,
   `Routers::of_binding`, which the budget strip (`BudgetInputs::routers`:
   its lease and stall bound) and the Workbench's arbitration view
   (`services::sweep::nodes::arbitration_spec`) read by; no routers' face

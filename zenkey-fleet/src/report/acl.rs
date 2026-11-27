@@ -644,7 +644,8 @@ pub struct AclRefusal {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigRead {
-    /// Through zenoh 1.10.1's own loader.
+    /// Through zenoh's own loader: 1.10.2's, which reads a file as
+    /// 1.10.1's does (`link.v2` §2.19).
     #[default]
     Zenoh,
     /// As data: the file's own tree, read by the keys checked.
@@ -653,11 +654,12 @@ pub enum ConfigRead {
 
 impl ConfigRead {
     /// How the configuration of a router of `binding` is read: stock
-    /// zenoh's through its loader, any other as data.
+    /// zenoh's, 1.10.1's and 1.10.2's, through its loader, any other as
+    /// data.
     #[must_use]
     pub fn of(binding: Binding) -> ConfigRead {
         match binding {
-            Binding::Zenoh1_10_1 => ConfigRead::Zenoh,
+            Binding::Zenoh1_10_1 | Binding::Zenoh1_10_2 => ConfigRead::Zenoh,
             Binding::Zm1_10_2R1 => ConfigRead::Data,
         }
     }
@@ -1700,5 +1702,17 @@ history   = true
                 },
             })
         );
+    }
+
+    /// Each stock binding's file is read through zenoh's own loader, the
+    /// fork's as data, since stock zenoh refuses its link protocols
+    /// (`link.v2` §2.4, §2.19; #1044, #1165).
+    #[test]
+    fn a_stock_bindings_file_is_read_through_zenohs_loader() {
+        for b in Binding::ALL {
+            let read = ConfigRead::of(b);
+            assert_eq!(read.is_zenoh(), b != Binding::Zm1_10_2R1, "{b}");
+        }
+        assert_eq!(ConfigRead::of(Binding::Zenoh1_10_2), ConfigRead::Zenoh);
     }
 }

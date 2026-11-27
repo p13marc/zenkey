@@ -433,16 +433,17 @@ revision against it, and is not asked without one; a file not there, or one
 a reader refuses, is refused (exit 2).
 
 `binding` names the zenoh the deployment's routers run, `"zenoh-1.10.1"`
-(the default when absent) or `"zm-1.10.2-r1"`; any other name is refused
-at the parse. The alarm rules (`alerts`, `alert-firing`) read by its
-defaults (`link.v2` §2.19, observer §5.2): how long a reader may stall
-before it counts a loss, the routers' `wait_before_close` or their lease
-less a keep-alive, and how long past a window its owners are watched.
-zm-1.10.2-r1 waits 10 s before it closes a transport where zenoh 1.10.1
-waits 5 s, so a reader on it may stall 7.5 s, not 5 s. zenwatch reads no
-routers' face policy and has no key for a lease: a deployment whose routers
-state their own lease or `wait_before_close` is read by the binding's
-defaults (`across_face.policy` is the face the owners sit across).
+(the default when absent), `"zenoh-1.10.2"` or `"zm-1.10.2-r1"`; any other
+name is refused at the parse. The alarm rules (`alerts`, `alert-firing`)
+read by its defaults (`link.v2` §2.19, observer §5.2): how long a reader
+may stall before it counts a loss, the routers' `wait_before_close` or
+their lease less a keep-alive, and how long past a window its owners are
+watched. zm-1.10.2-r1 waits 10 s before it closes a transport where stock
+zenoh, 1.10.1 and 1.10.2, waits 5 s, so a reader on it may stall 7.5 s,
+not 5 s. zenwatch reads no routers' face policy and has no key for a
+lease: a deployment whose routers state their own lease or
+`wait_before_close` is read by the binding's defaults
+(`across_face.policy` is the face the owners sit across).
 
 `across_face` reads owners across a constrained face (core §8.5, observer
 §7.5): no descriptor crosses one, so no presence is read, and each engine

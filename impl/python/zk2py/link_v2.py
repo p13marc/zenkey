@@ -85,8 +85,11 @@ from .lexical import is_plain_chunk
 
 PROFILE = "link.v2"
 #: §2.4: each binding's closed list of link protocols, in its order.
+#: ``zenoh-1.10.2`` (link.v2 0.25) is "the same nine, in the same order"
+#: as ``zenoh-1.10.1``, and refuses ``unixsock-dgram`` as it does.
 BINDINGS = {
     "zenoh-1.10.1": list(link.LINK_PROTOCOL_ORDER),
+    "zenoh-1.10.2": list(link.LINK_PROTOCOL_ORDER),
     "zm-1.10.2-r1": ["tcp", "udp", "tls", "quic", "serial", "unixpipe", "unixsock-stream", "unixsock-dgram",
                      "vsock", "ws"],
 }
@@ -108,9 +111,14 @@ SEQUENCES = ("8bit", "16bit", "32bit", "64bit")
 #: and 2^31 at 64bit".
 WINDOW = {"8bit": 64, "16bit": 8192, "32bit": 2**27, "64bit": 2**31}
 #: §2.19's table: what a configuration omits, read at the binding's default
-#: (wait_before_close in µs).
+#: (wait_before_close in µs). ``zenoh-1.10.2``'s column is ``zenoh-1.10.1``'s,
+#: its 5 s ``wait_before_close`` included: the fork's 10 s is "the fork's own
+#: change, not 1.10.2's default" (§2.4, link.v2 0.25).
 DEFAULTS = {
     "zenoh-1.10.1": {"lease_ms": 10_000, "keep_alive": 4, "wait_before_close_ms": 5_000_000, "sequence": "32bit",
+                     "batch_bytes": 65535, "open_timeout_ms": 10_000, "accept_timeout_ms": 10_000,
+                     "interests_timeout_ms": 10_000},
+    "zenoh-1.10.2": {"lease_ms": 10_000, "keep_alive": 4, "wait_before_close_ms": 5_000_000, "sequence": "32bit",
                      "batch_bytes": 65535, "open_timeout_ms": 10_000, "accept_timeout_ms": 10_000,
                      "interests_timeout_ms": 10_000},
     "zm-1.10.2-r1": {"lease_ms": 10_000, "keep_alive": 4, "wait_before_close_ms": 10_000_000, "sequence": "32bit",

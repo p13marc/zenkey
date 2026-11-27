@@ -4,6 +4,15 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — zenoh 1.10.2, and `--binding zenoh-1.10.2` (#1165)
+
+Core 0.114; `link.v2` 0.25 §2.4, §2.19. No rule changed. No pixel moved.
+
+| Before | Now | Notes |
+|---|---|---|
+| built on zenoh 1.10.1 | built on zenoh 1.10.2 (the lock) | a `--zenoh-config` file reads as before: zenoh's loader is 1.10.1's |
+| `--binding zenoh-1.10.2`: refused at launch | taken: stock 1.10.2, read by 1.10.1's defaults, a 5 s `wait_before_close` | any other name is refused at launch, as before |
+
 ## Unreleased (`main`, zk2) — an owner that sends owner heartbeats (#1110's H3)
 
 `freshness.v2` 0.10 §2.4; observer 0.34 §7.5. The runtime's owner sends

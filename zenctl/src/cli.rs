@@ -616,11 +616,11 @@ fn check_id(s: &str) -> Result<zenkey_fleet::report::CheckId, String> {
 pub(crate) struct BindingArgs {
     // Parsed by `Binding`'s `FromStr`, the model's one list of names.
     /// The zenoh the deployment's routers run, by its `link.v2` name
-    /// (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. Its defaults are those of
-    /// --lease and --wait-before-close, and its keep-alives the stall
-    /// bound's, where no flag and no --face-policy states them (`link.v2`
-    /// §2.19): zm-1.10.2-r1 waits 10 s before it closes, zenoh 1.10.1 5 s.
-    /// Omitted, zenoh 1.10.1's.
+    /// (§2.4): zenoh-1.10.1, zenoh-1.10.2 or zm-1.10.2-r1. Its defaults are
+    /// those of --lease and --wait-before-close, and its keep-alives the
+    /// stall bound's, where no flag and no --face-policy states them
+    /// (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, stock
+    /// zenoh, 1.10.1 and 1.10.2, 5 s. Omitted, zenoh 1.10.1's.
     #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::bindings))]
     pub(crate) binding: Option<zenkey_model::link::Binding>,
 }
@@ -1735,9 +1735,9 @@ pub(crate) enum CheckCmd {
     ///
     /// `link.v1` §2.15 (#769): for each face of the policy (`--face-policy`),
     /// the router config's block as it guards that face, read from the FILE
-    /// through zenoh's own loader; under a link.v2 binding other than
-    /// zenoh-1.10.1, as data in zenoh's shapes, since stock zenoh refuses
-    /// the fork's link protocols, each key that does not read named (#1044):
+    /// through zenoh's own loader; under zm-1.10.2-r1, as data in zenoh's
+    /// shapes, since stock zenoh refuses the fork's link protocols, each key
+    /// that does not read named (#1044):
     ///
     ///   zk_not_denied              a pair of the nine messages and both
     ///                              flows that no deny of the far principal's
@@ -2947,9 +2947,9 @@ pub(crate) struct RecordArgs {
     #[arg(long, requires = "on")]
     pub(crate) clocks_synced: bool,
     /// With --on: the zenoh the deployment's routers run, by its `link.v2`
-    /// name (§2.4), zenoh-1.10.1 or zm-1.10.2-r1, for an `alert-firing`
-    /// rule's reader, as `watchdog --binding`. Omitted, zenoh 1.10.1's
-    /// (#1011).
+    /// name (§2.4), zenoh-1.10.1, zenoh-1.10.2 or zm-1.10.2-r1, for an
+    /// `alert-firing` rule's reader, as `watchdog --binding`. Omitted, zenoh
+    /// 1.10.1's (#1011).
     #[arg(long, value_name = "NAME", requires = "on",
           add = ArgValueCandidates::new(completion::bindings))]
     pub(crate) binding: Option<zenkey_model::link::Binding>,
@@ -3315,11 +3315,12 @@ pub(crate) struct WatchdogArgs {
     #[arg(long)]
     pub(crate) clocks_synced: bool,
     /// The zenoh the deployment's routers run, by its `link.v2` name
-    /// (§2.4): zenoh-1.10.1 or zm-1.10.2-r1. An `alert-firing` rule's
-    /// reader reads its window and its own stall by that zenoh's lease,
-    /// keep-alives and wait_before_close (`link.v2` §2.19): zm-1.10.2-r1
-    /// waits 10 s before it closes, zenoh 1.10.1 5 s. No other rule reads
-    /// them. Omitted, zenoh 1.10.1's (#1011).
+    /// (§2.4): zenoh-1.10.1, zenoh-1.10.2 or zm-1.10.2-r1. An
+    /// `alert-firing` rule's reader reads its window and its own stall by
+    /// that zenoh's lease, keep-alives and wait_before_close (`link.v2`
+    /// §2.19): zm-1.10.2-r1 waits 10 s before it closes, stock zenoh, 1.10.1
+    /// and 1.10.2, 5 s. No other rule reads them. Omitted, zenoh 1.10.1's
+    /// (#1011).
     #[arg(long, value_name = "NAME", add = ArgValueCandidates::new(completion::bindings))]
     pub(crate) binding: Option<zenkey_model::link::Binding>,
     #[command(flatten)]
