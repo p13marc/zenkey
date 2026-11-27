@@ -43,9 +43,9 @@ No adopter's mapping and no shipped service uses these, yet or any
 longer. Their texts, fixtures, runtimes and tools are as complete as the
 others'. Only the walkthrough exercises them, or for `freshness.v1` and
 `desired.v2` their scenarios' own contracts. `health.v2` and `alarms.v2`
-each have a standard contract. Each is a text and its fixtures so far.
-No implementation runs either yet. A profile leaves this table when one
-does (the process, below).
+each have a standard contract, and the reference and zk2py both run
+them. No adopter's mapping and no shipped service uses either yet. A
+profile leaves this table when one does (the process, below).
 
 | Profile | Text | Status | Used by | Core | Extension points (core §10) | What it is |
 |---|---|---|---|---|---|---|
@@ -61,7 +61,7 @@ does (the process, below).
 ```text
 profiles/
   README.md               this file: the index, the template, the process
-  .history/               published revisions of the profiles' standard contracts (health.v1, health.v2, config.v1, alarms.v1, freshness.v2)
+  .history/               published revisions of the profiles' standard contracts (health.v1, health.v2, config.v1, alarms.v1, alarms.v2, freshness.v2)
   <name>/
     v<major>.md           the normative text of one wire major
     CHANGELOG.md          the versions of that text, and of a later major's beside it

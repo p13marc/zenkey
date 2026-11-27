@@ -18,7 +18,8 @@ its last view. Each was written by hand from one sentence. One is
 §2.9's restart. The other is §2.6's reader with no run. Each was
 computed once.
 
-No implementation has run them yet.
+The reference's model runs every case as written, and so does zk2py's
+(round 124).
 
 | File | Rules | What it pins |
 |---|---|---|
