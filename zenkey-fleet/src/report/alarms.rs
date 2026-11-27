@@ -24,12 +24,27 @@
 //! [`LastKnownAlarm`]: last-known, never current, never part of a verdict
 //! (core S6).
 //!
+//! **`alarms.v2`** (#984's S3, `spec/profiles/alarms/v2.md`): a row of an
+//! owner whose descriptor lists `alarms.v2` says so ([`AlarmRow::profile`]),
+//! names its slot ([`AlarmRow::slot`]) and its words ([`AlarmWords`]: a
+//! table's, a slot's `words/<slot>`, its alert key alone, or its numbers
+//! for an unnamed alarm, whose [`AlarmRow::alarm`] is then absent: it
+//! matches no reference, §2.14). Its record is shown as the profile's JSON
+//! reading ([`AlarmSeen::record`]), its `at` to the second, an absent one
+//! absent. "Do this slot's words derive its record's key?" is
+//! [`AlarmRow::rederives`]'s place under v2 (§5's third question), and "does
+//! this owner hold each identity on one slot?" [`AlarmOwnerRow::one_slot_each`].
+//! Every member v2 adds is omitted on an `alarms.v1` row, so v1's shape
+//! stands.
+//!
 //! **A reader's transitions** ([`AlarmTransition`]): one key's change, as
 //! a notifier routes it — §2.6's transition of a sample, a loss, or the
 //! verdict moving with no sample (stale, its owner gone) — each carrying
 //! the first question's answer after it, its three states kept apart. A
 //! loss makes every key unobservable, never ok. Computed by
 //! [`crate::model::alarms`], pinned here.
+
+use std::collections::BTreeMap;
 
 use serde::Serialize;
 use zenkey_model::alarms::{Alarm, AlarmRef, Severity};
@@ -108,6 +123,14 @@ pub struct AlarmSeen {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stamp: Option<Stamp>,
     pub via: AlarmVia,
+    /// `alarms.v2`: the record in the profile's JSON reading (§3), where it
+    /// reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<serde_json::Value>,
+    /// `alarms.v2`: the record's `at`, whole seconds since the Unix epoch
+    /// (§2.4); absent where the record carries none, never the epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_s: Option<i64>,
 }
 
 /// An archive's document for an alarm of an absent owner (core §4.4, S6):
@@ -127,6 +150,10 @@ pub struct LastKnownAlarm {
     pub stamp: Option<Stamp>,
     /// Whether the archive's alignment confirmed it (core §4.4).
     pub confirmed: bool,
+    /// `alarms.v2`: the archived record, in the profile's JSON reading
+    /// (§3), where it reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<serde_json::Value>,
 }
 
 /// One alarm key, as read, with §5's three per-key questions.
@@ -134,14 +161,35 @@ pub struct LastKnownAlarm {
 pub struct AlarmRow {
     /// The key, base-relative in the namespace.
     pub key: String,
-    /// Its owner's system and service, and its alert key (§2.12).
-    pub alarm: AlarmRef,
+    /// Its owner's system and service, and its alert key (§2.12): its
+    /// reference. Absent for an unnamed `alarms.v2` alarm, which matches no
+    /// reference (`alarms.v2` §2.14).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alarm: Option<AlarmRef>,
+    /// `alarms.v2` for a row read by that text (§2.1); absent for an
+    /// `alarms.v1` row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<&'static str>,
+    /// `alarms.v2`: the slot the alarm is on (§2.2), where it is now, never
+    /// its name. Absent for an alarm no slot holds any more: `rebound`,
+    /// `replaced` or `dropped` ([`AlarmRow::displaced`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// `alarms.v2`: how the alarm is named (§5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<AlarmWords>,
+    /// `alarms.v2`: what became of the alarm when another identity's record
+    /// took its slot (§2.6): `rebound`, `replaced` or `dropped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub displaced: Option<&'static str>,
     /// "Is this alarm firing?" (§2.14).
     pub firing: AlarmAnswer,
     /// "Is this firing alarm past its horizon, its owner present?" (§2.7,
     /// §2.14).
     pub stale: AlarmAnswer,
-    /// "Does this key re-derive from its document?" (§2.2, §2.3).
+    /// "Does this key re-derive from its document?" (§2.2, §2.3); under
+    /// `alarms.v2`, "do this slot's words derive its record's key?" (v2
+    /// §2.4, §5).
     pub rederives: AlarmAnswer,
     /// The latest document's severity, when one reads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -159,6 +207,65 @@ pub struct AlarmRow {
     pub foreign_stamp: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_known: Option<LastKnownAlarm>,
+}
+
+/// How an `alarms.v2` alarm is named (#984's S3; `alarms.v2` §2.4, §4,
+/// §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlarmNamedBy {
+    /// A rule of its owner's table, read from the revision its descriptor
+    /// names (or the deployment's word for it).
+    Table,
+    /// Its slot's words, taken because they derive the record's key.
+    Words,
+    /// By words, its words not taken: shown by its alert key alone.
+    Key,
+    /// Unnamed: a table's rule the reader cannot name, shown by its
+    /// numbers, as in `rule 1, labels 2`.
+    Numbers,
+}
+
+impl AlarmNamedBy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AlarmNamedBy::Table => "table",
+            AlarmNamedBy::Words => "words",
+            AlarmNamedBy::Key => "key",
+            AlarmNamedBy::Numbers => "numbers",
+        }
+    }
+}
+
+/// An `alarms.v2` alarm's words as a reader has them (§5): the rule's name,
+/// its labels, its summary and its category, or its numbers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AlarmWords {
+    pub by: AlarmNamedBy,
+    /// The rule's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+    /// The rule's index in its owner's table: a table's rule, named or not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u8>,
+    /// Each label's name and its text; host-scoped ones too, for an alarm
+    /// by words.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
+    /// The record's `labels`, as one integer: an unnamed alarm's numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// The argument's reading, in exact decimal (§4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argument: Option<String>,
+    /// Why it is shown by its numbers (`no_table`, `rule`, `labels`), or by
+    /// its alert key alone (`no_words`, `unreadable`, `mismatch`; §2.4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// How a reader knew of an owner in scope (§2.15, F-131).
@@ -218,6 +325,14 @@ pub struct AlarmOwnerRow {
     /// timeout before now. Absent when no subscription listened.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_s: Option<f64>,
+    /// `alarms.v2` for an owner read by that text (§2.1); absent for an
+    /// `alarms.v1` owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<&'static str>,
+    /// `alarms.v2`: "does this owner hold each identity on one slot?"
+    /// (§2.2, §5), no the finding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_slot_each: Option<AlarmAnswer>,
 }
 
 /// "Is anything firing at or above *S* under this selector?" (§2.15).
@@ -378,7 +493,8 @@ pub struct AlarmLoss {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AlarmTransition {
     pub key: String,
-    pub alarm: AlarmRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alarm: Option<AlarmRef>,
     pub change: AlarmChange,
     /// "Is this alarm firing?" after the change (§2.14).
     pub firing: AlarmAnswer,
@@ -393,6 +509,23 @@ pub struct AlarmTransition {
     pub via: Option<AlarmVia>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lost: Option<AlarmLoss>,
+    /// `alarms.v2` for an alarm read by that text; absent for `alarms.v1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<&'static str>,
+    /// `alarms.v2`: the slot (§2.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// `alarms.v2`: how the alarm is named (§5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<AlarmWords>,
+    /// `alarms.v2`: the record, in the profile's JSON reading (§3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<serde_json::Value>,
+    /// `alarms.v2`: the held alarm another identity's record displaced
+    /// from its slot (§2.6): `rebound`, a resolve to report (§2.16), or
+    /// `replaced` or `dropped`, nothing to report by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub displaced: Option<&'static str>,
 }
 
 #[cfg(test)]
@@ -485,10 +618,16 @@ mod tests {
             says: "s".into(),
             alarms: 1,
             window_s: Some(12.5),
+            profile: None,
+            one_slot_each: None,
         }];
         r.alarms = vec![AlarmRow {
             key: "zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da".into(),
-            alarm: a_ref(),
+            alarm: Some(a_ref()),
+            profile: None,
+            slot: None,
+            words: None,
+            displaced: None,
             firing: answer(AlarmAnswerToken::Yes, "firing"),
             stale: answer(AlarmAnswerToken::No, "fresh"),
             rederives: answer(AlarmAnswerToken::Yes, "strict"),
@@ -502,6 +641,8 @@ mod tests {
                     clock: "ab12".into(),
                 }),
                 via: AlarmVia::Get,
+                record: None,
+                at_s: None,
             }),
             problems: vec!["label_name_form".into()],
             foreign_stamp: true,
@@ -511,6 +652,7 @@ mod tests {
                 deleted: true,
                 stamp: None,
                 confirmed: false,
+                record: None,
             }),
         }];
         let v = serde_json::to_value(&r).unwrap();
@@ -562,6 +704,113 @@ mod tests {
         }
     }
 
+    /// An `alarms.v2` row's wire shape (#984's S3): its profile, its slot,
+    /// its words, its record in the profile's JSON reading and its `at`; an
+    /// unnamed one has no reference, and its numbers say why. Its owner row
+    /// says its profile and "one slot each".
+    #[test]
+    fn an_alarms_v2_row_pins_its_shape() {
+        let words = AlarmWords {
+            by: AlarmNamedBy::Table,
+            rule: Some("link_down".into()),
+            index: Some(1),
+            labels: BTreeMap::from([("peer".into(), "r2".into()), ("port".into(), "eth0".into())]),
+            codes: None,
+            summary: Some("Link to r2 on eth0 is down".into()),
+            category: None,
+            argument: None,
+            reason: None,
+        };
+        let row = AlarmRow {
+            key: "zk2/lab/svc/alarms.v2/state/alarms/0".into(),
+            alarm: Some(a_ref()),
+            profile: Some("alarms.v2"),
+            slot: Some(0),
+            words: Some(words),
+            displaced: None,
+            firing: answer(AlarmAnswerToken::Yes, "firing"),
+            stale: answer(AlarmAnswerToken::No, "fresh"),
+            rederives: answer(AlarmAnswerToken::NotAsked, "table"),
+            severity: Some(Severity::Warning),
+            latest: Some(AlarmSeen {
+                latest: AlarmLatest::Firing,
+                document: None,
+                invalid: None,
+                stamp: None,
+                via: AlarmVia::Get,
+                record: Some(json!({"state": "firing", "severity": "warning", "rule": 1,
+                                    "at": 1_794_062_759_000_i64, "labels": 2,
+                                    "argument": "not_available"})),
+                at_s: Some(1_794_062_759),
+            }),
+            problems: vec![],
+            foreign_stamp: false,
+            last_known: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&row).unwrap(),
+            json!({
+                "key": "zk2/lab/svc/alarms.v2/state/alarms/0",
+                "alarm": {"system": "lab", "service": "svc", "alert_key": "a659f813308ad1da"},
+                "profile": "alarms.v2",
+                "slot": 0,
+                "words": {"by": "table", "rule": "link_down", "index": 1,
+                          "labels": {"peer": "r2", "port": "eth0"},
+                          "summary": "Link to r2 on eth0 is down"},
+                "firing": {"answer": "yes", "reason": "firing", "says": "s"},
+                "stale": {"answer": "no", "reason": "fresh", "says": "s"},
+                "rederives": {"answer": "not_asked", "reason": "table", "says": "s"},
+                "severity": "warning",
+                "latest": {
+                    "latest": "firing",
+                    "via": "get",
+                    "record": {"state": "firing", "severity": "warning", "rule": 1,
+                               "at": 1_794_062_759_000_i64, "labels": 2,
+                               "argument": "not_available"},
+                    "at_s": 1_794_062_759,
+                },
+            })
+        );
+        let unnamed = AlarmRow {
+            alarm: None,
+            words: Some(AlarmWords {
+                by: AlarmNamedBy::Numbers,
+                rule: None,
+                index: Some(1),
+                labels: BTreeMap::new(),
+                codes: Some(2),
+                summary: None,
+                category: None,
+                argument: None,
+                reason: Some("no_table".into()),
+            }),
+            ..row
+        };
+        let v = serde_json::to_value(&unnamed).unwrap();
+        assert!(v.get("alarm").is_none(), "no reference: {v}");
+        assert_eq!(
+            v["words"],
+            json!({"by": "numbers", "index": 1, "codes": 2, "reason": "no_table"})
+        );
+        let owner = AlarmOwnerRow {
+            address: "lab/svc".into(),
+            known_by: vec![KnownBy::Presence],
+            verdict: AlarmSetVerdict::Established,
+            reason: "snapshot".into(),
+            says: "s".into(),
+            alarms: 2,
+            window_s: None,
+            profile: Some("alarms.v2"),
+            one_slot_each: Some(answer(AlarmAnswerToken::Yes, "one_slot_each")),
+        };
+        assert_eq!(
+            serde_json::to_value(&owner).unwrap(),
+            json!({"address": "lab/svc", "known_by": ["presence"], "verdict": "established",
+                   "reason": "snapshot", "says": "s", "alarms": 2, "profile": "alarms.v2",
+                   "one_slot_each": {"answer": "yes", "reason": "one_slot_each", "says": "s"}})
+        );
+    }
+
     /// The run's judgement is §2.15's answer: yes the 1 whatever else, no
     /// the 0, and unobservable, not asked or an unreadable scope the 2.
     #[test]
@@ -593,7 +842,7 @@ mod tests {
     fn a_transition_pins_its_shape() {
         let t = AlarmTransition {
             key: "zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da".into(),
-            alarm: a_ref(),
+            alarm: Some(a_ref()),
             change: AlarmChange::Lost,
             firing: answer(AlarmAnswerToken::Unobservable, "incomplete"),
             severity: Some(Severity::Critical),
@@ -604,6 +853,11 @@ mod tests {
                 dropped: 3,
                 stalled: false,
             }),
+            profile: None,
+            slot: None,
+            words: None,
+            record: None,
+            displaced: None,
         };
         assert_eq!(
             serde_json::to_value(&t).unwrap(),

@@ -625,13 +625,17 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   A case that expects `{"major": 1}` is checked for the major alone;
   `clock.json`'s across-face cases state no `deployment` and are read as
   `health.v2`'s. `spec/profiles/.history/health.v2/` holds revision 2.0.
-  `words` (`src/words.rs`, #986's Q2) is what `desired.v2` and
-  `health.v2` share of "an index into a contract's table", and what
-  `alarms.v2` (#984) is to use: `OUT_OF_RANGE`, `uses(contract,
+  `words` (`src/words.rs`, #986's Q2) is what `desired.v2`,
+  `health.v2` and `alarms.v2` (#984 S1) share of "an index into a
+  contract's table": `OUT_OF_RANGE`, `uses(contract,
   profile)`, `Index::{At, OutOfRange}` (`at(i, max)`, `to_json`,
   `of_json`), `Word::{Entry, Number, OutOfRange}`, `read(table, index)`,
   `write(table, word, max)`, `list(value, max, entry, once)` (an
-  annotation's value as a table) and `Lint { profile, at, key, token,
+  annotation's value as a table), `Instance<T>::{None, Table, Differ}`
+  with `instance_table(named)` (an instance's table among the revisions
+  its descriptor names; lifted from health by #984 S1, the third
+  profile whose tables are an instance's, so `health::v2::Instance` and
+  `alarms::v2::Instance` are aliases of it) and `Lint { profile, at, key, token,
   says }` with `Lint::place(resource)` and a `Display` that is the
   linter's line, `error[<profile> <token>] <at>: [<key>: ]<says>`.
   `desired::v2::{Index, Word, Lint, OUT_OF_RANGE}` and
@@ -641,8 +645,59 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `key` an `Option`). Each profile keeps what differs in meaning:
   desired's `Tables` (a report resource's two, 0 to 254) and its
   `ReportDeclaration`, health's `Word` (6 bits, the profile's half and
-  the service's), `Named`, `Declared`, `Instance` and `Growth`, and each
+  the service's), `Named`, `Declared` and `Growth`, and each
   `Major` (a contract's `uses` for one, a descriptor's `interfaces` for
-  the other). A third profile whose tables are an instance's would lift
-  health's `Declared`/`Instance`/`instance_table`, generic over the
-  table's type; they were left where one profile uses them.
+  the other). `Declared` stayed each profile's: its findings differ.
+  `alarms.v2` (#984 S1, text 0.1, experimental; the session-free half:
+  its owner is S2's, its readers S3's) is `alarms::v2`
+  (`src/alarms/v2.rs`), and what both majors share is `alarms`'s:
+  `alarms::Major` (`of(interfaces)`, v2 where a descriptor lists both;
+  `named(iface)`; `iface()`), `key_hex`/`key_integer` and
+  `Derived::integer` (the alert key as a record's 64 bits), and §2.6's
+  table and §2.14's steps (`put_reads`, `delete_reads`, `Asked`,
+  crate-private) under both majors' `firing`/`stale_firing`; `Reason`
+  gains `rebound`, `snapshot`, `snapshot_incomplete`, `snapshot_run`,
+  `table`, `no_words`, `no_record`, `unreadable`. No v1 answer moved. In
+  `v2`: `PROFILE`/`IFACE`, `FINGERPRINT` (revision 2.0, `2292477c…`),
+  `PUBLISHED` (`fe59e748…` the packed `Alarm`, `a3515ad4…` the `Words`
+  JSON Schema), `VOCABULARY` (`rules`; W105 by major,
+  `contract::vocabulary`), `RULES`, `ALARMS`/`WORDS` (`alarms/{slot}`,
+  `words/{slot}`), `ALARMS_COLL` 0 and `WORDS_COLL` 1, `TAG` 11,
+  `MAX_SLOTS` 256, `MAX_RULES` 255, `LABELS_BITS` 24, `CLASS` (`host`).
+  Keys: `parse_slot`, `slot_of`/`words_slot_of` → `SlotKey`,
+  `alarm_key`/`words_key(system, service, slot)`, `collection_read`. The
+  record: `Record { state, severity, rule: RuleIndex, at, labels,
+  argument: Argument, key }` (`at` whole Unix seconds, `time_at(unix_ms,
+  epoch)`; `new`, `to_json`/`of_json`, `check` → `Undecodable::{Core(core
+  §7.6's refusal), KeyWithRule, KeyMissing}`, `write(epoch)`, `put(stamp,
+  epoch)`, `read(tag, bytes, epoch)`, `layout()` the schema restated).
+  The table: `Rule { name, summary, category, argument: Option<ArgumentDecl>,
+  labels: Vec<Label> }` (`encode`, `decode`, `argument(reading)`,
+  `reading`, `summary`), `rules(value)`, `declaration(uses_v2, carried)`/
+  `declaration_of`/`table_of` → `Declared::{None, Table,
+  Invalid(Invalid)}` (§4's eight findings), `instance_table`, `growth` →
+  `same`/`kept`/`moved`, and `lint_contract` (a contract that lists
+  `alarms.v2` alone; `not_used` is core W105's), which `zk2 contract lint`
+  and zenkey-build run. Naming: `write_alarm(table, rule, labels,
+  reading)` → `Fields` (by the table, else by words with the alert key),
+  `Record::name(table)` → `Naming::{Named, Unnamed(no_table | rule |
+  labels), ByWords}`. Slots: `Slots<I>` (`new(bound)`, `raise` →
+  `Raise::{Put, Firing, Refused}`, `resolve` → `Resolve`, `slot_of`,
+  `held`, `forget(slot)` (S2: a put that did not go out, or a resolved
+  record a re-mint does not hold), `restart(left, bound)` →
+  `Adoption::{Left, Free, Resolved, Adopted}`, an identity the record
+  holds firing on two slots adopted on the lowest, §2.9), `taken(seen, present: Option<Run>)` → `Taken {
+  takes, double }` (no slot taken with no run stated, as across a face,
+  §2.6) and `one_slot_each`. Words:
+  `Words` (`from_json`, `decode`, `derive`), `words_taken(record, words)`
+  → `How::{Strict, Sanitized}` or `NotTaken`, `words_derive`. Reading:
+  `Held { record, run, alert_key }` (`same_identity`), `Track::apply(Sample)`
+  → `Applied { displaced: Displaced::{Rebound, Replaced, Dropped},
+  reads, reports }`; `Dating` (`at(act, held, clock_ms, epoch)`, the +1
+  step), `acknowledged`, `adopted_at`; `Seed::of(replies, epoch)` (both
+  collections by index, `snapshot(stated)`); `Reading`, `firing`,
+  `stale_firing`; `owner_set(presence, read, since)` (§2.15's order).
+  `tests/profiles/alarms_v2.rs` runs the ten `v2/` files as written, 477
+  cases, none blessed, all passing, and `alarms_v2_standard_contract`
+  holds `alarms.v2.toml` to the constants.
+  `spec/profiles/.history/alarms.v2/` holds revision 2.0.

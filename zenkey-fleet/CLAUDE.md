@@ -899,3 +899,48 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   tests, and `report-fixtures`' `health_v2_report`. Not done: zengui's
   nodes pane shows a v2 row's reason as text and its words nowhere else;
   zenwatch reads v2 through the doctor alone.
+  `alarms.v2` (#984's S3, text 0.1) is read beside `alarms.v1` in all four
+  layers, each owner by the major its descriptors list (v2 §2.1, §2.17):
+  `AlarmBook::major_of` (`Major::of` over the descriptors read, v2 where
+  any lists it; across a face `BookSpec::face_major`, else
+  `AlarmScope::spelled`; with no descriptor in hand the read that
+  answered, an archived slot included), `presence_for` reading an owner of
+  the other major not listed. A scope names owners, not a major:
+  `AlarmScope::parse` takes either template (`ALL_V2`), `selects_owner`
+  tests both, and `v2_selector` (`alarms.v2/state/*/*`, records and
+  words), `heartbeat_v2_selector` and `v2_get_selector`
+  (`alarms.v2/state/**`, both collections) are what every reader
+  subscribes and reads beside v1's, whichever major the selector spells.
+  The book's v2 half is the child module `model::alarms::v2` (`Slots`,
+  private, in `AlarmBook::v2`): `sample_v2` (`SlotSample`, CH's tag with
+  it) and `seed_v2` (`SlotRead`, the raw replies, each owner's pages
+  through the model's `Seed::of` under its epoch) fold each slot through
+  the model's `Track` (`Held` with its alert key by `Record::name` over the
+  owner's table), merged by in-band stamp; a displaced record is kept by
+  identity (`Detached`: `rebound` answers no, `rebound`, its transition a
+  `resolved` carrying `displaced`; `replaced`/`dropped` hold nothing,
+  their transition `judged`) until its identity takes a slot or
+  `FORGET_AFTER`; a slot left out by an establishing read holds nothing
+  and is named by its `last_record`. `owner_set_v2` is the model's
+  `owner_set`: the latest read (`Read::Complete(SnapshotRead)` with the
+  run against `stated`, the runs present descriptors state), and with a
+  subscription `Since` (no loss and no gap since the read was asked).
+  Readings (`slot_reading`): the subscription's last delivery or the
+  owner's heartbeat (the v2 view beside v1's in each owner's `Views`, so
+  an owner heartbeat's group of either is read) and the read's entry aged
+  from its confirmation, `previous_instance` by the snapshot's run.
+  Words: `v2_words` (`V2Words`: each owner's table from
+  `bus::alarms::words_v2`, the revisions its descriptors name, held
+  offline in `AlarmSpec::contracts` or retrieved by fingerprint, an
+  owner's last kept once it is gone; the revisions held the word for an
+  owner never described, and the epochs). `v2_rows` builds `AlarmRow`s
+  (`profile`, `slot`, `words`: `AlarmWords` by `table`, `words` where
+  `words_taken` takes them, `key`, or `numbers` with no reference;
+  `rederives` is `words_derive`; archived records by slot, named the same
+  way), `one_slot_each` is `taken`/`one_slot_each`, `v2_answers` feeds
+  `any_firing` one answer over both majors. `check conform`'s
+  `alarm-key`/`alarm-document` read a v2 owner by that text
+  (`ConformObservation::alarms_v2`, `alarm_cases_v2`, subject
+  `state/alarms/{slot}`). `model::alarms::v2`'s tests are session-free;
+  `report-fixtures`' `alarms_v2_report` is zenctl's render snapshot.
+  Not done: the doctor's `alarm-key`/`alarm-stale` read v1's keys only.

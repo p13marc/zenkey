@@ -1,0 +1,2656 @@
+{
+ "description": "alarms.v2 §2.1, §2.11, §2.13 to §2.15, §5: what a tool may conclude. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. A case gives the owner's `presence`: \"present\", \"absent\" (a complete read without its instance token), \"incomplete\" (its token not seen, and the read possibly incomplete or refused) or \"across_face\" (across a constrained face, where presence and descriptors do not cross, and the deployment's word names alarms.v2). `descriptor`, read only when present: null when it could not be read, or {interfaces: the interface ids it lists, token: false where the alarms are in the tokenless set}; the interface token plays no part. `face`, read only across a face: {reachable: whether the deployment grants this reader a GET of the alarms}. `majors`: a descriptor's interfaces -> the major a reader reads the service's alarms by: 2, 1 (alarms.v1 and not alarms.v2), or null (neither). In every list below, expect.major is that major, null where no descriptor decides, and under 1 the case expects nothing more, alarms.v1's own conclusions.json being the evidence. `readings`: one reading of one alarm -> §5's first question (`firing`) and its last (`stale_firing`), each an answer (yes, no, unobservable, not_asked) and a reason. `latest` is the alarm's latest sample as §2.6 reads it: \"firing\", \"resolved\", \"rebound\" (its record replaced on its slot by another identity's, under its run, while it fired), \"deleted\", \"undecodable\", or null (the reader holds nothing of it: never read, or its record replaced or dropped). `named` is false for an unnamed alarm, asked by its slot, and changes no answer. `freshness` is freshness.v2's verdict over the slot's observations at 900 s, as freshness's own judgements.json computes them, with its reason (fresh: within_horizon; stale: beyond_horizon or no_delivery; unobservable: listened_too_short, silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon or no_observation; not_asked: last_known, only an archive read), or null where nothing was observed. `lost`: the reader's subscription lost a delivery, and since then no GET has answered this slot. `previous_instance`: the latest put is attributed to an earlier instance (a snapshot under a run no present descriptor states). `held_whole`: the owner's alarms are established in this reading (§2.15). `left_out`: the read that established them listed the alarm's slot neither live nor as a tombstone, and nothing of it arrived after that read was asked; with `held_whole` it makes any held sample none, and heals `lost`. The steps are alarms.v1 §2.14's: presence (absent; presence_incomplete; face_closed), the descriptor (no_descriptor; not_listed), an archive alone (last_known), a loss (incomplete), the latest sample (deleted; resolved; rebound; not_held where established, else not_read, or nothing_crossed across a face; previous_instance), then its freshness (firing; undecodable; stale, or nothing_crossed across a face where nothing was delivered; else freshness's reason). `stale_firing` differs in three places: across a face that does not close the alarms it is unobservable, across_face; a deleted, resolved or rebound alarm, and none with the owner's alarms established, is not_asked, not_firing; and at the last step an undecodable put is unobservable, undecodable, a stale alarm yes, stale, and a fresh one no, fresh. `owner_sets`: an owner's presence, descriptor and face as above; its `read`, the reader's latest collection read of its alarms: null for none, {complete: false} for one that ended at its timeout or with an error reply, or {complete: true, snapshot}, the snapshot null where no page of it was drawn, else {complete: whether every page is held, run: \"stated\" (a present descriptor states it), \"other\" (one states another) or \"unstated\" (no present descriptor states a run), entries: their number}; and `since`, what its subscription saw since that read was asked: null for a reader that does not subscribe, or {lossless, present_throughout} -> whether its alarms are known whole (established, unobservable, not_asked) and the reason, the first of §2.15's order: presence and the descriptor as above; no_seed; seed_incomplete; window_lost; owner_gap (never asked across a face); snapshot_incomplete; snapshot_run (never asked across a face, nor where no run is stated); snapshot. `any_firing`: a severity `at_least`, `scope_whole` and the owners in scope, each with its set's verdict and its alarms (the first question's `answer`, and the record's `severity`, null for the escape or where none reads) -> §5's second question, in the shape of alarms.v1's conclusions.json and by its rule: an answer, a reason, `firing`, the count of alarms firing at or above the severity, and the owners counted by verdict.",
+ "majors": [
+  {
+   "note": "alarms.v2 listed",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "expect": 2
+  },
+  {
+   "note": "alarms.v1 listed, and not alarms.v2: read by alarms.v1's text",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v1",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "expect": 1
+  },
+  {
+   "note": "both listed, which breaks §2.1: a reader reads this major",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v1",
+     "alarms.v2",
+     "freshness.v2"
+    ],
+    "token": true
+   },
+   "expect": 2
+  },
+  {
+   "note": "neither listed",
+   "descriptor": {
+    "interfaces": [
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "expect": null
+  },
+  {
+   "note": "alarms.v2 in the tokenless set: listed all the same",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2"
+    ],
+    "token": false
+   },
+   "expect": 2
+  },
+  {
+   "note": "a later major alone is neither",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v3",
+     "freshness.v2"
+    ],
+    "token": true
+   },
+   "expect": null
+  }
+ ],
+ "readings": [
+  {
+   "note": "a firing record, fresh: its put, or a heartbeat that vouched for it, within 900 s",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "yes",
+     "reason": "firing"
+    },
+    "stale_firing": {
+     "answer": "no",
+     "reason": "fresh"
+    }
+   }
+  },
+  {
+   "note": "an unnamed alarm, the reader holding no table: answered as any other, by its slot",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": false,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "yes",
+     "reason": "firing"
+    },
+    "stale_firing": {
+     "answer": "no",
+     "reason": "fresh"
+    }
+   }
+  },
+  {
+   "note": "a firing record its owner has not confirmed within 900 s: stale, neither firing nor resolved",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "stale",
+    "reason": "beyond_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "stale"
+    },
+    "stale_firing": {
+     "answer": "yes",
+     "reason": "stale"
+    }
+   }
+  },
+  {
+   "note": "an unnamed alarm gone stale",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "stale",
+    "reason": "beyond_horizon"
+   },
+   "latest": "firing",
+   "named": false,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "stale"
+    },
+    "stale_firing": {
+     "answer": "yes",
+     "reason": "stale"
+    }
+   }
+  },
+  {
+   "note": "a resolved record, fresh",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "resolved",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "resolved"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "a resolved record kept for a day: resolved whatever its age, never stale",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "stale",
+    "reason": "beyond_horizon"
+   },
+   "latest": "resolved",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "resolved"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "rebound: another identity's record is on its slot under its run, so it resolved",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "rebound",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "rebound"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "rebound, and the slot's present record is stale: the held alarm resolved all the same",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "stale",
+    "reason": "beyond_horizon"
+   },
+   "latest": "rebound",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "rebound"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "a delete, which no rule here has an owner send: alarms.v1's answer",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "deleted",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "deleted"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "nothing held of it, the owner's alarms established: its record was replaced or dropped, or it never fired",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": null,
+   "latest": null,
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": true,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "not_held"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "nothing held of it, and the owner's alarms not established",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": null,
+   "latest": null,
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "not_read"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "not_read"
+    }
+   }
+  },
+  {
+   "note": "a record held, and the establishing read left its slot out: the new instance does not hold it",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "stale",
+    "reason": "beyond_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": true,
+   "held_whole": true,
+   "left_out": true,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "not_held"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "a resolved record held, left out by the establishing read: not_held, which is no as resolved is",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "resolved",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": true,
+   "left_out": true,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "not_held"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "a firing record an earlier instance's snapshot listed",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": true,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "not_asked",
+     "reason": "previous_instance"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "previous_instance"
+    }
+   }
+  },
+  {
+   "note": "a resolved record an earlier instance's snapshot listed: resolved comes first",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "resolved",
+   "named": true,
+   "lost": false,
+   "previous_instance": true,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "resolved"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "an undecodable record, fresh: never at a severity or in a state",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "undecodable",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "undecodable"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "undecodable"
+    }
+   }
+  },
+  {
+   "note": "an undecodable record, stale",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "stale",
+    "reason": "beyond_horizon"
+   },
+   "latest": "undecodable",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "stale"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "undecodable"
+    }
+   }
+  },
+  {
+   "note": "a delivery lost, and no GET since has answered the slot",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": true,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "incomplete"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "incomplete"
+    }
+   }
+  },
+  {
+   "note": "a delivery lost, the alarm resolved before it: still incomplete, the loss may have been a re-raise",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "resolved",
+   "named": true,
+   "lost": true,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "incomplete"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "incomplete"
+    }
+   }
+  },
+  {
+   "note": "a delivery lost, and the read that then established the owner's alarms left the slot out: healed",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": true,
+   "previous_instance": false,
+   "held_whole": true,
+   "left_out": true,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "not_held"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "a delivery lost, the owner's alarms established since, and the slot answered: lost is then false",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": true,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "yes",
+     "reason": "firing"
+    },
+    "stale_firing": {
+     "answer": "no",
+     "reason": "fresh"
+    }
+   }
+  },
+  {
+   "note": "freshness unobservable: listened too short",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "unobservable",
+    "reason": "listened_too_short"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "listened_too_short"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "listened_too_short"
+    }
+   }
+  },
+  {
+   "note": "freshness unobservable: the clock not trusted",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "unobservable",
+    "reason": "clock_untrusted"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "clock_untrusted"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "clock_untrusted"
+    }
+   }
+  },
+  {
+   "note": "an archive alone: last-known",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "not_asked",
+    "reason": "last_known"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "not_asked",
+     "reason": "last_known"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "last_known"
+    }
+   }
+  },
+  {
+   "note": "absent: its alarms are last-known, never firing now",
+   "presence": "absent",
+   "descriptor": null,
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": null,
+    "firing": {
+     "answer": "not_asked",
+     "reason": "absent"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "absent"
+    }
+   }
+  },
+  {
+   "note": "absent, a resolved record held: presence comes first",
+   "presence": "absent",
+   "descriptor": null,
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "resolved",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": null,
+    "firing": {
+     "answer": "not_asked",
+     "reason": "absent"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "absent"
+    }
+   }
+  },
+  {
+   "note": "its token not seen in a read possibly incomplete",
+   "presence": "incomplete",
+   "descriptor": null,
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": null,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "presence_incomplete"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "presence_incomplete"
+    }
+   }
+  },
+  {
+   "note": "the descriptor not read",
+   "presence": "present",
+   "descriptor": null,
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": null,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "no_descriptor"
+    }
+   }
+  },
+  {
+   "note": "the descriptor lists neither major",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": null,
+    "firing": {
+     "answer": "not_asked",
+     "reason": "not_listed"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_listed"
+    }
+   }
+  },
+  {
+   "note": "the descriptor lists alarms.v1 alone: alarms.v1's text reads it",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v1",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 1
+   }
+  },
+  {
+   "note": "the descriptor lists both: read by this text",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v1",
+     "alarms.v2",
+     "freshness.v2"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "yes",
+     "reason": "firing"
+    },
+    "stale_firing": {
+     "answer": "no",
+     "reason": "fresh"
+    }
+   }
+  },
+  {
+   "note": "alarms.v2 in the tokenless set: found by its descriptor, never by a token",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2"
+    ],
+    "token": false
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "yes",
+     "reason": "firing"
+    },
+    "stale_firing": {
+     "answer": "no",
+     "reason": "fresh"
+    }
+   }
+  },
+  {
+   "note": "the tokenless owner's alarm resolved",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2"
+    ],
+    "token": false
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "resolved",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "resolved"
+    },
+    "stale_firing": {
+     "answer": "not_asked",
+     "reason": "not_firing"
+    }
+   }
+  },
+  {
+   "note": "across a face that grants the GET: a firing entry, fresh by its confirmation",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "yes",
+     "reason": "firing"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "across_face"
+    }
+   }
+  },
+  {
+   "note": "across a face, a firing entry past its horizon",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "freshness": {
+    "verdict": "stale",
+    "reason": "beyond_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "stale"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "across_face"
+    }
+   }
+  },
+  {
+   "note": "across a face, nothing delivered",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "freshness": {
+    "verdict": "stale",
+    "reason": "no_delivery"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "nothing_crossed"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "across_face"
+    }
+   }
+  },
+  {
+   "note": "across a face, nothing read",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "freshness": null,
+   "latest": null,
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "nothing_crossed"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "across_face"
+    }
+   }
+  },
+  {
+   "note": "across a face, a complete snapshot left the slot out",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "freshness": null,
+   "latest": null,
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": true,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "not_held"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "across_face"
+    }
+   }
+  },
+  {
+   "note": "across a face, a resolved entry",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "resolved",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "no",
+     "reason": "resolved"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "across_face"
+    }
+   }
+  },
+  {
+   "note": "across a face closed to the alarms: unobservable, never \"not firing\"",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": false
+   },
+   "freshness": {
+    "verdict": "fresh",
+    "reason": "within_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "face_closed"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "face_closed"
+    }
+   }
+  },
+  {
+   "note": "across a face closed to them, with nothing held",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": false
+   },
+   "freshness": null,
+   "latest": null,
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "face_closed"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "face_closed"
+    }
+   }
+  },
+  {
+   "note": "a firing record with nothing observed of its freshness",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": null,
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "no_observation"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "no_observation"
+    }
+   }
+  }
+ ],
+ "owner_sets": [
+  {
+   "note": "a complete snapshot of three entries",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "established",
+    "reason": "snapshot"
+   }
+  },
+  {
+   "note": "a complete snapshot with no entry: the owner's word that nothing fires, at once, with no window",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 0
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "established",
+    "reason": "snapshot"
+   }
+  },
+  {
+   "note": "the same for a reader that only GETs",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 0
+    }
+   },
+   "since": null,
+   "expect": {
+    "major": 2,
+    "verdict": "established",
+    "reason": "snapshot"
+   }
+  },
+  {
+   "note": "no read made",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": null,
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "no_seed"
+   }
+  },
+  {
+   "note": "a read that ended at its timeout",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": false
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "seed_incomplete"
+   }
+  },
+  {
+   "note": "a read that ran to its final reply and drew no page: silence, never \"nothing fires\"",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": null
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "snapshot_incomplete"
+   }
+  },
+  {
+   "note": "a page of the snapshot is missing: read again",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": false,
+     "run": "stated",
+     "entries": 40
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "snapshot_incomplete"
+   }
+  },
+  {
+   "note": "a delivery lost since the read was asked",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": false,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "window_lost"
+   }
+  },
+  {
+   "note": "a gap in the owner's presence since the read: a new instance may hold other alarms",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": false
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "owner_gap"
+   }
+  },
+  {
+   "note": "a loss and a gap: the loss comes first",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": false,
+    "present_throughout": false
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "window_lost"
+   }
+  },
+  {
+   "note": "a loss since, and a page missing: the loss comes first",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": false,
+     "run": "stated",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": false,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "window_lost"
+   }
+  },
+  {
+   "note": "a snapshot under a run no present descriptor states: an earlier instance built it",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "other",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "snapshot_run"
+   }
+  },
+  {
+   "note": "the same for a reader that only GETs",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "other",
+     "entries": 0
+    }
+   },
+   "since": null,
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "snapshot_run"
+   }
+  },
+  {
+   "note": "a page missing under another run: incomplete comes first",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": false,
+     "run": "other",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "snapshot_incomplete"
+   }
+  },
+  {
+   "note": "the present descriptor states no run: nothing to compare, and the snapshot stands",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "unstated",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "established",
+    "reason": "snapshot"
+   }
+  },
+  {
+   "note": "absent",
+   "presence": "absent",
+   "descriptor": null,
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 0
+    }
+   },
+   "since": null,
+   "expect": {
+    "major": null,
+    "verdict": "not_asked",
+    "reason": "absent"
+   }
+  },
+  {
+   "note": "presence possibly incomplete",
+   "presence": "incomplete",
+   "descriptor": null,
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 0
+    }
+   },
+   "since": null,
+   "expect": {
+    "major": null,
+    "verdict": "unobservable",
+    "reason": "presence_incomplete"
+   }
+  },
+  {
+   "note": "the descriptor not read",
+   "presence": "present",
+   "descriptor": null,
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 0
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": null,
+    "verdict": "unobservable",
+    "reason": "no_descriptor"
+   }
+  },
+  {
+   "note": "the descriptor lists neither major: not asked, and the owner is counted with those that have no alarms to ask",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": null,
+   "since": null,
+   "expect": {
+    "major": null,
+    "verdict": "not_asked",
+    "reason": "not_listed"
+   }
+  },
+  {
+   "note": "the descriptor lists alarms.v1 alone",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v1",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "read": null,
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 1
+   }
+  },
+  {
+   "note": "alarms.v2 in the tokenless set, a complete snapshot with no entry",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2"
+    ],
+    "token": false
+   },
+   "face": null,
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "stated",
+     "entries": 0
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "established",
+    "reason": "snapshot"
+   }
+  },
+  {
+   "note": "across a face that grants the GET, a complete snapshot with no entry: established, where alarms.v1 answered across_face for ever",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "unstated",
+     "entries": 0
+    }
+   },
+   "since": null,
+   "expect": {
+    "major": 2,
+    "verdict": "established",
+    "reason": "snapshot"
+   }
+  },
+  {
+   "note": "across a face, a complete snapshot of three",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "unstated",
+     "entries": 3
+    }
+   },
+   "since": null,
+   "expect": {
+    "major": 2,
+    "verdict": "established",
+    "reason": "snapshot"
+   }
+  },
+  {
+   "note": "across a face, the GET ended at its timeout",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "read": {
+    "complete": false
+   },
+   "since": null,
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "seed_incomplete"
+   }
+  },
+  {
+   "note": "across a face, a page missing",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": false,
+     "run": "unstated",
+     "entries": 9
+    }
+   },
+   "since": null,
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "snapshot_incomplete"
+   }
+  },
+  {
+   "note": "across a face closed to the alarms: never \"nothing fires\"",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": false
+   },
+   "read": null,
+   "since": null,
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "face_closed"
+   }
+  },
+  {
+   "note": "across a face that grants the GET, none made: pushes and a heartbeat alone establish nothing",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "read": null,
+   "since": {
+    "lossless": true,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "no_seed"
+   }
+  },
+  {
+   "note": "across a face, a subscriber that lost a delivery since its read",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "unstated",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": false,
+    "present_throughout": true
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "unobservable",
+    "reason": "window_lost"
+   }
+  },
+  {
+   "note": "across a face, presence does not cross: a gap is not asked",
+   "presence": "across_face",
+   "descriptor": null,
+   "face": {
+    "reachable": true
+   },
+   "read": {
+    "complete": true,
+    "snapshot": {
+     "complete": true,
+     "run": "unstated",
+     "entries": 3
+    }
+   },
+   "since": {
+    "lossless": true,
+    "present_throughout": false
+   },
+   "expect": {
+    "major": 2,
+    "verdict": "established",
+    "reason": "snapshot"
+   }
+  }
+ ],
+ "any_firing": [
+  {
+   "note": "one owner established by a snapshot with no entry: nothing fires",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": []
+    }
+   ],
+   "expect": {
+    "answer": "no",
+    "reason": "none_firing",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "a firing alarm at the severity",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "yes",
+       "severity": "warning"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "yes",
+    "reason": "any_firing",
+    "firing": 1,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "a firing alarm below the severity",
+   "at_least": "critical",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "yes",
+       "severity": "warning"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "no",
+    "reason": "none_firing",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "an unnamed alarm counts: its severity is in its record",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "yes",
+       "severity": "critical"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "yes",
+    "reason": "any_firing",
+    "firing": 1,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "resolved and rebound alarms are no",
+   "at_least": "info",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "no",
+       "severity": "critical"
+      },
+      {
+       "answer": "no",
+       "severity": "critical"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "no",
+    "reason": "none_firing",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "a stale alarm at the severity: unobservable, never no",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "unobservable",
+       "severity": "critical"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "unobservable",
+    "reason": "alarm_unobservable",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "a stale alarm below the severity does not stop a no",
+   "at_least": "critical",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "unobservable",
+       "severity": "warning"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "no",
+    "reason": "none_firing",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "a firing alarm whose severity is the escape: yes without a severity",
+   "at_least": "info",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "yes",
+       "severity": null
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "unobservable",
+    "reason": "alarm_unobservable",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "an undecodable record has no severity known",
+   "at_least": "critical",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "unobservable",
+       "severity": null
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "unobservable",
+    "reason": "alarm_unobservable",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "one owner fires and another is unobservable: yes, whatever else is known",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "yes",
+       "severity": "critical"
+      }
+     ]
+    },
+    {
+     "set": {
+      "verdict": "unobservable"
+     },
+     "alarms": []
+    }
+   ],
+   "expect": {
+    "answer": "yes",
+    "reason": "any_firing",
+    "firing": 1,
+    "owners": {
+     "established": 1,
+     "unobservable": 1,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "one owner established with nothing, another's snapshot incomplete",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": []
+    },
+    {
+     "set": {
+      "verdict": "unobservable"
+     },
+     "alarms": []
+    }
+   ],
+   "expect": {
+    "answer": "unobservable",
+    "reason": "owner_unobservable",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 1,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "an owner across a face closed to its alarms: never \"nothing fires\"",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": []
+    },
+    {
+     "set": {
+      "verdict": "unobservable"
+     },
+     "alarms": []
+    }
+   ],
+   "expect": {
+    "answer": "unobservable",
+    "reason": "owner_unobservable",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 1,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "an owner not listed is not asked, and stops no answer: the hazard of a reader that knows only one major",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": []
+    },
+    {
+     "set": {
+      "verdict": "not_asked"
+     },
+     "alarms": []
+    }
+   ],
+   "expect": {
+    "answer": "no",
+    "reason": "none_firing",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 1
+    }
+   }
+  },
+  {
+   "note": "no owner established",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "not_asked"
+     },
+     "alarms": []
+    },
+    {
+     "set": {
+      "verdict": "not_asked"
+     },
+     "alarms": []
+    }
+   ],
+   "expect": {
+    "answer": "not_asked",
+    "reason": "no_owner",
+    "firing": 0,
+    "owners": {
+     "established": 0,
+     "unobservable": 0,
+     "not_asked": 2
+    }
+   }
+  },
+  {
+   "note": "the reads that found the scope were not whole",
+   "at_least": "warning",
+   "scope_whole": false,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": []
+    }
+   ],
+   "expect": {
+    "answer": "unobservable",
+    "reason": "scope_incomplete",
+    "firing": 0,
+    "owners": {
+     "established": 1,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "a firing alarm of an owner whose alarms are not established still answers yes",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "unobservable"
+     },
+     "alarms": [
+      {
+       "answer": "yes",
+       "severity": "warning"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "yes",
+    "reason": "any_firing",
+    "firing": 1,
+    "owners": {
+     "established": 0,
+     "unobservable": 1,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "two owners, three alarms at or above warning",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "yes",
+       "severity": "warning"
+      },
+      {
+       "answer": "yes",
+       "severity": "info"
+      }
+     ]
+    },
+    {
+     "set": {
+      "verdict": "established"
+     },
+     "alarms": [
+      {
+       "answer": "yes",
+       "severity": "critical"
+      },
+      {
+       "answer": "yes",
+       "severity": "warning"
+      },
+      {
+       "answer": "no",
+       "severity": "critical"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "answer": "yes",
+    "reason": "any_firing",
+    "firing": 3,
+    "owners": {
+     "established": 2,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  },
+  {
+   "note": "no owner in scope",
+   "at_least": "warning",
+   "scope_whole": true,
+   "owners": [],
+   "expect": {
+    "answer": "not_asked",
+    "reason": "no_owner",
+    "firing": 0,
+    "owners": {
+     "established": 0,
+     "unobservable": 0,
+     "not_asked": 0
+    }
+   }
+  }
+ ]
+}

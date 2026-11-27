@@ -51,6 +51,20 @@
 //! first refresh read after them (zk2py round 47's F-154, #819 TE), so the
 //! router holds them, and a put from then on is heard.
 //!
+//! **Both majors** (#984's S3, `alarms.v2` §2.17): the scope names owners,
+//! so beside `alarms.v1`'s reads each refresh makes `alarms.v2`'s: a
+//! subscription to the owners' records and words
+//! ([`AlarmScope::v2_selector`]) and to their heartbeat covering
+//! `alarms.v2`, one collection read of `…/alarms.v2/state/**`
+//! ([`AlarmScope::v2_get_selector`]: the records' snapshot and the words',
+//! read whole by the model's `Seed` in the book), and each `alarms.v2`
+//! owner's table, read from the revisions its present descriptors name,
+//! held offline ([`AlarmSpec::contracts`]) or retrieved by fingerprint
+//! (core §8.4), never another revision's (§4); an owner with no
+//! descriptor in hand is named by the revisions held, the deployment's
+//! word. Each owner is then read by the major its descriptors list, in the
+//! book.
+//!
 //! **Heartbeats** (`freshness.v2`, alarms.v1 text 0.11; #978's F4): a
 //! subscription to each owner's heartbeat covering `alarms.v1` folds into
 //! the book's view of its alarms, and a heartbeat in step with the view
@@ -72,7 +86,10 @@ use zenoh::sample::{Sample, SampleKind};
 
 use crate::bus::presence::Scope;
 use crate::bus::stall::{StallSeen, StallWatch};
-use crate::model::alarms::{AlarmBook, AlarmSample, AlarmScope, ArchivedAlarm, BookSpec, SeedRead};
+use crate::model::alarms::{
+    AlarmBook, AlarmSample, AlarmScope, ArchivedAlarm, BookSpec, SeedRead, SlotRead, SlotSample,
+    V2Words,
+};
 use crate::model::catalog::{Catalog, Observed};
 use crate::report::{AlarmLoss, AlarmTransition, AlarmVia};
 
@@ -116,6 +133,14 @@ pub struct AlarmSpec {
     /// names, read through these (`bus::query::EntryEpochs`; #1087). With
     /// none, an owner naming a catalog leaves its confirmations undated.
     pub catalogs: crate::model::deployment::Catalogs,
+    /// The contracts held offline (`--contracts`): an `alarms.v2` owner's
+    /// table is read from the revisions its descriptors name, these first,
+    /// one not held retrieved by fingerprint; with no descriptor of it in
+    /// hand, from these, the deployment's word (`alarms.v2` §4).
+    pub contracts: crate::model::catalog::ContractSet,
+    /// Across a face, the deployment's word for the owner's major; `None`:
+    /// the major the selector spells (`alarms.v2` §2.11).
+    pub face_major: Option<zenkey_model::alarms::Major>,
 }
 
 impl AlarmSpec {
@@ -129,6 +154,8 @@ impl AlarmSpec {
             face: None,
             archives: true,
             catalogs: crate::model::deployment::Catalogs::default(),
+            contracts: crate::model::catalog::ContractSet::new(),
+            face_major: None,
         }
     }
 
@@ -139,6 +166,7 @@ impl AlarmSpec {
             routers: self.routers,
             clocks_synced: self.clocks_synced,
             face: self.face,
+            face_major: self.face_major,
         }
     }
 
@@ -152,6 +180,8 @@ impl AlarmSpec {
 /// What a subscription called back with.
 enum Delivery {
     Sample(AlarmSample, crate::model::inband::Envelope),
+    /// An `alarms.v2` record's or words' delivery (#984's S3).
+    Slot(SlotSample),
     Instance {
         key: ZkKey,
         held: bool,
@@ -254,6 +284,12 @@ pub struct Refreshed {
     /// not stand (#851, core §8.1, 0.41), so it is not complete.
     pub unsettled: bool,
     pub seed: Result<SeedRead, String>,
+    /// `alarms.v2`'s collection read (#984's S3), or why it could not be
+    /// made.
+    pub seed_v2: Result<SlotRead, String>,
+    /// The `alarms.v2` owners' tables and epochs, as this refresh read
+    /// them.
+    pub words_v2: V2Words,
     pub archived: Option<Result<ArchivesRead, String>>,
 }
 
@@ -311,9 +347,15 @@ impl AlarmRefresh {
             &self.spec.catalogs,
             presence.as_ref().and_then(|(_, p)| p.as_ref().ok()),
         );
-        let seed = match &cut {
-            Some(why) => Err(why.clone()),
-            None => get(&self.session, self.scope.alarms_selector(), t, &epochs).await,
+        let observed = presence.as_ref().and_then(|(_, p)| p.as_ref().ok());
+        let words_v2 = words_v2(&self.session, &self.spec, observed, &epochs).await;
+        let v2_selector = self.scope.v2_get_selector();
+        let (seed, seed_v2) = match &cut {
+            Some(why) => (Err(why.clone()), Err(why.clone())),
+            None => tokio::join!(
+                get(&self.session, self.scope.alarms_selector(), t, &epochs),
+                get_v2(&self.session, &v2_selector, t),
+            ),
         };
         let archived = if self.spec.archives && self.spec.face.is_none() {
             Some(match &cut {
@@ -328,9 +370,136 @@ impl AlarmRefresh {
             presence,
             unsettled,
             seed,
+            seed_v2,
+            words_v2,
             archived,
         }
     }
+}
+
+/// One collection read of the `alarms.v2` owners' state (`alarms.v2` §2.12,
+/// §2.15; core S4): target `All`, consolidation `None`, every reply kept as
+/// it came, so the book reads each owner's pages by the model's `Seed`.
+pub async fn get_v2(
+    session: &Session,
+    selector: &str,
+    timeout: Duration,
+) -> Result<SlotRead, String> {
+    let asked_at = Instant::now();
+    let replies =
+        crate::bus::query::state_get(session, selector, &crate::bus::query::GetOpts::new(timeout))
+            .await
+            .map_err(|e| format!("GET {selector}: {}", crate::one_line(&e)))?;
+    let mut out = SlotRead {
+        asked_at,
+        complete: true,
+        replies: Vec::new(),
+    };
+    while let Ok(reply) = replies.recv_async().await {
+        let Ok(sample) = reply.result() else {
+            out.complete = false;
+            continue;
+        };
+        out.replies.push((
+            sample.key_expr().as_str().to_owned(),
+            sample.payload().to_bytes().into_owned(),
+        ));
+    }
+    Ok(out)
+}
+
+/// The `alarms.v2` owners' tables and epochs (`alarms.v2` §4, core §8.6):
+/// for each owner whose present descriptors list `alarms.v2`, the one table
+/// among the revisions they name (the standard contract writes none, so its
+/// revision is not retrieved), held offline or retrieved by fingerprint,
+/// never another revision's; its epoch, the one its records' `at` is read
+/// under. The revisions held offline are the deployment's word for an
+/// owner with no descriptor in hand, as across a face.
+pub(crate) async fn words_v2(
+    session: &Session,
+    spec: &AlarmSpec,
+    presence: Option<&Observed>,
+    epochs: &crate::bus::query::EntryEpochs,
+) -> V2Words {
+    use zenkey_model::alarms::v2 as m2;
+    let held: Vec<Option<Vec<m2::Rule>>> = spec
+        .contracts
+        .iter()
+        .map(|r| m2::table_of(r.contract()))
+        .collect();
+    let probe = |a: &zenkey_model::grammar::Addr| format!("zk2/{a}/alarms.v2/state/alarms/0");
+    let mut out = V2Words {
+        word: m2::instance_table(held.iter().map(Option::as_deref))
+            .table()
+            .map(<[m2::Rule]>::to_vec),
+        default_epoch: crate::bus::query::EntryEpochs::of_catalogs(&spec.catalogs)
+            .of("zk2/_/_/alarms.v2/state/alarms/0"),
+        ..V2Words::default()
+    };
+    let Some(o) = presence else {
+        return out;
+    };
+    let catalog = Catalog::new(o);
+    let mut named: std::collections::BTreeMap<
+        zenkey_model::grammar::Addr,
+        BTreeSet<(IfaceId, zenkey_model::canonical::Fingerprint)>,
+    > = Default::default();
+    for ((a, _), read) in o.descriptors.iter().flatten() {
+        let Some(d) = read.descriptor() else {
+            continue;
+        };
+        let major = zenkey_model::alarms::Major::of(d.interfaces.iter().map(|e| e.iface.as_str()));
+        if major != Some(zenkey_model::alarms::Major::V2) {
+            continue;
+        }
+        let revisions = named.entry(a.clone()).or_default();
+        for e in &d.interfaces {
+            let (Ok(i), Ok(f)) = (
+                IfaceId::from_str(&e.iface),
+                zenkey_model::canonical::Fingerprint::parse(&e.contract),
+            ) else {
+                continue;
+            };
+            if e.iface == m2::IFACE {
+                continue;
+            }
+            revisions.insert((i, f));
+        }
+    }
+    let store = crate::bus::contracts::BundleStore::new(spec.timeout);
+    store.seed(&spec.contracts);
+    let wanted: Vec<_> = named
+        .values()
+        .flatten()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let got = store.fetch_all(session, &wanted).await;
+    let tables: std::collections::BTreeMap<_, Option<Vec<m2::Rule>>> = wanted
+        .into_iter()
+        .zip(got)
+        .filter_map(|(w, g)| {
+            let g = g.ok()?;
+            let table = m2::table_of(g.revision()?.contract());
+            Some((w, table))
+        })
+        .collect();
+    for (a, revisions) in named {
+        let of: Vec<Option<&[m2::Rule]>> = revisions
+            .iter()
+            .filter_map(|w| tables.get(w))
+            .map(Option::as_deref)
+            .collect();
+        out.tables.insert(
+            a.clone(),
+            m2::instance_table(of).table().map(<[m2::Rule]>::to_vec),
+        );
+    }
+    for a in catalog.addresses() {
+        out.epochs.insert(a.clone(), epochs.of(&probe(a)));
+    }
+    out
 }
 
 /// S4's GET of `selector` (core §4.2): target `All`, consolidation
@@ -411,6 +580,23 @@ pub async fn get(
 /// profile reader), the run and seq what orders it, the Zenoh stamp its
 /// time. A refused envelope's payload is its bytes as they came, which the
 /// book never decodes.
+/// An `alarms.v2` delivery as the book folds it: its envelope read, its
+/// record stripped of it, with CH's tag (#984's S3).
+fn slot_sample_of(sample: Sample) -> SlotSample {
+    let read = crate::model::inband::read(sample);
+    let envelope = crate::model::inband::envelope_of(&read);
+    let tag = read.tag();
+    let s = read.sample();
+    SlotSample {
+        key: s.key_expr().as_str().to_owned(),
+        delete: s.kind() == SampleKind::Delete,
+        payload: s.payload().to_bytes().into_owned(),
+        tag,
+        envelope,
+        at: Instant::now(),
+    }
+}
+
 fn sample_of(sample: &Sample, via: AlarmVia) -> (AlarmSample, crate::model::inband::Envelope) {
     let read = crate::model::inband::read(sample.clone());
     let envelope = crate::model::inband::envelope_of(&read);
@@ -444,15 +630,21 @@ async fn archived(
     let mut out = ArchivesRead::default();
     for a in Catalog::new(&all).providers_of(&archive) {
         out.asked.push(a.to_string());
-        match zenkey::archive::last_known_all(session, &a, scope.alarms_selector(), timeout).await {
-            Ok(got) => out.found.extend(got.into_iter().map(|lk| ArchivedAlarm {
-                archive: a.clone(),
-                key: lk.origin,
-                value: lk.value,
-                stamp: lk.timestamp,
-                confirmed: lk.confirmed,
-            })),
-            Err(e) => out.failed.push(format!("archive {a}: {e}")),
+        for selector in [
+            scope.alarms_selector().to_owned(),
+            scope.v2_alarms_selector(),
+        ] {
+            match zenkey::archive::last_known_all(session, &a, &selector, timeout).await {
+                Ok(got) => out.found.extend(got.into_iter().map(|lk| ArchivedAlarm {
+                    archive: a.clone(),
+                    key: lk.origin,
+                    value: lk.value,
+                    stamp: lk.timestamp,
+                    confirmed: lk.confirmed,
+                    tag: lk.tag,
+                })),
+                Err(e) => out.failed.push(format!("archive {a}: {e}")),
+            }
         }
     }
     Ok(out)
@@ -479,6 +671,9 @@ pub struct AlarmFeed {
     /// The owners' owner heartbeat key of alarms.v1's collection's class
     /// (`freshness.v2` §2.5, "Both forms"; #1110).
     _owner_heartbeats: Option<zenoh::pubsub::Subscriber<()>>,
+    /// `alarms.v2`'s records and words, and their heartbeat (#984's S3).
+    _data_v2: Option<zenoh::pubsub::Subscriber<()>>,
+    _heartbeats_v2: Option<zenoh::pubsub::Subscriber<()>>,
     discarded: Arc<AtomicU64>,
     stall: Option<Result<StallWatch, String>>,
     stall_seen: StallSeen,
@@ -538,6 +733,8 @@ impl AlarmFeed {
             _data: None,
             _heartbeats: None,
             _owner_heartbeats: None,
+            _data_v2: None,
+            _heartbeats_v2: None,
             discarded: Arc::default(),
             stall: None,
             stall_seen: StallSeen::default(),
@@ -597,8 +794,11 @@ impl AlarmFeed {
         self.barrier = Some(barrier);
         let q = queue.clone();
         let oq = queue.clone();
+        let vq = queue.clone();
+        let vhq = queue.clone();
         let hq = queue;
         let discarded = Arc::clone(&self.discarded);
+        let discarded_v2 = Arc::clone(&self.discarded);
         let data = crate::bus::teardown::declared(
             "alarms",
             scope.alarms_selector(),
@@ -666,6 +866,45 @@ impl AlarmFeed {
                 }),
         )
         .await?;
+        // alarms.v2's records and words (#984's S3), each with its tag, and
+        // its heartbeat, in the queue's one order.
+        let data_v2 = crate::bus::teardown::declared(
+            "alarms.v2",
+            scope.v2_selector(),
+            self.session
+                .declare_subscriber(scope.v2_selector())
+                .callback(move |s: Sample| {
+                    if s.key_expr().as_str().contains('*') {
+                        discarded_v2.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    }
+                    vq.send(Delivery::Slot(slot_sample_of(s)));
+                }),
+        )
+        .await?;
+        let heartbeats_v2 = crate::bus::teardown::declared(
+            "alarms.v2's heartbeats",
+            scope.heartbeat_v2_selector(),
+            self.session
+                .declare_subscriber(scope.heartbeat_v2_selector())
+                .callback(move |s: Sample| {
+                    let at = Instant::now();
+                    if let Ok((sample, stamp, tag)) =
+                        zenkey::inband::admit_heartbeat(crate::model::inband::read(s))
+                    {
+                        vhq.send(Delivery::Heartbeat {
+                            key: sample.key_expr().as_str().to_owned(),
+                            stamp,
+                            tag,
+                            body: sample.payload().to_bytes().into_owned(),
+                            at,
+                        });
+                    }
+                }),
+        )
+        .await?;
+        self._data_v2 = Some(data_v2);
+        self._heartbeats_v2 = Some(heartbeats_v2);
         self.book.subscribed(Instant::now());
         self.stall = Some(StallWatch::start(&self.session).await);
         self._tokens = Some(tokens);
@@ -700,7 +939,9 @@ impl AlarmFeed {
             out.push(scope.presence_scope().selector());
         }
         out.push(scope.alarms_selector().to_owned());
+        out.push(scope.v2_get_selector());
         if self.rx.is_some() {
+            out.push(scope.v2_selector());
             out.push(scope.instance_selector());
         }
         let mut seen = BTreeSet::new();
@@ -794,6 +1035,7 @@ impl AlarmFeed {
             }
             Some(Err(e)) => self.log.archives = Some(Err(e)),
         }
+        self.book.v2_words(r.words_v2);
         match r.seed {
             Ok(read) => {
                 self.log.seed = Some(Ok(read.complete));
@@ -801,6 +1043,19 @@ impl AlarmFeed {
                 out.extend(self.book.seed(read, now, wall));
             }
             Err(e) => self.log.seed = Some(Err(e)),
+        }
+        match r.seed_v2 {
+            Ok(read) => {
+                if let Some(Ok(c)) = &mut self.log.seed {
+                    *c &= read.complete;
+                }
+                out.extend(self.book.seed_v2(read, now, wall));
+            }
+            Err(e) => {
+                if !matches!(self.log.seed, Some(Err(_))) {
+                    self.log.seed = Some(Err(e));
+                }
+            }
         }
         out.extend(self.take_refused(now, wall));
         out.extend(self.check_stall(now, wall));
@@ -842,6 +1097,7 @@ impl AlarmFeed {
         let mut out = self.take_refused(now, wall);
         match d {
             Delivery::Sample(s, envelope) => out.extend(self.book.sample_enveloped(s, envelope)),
+            Delivery::Slot(s) => out.extend(self.book.sample_v2(s, wall)),
             Delivery::Instance { key, held, at } => {
                 if let ZkKey::Instance { addr, instance } = key {
                     self.book.instance(&addr, &instance, held, at);

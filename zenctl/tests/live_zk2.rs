@@ -10535,6 +10535,750 @@ async fn alarms_told_the_forks_binding_watch_its_wait_before_close() {
     );
 }
 
+// ─── alarms.v2: scenarios-v2.md §8, §10 and §11, the tool's (#984's S3) ────
+//
+// Common setup, the text's: R1 a router with timestamping on, owners and the
+// tool T its clients. `lab/svc` implements `alarms.v2` beside its own
+// contract `tc.v1` (`zenkey/tests/contracts/alarms/tc.v1.toml`), whose table
+// T1 has `hot` at 0, `link_down` at 1, `sensor_lost` at 2, `door_open` at 3;
+// each owner runs on a 16-bit run, as the scenarios' sizes do. T is `zenctl
+// alarms`, taking the deployment's word for its clock (`--clocks-synced`),
+// and in §10's step 3 the fleet's live reader, which holds what it read.
+
+/// The alarms of the scenarios-v2.md conventions, at `severity`: A, B, C.
+fn v2_a(severity: zenkey::alarms::Severity) -> zenkey::alarms::v2::Condition {
+    zenkey::alarms::v2::Condition::new("link_down", severity, "Link to r2 on eth0 is down")
+        .label("peer", "r2")
+        .label("port", "eth0")
+}
+
+fn v2_b(severity: zenkey::alarms::Severity) -> zenkey::alarms::v2::Condition {
+    zenkey::alarms::v2::Condition::new("door_open", severity, "Enclosure door open")
+}
+
+fn v2_c(severity: zenkey::alarms::Severity) -> zenkey::alarms::v2::Condition {
+    zenkey::alarms::v2::Condition::new("link_down", severity, "Link to r3 on eth1 is down")
+        .label("peer", "r3")
+        .label("port", "eth1")
+}
+
+const B_KEY: &str = "abb089906038056a";
+
+/// An owner of `alarms.v2` at `address` beside `tc.v1`, on a 16-bit run
+/// whose record is kept in the directory `runs` (each restart a later run),
+/// started on `session`; its alarms in the tokenless set when `tokenless`.
+async fn alarms_v2_owner(
+    session: &zenoh::Session,
+    address: &str,
+    tokenless: bool,
+    runs: &Path,
+) -> (Service, zenkey::alarms::v2::Alarms) {
+    let mut cfg = ServiceConfig::new(address.parse().expect("an address"));
+    if tokenless {
+        cfg = cfg.tokenless(zenkey::alarms::v2::iface());
+    }
+    let mut b = ServiceBuilder::new(session, cfg);
+    std::fs::create_dir_all(runs).expect("a run directory");
+    let record = runs.join(format!("{}.run", address.replace('/', "-")));
+    b.run_store(Arc::new(zenkey::run::FileRunStore::new(record)))
+        .expect("a run store");
+    let tc = Implementation::new(scenario_contract("alarms/tc.v1"));
+    let iface = tc.iface().clone();
+    b.implement(tc).expect("tc.v1");
+    b.expose(&iface, "state/qdisc").expect("its qdisc");
+    let a = b
+        .alarms_v2(zenkey::alarms::v2::Startup::default())
+        .await
+        .expect("alarms.v2");
+    (b.start().await.expect("start"), a)
+}
+
+/// `alarms`'s alarms.v2 row of `address`'s `slot`.
+fn v2_slot_of(run: &Run, address: &str, slot: u64) -> Option<Value> {
+    let doc: Value = serde_json::from_str(&run.stdout).ok()?;
+    rows_of(&doc, "alarm")
+        .into_iter()
+        .find(|r| {
+            r["profile"] == "alarms.v2"
+                && r["slot"] == slot
+                && r["key"]
+                    .as_str()
+                    .is_some_and(|k| k.starts_with(&format!("zk2/{address}/")))
+        })
+        .cloned()
+}
+
+/// The selector of every alarms.v2 record of `lab`.
+const LAB_V2: &str = "zk2/lab/*/alarms.v2/state/alarms/*";
+
+/// A raw collection read of `selector` (core S4): every reply as it came.
+async fn raw_get(s: &zenoh::Session, selector: &str) -> Vec<zenoh::sample::Sample> {
+    let rx = s
+        .get(selector.to_owned())
+        .target(zenoh::query::QueryTarget::All)
+        .consolidation(zenoh::query::ConsolidationMode::None)
+        .timeout(Duration::from_secs(1))
+        .await
+        .expect("a GET");
+    let mut out = Vec::new();
+    while let Ok(r) = rx.recv_async().await {
+        if let Ok(s) = r.into_result() {
+            out.push(s);
+        }
+    }
+    out
+}
+
+/// alarms.v2 `scenarios-v2.md` §8 (§2.7, §2.9, §2.14): an absent owner,
+/// last-known, for a tool. An archive records `zk2/lab/svc/alarms.v2/state/**`
+/// and the owner holds A firing on slot 0. Step 1: T judges A yes, `firing`,
+/// on slot 0, named by `tc.v1`'s table. Step 2: the owner closes cleanly, and
+/// S hears no resolved record and no delete. Step 3: T reads presence (a
+/// complete read), the owner's alarms (no reply) and the archive's form:
+/// A not asked, `absent`, its archived record of slot 0 firing, last-known,
+/// never firing now. With the revision the owner's last descriptor named
+/// (held offline, the deployment's word for an owner whose descriptor no
+/// longer reaches T) T names it `link_down`; without it, `rule 1, labels 2`,
+/// unnamed. "Is anything firing at or above warning?" over `zk2/lab/*`
+/// counts the owner not asked, and is not yes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_v2_s8_an_absent_owner_last_known_for_a_tool() {
+    use zenkey::alarms::Severity;
+    let bus = Bus::bare(None).await;
+    let archiving = client(&bus.endpoint, None).await;
+    let archive = Archive::start(
+        &archiving,
+        ArchiveConfig {
+            service: ServiceConfig::new("lab/archive".parse().expect("an address")),
+            records: vec![Recorded {
+                owner: "lab/svc".parse().expect("an address"),
+                selector: "zk2/lab/svc/alarms.v2/state/**".to_owned(),
+                implementation: zenkey::alarms::v2::implementation(),
+            }],
+            peers: Vec::new(),
+            unconfirmed_horizon: None,
+            watch: None,
+        },
+    )
+    .await
+    .expect("an archive");
+    let owning = client(&bus.endpoint, None).await;
+    let (svc, alarms) = alarms_v2_owner(&owning, "lab/svc", false, &bus.home.join("runs")).await;
+    wait_for(&bus, &["lab/svc", "lab/archive"]).await;
+    alarms
+        .raise(v2_a(Severity::Warning))
+        .await
+        .expect("A raised");
+    let key = "zk2/lab/svc/alarms.v2/state/alarms/0";
+    let deadline = Instant::now() + SETTLE;
+    while archive.confirmed(key).is_none() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        archive.confirmed(key).is_some(),
+        "the archive records slot 0"
+    );
+
+    // Step 1: T reads the owner and judges A.
+    let args = [
+        "alarms",
+        LAB_V2,
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&args, |r| r.code == 1).await;
+    exits(&run, 1);
+    let a = v2_slot_of(&run, "lab/svc", 0).expect("slot 0's row");
+    assert_eq!(a["firing"]["answer"], "yes", "{run}");
+    assert_eq!(a["firing"]["reason"], "firing");
+    assert_eq!(a["words"]["by"], "table", "{run}");
+    assert_eq!(a["words"]["rule"], "link_down");
+    assert_eq!(a["alarm"]["alert_key"], A_KEY, "its reference: {run}");
+    let owner = alarm_owner(&run.json(), "lab/svc").clone();
+    assert_eq!(owner["profile"], "alarms.v2", "{run}");
+    assert_eq!(owner["reason"], "snapshot", "{run}");
+
+    // Step 2: the owner closes cleanly; S hears no resolved record and no
+    // delete.
+    let listening = client(&bus.endpoint, None).await;
+    // Each delivery: a delete, and its payload.
+    type Heard = Arc<std::sync::Mutex<Vec<(bool, Vec<u8>)>>>;
+    let heard: Heard = Arc::default();
+    let h = Arc::clone(&heard);
+    let s = listening
+        .declare_subscriber("zk2/lab/svc/alarms.v2/**")
+        .callback(move |x: zenoh::sample::Sample| {
+            h.lock().unwrap().push((
+                x.kind() == zenoh::sample::SampleKind::Delete,
+                x.payload().to_bytes().into_owned(),
+            ));
+        })
+        .await
+        .expect("S");
+    drop(alarms);
+    svc.close().await.expect("the owner closes");
+    owning.close().await.expect("its session ends");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    for (delete, payload) in heard.lock().unwrap().iter() {
+        assert!(!delete, "a clean close deletes nothing (§2.9)");
+        let e = zenkey::model::wire::Envelope::parse(payload).expect("an envelope");
+        let r = zenkey::model::alarms::v2::Record::read(e.tag.get(), e.record, 0);
+        assert!(
+            r.is_ok_and(|r| r.state == zenkey::model::alarms::State::Firing),
+            "a clean close resolves nothing (§2.9)"
+        );
+    }
+    drop(s);
+
+    // Step 3: a complete presence read, the owner's GET, the archive's form.
+    let tc = scenario_path("alarms/tc.v1");
+    let named = [
+        "alarms",
+        "zk2/lab/**",
+        "--contracts",
+        tc.to_str().expect("a UTF-8 path"),
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&named, |r| {
+            v2_slot_of(r, "lab/svc", 0).is_some_and(|a| a["firing"]["reason"] == "absent")
+        })
+        .await;
+    exits(&run, 2);
+    let doc = run.json();
+    assert_eq!(doc["presence"]["complete"], true, "{run}");
+    let a = v2_slot_of(&run, "lab/svc", 0).expect("slot 0's row");
+    assert_eq!(a["firing"]["answer"], "not_asked", "{run}");
+    assert!(a.get("latest").is_none(), "never shown as current: {run}");
+    let lk = &a["last_known"];
+    assert_eq!(lk["archive"], "lab/archive", "{run}");
+    assert_eq!(lk["record"]["state"], "firing", "{run}");
+    assert_eq!(a["words"]["rule"], "link_down", "by tc.v1's table: {run}");
+    assert_eq!(a["alarm"]["alert_key"], A_KEY, "{run}");
+    let owner = alarm_owner(&doc, "lab/svc");
+    assert_eq!(owner["verdict"], "not_asked", "{run}");
+    assert_eq!(owner["reason"], "absent");
+    assert_eq!(owner["known_by"], json!(["archive"]), "{run}");
+    assert_ne!(doc["any_firing"]["answer"], "yes", "{run}");
+    // A tool without the revision shows the record unnamed.
+    let run = bus
+        .zenctl(&[
+            "alarms",
+            "zk2/lab/**",
+            "--clocks-synced",
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ])
+        .await;
+    let a = v2_slot_of(&run, "lab/svc", 0).expect("slot 0's row");
+    assert_eq!(
+        (
+            &a["words"]["by"],
+            &a["words"]["index"],
+            &a["words"]["codes"]
+        ),
+        (&json!("numbers"), &json!(1), &json!(2)),
+        "rule 1, labels 2: {run}"
+    );
+    assert!(a.get("alarm").is_none(), "unnamed, no reference: {run}");
+    let table = bus
+        .zenctl(&[
+            "alarms",
+            "zk2/lab/**",
+            "--clocks-synced",
+            "--timeout",
+            "1",
+            "--format",
+            "table",
+        ])
+        .await;
+    assert!(table.stdout.contains("rule 1, labels 2"), "{table}");
+    assert!(
+        table.stdout.contains("last-known, never current"),
+        "{table}"
+    );
+    drop(archive);
+}
+
+/// alarms.v2 `scenarios-v2.md` §10's two owners: `lab/a` holding A, B and C
+/// firing at warning on slots 0 to 2, and `lab/b` holding nothing, with
+/// `alarms.v2` in its tokenless set (core §8.1).
+async fn v2_s10_owners(bus: &mut Bus) -> (Service, zenkey::alarms::v2::Alarms) {
+    use zenkey::alarms::Severity;
+    let (a, alarms_a) = alarms_v2_owner(&bus.owners, "lab/a", false, &bus.home.join("runs")).await;
+    for c in [
+        v2_a(Severity::Warning),
+        v2_b(Severity::Warning),
+        v2_c(Severity::Warning),
+    ] {
+        alarms_a.raise(c).await.expect("raised");
+    }
+    let owning = client(&bus.endpoint, None).await;
+    let (b, alarms_b) = alarms_v2_owner(&owning, "lab/b", true, &bus.home.join("runs")).await;
+    bus.services.push(a);
+    bus.keep(alarms_a);
+    bus.keep(owning);
+    wait_for(bus, &["lab/a", "lab/b"]).await;
+    let alive = zenkey::presence::liveliness_read(
+        &bus.owners,
+        "zk2/lab/b/@zk/alive/alarms.v2/**",
+        Duration::from_secs(1),
+    )
+    .await
+    .expect("a liveliness read");
+    assert!(
+        alive.keys.is_empty(),
+        "lab/b holds no alive/alarms.v2/… token"
+    );
+    (b, alarms_b)
+}
+
+/// alarms.v2 `scenarios-v2.md` §10 (§2.13, §2.15, §5): anything firing, for
+/// a tool, from one snapshot. Step 1: T subscribes, then reads, and asks at
+/// once: at warning yes, `any_firing`, 3; at critical no, `none_firing`;
+/// both owners established by `snapshot`, with no window to wait out.
+/// `lab/a`'s answer is one page of 70 bytes with three entries, `lab/b`'s
+/// one page of 16 bytes with none; T finds `lab/b` by its descriptor though
+/// it holds no `alive/alarms.v2/…` token. Step 2: `lab/b` raises B at
+/// critical: yes, `any_firing`, 1. Step 3: `lab/b`'s process restarts with
+/// no record. A reader that holds what it read (the fleet's live reader, as
+/// a notifier and the watchdog hold one) asks at critical before it reads
+/// again: unobservable, `owner_unobservable`. Its owner row is `no_descriptor`
+/// while it holds the new instance's token and not its descriptor (§2.14
+/// step 2), and, the descriptor read as the conventions read it, `owner_gap`:
+/// a gap in `lab/b`'s presence since T's read. Then it reads again: no,
+/// `none_firing`, and the B it held from the earlier instance is left out,
+/// no, `not_held`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_v2_s10_anything_firing_for_a_tool_from_one_snapshot() {
+    use zenkey::alarms::Severity;
+    let mut bus = Bus::bare(None).await;
+    let (b_svc, alarms_b) = v2_s10_owners(&mut bus).await;
+
+    // Step 1, at warning and at critical, the window opening at once.
+    let step1 = |at_least: &'static str| {
+        [
+            "alarms",
+            LAB_V2,
+            "--for",
+            "1",
+            "--at-least",
+            at_least,
+            "--clocks-synced",
+            "--timeout",
+            "1",
+            "--format",
+            "json",
+        ]
+    };
+    let run = bus.zenctl(&step1("warning")).await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["any_firing"]["answer"], "yes", "{run}");
+    assert_eq!(doc["any_firing"]["reason"], "any_firing");
+    assert_eq!(doc["any_firing"]["firing"], 3, "{run}");
+    let run = bus.zenctl(&step1("critical")).await;
+    exits(&run, 0);
+    let doc = run.json();
+    assert_eq!(
+        (
+            doc["any_firing"]["answer"].as_str(),
+            doc["any_firing"]["reason"].as_str()
+        ),
+        (Some("no"), Some("none_firing")),
+        "{run}"
+    );
+    for owner in ["lab/a", "lab/b"] {
+        let o = alarm_owner(&doc, owner);
+        assert_eq!(
+            (o["verdict"].as_str(), o["reason"].as_str()),
+            (Some("established"), Some("snapshot")),
+            "{owner}: {run}"
+        );
+        assert!(o.get("window_s").is_none(), "no window: {run}");
+    }
+    assert_eq!(
+        alarm_owner(&doc, "lab/b")["known_by"],
+        json!(["presence"]),
+        "by its descriptor: {run}"
+    );
+    // The pages, as a runner checks them: their sizes alone.
+    let reader = client(&bus.endpoint, None).await;
+    let pages = |address: &'static str, got: &[zenoh::sample::Sample]| -> Vec<usize> {
+        got.iter()
+            .filter(|s| s.key_expr().as_str() == format!("zk2/{address}/alarms.v2/state/alarms"))
+            .map(|s| s.payload().len())
+            .collect()
+    };
+    let got = raw_get(&reader, "zk2/lab/*/alarms.v2/state/alarms/**").await;
+    assert_eq!(pages("lab/a", &got), [70], "three entries, two with labels");
+    assert_eq!(
+        pages("lab/b", &got),
+        [16],
+        "no entry: its word that nothing fires"
+    );
+
+    // Step 2: lab/b raises B at critical.
+    alarms_b
+        .raise(v2_b(Severity::Critical))
+        .await
+        .expect("B raised");
+    let critical = [
+        "alarms",
+        LAB_V2,
+        "--at-least",
+        "critical",
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus.until(&critical, |r| r.code == 1).await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["any_firing"]["reason"], "any_firing", "{run}");
+    assert_eq!(doc["any_firing"]["firing"], 1, "{run}");
+
+    // Step 3: a reader that holds what it read: the fleet's live one.
+    let session = client(&bus.endpoint, None).await;
+    let watching = client(&bus.endpoint, None).await;
+    let watch = zenkey_fleet::WatchSession::new(&watching, "").expect("a watch session");
+    let mut spec = zenkey_fleet::AlarmSpec::new(Duration::from_secs(1));
+    spec.clocks_synced = true;
+    spec.archives = false;
+    let scope = zenkey_fleet::AlarmScope::parse(LAB_V2).expect("a scope");
+    let (mut feed, _) = zenkey_fleet::AlarmFeed::open(&session, Some(&watch), scope, spec, true)
+        .await
+        .expect("the reader opens");
+    let ask = |feed: &zenkey_fleet::AlarmFeed| {
+        let any = feed.book().any_firing(
+            zenkey_model::alarms::Severity::Critical,
+            Instant::now(),
+            std::time::SystemTime::now(),
+        );
+        (any.answer, any.reason)
+    };
+    use zenkey_model::alarms::{Answer, Reason};
+    assert_eq!(
+        ask(&feed),
+        (Answer::Yes, Reason::AnyFiring),
+        "B held firing"
+    );
+    let lab_b: zenkey_model::grammar::Addr = "lab/b".parse().unwrap();
+    drop(alarms_b);
+    b_svc.close().await.expect("lab/b's process ends");
+    let (b_svc, alarms_b) =
+        alarms_v2_owner(&bus.owners, "lab/b", true, &bus.home.join("runs")).await;
+    // The reader folds the instance tokens' moves as they come: the old
+    // instance's token withdrawn, the new one's appearing, its descriptor
+    // not read yet (§2.14 step 2: unobservable, `no_descriptor`).
+    let deadline = Instant::now() + SETTLE;
+    while feed.book().owner_set(&lab_b, Instant::now()).reason != Reason::NoDescriptor
+        && Instant::now() < deadline
+    {
+        let _ = tokio::time::timeout(Duration::from_millis(200), feed.next()).await;
+    }
+    assert_eq!(
+        feed.book().owner_set(&lab_b, Instant::now()).reason,
+        Reason::NoDescriptor,
+        "the new instance's token heard, its descriptor not read"
+    );
+    assert_eq!(
+        ask(&feed),
+        (Answer::Unobservable, Reason::OwnerUnobservable),
+        "before it reads again"
+    );
+    // T judges with the descriptor read (core §3.3, the conventions): its
+    // presence read, and no collection read since the gap.
+    wait_for(&bus, &["lab/b"]).await;
+    let mut judged = feed.book().clone();
+    let asked = Instant::now();
+    let presence = zenkey_fleet::bus::presence::observe(
+        &session,
+        &zenkey_fleet::bus::presence::Scope::system("lab").expect("a system"),
+        Duration::from_secs(1),
+    )
+    .await
+    .expect("a presence read");
+    judged.presence_read(&presence, asked);
+    let any = judged.any_firing(
+        zenkey_model::alarms::Severity::Critical,
+        Instant::now(),
+        std::time::SystemTime::now(),
+    );
+    assert_eq!(
+        (any.answer, any.reason),
+        (Answer::Unobservable, Reason::OwnerUnobservable),
+        "before it reads again, the descriptor read"
+    );
+    assert_eq!(
+        judged.owner_set(&lab_b, Instant::now()).reason,
+        Reason::OwnerGap,
+        "a gap in lab/b's presence since T's read"
+    );
+    feed.refresh().await;
+    assert_eq!(ask(&feed), (Answer::No, Reason::NoneFiring), "after it");
+    let rows = feed
+        .book()
+        .v2_rows(Instant::now(), std::time::SystemTime::now());
+    let b = rows
+        .iter()
+        .find(|r| {
+            r.key.starts_with("zk2/lab/b/")
+                && r.alarm.as_ref().is_some_and(|a| a.alert_key == B_KEY)
+        })
+        .expect("the B held from the earlier instance");
+    assert_eq!(
+        (b.firing.answer, b.firing.reason.as_str()),
+        (zenkey_fleet::report::AlarmAnswerToken::No, "not_held"),
+        "{b:?}"
+    );
+    bus.keep(alarms_b);
+    bus.services.push(b_svc);
+}
+
+/// alarms.v2 `scenarios-v2.md` §11 (§2.1, §2.17): a reader built for
+/// `alarms.v1`, beside an `alarms.v2` owner. `lab/svc` implements
+/// `alarms.v2` and holds A firing at critical; `lab/old` implements
+/// `alarms.v1` and holds one alarm firing at info. T1 follows `alarms.v1`'s
+/// text alone: it is the model's `alarms.v1` judges over what it reads,
+/// each descriptor's `alarms.v1` entry and its GET of `alarms.v1` keys.
+/// Step 1: T1 over `zk2/lab/*/alarms.v1/state/alarms/*` answers of `lab/svc`
+/// not asked, `not_listed`, of `lab/old` established by its GET's answer,
+/// and no, `none_firing`, while `lab/svc` fires at critical: it reports
+/// `lab/svc` among the owners not asked, never among those with nothing
+/// firing. Step 2: over `zk2/lab/svc/alarms.v1/state/alarms/*`: not asked,
+/// `no_owner`. Step 3: T2, `zenctl alarms`, over step 1's selector: yes,
+/// `any_firing`, 1, reading both majors of the owners the selector selects,
+/// and reports A by its reference: `lab`, `svc`, `a659f813308ad1da`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_v2_s11_a_reader_built_for_alarms_v1_beside_an_alarms_v2_owner() {
+    use zenkey::alarms::Severity;
+    use zenkey_model::alarms::{
+        self as am, Answer, Listing, OwnerAlarms, Presence, Reason, ScopeRead, Seed,
+    };
+    let mut bus = Bus::bare(None).await;
+    let (svc, v2) = alarms_v2_owner(&bus.owners, "lab/svc", false, &bus.home.join("runs")).await;
+    v2.raise(v2_a(Severity::Critical)).await.expect("A raised");
+    let (old, v1) = alarms_owner(&bus.owners, "lab/old", false).await;
+    v1.raise(alarm_a(Severity::Info))
+        .await
+        .expect("raised at info");
+    bus.services.extend([svc, old]);
+    bus.keep(v2);
+    bus.keep(v1);
+    wait_for(&bus, &["lab/svc", "lab/old"]).await;
+
+    // T1: what alarms.v1's text alone reads of each owner.
+    let tool = client(&bus.endpoint, None).await;
+    let t = Duration::from_secs(1);
+    let t1 = |selected: Vec<&'static str>| {
+        let tool = tool.clone();
+        async move {
+            let mut owners = Vec::new();
+            for address in selected {
+                let addr: zenkey_model::grammar::Addr = address.parse().unwrap();
+                let instance = zenkey::presence::tokens(&tool, &format!("zk2/{address}/@zk/**"), t)
+                    .await
+                    .expect("tokens")
+                    .into_iter()
+                    .find_map(|k| match k {
+                        zenkey_model::grammar::ZkKey::Instance { instance, .. } => Some(instance),
+                        _ => None,
+                    })
+                    .expect("its instance token");
+                let d = zenkey::presence::descriptor(&tool, &addr, &instance, t)
+                    .await
+                    .expect("a descriptor")
+                    .into_descriptor()
+                    .expect("served");
+                let listing = d
+                    .interfaces
+                    .iter()
+                    .find(|e| e.iface == am::IFACE)
+                    .map_or(Listing::NotListed, |e| Listing::Listed { token: e.token });
+                // Its GET of the alarms.v1 keys: each entry of a page.
+                let got = raw_get(&tool, &format!("zk2/{address}/alarms.v1/state/alarms/**")).await;
+                let members: usize = got
+                    .iter()
+                    .filter_map(|s| {
+                        zenkey::model::collection::Page::parse(&s.payload().to_bytes()).ok()
+                    })
+                    .map(|p| p.live.len())
+                    .sum();
+                let set = am::owner_set(
+                    Presence::Present(listing),
+                    Some(Seed::Complete { members }),
+                    None,
+                );
+                // lab/old's one alarm, at info: firing, below warning.
+                let alarms = if members > 0 {
+                    vec![(
+                        am::Judged {
+                            answer: Answer::Yes,
+                            reason: Reason::Firing,
+                        },
+                        Some(am::Severity::Info),
+                    )]
+                } else {
+                    Vec::new()
+                };
+                owners.push((address, set, alarms));
+            }
+            owners
+        }
+    };
+    let owners = t1(vec!["lab/old", "lab/svc"]).await;
+    let (_, svc_set, _) = owners.iter().find(|(a, ..)| *a == "lab/svc").unwrap();
+    assert_eq!(
+        (svc_set.verdict, svc_set.reason),
+        (am::SetVerdict::NotAsked, Reason::NotListed),
+        "lab/svc lists no alarms.v1"
+    );
+    let (_, old_set, _) = owners.iter().find(|(a, ..)| *a == "lab/old").unwrap();
+    assert_eq!(
+        (old_set.verdict, old_set.reason),
+        (am::SetVerdict::Established, Reason::Answered)
+    );
+    // T1's reading of one owner: its address, its set, its alarms' answers.
+    type T1Owner<'a> = (
+        &'a str,
+        am::SetJudged,
+        Vec<(am::Judged, Option<am::Severity>)>,
+    );
+    let any = |owners: &[T1Owner<'_>]| {
+        let rows: Vec<OwnerAlarms<'_>> = owners
+            .iter()
+            .map(|(_, set, alarms)| OwnerAlarms { set: *set, alarms })
+            .collect();
+        am::any_firing(am::Severity::Warning, &rows, ScopeRead::Whole)
+    };
+    let a = any(&owners);
+    assert_eq!(
+        (a.answer, a.reason),
+        (Answer::No, Reason::NoneFiring),
+        "{a:?}"
+    );
+    assert_eq!(
+        (a.established, a.not_asked),
+        (1, 1),
+        "lab/svc not asked: {a:?}"
+    );
+    // Step 2: lab/svc's alarms.v1 keys alone.
+    let a = any(&t1(vec!["lab/svc"]).await);
+    assert_eq!(
+        (a.answer, a.reason),
+        (Answer::NotAsked, Reason::NoOwner),
+        "{a:?}"
+    );
+
+    // Step 3: T2 reads both majors of the owners the selector selects.
+    let run = bus
+        .until(
+            &[
+                "alarms",
+                LAB,
+                "--clocks-synced",
+                "--timeout",
+                "1",
+                "--format",
+                "json",
+            ],
+            |r| r.code == 1,
+        )
+        .await;
+    exits(&run, 1);
+    let doc = run.json();
+    assert_eq!(doc["any_firing"]["reason"], "any_firing", "{run}");
+    assert_eq!(doc["any_firing"]["firing"], 1, "{run}");
+    let a = v2_slot_of(&run, "lab/svc", 0).expect("A's row");
+    assert_eq!(
+        a["alarm"],
+        json!({"system": "lab", "service": "svc", "alert_key": A_KEY}),
+        "{run}"
+    );
+    assert_eq!(a["firing"]["reason"], "firing", "{run}");
+    assert_eq!(alarm_owner(&doc, "lab/old")["reason"], "answered", "{run}");
+}
+
+/// `check conform`'s alarm cases of an `alarms.v2` owner (#984's S3,
+/// `alarms.v2` §2.1, §2.2, §2.4, §5): read by that text, from one collection
+/// read of its `alarms.v2/state/**`, their subject `state/alarms/{slot}`.
+/// `lab/svc` holds A by its table on slot 0 and W, `disk_full` with `mount`
+/// `/var`, by words on slot 1: `alarm-key` passes (not established, a
+/// violation its yes), each slot its record's identity and none on two
+/// slots, and `alarm-document` passes, each record a packed `Alarm` that
+/// reads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn check_conform_reads_an_alarms_v2_owners_alarm_cases() {
+    use zenkey::alarms::Severity;
+    let mut bus = Bus::bare(None).await;
+    let (svc, alarms) =
+        alarms_v2_owner(&bus.owners, "lab/svc", false, &bus.home.join("runs")).await;
+    alarms
+        .raise(v2_a(Severity::Warning))
+        .await
+        .expect("A raised");
+    alarms
+        .raise(
+            zenkey::alarms::v2::Condition::new("disk_full", Severity::Warning, "/var is 97% full")
+                .label("mount", "/var"),
+        )
+        .await
+        .expect("W raised");
+    bus.services.push(svc);
+    bus.keep(alarms);
+    wait_for(&bus, &["lab/svc"]).await;
+    let args = [
+        "check",
+        "conform",
+        "lab/svc",
+        "alarms.v2",
+        "--for",
+        "1",
+        "--timeout",
+        "1",
+        "--clocks-synced",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            serde_json::from_str::<Value>(&r.stdout).is_ok_and(|d| {
+                rows_of(&d, "case").iter().any(|c| {
+                    c["case"] == "alarm-key" && c["verdict"]["answer"] == "not_established"
+                })
+            })
+        })
+        .await;
+    let doc = run.json();
+    // A case passes as not established: a violation is its yes.
+    let key = conform_case(&doc, "alarm-key", "state/alarms/{slot}");
+    assert_eq!(key["verdict"]["answer"], "not_established", "{run}");
+    assert!(
+        key["verdict"]["reason"].to_string().contains("2 slot(s)"),
+        "both slots: {run}"
+    );
+    let document = conform_case(&doc, "alarm-document", "state/alarms/{slot}");
+    assert_eq!(document["verdict"]["answer"], "not_established", "{run}");
+    assert!(
+        document["verdict"]["reason"]
+            .to_string()
+            .contains("2 record(s)"),
+        "{run}"
+    );
+}
+
 // ─── telemetry.v1: scenarios.md §8, the tool's section (#819, TC) ──────────
 //
 // Common setup, the text's: R1 a router with timestamping on, the owner O

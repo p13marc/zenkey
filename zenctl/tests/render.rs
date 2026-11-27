@@ -819,6 +819,72 @@ alarms under zk2/lab/*/alarms.v1/state/alarms/* in namespace "acme" — anything
     assert!(said.contains("(scope_incomplete)"), "{said}");
 }
 
+/// `zenctl alarms` over both majors (#984's S3, `alarms.v2` §5): an
+/// `alarms.v2` row says its profile, its slot and its words — a table's, a
+/// slot's words, its alert key alone with why its words were not taken, or
+/// its numbers for an unnamed alarm — its `at` to the second, and an alarm
+/// `rebound` off its slot; its owner row says its profile and "one slot
+/// each"; the `alarms.v1` row is drawn as it always was.
+#[test]
+fn an_alarms_v2_reading_names_each_slot_by_its_words() {
+    let report = fx::alarms_v2_report();
+    assert_data_eq!(
+        table(&report),
+        str![[r#"
+alarms under zk2/lab/*/alarms.v1/state/alarms/* in namespace "acme" — anything at or above warning: yes (any_firing), 4 firing; owners 2 established, 0 unobservable, 0 not asked
+✓  lab/old  established (answered) — its owner answered a complete GET; 1 alarm(s); known by presence
+✓  lab/svc  alarms.v2: established (snapshot) — its owner answered one complete snapshot of its alarms; 5 alarm(s); known by presence; one slot each: yes (one_slot_each) — no two slots of its present run name one alert key
+✗  lab/old a659f813308ad1da                       firing: yes (firing, info) — its owner says it fires, and confirmed it within 900 s
+    past its horizon: no (fresh) — its owner confirmed it within 900 s
+    key re-derives: yes (strict) — the key is the document's, by the strict recipe
+✗  lab/svc slot 0 · link_down peer=r2 port=eth0   firing: yes (firing, warning) — its owner says it fires, and confirmed it within 900 s
+    alarms.v2: named by its owner's table — "Link to r2 on eth0 is down"; reference lab svc a659f813308ad1da
+    latest firing, at 2026-11-07T14:45:59Z — its owner's reply
+    past its horizon: no (fresh) — its owner confirmed it within 900 s
+    its words derive its key: not asked (table) — the slot's record names a table's rule, which its table names
+✗  lab/svc slot 1 · disk_full mount=/var          firing: yes (firing, warning) — its owner says it fires, and confirmed it within 900 s
+    alarms.v2: named by its slot's words — "/var is 97% full"; reference lab svc 719d159937e54eb8
+    latest firing, at 2026-11-07T14:45:59Z — its owner's reply
+    past its horizon: no (fresh) — its owner confirmed it within 900 s
+    its words derive its key: yes (strict) — the key is the document's, by the strict recipe
+✗  lab/svc slot 2 · 16991d91fb818ca6              firing: yes (firing, warning) — its owner says it fires, and confirmed it within 900 s
+    alarms.v2: by words, shown by its alert key: its words not taken (no_words); reference lab svc 16991d91fb818ca6
+    latest firing, at 2026-11-07T14:45:59Z — its owner's reply
+    past its horizon: no (fresh) — its owner confirmed it within 900 s
+    its words derive its key: not asked (no_words) — no words were read on the slot
+✗  lab/svc slot 3 · rule 9, labels 4              firing: yes (firing, warning) — its owner says it fires, and confirmed it within 900 s
+    alarms.v2: unnamed (rule), shown by its numbers: it matches no reference
+    latest firing, at 2026-11-07T14:45:59Z — its owner's reply
+    past its horizon: no (fresh) — its owner confirmed it within 900 s
+    its words derive its key: not asked (table) — the slot's record names a table's rule, which its table names
+·  lab/svc no slot · link_down peer=r3 port=eth1  firing: no (rebound, warning) — another alarm's record is on its slot under its run, so it resolved
+    alarms.v2: named by its owner's table — "Link to r3 on eth1 is down"; reference lab svc f3ba0819e7b57762
+    displaced from its slot: rebound — another identity's record took it (alarms.v2 §2.6)
+    past its horizon: not asked (not_firing) — it is not firing
+    its words derive its key: not asked (no_record) — no record is held on the slot
+
+"#]]
+    );
+    let lines: Vec<serde_json::Value> = ndjson(&report)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("one object per line"))
+        .collect();
+    let unnamed = lines
+        .iter()
+        .find(|r| r["row"] == "alarm" && r["slot"] == 3)
+        .expect("slot 3's row");
+    assert!(unnamed.get("alarm").is_none(), "no reference: {unnamed}");
+    assert_eq!(unnamed["words"]["by"], "numbers");
+    let old = lines
+        .iter()
+        .find(|r| r["row"] == "alarm" && r["key"].as_str().is_some_and(|k| k.contains("lab/old")))
+        .expect("lab/old's row");
+    assert!(
+        old.get("profile").is_none() && old.get("slot").is_none(),
+        "{old}"
+    );
+}
+
 /// `zenctl desired` over both majors (#986's J4, `desired.v2` §2.18, §5):
 /// a `desired.v2` author's targets beside a `desired.v1` role. A
 /// `desired.v2` row says its major, shows every version as `<run>/<seq>`,

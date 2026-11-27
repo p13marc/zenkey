@@ -1,0 +1,38 @@
+# alarms.v2's scenarios (#984's S2; spec/profiles/alarms/scenarios-v2.md):
+# §9's earlier revision of `tc.v1`, which T2 holds alone: its table has
+# `door_open` at index 1 and `link_down` at index 3. A reader holding it
+# names nothing of an owner whose descriptor names another revision.
+[interface]
+name  = "tc"
+major = 1
+minor = 0
+uses  = ["alarms.v2"]
+
+[[defaults.annotations."alarms.rules"]]
+name = "hot"
+category = "sensor_health"
+summary = "Temperature {argument} C"
+argument = { minimum = "-40", resolution = "0.1" }
+
+[[defaults.annotations."alarms.rules"]]
+name = "door_open"
+summary = "Enclosure door open"
+
+[[defaults.annotations."alarms.rules"]]
+name = "sensor_lost"
+summary = "Sensor {sensor} lost"
+labels = [
+  { name = "sensor", minimum = 0, maximum = 63 },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name = "link_down"
+summary = "Link to {peer} on {port} is down"
+labels = [
+  { name = "peer", values = ["r1", "r2", "r3"] },
+  { name = "port", values = ["eth0", "eth1"] },
+]
+
+[resources.qdisc]
+kind = "state"
+type = { raw = "text/plain" }

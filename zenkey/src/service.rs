@@ -32,7 +32,9 @@
 //! [`ServiceBuilder::config_v2`] its record ([`crate::config_v2`]);
 //! one implementing `alarms.v1` through [`ServiceBuilder::alarms`] adopts
 //! its previous instance's alarms there, putting each again before
-//! anything is alive (`alarms.v1` §2.9, [`crate::alarms`]); an author of
+//! anything is alive (`alarms.v1` §2.9, [`crate::alarms`]), and one
+//! implementing `alarms.v2` through [`ServiceBuilder::alarms_v2`] its
+//! records by slot (`alarms.v2` §2.9, [`crate::alarms::v2`]); an author of
 //! `desired.v1` documents through [`ServiceBuilder::desired_author`] puts
 //! again there what its record keeps (`desired.v1` §2.11), and a target
 //! through [`ServiceBuilder::desired_target`] puts its baseline report
@@ -204,6 +206,8 @@ pub struct ServiceBuilder {
     pub(crate) config_v2: Option<crate::config_v2::Configuration>,
     /// `alarms.v1`, once [`ServiceBuilder::alarms`] implemented it.
     pub(crate) alarms: Option<crate::alarms::Alarms>,
+    /// `alarms.v2`, once [`ServiceBuilder::alarms_v2`] implemented it.
+    pub(crate) alarms_v2: Option<crate::alarms::v2::Alarms>,
     /// `desired.v1`'s desired resources this service authors.
     pub(crate) desired_authors: Vec<crate::desired::Author>,
     /// `desired.v1`'s roles this service holds as a target.
@@ -282,6 +286,28 @@ fn other_health_major(impls: &[ImplState], iface: &IfaceId) -> Result<()> {
         Some(other) => Err(Error::Contract(format!(
             "{iface}: this service implements {} already, and an instance implements one major \
              of health, never both (health.v2 §2.3)",
+            other.iface()
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// `alarms.v2` §2.1: an instance has one set of alarms, so an owner MUST
+/// NOT implement `alarms.v1` and `alarms.v2` in one instance. Refuses
+/// `iface` where it is one major and `impls` holds the other.
+fn other_alarms_major(impls: &[ImplState], iface: &IfaceId) -> Result<()> {
+    use zenkey_model::alarms::Major;
+    let Some(major) = Major::named(&iface.to_string()) else {
+        return Ok(());
+    };
+    let held = impls
+        .iter()
+        .filter_map(|s| Major::named(&s.imp.iface().to_string()))
+        .find(|m| *m != major);
+    match held {
+        Some(other) => Err(Error::Contract(format!(
+            "{iface}: this service implements {} already, and an instance implements one major \
+             of alarms, never both (alarms.v2 §2.1)",
             other.iface()
         ))),
         None => Ok(()),
@@ -444,6 +470,7 @@ impl ServiceBuilder {
             config_v1: None,
             config_v2: None,
             alarms: None,
+            alarms_v2: None,
             desired_authors: Vec::new(),
             desired_targets: Vec::new(),
             arbitrated: BTreeMap::new(),
@@ -752,13 +779,15 @@ impl ServiceBuilder {
     /// (R4): its `state/alarms/{alert_key}` must be a JSON state, and its
     /// `freshness.ttl_s` sets the confirmation period, half of it with the
     /// refresher's lead (`freshness.v1` §2.4). A later minor, or a test's
-    /// copy with a short horizon.
+    /// copy with a short horizon. Refused when the service implements
+    /// `alarms.v2`: an instance implements one major (`alarms.v2` §2.1).
     pub async fn alarms_with(
         &mut self,
         imp: Implementation,
         startup: crate::alarms::Startup,
     ) -> Result<crate::alarms::Alarms> {
         let iface = crate::alarms::iface();
+        other_alarms_major(&self.impls, &iface)?;
         if self.alarms.is_some() || self.implements(&iface) {
             return Err(Error::Duplicate(iface));
         }
@@ -766,6 +795,66 @@ impl ServiceBuilder {
             return Err(Error::Contract(not_elected("alarms.v1's owner", &iface)));
         }
         crate::alarms::Alarms::declare(self, imp, startup).await
+    }
+
+    /// Implements `alarms.v2`, its standard contract embedded
+    /// ([`crate::alarms::v2`], #984's S2), in place of `alarms.v1`: the
+    /// templates `state/alarms/{slot}` and `state/words/{slot}` are exposed
+    /// and their GETs served, `startup`'s bound applied, and the previous
+    /// instance's alarms adopted from `startup`'s record by slot, each put
+    /// again before this returns, so before any GET is answered and before
+    /// the instance token (§2.9). The handle returned raises, refreshes and
+    /// resolves the alarms, each one packed record on its slot, written by
+    /// the table the service's own contracts declare (`alarms.rules`, §4)
+    /// or by words; each firing one is confirmed every 427.5 s by the
+    /// heartbeat covering `alarms.v2` (§2.7). Implement the contract that
+    /// holds the table first, and give the deployment catalog first
+    /// ([`ServiceBuilder::catalog`]): adoption writes by the table in force
+    /// here, and the records' times count from the catalog's epoch.
+    /// Refused when the service implements `alarms.v2` already, and when it
+    /// implements `alarms.v1`: an owner MUST NOT implement both majors in
+    /// one instance (§2.1).
+    pub async fn alarms_v2(
+        &mut self,
+        startup: crate::alarms::v2::Startup,
+    ) -> Result<crate::alarms::v2::Alarms> {
+        self.alarms_v2_with(crate::alarms::v2::implementation(), startup)
+            .await
+    }
+
+    /// [`ServiceBuilder::alarms_v2`] on `imp`, another revision of
+    /// `alarms.v2`: its `state/alarms/{slot}` must be a packed state with a
+    /// horizon, and its `state/words/{slot}` a JSON state. Its
+    /// `freshness.ttl_s` sets the confirmation period and §2.5's refresh
+    /// window, half of it: a test's copy with a short horizon.
+    pub async fn alarms_v2_with(
+        &mut self,
+        imp: Implementation,
+        startup: crate::alarms::v2::Startup,
+    ) -> Result<crate::alarms::v2::Alarms> {
+        let iface = crate::alarms::v2::iface();
+        other_alarms_major(&self.impls, &iface)?;
+        if self.alarms_v2.is_some() || self.implements(&iface) {
+            return Err(Error::Duplicate(iface));
+        }
+        if zenkey_model::redundancy::is_governed(imp.contract()) {
+            return Err(Error::Contract(not_elected("alarms.v2's owner", &iface)));
+        }
+        crate::alarms::v2::Alarms::declare(self, imp, startup).await
+    }
+
+    /// `alarms.v2` §4: the instance's table of rules, the one
+    /// `alarms.rules` among the contracts implemented so far, none where
+    /// none holds one or two hold two different lists.
+    pub(crate) fn alarms_table(&self) -> Option<Vec<zenkey_model::alarms::v2::Rule>> {
+        let held: Vec<Option<Vec<zenkey_model::alarms::v2::Rule>>> = self
+            .impls
+            .iter()
+            .map(|s| zenkey_model::alarms::v2::table_of(s.imp.contract()))
+            .collect();
+        zenkey_model::alarms::v2::instance_table(held.iter().map(Option::as_deref))
+            .table()
+            .map(<[_]>::to_vec)
     }
 
     /// Authors the desired resource `resource` (`state/<template>`) of
@@ -1015,6 +1104,7 @@ impl ServiceBuilder {
             return Err(Error::Duplicate(imp.iface().clone()));
         }
         other_health_major(&self.impls, imp.iface())?;
+        other_alarms_major(&self.impls, imp.iface())?;
         for (role, req) in &imp.contract().requires {
             self.roles.push(Role {
                 role: role.clone(),
@@ -1083,6 +1173,10 @@ impl ServiceBuilder {
         // tables of words, or one that differs from another's.
         if let Some(h) = &self.health {
             h.retable(self.health_tables());
+        }
+        // alarms.v2 §4: likewise its table of rules.
+        if let Some(a) = &self.alarms_v2 {
+            a.retable(self.alarms_table());
         }
         Ok(self)
     }
@@ -1593,6 +1687,7 @@ impl ServiceBuilder {
             config_v1: self.config_v1,
             config_v2: self.config_v2,
             alarms: self.alarms,
+            alarms_v2: self.alarms_v2,
             desired_authors: self.desired_authors,
             desired_targets: self.desired_targets,
             redundancy: self.redundancy,
@@ -1893,6 +1988,8 @@ pub struct Service {
     config_v2: Option<crate::config_v2::Configuration>,
     /// `alarms.v1`, when the builder implemented it.
     alarms: Option<crate::alarms::Alarms>,
+    /// `alarms.v2`, when the builder implemented it.
+    alarms_v2: Option<crate::alarms::v2::Alarms>,
     /// `desired.v1`'s authored resources and target roles.
     desired_authors: Vec<crate::desired::Author>,
     desired_targets: Vec<crate::desired::Target>,
@@ -2090,6 +2187,13 @@ impl Service {
     #[must_use]
     pub fn alarms(&self) -> Option<&crate::alarms::Alarms> {
         self.alarms.as_ref()
+    }
+
+    /// Its `alarms.v2`, when [`ServiceBuilder::alarms_v2`] implemented it:
+    /// the handle the builder returned.
+    #[must_use]
+    pub fn alarms_v2(&self) -> Option<&crate::alarms::v2::Alarms> {
+        self.alarms_v2.as_ref()
     }
 
     /// Its authorship of `iface`'s desired resource `resource`, when
@@ -2389,7 +2493,10 @@ impl Service {
     ///
     /// A service implementing `alarms.v1` through [`ServiceBuilder::alarms`]
     /// puts every alarm it holds again from the new instance, after its
-    /// descriptor and before its tokens (`alarms.v1` §2.9), and an author of
+    /// descriptor and before its tokens (`alarms.v1` §2.9); one implementing
+    /// `alarms.v2` ([`ServiceBuilder::alarms_v2`]) puts each firing record
+    /// again on its slot there, `at` kept, and holds no resolved one from
+    /// then on (`alarms.v2` §2.9); and an author of
     /// `desired.v1` documents every document it keeps, and every delete
     /// within its window (`desired.v1` §2.11). An author's new epoch is
     /// refused while the clock guard holds ([`Error::ClockAhead`]), nothing
@@ -2402,7 +2509,8 @@ impl Service {
         // guard refuses (core §4.3, "Ahead"): refused here instead, before
         // the new instance's run, descriptor or electors move. An alarm's
         // carry none, unless the session stamps every put (§8.2).
-        let timed_alarms = self.alarms.is_some() && self.minter.session_timestamping();
+        let timed_alarms = (self.alarms.is_some() || self.alarms_v2.is_some())
+            && self.minter.session_timestamping();
         // A `desired.v2` author's carry none either (`desired.v2` §2.4).
         let timed_documents = self
             .desired_authors
@@ -2456,6 +2564,11 @@ impl Service {
         let reput = async {
             if let Some(a) = &self.alarms {
                 a.reput_all().await?;
+            }
+            // alarms.v2 §2.9: each firing record on its slot, `at` kept;
+            // the new instance holds no resolved one.
+            if let Some(a) = &self.alarms_v2 {
+                a.new_instance().await?;
             }
             for a in &self.desired_authors {
                 a.reput_all().await?;

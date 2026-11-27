@@ -6,6 +6,25 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `alarms` reads `alarms.v2` (#984's S3)
+
+`alarms.v2` 0.1 §2.1, §2.2, §2.4, §2.6, §2.14 to §2.17, §4, §5. `alarms`,
+`check conform`'s `alarm-*` cases and the watchdog's `alert-firing` read
+each owner by the major its descriptor lists, `alarms.v2` where it lists
+both, whichever major the selector spells. One flag is new on `alarms`,
+`--contracts`. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| an `alarms.v2` owner: not asked, `not_listed`, counted among those with no alarm to ask | read as `alarms.v2`: its slots by identity, "nothing fires" from one complete snapshot (`snapshot`, `snapshot_incomplete`, `snapshot_run`, `owner_gap`, `window_lost`), one answer with `alarms.v1`'s | a reading adds a GET of `zk2/*/*/alarms.v2/state/**` and, with `--for`, a subscription to `…/alarms.v2/state/*/*` and its heartbeat; `asked` lists them |
+| a selector must reach `alarms.v1` keys | either major's: `zk2/lab/svc/alarms.v2/state/alarms/0` names a slot; a selector of either major reads both majors of the owners it selects | a selector reaching neither is still refused, exit 2, its message naming both templates |
+| an `alarm` row | an `alarms.v2` row adds `profile`, `slot`, `words` (`by`: `table`, `words`, `key` or `numbers`; rule, labels, summary, category, argument, or why it is shown by its key or its numbers) and `displaced` (`rebound`, `replaced`, `dropped`); `latest.record` (the packed record's JSON reading) and `latest.at_s`; `last_known.record` | `alarm`, the reference, is absent for an unnamed alarm; every new member is absent on an `alarms.v1` row |
+| `rederives`: "does this key re-derive from its document?" | under `alarms.v2`, "do this slot's words derive its record's key?": `strict`, `sanitized`, `mismatch`, `table`, `no_words`, `no_record`, `unreadable`, `undecodable` | |
+| an `owner` row | an `alarms.v2` owner's adds `profile` and `one_slot_each`; it has no `window_s` | |
+| the table: `lab/svc a659f813308ad1da` | an `alarms.v2` row: `lab/svc slot 0 · link_down peer=r2 port=eth0`, its alert key alone, or `rule 1, labels 2` unnamed, with an `alarms.v2:` line naming how, the summary and the reference | |
+| `check conform`'s `alarm-key` and `alarm-document` on `state/alarms/{alert_key}` | for an `alarms.v2` owner, on `state/alarms/{slot}`: the words against the key and one identity on one slot; each record and each slot's words read; not asked over a complete snapshot with no entry | |
+| an owner's table | from the revisions its descriptor names, `--contracts` first, else retrieved by fingerprint, never another revision's; for an owner with no descriptor in hand (absent, across a face), the revisions `--contracts` holds | across a face, the selector's major is the deployment's word for the owner's |
+
 ## Unreleased (`main`, zk2) — `health` reads `health.v2` (#986's Q2)
 
 `health.v2` 0.2 §2.2, §2.5, §2.10, §2.11, §2.12, §5. `health`, the

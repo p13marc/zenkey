@@ -1,0 +1,1243 @@
+{
+ "description": "alarms.v2 §2.4, §3: the packed Alarm of alarms.v2.json (core §7.6). Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `schema` is the profile's packed document. `layouts`: the type -> its layout form, the sha256 of its JCS bytes, its tag, and its shortest and longest record in bits, before the pad. `writes`: the deployment `epoch` in seconds (0 where none is given) and a value in core §7.6's JSON reading (`rule` and `argument` a number or \"not_available\", `at` in milliseconds since the Unix epoch, `key` the alert key as an integer, `severity` null for the escape, an absent optional field no member) -> the record's `bits` before the pad, the `pad` and the bytes in `hex`; with `stamp`, the owner's own stamp of that put (<run>/<seq>, the run in 4 lowercase hexadecimal digits for a 16-bit run and 8 for a 32-bit run, the seq in decimal), also the put's `payload`: CH (form 0, the stamp's width bit, the type's tag), the run, the seq, the record; or {refused: token}. The writer's tokens are the core's packed/vectors.json's (`missing`, a field not given; `unknown`, a member the type does not have; `value`, a value of the wrong JSON type or a name not declared; `range`, a value with no code), then this text's, for a value the core writes: `key_with_rule` (`key` given under a table's rule), `key_missing` (no `key` under not_available) and `by_words_fields` (`labels` given, or an `argument` other than not_available, under not_available). An accepted write reads back to its value. `reads`: CH's `tag`, the record's bytes and the epoch -> {value} or {undecodable: token}, the first of: core §7.6's refusals (`tag`; then `length`, the record ends before a bit the layout needs; then `length`, a byte after the pad; `pad`, a pad bit set), then `key_with_rule` and `key_missing`. No field has an unused code, so no record is refused `code`; the layout ends at its marker, so none is refused `extension`: a marker read as 1 ends the reading, the rest a later text's. A reader ignores `labels` and `argument` under not_available, and the value shows them as read.",
+ "schema": {
+  "description": "alarms.v2's standard packed schema (spec/profiles/alarms/v2.md, section 3; core section 7.6). The standard contract alarms.v2.toml lists this file and types its resource alarms/{slot} by it. An alarm's slot is its key's last chunk, never a field. Its rule and its labels are numbers that the service's own table names (the annotation alarms.rules, section 4), or its rule is not_available and its words are on words/{slot} (section 2.4).",
+  "types": {
+   "Alarm": {
+    "description": "state alarms/{slot}: one alarm's record. 35 bits, 5 bytes, with no optional field; 67 bits, 9 bytes, with its time; 91 bits, 12 bytes, with its labels too; 131 bits, 17 bytes, for an alarm named by words, with its time and its key.",
+    "fields": [
+     {
+      "name": "state",
+      "type": "enum",
+      "values": [
+       "firing",
+       "resolved"
+      ],
+      "description": "Whether the alarm fires. The record says the state, never the sample's kind, the heartbeat's bit or its live count."
+     },
+     {
+      "name": "severity",
+      "type": "enum",
+      "values": [
+       "info",
+       "warning",
+       "critical"
+      ],
+      "escape": true,
+      "description": "In that order. The escape is a severity a later text names: a reader of this one reads it as no severity known."
+     },
+     {
+      "name": "rule",
+      "type": "int",
+      "minimum": 0,
+      "maximum": 254,
+      "reserved": [
+       "not_available"
+      ],
+      "description": "The rule's index in the service's table. not_available for an alarm no table names: its words are on words/{slot}, and its record carries key."
+     },
+     {
+      "name": "at",
+      "type": "time",
+      "optional": true,
+      "description": "When the alarm's latest transition happened (a raise, an escalation or a resolve), on the owner's clock, in whole seconds. It is the acknowledgement identity. Absent while that clock reads no instant the deployment epoch codes."
+     },
+     {
+      "name": "labels",
+      "type": "int",
+      "minimum": 0,
+      "maximum": 16777215,
+      "optional": true,
+      "description": "The codes of the rule's labels, in the table's order, the first the most significant, as one integer. Present exactly where the rule declares a label."
+     },
+     {
+      "name": "argument",
+      "type": "int",
+      "minimum": 0,
+      "maximum": 1048574,
+      "reserved": [
+       "not_available"
+      ],
+      "description": "The rule's own number: the reading that changes while the condition holds. It reads as the rule's minimum plus this code times its resolution. not_available where the rule declares none, or the reading has no code."
+     },
+     {
+      "name": "key",
+      "type": "counter",
+      "width": 64,
+      "optional": true,
+      "description": "The alert key, as the 64 bits of its hash. Present exactly where rule is not_available. It counts nothing: a counter is the one kind that holds 64 bits."
+     },
+     "..."
+    ]
+   }
+  }
+ },
+ "layouts": [
+  {
+   "type": "Alarm",
+   "expect": {
+    "form": [
+     {
+      "type": "enum",
+      "width": 1,
+      "optional": false,
+      "escape": false,
+      "values": 2
+     },
+     {
+      "type": "enum",
+      "width": 2,
+      "optional": false,
+      "escape": true
+     },
+     {
+      "type": "int",
+      "width": 8,
+      "optional": false,
+      "minimum": 0,
+      "maximum": 254,
+      "reserved": [
+       "not_available"
+      ]
+     },
+     {
+      "type": "time",
+      "width": 32,
+      "optional": true,
+      "ms": false
+     },
+     {
+      "type": "int",
+      "width": 24,
+      "optional": true,
+      "minimum": 0,
+      "maximum": 16777215,
+      "reserved": []
+     },
+     {
+      "type": "int",
+      "width": 20,
+      "optional": false,
+      "minimum": 0,
+      "maximum": 1048574,
+      "reserved": [
+       "not_available"
+      ]
+     },
+     {
+      "type": "counter",
+      "width": 64,
+      "optional": true
+     },
+     "..."
+    ],
+    "sha256": "95f4bce6d2bca99bef7d6f85cbd0449946f8834181c4b0d45d3e80ef8967705b",
+    "tag": 11,
+    "min_bits": 35,
+    "max_bits": 155
+   }
+  }
+ ],
+ "writes": [
+  {
+   "note": "the usual record: a table's rule with no label, raised at 14:45:59. 67 bits, 9 bytes; its put under the 16-bit run 0003 at seq 5 has CH 0x0b and 15 bytes",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "stamp": "0003/5",
+   "expect": {
+    "bits": "0100000001110000000110011001100000001010011101111111111111111111100",
+    "pad": 5,
+    "hex": "407019980a77ffff80",
+    "payload": "0b0003000005407019980a77ffff80"
+   }
+  },
+  {
+   "note": "the same under a 32-bit run: CH 0x1b, 17 bytes",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "stamp": "0000a1b2/5",
+   "expect": {
+    "bits": "0100000001110000000110011001100000001010011101111111111111111111100",
+    "pad": 5,
+    "hex": "407019980a77ffff80",
+    "payload": "1b0000a1b2000005407019980a77ffff80"
+   }
+  },
+  {
+   "note": "link_down with peer r2 and port eth0: labels 2. 91 bits, 12 bytes, a payload of 18",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "warning",
+    "at": 1794062759000,
+    "rule": 1,
+    "labels": 2,
+    "argument": "not_available"
+   },
+   "stamp": "0003/6",
+   "expect": {
+    "bits": "0010000000110000000110011001100000001010011110000000000000000000000101111111111111111111100",
+    "pad": 5,
+    "hex": "203019980a78000017ffff80",
+    "payload": "0b0003000006203019980a78000017ffff80"
+   }
+  },
+  {
+   "note": "an owner whose clock reads no instant the epoch codes writes no at: 35 bits, 5 bytes, a payload of 11",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "stamp": "0003/7",
+   "expect": {
+    "bits": "01000000011001111111111111111111100",
+    "pad": 5,
+    "hex": "4067ffff80",
+    "payload": "0b00030000074067ffff80"
+   }
+  },
+  {
+   "note": "an alarm by words: rule not_available, its alert key a659f813308ad1da as an integer. 131 bits, 17 bytes, a payload of 23",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "warning",
+    "at": 1794062759000,
+    "rule": "not_available",
+    "argument": "not_available",
+    "key": 11986884644525756890
+   },
+   "stamp": "0003/8",
+   "expect": {
+    "bits": "00111111111100000001100110011000000010100111011111111111111111111110100110010110011111100000010011001100001000101011010001110110100",
+    "pad": 5,
+    "hex": "3ff019980a77ffffe9967e04cc22b47680",
+    "payload": "0b00030000083ff019980a77ffffe9967e04cc22b47680"
+   }
+  },
+  {
+   "note": "hot at 85.5 C: the argument's code is (85.5 + 40) / 0.1 = 1255",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "warning",
+    "at": 1794062759000,
+    "rule": 0,
+    "argument": 1255
+   },
+   "stamp": "0003/9",
+   "expect": {
+    "bits": "0010000000010000000110011001100000001010011100000000001001110011100",
+    "pad": 5,
+    "hex": "201019980a70027380",
+    "payload": "0b0003000009201019980a70027380"
+   }
+  },
+  {
+   "note": "the usual alarm resolved a minute later: state resolved, its severity kept, a new at",
+   "epoch": 1767225600,
+   "value": {
+    "state": "resolved",
+    "severity": "critical",
+    "at": 1794062819000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "stamp": "0003/10",
+   "expect": {
+    "bits": "1100000001110000000110011001100000001110001101111111111111111111100",
+    "pad": 5,
+    "hex": "c07019980e37ffff80",
+    "payload": "0b000300000ac07019980e37ffff80"
+   }
+  },
+  {
+   "note": "info, the lowest severity",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "info",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "expect": {
+    "bits": "0000000001110000000110011001100000001010011101111111111111111111100",
+    "pad": 5,
+    "hex": "007019980a77ffff80"
+   }
+  },
+  {
+   "note": "the highest index, 254, the largest labels and the largest argument",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 254,
+    "labels": 16777215,
+    "argument": 1048574
+   },
+   "expect": {
+    "bits": "0101111111010000000110011001100000001010011111111111111111111111111111111111111111111111000",
+    "pad": 5,
+    "hex": "5fd019980a7fffffffffff00"
+   }
+  },
+  {
+   "note": "labels 0 is present, and is not an absent labels",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "info",
+    "at": 1794062759000,
+    "rule": 5,
+    "labels": 0,
+    "argument": "not_available"
+   },
+   "expect": {
+    "bits": "0000000010110000000110011001100000001010011110000000000000000000000001111111111111111111100",
+    "pad": 5,
+    "hex": "00b019980a78000007ffff80"
+   }
+  },
+  {
+   "note": "labels with no at: 59 bits, 8 bytes",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "warning",
+    "rule": 2,
+    "labels": 63,
+    "argument": "not_available"
+   },
+   "expect": {
+    "bits": "00100000010010000000000000000001111111111111111111111111100",
+    "pad": 5,
+    "hex": "20480001ffffff80"
+   }
+  },
+  {
+   "note": "by words with no at: 99 bits, 13 bytes",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "warning",
+    "rule": "not_available",
+    "argument": "not_available",
+    "key": 11986884644525756890
+   },
+   "expect": {
+    "bits": "001111111110011111111111111111111110100110010110011111100000010011001100001000101011010001110110100",
+    "pad": 5,
+    "hex": "3fe7ffffe9967e04cc22b47680"
+   }
+  },
+  {
+   "note": "the epoch's first second",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "warning",
+    "at": 1767225600000,
+    "rule": 0,
+    "argument": 0
+   },
+   "expect": {
+    "bits": "0010000000010000000000000000000000000000000000000000000000000000000",
+    "pad": 5,
+    "hex": "201000000000000000"
+   }
+  },
+  {
+   "note": "the epoch's last second, 2^32 - 1 after it",
+   "epoch": 1767225600,
+   "value": {
+    "state": "resolved",
+    "severity": "warning",
+    "at": 6062192895000,
+    "rule": 0,
+    "argument": 0
+   },
+   "expect": {
+    "bits": "1010000000011111111111111111111111111111111100000000000000000000000",
+    "pad": 5,
+    "hex": "a01ffffffff0000000"
+   }
+  },
+  {
+   "note": "milliseconds are dropped: 14:45:59.999 is written as 14:45:59, and reads back so",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "warning",
+    "at": 1794062759999,
+    "rule": 0,
+    "argument": 0
+   },
+   "expect": {
+    "bits": "0010000000010000000110011001100000001010011100000000000000000000000",
+    "pad": 5,
+    "hex": "201019980a70000000"
+   },
+   "reads_as": {
+    "state": "firing",
+    "severity": "warning",
+    "at": 1794062759000,
+    "rule": 0,
+    "argument": 0
+   }
+  },
+  {
+   "note": "no catalog, so the epoch is 0: at is Unix seconds",
+   "epoch": 0,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "stamp": "0003/5",
+   "expect": {
+    "bits": "0100000001110110101011101111001110011010011101111111111111111111100",
+    "pad": 5,
+    "hex": "4076aef39a77ffff80",
+    "payload": "0b00030000054076aef39a77ffff80"
+   }
+  },
+  {
+   "note": "a key of 0 and a key of 2^64 - 1 are keys",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "info",
+    "rule": "not_available",
+    "argument": "not_available",
+    "key": 0
+   },
+   "expect": {
+    "bits": "000111111110011111111111111111111100000000000000000000000000000000000000000000000000000000000000000",
+    "pad": 5,
+    "hex": "1fe7ffffc00000000000000000"
+   }
+  },
+  {
+   "note": "the largest key",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "info",
+    "rule": "not_available",
+    "argument": "not_available",
+    "key": 18446744073709551615
+   },
+   "expect": {
+    "bits": "000111111110011111111111111111111111111111111111111111111111111111111111111111111111111111111111110",
+    "pad": 5,
+    "hex": "1fe7ffffffffffffffffffffc0"
+   }
+  },
+  {
+   "note": "the escape is null in the JSON reading: a writer of this text has no fourth severity, and core §7.6 writes it",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": null,
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "expect": {
+    "bits": "0110000001110000000110011001100000001010011101111111111111111111100",
+    "pad": 5,
+    "hex": "607019980a77ffff80"
+   }
+  },
+  {
+   "note": "an instant before the epoch has no code: the owner writes no at instead (§2.5)",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1767225599999,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "range"
+   }
+  },
+  {
+   "note": "an instant 2^32 s after the epoch has no code",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 6062192896000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "range"
+   }
+  },
+  {
+   "note": "rule 255 has no code: a table holds at most 255 rules, indices 0 to 254",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 255,
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "range"
+   }
+  },
+  {
+   "note": "an argument of 1,048,575 has no code: the owner writes not_available instead (§4)",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 0,
+    "argument": 1048575
+   },
+   "expect": {
+    "refused": "range"
+   }
+  },
+  {
+   "note": "labels of 2^24 have no code",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 1,
+    "labels": 16777216,
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "range"
+   }
+  },
+  {
+   "note": "no severity given",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "missing"
+   }
+  },
+  {
+   "note": "no argument given: the field is not optional, and none is written not_available",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 3
+   },
+   "expect": {
+    "refused": "missing"
+   }
+  },
+  {
+   "note": "a severity the type does not declare",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "fatal",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "value"
+   }
+  },
+  {
+   "note": "a state the type does not declare",
+   "epoch": 1767225600,
+   "value": {
+    "state": "stale",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "value"
+   }
+  },
+  {
+   "note": "a member the type does not have: the slot is the key's chunk, never a field",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available",
+    "slot": 0
+   },
+   "expect": {
+    "refused": "unknown"
+   }
+  },
+  {
+   "note": "the rule's name where its index belongs",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": "door_open",
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "value"
+   }
+  },
+  {
+   "note": "a key given as its 16 hexadecimal digits: it is an integer",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "rule": "not_available",
+    "argument": "not_available",
+    "key": "a659f813308ad1da"
+   },
+   "expect": {
+    "refused": "value"
+   }
+  },
+  {
+   "note": "key under a table's rule: a reader reads it undecodable, so an owner never writes it",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": 3,
+    "argument": "not_available",
+    "key": 11986884644525756890
+   },
+   "expect": {
+    "refused": "key_with_rule"
+   }
+  },
+  {
+   "note": "no key under not_available",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": "not_available",
+    "argument": "not_available"
+   },
+   "expect": {
+    "refused": "key_missing"
+   }
+  },
+  {
+   "note": "labels under not_available: an alarm by words has its labels in its words",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": "not_available",
+    "labels": 2,
+    "argument": "not_available",
+    "key": 11986884644525756890
+   },
+   "expect": {
+    "refused": "by_words_fields"
+   }
+  },
+  {
+   "note": "an argument under not_available: a rule by words declares none",
+   "epoch": 1767225600,
+   "value": {
+    "state": "firing",
+    "severity": "critical",
+    "at": 1794062759000,
+    "rule": "not_available",
+    "argument": 7,
+    "key": 11986884644525756890
+   },
+   "expect": {
+    "refused": "by_words_fields"
+   }
+  }
+ ],
+ "reads": [
+  {
+   "note": "read back: the usual record: a table's rule with no label, raised at 14:45:59. 67 bits, 9 bytes; its put under the 16-bit run 0003 at seq 5 has CH 0x0b and 15 bytes",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "critical",
+     "rule": 3,
+     "at": 1794062759000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: the same under a 32-bit run: CH 0x1b, 17 bytes",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "critical",
+     "rule": 3,
+     "at": 1794062759000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: link_down with peer r2 and port eth0: labels 2. 91 bits, 12 bytes, a payload of 18",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "203019980a78000017ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "warning",
+     "rule": 1,
+     "at": 1794062759000,
+     "labels": 2,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: an owner whose clock reads no instant the epoch codes writes no at: 35 bits, 5 bytes, a payload of 11",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "4067ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "critical",
+     "rule": 3,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: an alarm by words: rule not_available, its alert key a659f813308ad1da as an integer. 131 bits, 17 bytes, a payload of 23",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "3ff019980a77ffffe9967e04cc22b47680",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "warning",
+     "rule": "not_available",
+     "at": 1794062759000,
+     "argument": "not_available",
+     "key": 11986884644525756890
+    }
+   }
+  },
+  {
+   "note": "read back: hot at 85.5 C: the argument's code is (85.5 + 40) / 0.1 = 1255",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "201019980a70027380",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "warning",
+     "rule": 0,
+     "at": 1794062759000,
+     "argument": 1255
+    }
+   }
+  },
+  {
+   "note": "read back: the usual alarm resolved a minute later: state resolved, its severity kept, a new at",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "c07019980e37ffff80",
+   "expect": {
+    "value": {
+     "state": "resolved",
+     "severity": "critical",
+     "rule": 3,
+     "at": 1794062819000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: info, the lowest severity",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "007019980a77ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "info",
+     "rule": 3,
+     "at": 1794062759000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: the highest index, 254, the largest labels and the largest argument",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "5fd019980a7fffffffffff00",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "critical",
+     "rule": 254,
+     "at": 1794062759000,
+     "labels": 16777215,
+     "argument": 1048574
+    }
+   }
+  },
+  {
+   "note": "read back: labels 0 is present, and is not an absent labels",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "00b019980a78000007ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "info",
+     "rule": 5,
+     "at": 1794062759000,
+     "labels": 0,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: labels with no at: 59 bits, 8 bytes",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "20480001ffffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "warning",
+     "rule": 2,
+     "labels": 63,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: by words with no at: 99 bits, 13 bytes",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "3fe7ffffe9967e04cc22b47680",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "warning",
+     "rule": "not_available",
+     "argument": "not_available",
+     "key": 11986884644525756890
+    }
+   }
+  },
+  {
+   "note": "read back: the epoch's first second",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "201000000000000000",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "warning",
+     "rule": 0,
+     "at": 1767225600000,
+     "argument": 0
+    }
+   }
+  },
+  {
+   "note": "read back: the epoch's last second, 2^32 - 1 after it",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "a01ffffffff0000000",
+   "expect": {
+    "value": {
+     "state": "resolved",
+     "severity": "warning",
+     "rule": 0,
+     "at": 6062192895000,
+     "argument": 0
+    }
+   }
+  },
+  {
+   "note": "read back: milliseconds are dropped: 14:45:59.999 is written as 14:45:59, and reads back so",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "201019980a70000000",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "warning",
+     "rule": 0,
+     "at": 1794062759000,
+     "argument": 0
+    }
+   }
+  },
+  {
+   "note": "read back: no catalog, so the epoch is 0: at is Unix seconds",
+   "tag": 11,
+   "epoch": 0,
+   "hex": "4076aef39a77ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "critical",
+     "rule": 3,
+     "at": 1794062759000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "read back: a key of 0 and a key of 2^64 - 1 are keys",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "1fe7ffffc00000000000000000",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "info",
+     "rule": "not_available",
+     "argument": "not_available",
+     "key": 0
+    }
+   }
+  },
+  {
+   "note": "read back: the largest key",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "1fe7ffffffffffffffffffffc0",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "info",
+     "rule": "not_available",
+     "argument": "not_available",
+     "key": 18446744073709551615
+    }
+   }
+  },
+  {
+   "note": "read back: the escape is null in the JSON reading: a writer of this text has no fourth severity, and core §7.6 writes it",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "607019980a77ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": null,
+     "rule": 3,
+     "at": 1794062759000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "the usual record under another tag: refused before a bit is read",
+   "tag": 3,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffff80",
+   "expect": {
+    "undecodable": "tag"
+   }
+  },
+  {
+   "note": "the usual record under tag 0, an untagged payload's: refused",
+   "tag": 0,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffff80",
+   "expect": {
+    "undecodable": "tag"
+   }
+  },
+  {
+   "note": "a JSON document where a record belongs: the bytes of {\"state\":\"firing\"}, put with the tag 0 a JSON payload carries. The tag is not the Alarm's, so it is refused before a bit is read",
+   "tag": 0,
+   "epoch": 1767225600,
+   "hex": "7b227374617465223a22666972696e67227d",
+   "expect": {
+    "undecodable": "tag"
+   }
+  },
+  {
+   "note": "the same bytes under the Alarm's own tag, which no JSON payload carries: the marker falls on a 1, so core §7.6's length is only a lower bound and it refuses nothing. This text does, by a key beside a table's rule, as these bits happen to fall. The tag is what refuses a JSON payload",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "7b227374617465223a22666972696e67227d",
+   "expect": {
+    "undecodable": "key_with_rule"
+   }
+  },
+  {
+   "note": "no byte at all",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "",
+   "expect": {
+    "undecodable": "length"
+   }
+  },
+  {
+   "note": "the usual record cut to 8 bytes: it ends before a bit its layout needs",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffff",
+   "expect": {
+    "undecodable": "length"
+   }
+  },
+  {
+   "note": "the usual record cut to 4 bytes: at is present and ends early",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "40701998",
+   "expect": {
+    "undecodable": "length"
+   }
+  },
+  {
+   "note": "the usual record with a byte after its pad",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffff8000",
+   "expect": {
+    "undecodable": "length"
+   }
+  },
+  {
+   "note": "the usual record with its last pad bit set",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffff81",
+   "expect": {
+    "undecodable": "pad"
+   }
+  },
+  {
+   "note": "the usual record with its first pad bit set",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffff90",
+   "expect": {
+    "undecodable": "pad"
+   }
+  },
+  {
+   "note": "a record with no at and two bytes more: at absent, so the record ends at 35 bits and the rest is bytes after the pad",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "4067ffff800000",
+   "expect": {
+    "undecodable": "length"
+   }
+  },
+  {
+   "note": "the usual record with its marker read as 1: a later text's fields follow, the pad's 5 bits standing for them here. This text's fields stand",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffffa0",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "critical",
+     "rule": 3,
+     "at": 1794062759000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "the same with more bytes after it: all a later text's",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffffa0c0ffee",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "critical",
+     "rule": 3,
+     "at": 1794062759000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "severity's fourth code is the escape: no severity known, null in the JSON reading. The record reads",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "607019980a77ffff80",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": null,
+     "rule": 3,
+     "at": 1794062759000,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "key present under a table's rule: undecodable, never read at its severity",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffffe9967e04cc22b47680",
+   "expect": {
+    "undecodable": "key_with_rule"
+   }
+  },
+  {
+   "note": "key absent under not_available: undecodable",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "5ff019980a77ffff80",
+   "expect": {
+    "undecodable": "key_missing"
+   }
+  },
+  {
+   "note": "key present under a table's rule, and a pad bit set: core §7.6's refusal comes first",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "407019980a77ffffe9967e04cc22b47688",
+   "expect": {
+    "undecodable": "pad"
+   }
+  },
+  {
+   "note": "labels and an argument under not_available: a reader ignores them, and the alarm is by words",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "5ff019980a780000100003e9967e04cc22b47680",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "critical",
+     "rule": "not_available",
+     "at": 1794062759000,
+     "labels": 2,
+     "argument": 7,
+     "key": 11986884644525756890
+    }
+   }
+  },
+  {
+   "note": "the by-words record cut before its key ends",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "3ff019980a77ffffe996",
+   "expect": {
+    "undecodable": "length"
+   }
+  },
+  {
+   "note": "at absent and labels present: 59 bits",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "804800004fffff80",
+   "expect": {
+    "value": {
+     "state": "resolved",
+     "severity": "info",
+     "rule": 2,
+     "labels": 9,
+     "argument": "not_available"
+    }
+   }
+  },
+  {
+   "note": "every bit set, 20 bytes: every optional field present, rule and argument not_available, the marker 1, and key present: by words, with a later text's bits after",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "ffffffffffffffffffffffffffffffffffffffff",
+   "expect": {
+    "value": {
+     "state": "resolved",
+     "severity": null,
+     "rule": "not_available",
+     "at": 6062192895000,
+     "labels": 16777215,
+     "argument": "not_available",
+     "key": 18446744073709551615
+    }
+   }
+  },
+  {
+   "note": "every bit clear, 5 bytes: firing, info, rule 0, argument 0",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "0000000000",
+   "expect": {
+    "value": {
+     "state": "firing",
+     "severity": "info",
+     "rule": 0,
+     "argument": 0
+    }
+   }
+  },
+  {
+   "note": "every bit clear, 4 bytes: the record ends before its marker",
+   "tag": 11,
+   "epoch": 1767225600,
+   "hex": "00000000",
+   "expect": {
+    "undecodable": "length"
+   }
+  }
+ ]
+}

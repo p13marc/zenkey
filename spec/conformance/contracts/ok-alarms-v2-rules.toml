@@ -1,0 +1,33 @@
+# core §10 point 2: W105 reads the table of the major the contract uses.
+# `alarms.v2`'s has one key, `rules` (alarms.v2 §4): a service's own table
+# of its alarm rules, written once on `[defaults]`, so every resource
+# carries it and none draws W105. `w105-alarms-rules` is the same contract
+# under `alarms.v1`, whose table stays empty. The table is the text's own.
+[interface]
+name  = "seed"
+major = 1
+minor = 0
+uses  = ["alarms.v2"]
+
+[[defaults.annotations."alarms.rules"]]
+name     = "hot"
+category = "sensor_health"
+summary  = "Temperature {argument} C"
+argument = { minimum = "-40", resolution = "0.1" }
+
+[[defaults.annotations."alarms.rules"]]
+name    = "link_down"
+summary = "Link to {peer} on {port} is down"
+labels  = [
+  { name = "peer", values = ["r1", "r2", "r3"] },
+  { name = "port", values = ["eth0", "eth1"] },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name    = "sensor_lost"
+summary = "Sensor {sensor} lost"
+labels  = [{ name = "sensor", minimum = 0, maximum = 63 }]
+
+[resources.a]
+kind = "stream"
+type = { raw = "text/plain" }

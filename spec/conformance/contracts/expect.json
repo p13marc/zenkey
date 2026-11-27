@@ -564,6 +564,10 @@
       ],
       "fingerprint": null
     },
+    "ok-alarms-v2-rules": {
+      "codes": [],
+      "fingerprint": "sha256:f5f8920ecbec57188db9c0025b0a048ac2eab002c3b7ffc29eacdc7ae84a6584"
+    },
     "ok-cardinality-no-ceiling": {
       "codes": [],
       "fingerprint": "sha256:daec59e632e3fb1e98f9f088cb5747d0115eae4f89ad25bc8d332a9aac161338"
@@ -665,6 +669,18 @@
         "W104"
       ],
       "fingerprint": "sha256:b661ea20132d9de4f8a45fae30d9d6005186f87bdaf6c3e3a21355bc35822d18"
+    },
+    "w105-alarms-rules": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:0e6c54c12e27c8e22d222702d2c3023b34091793a7423cf23ed227d71b0fea70"
+    },
+    "w105-alarms-v2-vocabulary": {
+      "codes": [
+        "W105"
+      ],
+      "fingerprint": "sha256:0b1d0d2a326e7e81096a7eefbbed00059907cec996e2642bdd483e288bafd7f3"
     },
     "w105-alarms-vocabulary": {
       "codes": [

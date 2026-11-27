@@ -332,10 +332,18 @@ impl Discipline {
             } else {
                 p.rule_id
             };
+            // An `alerts` notice written against an `alarms.v1` key is read
+            // onto the alarm's reference (#984's S3, alarms.v2 §2.16): an
+            // upgrade tells nothing twice.
+            let id = if facts.head == "alerts" {
+                crate::alarms::migrate_id(&p.id)
+            } else {
+                p.id
+            };
             self.entries.insert(
-                p.id.clone(),
+                id.clone(),
                 Entry {
-                    id: p.id,
+                    id,
                     rule: p.rule,
                     rule_id,
                     state: p.state,

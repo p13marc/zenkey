@@ -1108,14 +1108,21 @@ pub(crate) enum Command {
     /// (unhealthy, stale, a break, a clock ahead), 2 no verdict: a service
     /// unobservable, none asked, or a run that could not start.
     Health(HealthArgs),
-    /// Read the alarms.v1 alarms a selector reaches: is anything firing?
+    /// Read the alarms a selector reaches, either major's: is anything firing?
     ///
-    /// alarms.v1's reader (spec/profiles/alarms/v1.md §2.14, §2.15),
-    /// through a session in the deployment's namespace: presence and each
-    /// descriptor — an owner implements alarms.v1 when its descriptor lists
-    /// it, token or not (§2.13) — then S4's GET of the alarms the selector
-    /// reaches, merged by the owner's stamp with what a subscription heard
-    /// when --for listens; and every archive's last-known documents, which
+    /// alarms.v1's and alarms.v2's reader (spec/profiles/alarms/v1.md §2.14,
+    /// §2.15; v2.md), through a session in the deployment's namespace:
+    /// presence and each descriptor — an owner implements a major when its
+    /// descriptor lists it, token or not (§2.13), and one listing alarms.v2
+    /// is read by that text (v2 §2.1) — then S4's GET of the alarms the
+    /// selector reaches, merged by the owner's stamp with what a subscription
+    /// heard when --for listens; a selector names owners, not a major, so
+    /// each owner it reaches is read by the major its descriptor lists (v2
+    /// §2.17). An alarms.v2 owner's slots are read by identity, named by the
+    /// table of the revision its descriptor names (--contracts, else
+    /// retrieved) or its slot's words, and its alarms are known whole by one
+    /// complete snapshot, with an entry or with none (v2 §2.15). Every
+    /// archive's last-known documents, which
     /// are shown, never current, and name owners a complete presence read
     /// no longer finds (absent, not asked). Per alarm, §5's questions: is it
     /// firing (a fresh firing document of the present instance; resolved, a
@@ -3844,10 +3851,12 @@ pub(crate) struct HealthArgs {
 #[derive(clap::Args)]
 pub(crate) struct AlarmsArgs {
     /// The alarms asked of: a key expression, base-relative (`zk2/…`), that
-    /// reaches alarms.v1 keys — one alarm
-    /// (`zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da`), one owner's
-    /// (`zk2/lab/svc/**`), a system's (`zk2/lab/**`). Omitted, every alarm
-    /// in the namespace.
+    /// reaches alarms.v1 or alarms.v2 keys — one alarm
+    /// (`zk2/lab/svc/alarms.v1/state/alarms/a659f813308ad1da`), one slot
+    /// (`zk2/lab/svc/alarms.v2/state/alarms/0`), one owner's
+    /// (`zk2/lab/svc/**`), a system's (`zk2/lab/**`). It names owners, not a
+    /// major: each owner it reaches is read by the major its descriptor
+    /// lists (alarms.v2 §2.17). Omitted, every alarm in the namespace.
     #[arg(
         value_name = "SELECTOR",
         default_value = "zk2/*/*/alarms.v1/state/alarms/*"
@@ -3899,12 +3908,22 @@ pub(crate) struct AlarmsArgs {
     pub(crate) binding: BindingArgs,
     /// The one owner the selector names sits across a constrained face
     /// (spec §8.5), where presence and descriptors do not cross: the
-    /// deployment's word that it implements alarms.v1. `granted` when the
-    /// face grants this reader a GET of them (link.v1 §2.9), `denied` when it
-    /// does not — then every question is unobservable, never "nothing fires"
-    /// (alarms.v1 §2.11).
+    /// deployment's word that it implements the major the selector spells
+    /// (alarms.v2 where it spells that alone, else alarms.v1). `granted` when
+    /// the face grants this reader a GET of them (link.v1 §2.9), `denied`
+    /// when it does not — then every question is unobservable, never
+    /// "nothing fires" (alarms.v1 §2.11, alarms.v2 §2.11).
     #[arg(long, value_enum, value_name = "GRANT")]
     pub(crate) across_face: Option<FaceGrant>,
+    /// Contracts known offline, repeatable: an authoring file (`*.toml`), a
+    /// directory of them, or a `.history` root. An alarms.v2 owner's table
+    /// (`alarms.rules`) is read from the revisions its descriptor names,
+    /// these first, one not held retrieved by fingerprint, never another
+    /// revision's; with no descriptor of it in hand (an absent owner, across
+    /// a face), from these, the deployment's word (alarms.v2 §4). Without a
+    /// table, an alarm is shown by its numbers, unnamed.
+    #[arg(long = "contracts", value_name = "PATH")]
+    pub(crate) contracts: Vec<PathBuf>,
     /// The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1`
     /// file the deployment provisions. A snapshot's confirmations are dated
     /// under the epoch of the catalog an owner's descriptor names, read

@@ -1,0 +1,55 @@
+# alarms.v2's scenarios (#984's S2; spec/profiles/alarms/scenarios-v2.md):
+# the contract of its own in which `lab/svc` names its alarms. It lists
+# alarms.v2 in `uses`, and declares on [defaults] the table T1 of
+# conformance/v2/tables.json: `hot` at index 0, `link_down` at 1,
+# `sensor_lost` at 2, `door_open` at 3 (v2.md §4).
+[interface]
+name  = "tc"
+major = 1
+minor = 1
+uses  = ["alarms.v2"]
+
+[[defaults.annotations."alarms.rules"]]
+name = "hot"
+category = "sensor_health"
+summary = "Temperature {argument} C"
+argument = { minimum = "-40", resolution = "0.1" }
+
+[[defaults.annotations."alarms.rules"]]
+name = "link_down"
+summary = "Link to {peer} on {port} is down"
+labels = [
+  { name = "peer", values = ["r1", "r2", "r3"] },
+  { name = "port", values = ["eth0", "eth1"] },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name = "sensor_lost"
+summary = "Sensor {sensor} lost"
+labels = [
+  { name = "sensor", minimum = 0, maximum = 63 },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name = "door_open"
+summary = "Enclosure door open"
+
+[[defaults.annotations."alarms.rules"]]
+name = "rack_temp"
+category = "sensor_health"
+summary = "Rack {rack}: {argument} C over"
+argument = { minimum = "0", resolution = "0.5" }
+labels = [
+  { name = "rack", minimum = -2, maximum = 5 },
+]
+
+[[defaults.annotations."alarms.rules"]]
+name = "fan"
+summary = "Fan {unit} stopped"
+labels = [
+  { name = "unit", values = ["only"] },
+]
+
+[resources.qdisc]
+kind = "state"
+type = { raw = "text/plain" }

@@ -452,7 +452,7 @@ mod tests {
             "alert-firing zk2/lab/svc/health.v1/** warning",
         ] {
             let e = parse_rule(no_alarm).unwrap_err().to_string();
-            assert!(e.contains("reaches no alarms.v1 key"), "{no_alarm}: {e}");
+            assert!(e.contains("reaches no alarms key"), "{no_alarm}: {e}");
         }
         let e = parse_rule("alert-firing zk2/** severe")
             .unwrap_err()

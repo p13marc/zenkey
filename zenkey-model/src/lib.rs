@@ -92,7 +92,11 @@
 //!   read into transitions; a reference to an alarm; and §5's questions,
 //!   on top of [`freshness`] (`spec/profiles/alarms/v1.md`, #800). The
 //!   owner's puts, its confirmations and its adoption at a restart are the
-//!   runtime's.
+//!   runtime's. [`alarms::v2`] is `alarms.v2`'s
+//!   (`spec/profiles/alarms/v2.md`, #984): the packed record on a slot, the
+//!   service's table of rules and its lints, slot choice, words taken by
+//!   the key, transitions by identity, and what one complete snapshot
+//!   establishes; [`alarms::Major`] says which a descriptor is read by.
 //! - [`telemetry`]: `telemetry.v1`'s vocabulary and standard schema, the
 //!   declaration read from a resolved resource, one sample's conformance
 //!   with the member's kind and unit, and a pair's continuity and rate, its

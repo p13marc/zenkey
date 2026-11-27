@@ -98,7 +98,11 @@ pub fn row(
     let alarm = zenkey_model::alarms::AlarmRef::from_key(key)?;
     Some(AlarmRow {
         key: key.to_owned(),
-        alarm,
+        alarm: Some(alarm),
+        profile: None,
+        slot: None,
+        words: None,
+        displaced: None,
         firing: answer_of(r.firing()),
         stale: answer_of(r.stale()),
         rederives: answer_of(r.rederives()),
@@ -120,6 +124,7 @@ fn last_known(a: &crate::model::alarms::ArchivedAlarm) -> LastKnownAlarm {
         deleted: a.value.is_none(),
         stamp: a.stamp.as_ref().map(stamp_report),
         confirmed: a.confirmed,
+        record: None,
     }
 }
 
@@ -140,7 +145,11 @@ fn archived_row(book: &AlarmBook, key: &str) -> Option<AlarmRow> {
     });
     Some(AlarmRow {
         key: key.to_owned(),
-        alarm,
+        alarm: Some(alarm),
+        profile: None,
+        slot: None,
+        words: None,
+        displaced: None,
         firing: not_asked.clone(),
         stale: not_asked.clone(),
         rederives: not_asked,
@@ -223,19 +232,35 @@ pub fn judge(obs: &AlarmObservation, at_least: Severity) -> AlarmsReport {
             alarms.push(r);
         }
     }
+    // alarms.v2's rows (#984's S3): each slot, each displaced alarm, each
+    // archived record no slot holds.
+    alarms.extend(book.v2_rows(at, wall));
     alarms.sort_by(|a, b| a.key.cmp(&b.key));
     let owners: Vec<AlarmOwnerRow> = book
         .owners()
         .map(|a| {
             let set = book.owner_set(a, at);
+            let v2 = book.major_of(a) == Some(zenkey_model::alarms::Major::V2);
             AlarmOwnerRow {
                 address: a.to_string(),
                 known_by: book.known_by(a),
                 verdict: set_token(set.verdict),
                 reason: set.reason.as_str().to_owned(),
                 says: set.reason.says().to_owned(),
-                alarms: book.keys_of(a).count(),
-                window_s: book.window(a, at).map(|w| w.listened.as_secs_f64()),
+                alarms: if v2 {
+                    book.slots_of(a)
+                } else {
+                    book.keys_of(a).count()
+                },
+                // alarms.v2 has no window: one complete snapshot (§2.15).
+                window_s: (!v2)
+                    .then(|| book.window(a, at).map(|w| w.listened.as_secs_f64()))
+                    .flatten(),
+                profile: v2.then_some(zenkey_model::alarms::v2::PROFILE),
+                one_slot_each: v2.then(|| {
+                    let answer = book.one_slot_each(a);
+                    one_slot_answer(answer, set.verdict)
+                }),
             }
         })
         .collect();
@@ -296,6 +321,35 @@ pub fn judge(obs: &AlarmObservation, at_least: Severity) -> AlarmsReport {
         alarms,
         lost: book.lost(),
         unobservable,
+    }
+}
+
+/// §5's fourth question of `alarms.v2`, "does this owner hold each
+/// identity on one slot?" (§2.2), as the report spells it: yes, no (two
+/// slots of its present run name one alert key, a finding about the owner),
+/// or unobservable while its alarms are not established.
+fn one_slot_answer(
+    answer: Answer,
+    set: zenkey_model::alarms::SetVerdict,
+) -> crate::report::AlarmAnswer {
+    let (reason, says) = match answer {
+        Answer::Yes => (
+            "one_slot_each",
+            "no two slots of its present run name one alert key",
+        ),
+        Answer::No => (
+            "two_slots",
+            "two slots of its present run name one alert key: a break of alarms.v2 §2.2",
+        ),
+        _ => (
+            set_token(set).as_str(),
+            "its alarms are not established, so its slots are not compared (alarms.v2 §5)",
+        ),
+    };
+    crate::report::AlarmAnswer {
+        answer: token(answer),
+        reason: reason.to_owned(),
+        says: says.to_owned(),
     }
 }
 
@@ -413,6 +467,7 @@ mod tests {
             value: Some(doc()),
             stamp: Some(stamp(30)),
             confirmed: true,
+            tag: None,
         }]);
         let replies = if present {
             vec![AlarmSample {

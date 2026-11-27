@@ -69,10 +69,23 @@ and three of zenwatch's own, one state per *address*, per *token* or per
   anything else — another application's tokens, another namespace's — the
   daemon keeps its own ledger, one state per token key, seeded by a
   liveliness read that says when it ran to its timeout.
-- `alerts <SEL>` — the alarms of `alarms.v1`
-  ([`spec/profiles/alarms/v1.md`](../spec/profiles/alarms/v1.md), #800):
-  each alarm key the selector reaches is an identity of its own, from its
-  raise to its resolve. The selector is **base-relative** —
+- `alerts <SEL>` — the alarms of `alarms.v1` and `alarms.v2`
+  ([`spec/profiles/alarms/v1.md`](../spec/profiles/alarms/v1.md), #800;
+  [`v2.md`](../spec/profiles/alarms/v2.md), #984): each alarm the selector
+  reaches is an identity of its own, from its raise to its resolve: its
+  **reference**, `<system>/<service>/<alert_key>`, never its key and never
+  its slot (alarms.v2 §2.16). A selector names owners, not a major: an
+  owner whose descriptor lists `alarms.v2` is read by its slots, one that
+  lists `alarms.v1` by its keys, whichever major the selector spells
+  (§2.17), so a rule written over `zk2/*/*/alarms.v1/state/alarms/*` goes
+  on reporting an owner that moves, and tells nothing twice: the same
+  reference, the same answer. An `alarms.v2` alarm is named by its
+  owner's table (the revision its descriptor names, retrieved by
+  fingerprint) or its slot's words; one no table in hand names is
+  **unnamed**, its identity its slot's key, and a restart may tell it
+  again. Another identity's record on a slot that held a firing alarm,
+  under its run (`rebound`), is told as that alarm's resolve. The
+  selector is **base-relative** —
   `zk2/*/*/alarms.v1/state/alarms/*`, `zk2/lab/**` — because alarms are
   read through the session in the deployment's namespace, as every reader
   of a profile reads them (a selector with the namespace on it is refused,
@@ -155,7 +168,13 @@ heals it decides it.
   confirmed|resolved|retired|unreadable|judged", "firing": {"answer":
   "yes|no|unobservable|not_asked", "reason", "says"}}`, with `severity`,
   `document` (the alarm as alarms.v1 writes it), `stamp` and `via`
-  (`subscription|get`) when known; `null` otherwise. An alert's `severity`
+  (`subscription|get`) when known; `null` otherwise. An `alarms.v2`
+  alarm's adds `profile` (`alarms.v2`), `slot`, `words` (how it is named:
+  `by` `table`, `words`, `key` or `numbers`, with its rule, labels and
+  summary) and `record` (the packed record's JSON reading), and
+  `displaced` (`rebound`, `replaced`, `dropped`) for an alarm another
+  identity's record took off its slot; `alarm` is absent for an unnamed
+  one. An alert's `severity`
   is its document's, its `labels` the rule's with the document's
   discriminating labels over them (never `host` or `host.*`), and its
   `rendering` `schema`: the document rendered through the contract.
@@ -215,8 +234,9 @@ document): deduplicated, grouped, repeats, cancelled, baselines, evicted.
 `state_file` keeps the ledger across restarts, so a restart does not
 re-page the world: what was announced firing or unobservable, when, when it
 was last sent, how often it repeated, and the address it was about. JSON,
-**version 2** — zk2 identities (an alarm's key among them, a string like
-the others), and the namespace they were judged in —
+**version 2** — zk2 identities (an alarm's reference among them,
+`<rule_id>:<system>/<service>/<alert_key>`, a string like the others), and
+the namespace they were judged in —
 written atomically (`.tmp` then rename) on the tick when something changed
 and at stop; read once at startup. **Missing is fresh; malformed is exit 2
 naming the path** — silently discarding history is how a resolved notice
@@ -228,7 +248,12 @@ once what is still firing. `check-config` reads the file, so the refusal
 lands while the config is being edited, not at a daemon's restart. The
 ledger is bounded to `state_max_entries` (4096) identities, least recently
 changed evicted first, the count carried in the file and on the health
-document.
+document. An `alerts` entry a zenwatch before #984 wrote names the alarm by
+its `alarms.v1` key (`<rule_id>:zk2/<system>/<service>/alarms.v1/state/alarms/<alert_key>`):
+it is read onto the alarm's reference, so an upgrade, and a service's move
+to `alarms.v2`, tells nothing twice, and the next write holds the reference
+alone. A rollback to an older zenwatch reads such a reference as no alarm
+key it knows, and tells every firing alarm again.
 
 ## The doctor
 

@@ -71,7 +71,10 @@
 //! `zenkey_model::alarms`'s recipe and put whole, each firing alarm
 //! confirmed every 450 s until the owner stops evaluating it, a raise past
 //! the bound refused, and a restart's adoption from the application's
-//! record, else an archive on its own side, before anything is alive;
+//! record, else an archive on its own side, before anything is alive, and
+//! `alarms.v2` [`alarms::v2`], through [`ServiceBuilder::alarms_v2`]
+//! (#984), one major per instance: each alarm one packed record on a slot,
+//! by the service's table of rules or by words, adopted by slot;
 //! `telemetry.v1` is [`telemetry`] (#819): every writer of a metric resource
 //! checks each sample against its declaration, refuses a counter or
 //! histogram that goes down within its epoch, and writes the epoch a reader

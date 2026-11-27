@@ -1,5 +1,7 @@
 //! `alarms.v1` in the runtime: a service says which of its alarms fire
-//! (`spec/profiles/alarms/v1.md`, #800).
+//! (`spec/profiles/alarms/v1.md`, #800). `alarms.v2`, its slots and packed
+//! records, is [`v2`] (#984's S2): [`ServiceBuilder::alarms_v2`] implements
+//! it in place of this major, never beside it (`alarms.v2` §2.1).
 //!
 //! The owner's half of the profile. The key recipe, the document, the
 //! reading of transitions and every judgement are `zenkey-model`'s
@@ -105,6 +107,8 @@ use crate::implementation::Implementation;
 use crate::service::ServiceBuilder;
 use crate::state::{Minter, StateWriter, Store};
 use crate::writer::Writer;
+
+pub mod v2;
 
 /// The standard contract's bundle, revision 1.1 as published in
 /// `spec/profiles/.history/alarms.v1/` (§3), byte for byte: it uses

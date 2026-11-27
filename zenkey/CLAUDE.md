@@ -409,6 +409,58 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   takes another revision (a test's short-ttl copy), and the owner
   example's `--alarms` drives it from stdin (`alarm raise|resolve|confirm|
   list|adoption`).
+  `alarms::v2` (#984's S2, text 0.1, `src/alarms/v2.rs`) is `alarms.v2`'s
+  owner on its embedded bundle (`bundles/alarms.v2/`, revision 2.0
+  `2292477c…`): opt-in through `ServiceBuilder::alarms_v2(v2::Startup)`
+  (`alarms_v2_with` for a short-ttl copy) → `v2::Alarms` (also
+  `Service::alarms_v2()`); `alarms()` is still `alarms.v1`, the default
+  (flipping it is S5). **One major per instance** (v2 §2.1): either
+  major's call beside the other, either order, and `implement` of the
+  other's contract are `Error::Contract` naming §2.1 (`service.rs`'s
+  `other_alarms_major`, beside health's). The slots are the model's
+  `Slots<u64>` (by alert key, `Condition::identity` = v1's `derive`
+  through its sanitizing step); one `StateWriter` per slot on
+  `state/alarms/{slot}` sealed under tag 11 (`PackedType`), and one per
+  slot on `state/words/{slot}` for alarms by words, its `Words` put
+  first; keys from the model's `alarm_key`/`words_key`. **The record
+  by table or by words** is `model::write_alarm` over the instance's
+  table (`ServiceBuilder::alarms_table()`, read again at each
+  `implement`, `Alarms::retable`), fixed for an identity when it takes
+  its slot (§2.5's "what stays"): a table implemented after
+  `alarms_v2()` names only identities that take a slot after it, so the
+  example and the tests implement the table's contract first.
+  `raise(v2::Condition)` (v1's with a `reading`, a decimal, from JSON a
+  string or a number) → `Act::{Raised, Escalated, Refreshed, Deferred,
+  Unchanged}`: a refresh within half the horizon of the last one put is
+  `Deferred`, nothing put, the reading kept for the next act (§2.5's
+  SHOULD NOT; no timer puts it later). `resolve` is the resolved
+  record, severity kept, argument the latest reading, bit cleared
+  first, and no delete; the slot is free and keeps the record.
+  Confirmation is the heartbeat's bit (`set_vouched`), set again after
+  each firing put. Every slot firing: `Error::Budget` built by hand
+  (`Refusal`, member `the alarm <key> (<rule>)`), nothing put. **The
+  record** is the application's `OwnerRecord` (`v2::FileRecord`:
+  `{"profile": "alarms.v2", "slots": {"<n>": {record, words,
+  alert_key, reading?}}}`, record and words as JSON so an entry that
+  does not read survives), saved whole after every act; `load` gives
+  `Found::V2(Vec<Kept>)` or, from an `alarms.v1` `FileRecord`'s file,
+  `Found::V1`. Adoption (inside `alarms_v2()`, before anything is
+  alive) is `Slots::restart`'s steps on the record's slots, each alarm
+  written again by name (`write_alarm` over this instance's table, its
+  severity kept, `at` kept or new for a resolve), or from v1 each firing
+  document onto the lowest free slot, `at` = `adopted_at`; a failed put
+  is `Slots::forget` and kept unsettled. No archive is read.
+  `new_epoch` calls `Alarms::new_instance` after the descriptor, before
+  the tokens: resolved slots freed (`Store::forget`, the budget
+  released, nothing put), each firing record `reput`, `at` kept.
+  `tests/profile_alarms_v2.rs` runs `scenarios-v2.md` §1 to §7, §9 and
+  §12 (§2, §3, §6 fast on a ttl-4 copy, `#[ignore]`d at 900 s), and a
+  re-mint; every owner on a `FileRunStore` (16-bit run);
+  `tests/contracts/alarms/` holds `tc.v1` (T1), the later revision
+  (`disk_full` at 6) and the earlier one §9's T2 holds. §8, §10 and §11
+  are S3's. The owner example's `--alarms-v2` drives it with the same
+  `alarm` verbs, answers `alarm <act> <key> <slot> {"record", "words"}`
+  (`owner_example.rs`'s `the_owner_example_implements_alarms_v2`).
   `telemetry` (#819, TB) holds an owner to `telemetry.v1`: every
   `Writer`/`StateWriter` of a metric resource (declaration `declared`, raw
   excepted) decodes each put strictly (`zenkey_model::telemetry::Datum::

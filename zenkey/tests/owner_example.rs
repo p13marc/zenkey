@@ -1253,6 +1253,226 @@ async fn the_owner_example_implements_alarms() {
     o.stop().await;
 }
 
+/// `alarms.v2` in the owner example (#984's S2): `--alarms-v2` implements
+/// it beside a contract that holds the table; the commands raise by the
+/// table and by words, refuse at the lowered bound, retake a resolved
+/// slot, refresh and defer, and a restart on the same `--alarms-record`
+/// takes the slots over, resolving a rule it no longer evaluates.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_implements_alarms_v2() {
+    use zenkey::model::alarms::v2 as m2;
+
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let tc = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/alarms/tc.v1.toml");
+    let tc = tc.display().to_string();
+    let dir = tempfile::tempdir().unwrap();
+    let record = dir.path().join("alarms.json");
+    let record_arg = record.display().to_string();
+    let runs = dir.path().join("svc.run").display().to_string();
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--alarms-v2",
+        "--run-file",
+        &runs,
+        "--alarms-record",
+        &record_arg,
+        "--cardinality",
+        "alarms.v2:state/alarms/{slot}=2",
+        "ex/alarmed",
+        &tc,
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    let ready = line(&o.lines).await;
+    let instance = ready.rsplit('/').next().unwrap().parse().unwrap();
+    let addr = "ex/alarmed".parse().unwrap();
+    let d = loop {
+        match presence::descriptor(&tool, &addr, &instance, T)
+            .await
+            .unwrap()
+        {
+            presence::Found::Nothing => continue,
+            found => break found.into_descriptor().unwrap(),
+        }
+    };
+    let e = d
+        .interfaces
+        .iter()
+        .find(|e| e.iface == "alarms.v2")
+        .unwrap();
+    assert_eq!(e.contract, format!("sha256:{}", m2::FINGERPRINT));
+    assert_eq!(e.cardinality.get(zenkey::alarms::v2::ALARMS), Some(&2));
+    assert!(d.interfaces.iter().all(|e| e.iface != "alarms.v1"));
+    assert_eq!(
+        o.ask("alarm adoption").await,
+        "alarm adoption source=nothing adopted=- resolved=- free=- left=- failed=-"
+    );
+    let body = |answer: &str, n: usize| -> serde_json::Value {
+        serde_json::from_str(answer.splitn(n + 1, ' ').nth(n).unwrap()).unwrap()
+    };
+
+    // A by the table, on slot 0; D by words, on slot 1.
+    let a = r#"{"rule": "link_down", "severity": "warning", "summary": "down", "labels": {"peer": "r2", "port": "eth0"}}"#;
+    let raised = o.ask(&format!("alarm raise {a}")).await;
+    assert!(
+        raised.starts_with("alarm raised a659f813308ad1da 0 {"),
+        "{raised}"
+    );
+    let j = body(&raised, 4);
+    assert_eq!(
+        (j["record"]["rule"].clone(), j["record"]["labels"].clone()),
+        (1.into(), 2.into())
+    );
+    assert_eq!(j["words"], serde_json::Value::Null);
+    let got = state(&tool, "zk2/ex/alarmed/alarms.v2/state/alarms/0").await;
+    let rec = m2::Record::read(m2::TAG, &got[0], 0).unwrap();
+    assert_eq!(rec.rule, m2::RuleIndex::Table(1));
+    let d_ = r#"{"rule": "disk_full", "severity": "warning", "summary": "full", "labels": {"mount": "/var"}}"#;
+    let raised = o.ask(&format!("alarm raise {d_}")).await;
+    assert!(
+        raised.starts_with("alarm raised 719d159937e54eb8 1 {"),
+        "{raised}"
+    );
+    let j = body(&raised, 4);
+    assert_eq!(j["record"]["rule"], "not_available");
+    assert_eq!(j["words"]["summary"], "full");
+    // At the bound: refused.
+    let h = r#"{"rule": "hot", "severity": "warning", "summary": "hot", "reading": 85.5}"#;
+    let refused = o.ask(&format!("alarm raise {h}")).await;
+    assert!(
+        refused.starts_with("refused alarm raise") && refused.contains("bound of 2"),
+        "{refused}"
+    );
+    assert_eq!(
+        o.ask("alarm confirm a659f813308ad1da off").await,
+        "alarm confirm a659f813308ad1da off"
+    );
+    assert_eq!(o.ask("alarm confirm all on").await, "alarm confirm all on");
+    let held = o.ask("alarm list").await;
+    let held: serde_json::Value =
+        serde_json::from_str(held.strip_prefix("alarm held ").unwrap()).unwrap();
+    assert_eq!(
+        held.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["0", "1"]
+    );
+    assert_eq!(held["1"]["alert_key"], "719d159937e54eb8");
+
+    // D resolved, then H on its slot, refreshed, then deferred.
+    let resolved = o.ask("alarm resolve 719d159937e54eb8").await;
+    assert!(
+        resolved.starts_with("alarm resolved 719d159937e54eb8 1 {"),
+        "{resolved}"
+    );
+    assert_eq!(body(&resolved, 4)["record"]["state"], "resolved");
+    assert_eq!(
+        o.ask("alarm resolve 719d159937e54eb8").await,
+        "alarm none 719d159937e54eb8"
+    );
+    assert_eq!(
+        o.ask("alarm confirm 719d159937e54eb8 off").await,
+        "refused alarm confirm 719d159937e54eb8 off: the alarm 719d159937e54eb8 is resolved on \
+         slot 1, and a resolved record is never confirmed (alarms.v2 §2.7)"
+    );
+    let raised = o.ask(&format!("alarm raise {h}")).await;
+    assert!(
+        raised.starts_with("alarm raised 335f24192ff5d0d4 1 {"),
+        "{raised}"
+    );
+    assert_eq!(body(&raised, 4)["record"]["argument"], 1255);
+    let r = o
+        .ask(&format!("alarm raise {}", h.replace("85.5", "\"86.0\"")))
+        .await;
+    assert!(r.starts_with("alarm refreshed 335f24192ff5d0d4 1 "), "{r}");
+    assert_eq!(body(&r, 4)["record"]["argument"], 1260);
+    let r = o
+        .ask(&format!("alarm raise {}", h.replace("85.5", "86.5")))
+        .await;
+    assert!(r.starts_with("alarm deferred 335f24192ff5d0d4 1 "), "{r}");
+    assert!(
+        o.ask("alarm raise nope")
+            .await
+            .starts_with("refused alarm raise nope: not a condition")
+    );
+    o.stop().await;
+
+    // The clean close left A firing, D resolved then H on slot 1; a
+    // restart that evaluates only hot puts A resolved on its slot.
+    let file: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&record).unwrap()).unwrap();
+    assert_eq!(file["profile"], "alarms.v2");
+    assert_eq!(
+        file["slots"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        ["0", "1"]
+    );
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--alarms-v2",
+        "--run-file",
+        &runs,
+        "--alarms-record",
+        &record_arg,
+        "--alarms-rules",
+        "hot",
+        "ex/alarmed",
+        &tc,
+    ]);
+    assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+    line(&o.lines).await;
+    assert_eq!(
+        o.ask("alarm adoption").await,
+        "alarm adoption source=record adopted=1 resolved=0 free=- left=- failed=-"
+    );
+    let held = o.ask("alarm list").await;
+    let held: serde_json::Value =
+        serde_json::from_str(held.strip_prefix("alarm held ").unwrap()).unwrap();
+    assert_eq!(held["0"]["record"]["state"], "resolved");
+    assert_eq!(held["1"]["record"]["state"], "firing");
+    assert_eq!(held["1"]["reading"], "86.5", "the latest reading kept");
+    o.stop().await;
+
+    // --alarms-archive is refused under --alarms-v2, before anything is
+    // alive.
+    let o = spawn_owner(&[
+        "--connect",
+        &ep,
+        "--alarms-v2",
+        "--alarms-archive",
+        "lab/archive",
+        "ex/archived",
+    ]);
+    let why = o.task.await.unwrap().unwrap_err();
+    assert!(
+        why.contains("--alarms-archive: no archive is read under alarms.v2"),
+        "{why}"
+    );
+}
+
+/// `owner --help` documents `alarms.v2`'s surface beside `alarms.v1`'s: the
+/// flag, the record file by slot, the condition's `reading`, and every
+/// answer line.
+#[test]
+fn the_help_documents_the_alarms_v2_surface() {
+    for piece in [
+        "--alarms-v2",
+        "alarms.v2 (spec/profiles/alarms/v2.md)",
+        "{\"profile\": \"alarms.v2\", \"slots\": {\"<slot>\":",
+        "\"reading\"?: <decimal>",
+        "alarm raised|escalated|refreshed|deferred|unchanged <alert_key> <slot> <json>",
+        "alarm resolved <alert_key> <slot> <json>, or alarm none <alert_key>",
+        "alarm adoption source=<record|record_v1|nothing> adopted=<slots> resolved=<slots>",
+        "--cardinality alarms.v2:state/alarms/{slot}=<n>",
+        "(--alarms-archive is refused under --alarms-v2)",
+    ] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+}
+
 /// `owner --help` (#800, AC; zk2py's F-133) documents the interface a live
 /// runner drives: the command word `alarm` and each of its commands, the
 /// condition's JSON, every answer line, the record file's format, and that

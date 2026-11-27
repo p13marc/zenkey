@@ -1573,7 +1573,7 @@ mod tests {
         };
         let transition = zenkey_fleet::AlarmTransition {
             key: key.into(),
-            alarm: zenkey_model::alarms::AlarmRef::from_key(key).unwrap(),
+            alarm: Some(zenkey_model::alarms::AlarmRef::from_key(key).unwrap()),
             change: AlarmChange::Raised,
             firing: AlarmAnswer {
                 answer: AlarmAnswerToken::Yes,
@@ -1588,6 +1588,11 @@ mod tests {
             }),
             via: Some(AlarmVia::Subscription),
             lost: None,
+            profile: None,
+            slot: None,
+            words: None,
+            record: None,
+            displaced: None,
         };
         let n = RuleNotice {
             rule: "fleet".into(),

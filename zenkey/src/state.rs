@@ -1180,6 +1180,20 @@ impl Store {
         self.toggle(key.as_str(), old, None);
     }
 
+    /// Forgets the one key `key`, its value or its tombstone: a member its
+    /// instance holds no longer, with nothing put or deleted (`alarms.v2`
+    /// §2.9, a resolved record at a re-mint).
+    pub(crate) fn forget(&self, key: &str) {
+        let mut map = self.map.lock().expect("not poisoned");
+        let Some(k) = map.keys().find(|k| k.as_str() == key).cloned() else {
+            return;
+        };
+        let old = map
+            .remove(&k)
+            .and_then(|e| e.value.is_some().then_some(e.stamped.stamp));
+        self.toggle(key, old, None);
+    }
+
     /// Forgets every key under `prefix`, values and tombstones: a governed
     /// interface's state once its instance steps down (`redundancy.v1`
     /// §2.9), so that a later takeover answers only what it puts again

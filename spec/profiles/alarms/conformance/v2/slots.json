@@ -1,0 +1,3748 @@
+{
+ "description": "alarms.v2 §2.2, §2.6, §2.8, §2.9: which slot an identity holds. Computed twice by two scripts of the text's drafter that share no code, kept out of the repository, and never blessed. `cases`: one service's instances, as its owner runs them. `bound` is its first instance's bound (256, or the cardinality its descriptor states). An identity is a letter standing for an alert key. `events`, in order, each with what the owner does (`expect`) and, but in the one case of 259 events, the records its instance then holds (`holds`: slot -> {id, state}). `raise`: the condition of an identity is found -> {put: slot, state: \"firing\"}; {none: \"firing\"} for a duplicate observation; or {refused: \"bound\"} where every slot below the bound holds a firing record: nothing is put, and no alarm is resolved or put over. The identity takes the slot its instance holds a record of it on, firing or resolved, else the lowest slot on which the instance holds no firing record. `resolve`: its condition cleared -> {put: slot, state: \"resolved\"}, the record staying on its slot, or {none: \"not_firing\"}. `restart`: a new instance, with the `record` its previous instance left (slot -> {id, state, reads, derives, evaluated}: whether the entry reads, whether its words derive its alert key, and whether the new instance still evaluates its rule; null for no source) and its `bound` -> for each slot of the record, in §2.9's order: `left` (at or above the new bound: neither put nor resolved), `free` (resolved, or it does not read, or its words do not derive its key, or its identity fires on a lower slot of the record, which it takes: nothing is put), `resolved` (firing under a rule no longer evaluated: put resolved on its slot) or `adopted` (put again, firing, on its slot). The new instance holds what it put, and nothing else. `views`: what one reader holds of one owner, each slot's record with the `run` and `seq` of its put, its `alert_key` (null for an unnamed alarm) and its state, and the run the owner's present descriptor states (null where no run is stated, as across a face) -> `takes`: for each alert key, the slot the reader takes it on: the one under the present run, the later by seq of two under it, null where none is under it or no run is stated; and `double`: the alert keys two slots of the present run name, the break of §2.2 a tool may report. Unnamed alarms are not compared. The last case and the last view were written by hand from §2.9's and §2.6's sentences, and computed once.",
+ "cases": [
+  {
+   "note": "W2's day: three alarms on slots 0 to 2, and a transient on 3",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "C",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "D",
+     "expect": {
+      "put": 3,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "C",
+       "state": "firing"
+      },
+      "3": {
+       "id": "D",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "D",
+     "expect": {
+      "put": 3,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "C",
+       "state": "firing"
+      },
+      "3": {
+       "id": "D",
+       "state": "resolved"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a duplicate observation is no act, and a resolve of what does not fire is none",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "A",
+     "expect": {
+      "none": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "B",
+     "expect": {
+      "none": "not_firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 0,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "none": "not_firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a re-raise takes the slot its resolved record is still on, though a lower slot is free",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 0,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "B",
+     "expect": {
+      "put": 1,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a resolved slot retaken: C takes slot 0, the lowest that does not fire, over A's resolved record; A then comes back on the lowest free slot, 2",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 0,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "A",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "the lowest slot that does not fire is a resolved one before an empty one above it",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "C",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "B",
+     "expect": {
+      "put": 1,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "resolved"
+      },
+      "2": {
+       "id": "C",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "D",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "D",
+       "state": "firing"
+      },
+      "2": {
+       "id": "C",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 3,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "D",
+       "state": "firing"
+      },
+      "2": {
+       "id": "C",
+       "state": "firing"
+      },
+      "3": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "the bound: with both slots firing the raise is refused, and nothing is put over a firing record; a resolve frees a slot at once",
+   "bound": 2,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "refused": "bound"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "B",
+     "expect": {
+      "put": 1,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "C",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "refused": "bound"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "C",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a bound of 1",
+   "bound": 1,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "refused": "bound"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 0,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "A",
+     "expect": {
+      "refused": "bound"
+     },
+     "holds": {
+      "0": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a resolved record takes no room: at a bound of 2, two resolved records are two free slots",
+   "bound": 2,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 0,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "B",
+     "expect": {
+      "put": 1,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "raise": "D",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "D",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "E",
+     "expect": {
+      "refused": "bound"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "D",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "256 firing alarms fill slots 0 to 255, and the 257th raise is refused",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "a0",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a1",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a2",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a3",
+     "expect": {
+      "put": 3,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a4",
+     "expect": {
+      "put": 4,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a5",
+     "expect": {
+      "put": 5,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a6",
+     "expect": {
+      "put": 6,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a7",
+     "expect": {
+      "put": 7,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a8",
+     "expect": {
+      "put": 8,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a9",
+     "expect": {
+      "put": 9,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a10",
+     "expect": {
+      "put": 10,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a11",
+     "expect": {
+      "put": 11,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a12",
+     "expect": {
+      "put": 12,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a13",
+     "expect": {
+      "put": 13,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a14",
+     "expect": {
+      "put": 14,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a15",
+     "expect": {
+      "put": 15,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a16",
+     "expect": {
+      "put": 16,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a17",
+     "expect": {
+      "put": 17,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a18",
+     "expect": {
+      "put": 18,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a19",
+     "expect": {
+      "put": 19,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a20",
+     "expect": {
+      "put": 20,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a21",
+     "expect": {
+      "put": 21,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a22",
+     "expect": {
+      "put": 22,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a23",
+     "expect": {
+      "put": 23,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a24",
+     "expect": {
+      "put": 24,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a25",
+     "expect": {
+      "put": 25,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a26",
+     "expect": {
+      "put": 26,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a27",
+     "expect": {
+      "put": 27,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a28",
+     "expect": {
+      "put": 28,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a29",
+     "expect": {
+      "put": 29,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a30",
+     "expect": {
+      "put": 30,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a31",
+     "expect": {
+      "put": 31,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a32",
+     "expect": {
+      "put": 32,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a33",
+     "expect": {
+      "put": 33,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a34",
+     "expect": {
+      "put": 34,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a35",
+     "expect": {
+      "put": 35,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a36",
+     "expect": {
+      "put": 36,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a37",
+     "expect": {
+      "put": 37,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a38",
+     "expect": {
+      "put": 38,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a39",
+     "expect": {
+      "put": 39,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a40",
+     "expect": {
+      "put": 40,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a41",
+     "expect": {
+      "put": 41,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a42",
+     "expect": {
+      "put": 42,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a43",
+     "expect": {
+      "put": 43,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a44",
+     "expect": {
+      "put": 44,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a45",
+     "expect": {
+      "put": 45,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a46",
+     "expect": {
+      "put": 46,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a47",
+     "expect": {
+      "put": 47,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a48",
+     "expect": {
+      "put": 48,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a49",
+     "expect": {
+      "put": 49,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a50",
+     "expect": {
+      "put": 50,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a51",
+     "expect": {
+      "put": 51,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a52",
+     "expect": {
+      "put": 52,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a53",
+     "expect": {
+      "put": 53,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a54",
+     "expect": {
+      "put": 54,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a55",
+     "expect": {
+      "put": 55,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a56",
+     "expect": {
+      "put": 56,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a57",
+     "expect": {
+      "put": 57,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a58",
+     "expect": {
+      "put": 58,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a59",
+     "expect": {
+      "put": 59,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a60",
+     "expect": {
+      "put": 60,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a61",
+     "expect": {
+      "put": 61,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a62",
+     "expect": {
+      "put": 62,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a63",
+     "expect": {
+      "put": 63,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a64",
+     "expect": {
+      "put": 64,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a65",
+     "expect": {
+      "put": 65,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a66",
+     "expect": {
+      "put": 66,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a67",
+     "expect": {
+      "put": 67,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a68",
+     "expect": {
+      "put": 68,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a69",
+     "expect": {
+      "put": 69,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a70",
+     "expect": {
+      "put": 70,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a71",
+     "expect": {
+      "put": 71,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a72",
+     "expect": {
+      "put": 72,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a73",
+     "expect": {
+      "put": 73,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a74",
+     "expect": {
+      "put": 74,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a75",
+     "expect": {
+      "put": 75,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a76",
+     "expect": {
+      "put": 76,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a77",
+     "expect": {
+      "put": 77,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a78",
+     "expect": {
+      "put": 78,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a79",
+     "expect": {
+      "put": 79,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a80",
+     "expect": {
+      "put": 80,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a81",
+     "expect": {
+      "put": 81,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a82",
+     "expect": {
+      "put": 82,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a83",
+     "expect": {
+      "put": 83,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a84",
+     "expect": {
+      "put": 84,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a85",
+     "expect": {
+      "put": 85,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a86",
+     "expect": {
+      "put": 86,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a87",
+     "expect": {
+      "put": 87,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a88",
+     "expect": {
+      "put": 88,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a89",
+     "expect": {
+      "put": 89,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a90",
+     "expect": {
+      "put": 90,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a91",
+     "expect": {
+      "put": 91,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a92",
+     "expect": {
+      "put": 92,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a93",
+     "expect": {
+      "put": 93,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a94",
+     "expect": {
+      "put": 94,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a95",
+     "expect": {
+      "put": 95,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a96",
+     "expect": {
+      "put": 96,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a97",
+     "expect": {
+      "put": 97,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a98",
+     "expect": {
+      "put": 98,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a99",
+     "expect": {
+      "put": 99,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a100",
+     "expect": {
+      "put": 100,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a101",
+     "expect": {
+      "put": 101,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a102",
+     "expect": {
+      "put": 102,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a103",
+     "expect": {
+      "put": 103,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a104",
+     "expect": {
+      "put": 104,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a105",
+     "expect": {
+      "put": 105,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a106",
+     "expect": {
+      "put": 106,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a107",
+     "expect": {
+      "put": 107,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a108",
+     "expect": {
+      "put": 108,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a109",
+     "expect": {
+      "put": 109,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a110",
+     "expect": {
+      "put": 110,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a111",
+     "expect": {
+      "put": 111,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a112",
+     "expect": {
+      "put": 112,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a113",
+     "expect": {
+      "put": 113,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a114",
+     "expect": {
+      "put": 114,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a115",
+     "expect": {
+      "put": 115,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a116",
+     "expect": {
+      "put": 116,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a117",
+     "expect": {
+      "put": 117,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a118",
+     "expect": {
+      "put": 118,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a119",
+     "expect": {
+      "put": 119,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a120",
+     "expect": {
+      "put": 120,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a121",
+     "expect": {
+      "put": 121,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a122",
+     "expect": {
+      "put": 122,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a123",
+     "expect": {
+      "put": 123,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a124",
+     "expect": {
+      "put": 124,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a125",
+     "expect": {
+      "put": 125,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a126",
+     "expect": {
+      "put": 126,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a127",
+     "expect": {
+      "put": 127,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a128",
+     "expect": {
+      "put": 128,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a129",
+     "expect": {
+      "put": 129,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a130",
+     "expect": {
+      "put": 130,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a131",
+     "expect": {
+      "put": 131,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a132",
+     "expect": {
+      "put": 132,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a133",
+     "expect": {
+      "put": 133,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a134",
+     "expect": {
+      "put": 134,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a135",
+     "expect": {
+      "put": 135,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a136",
+     "expect": {
+      "put": 136,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a137",
+     "expect": {
+      "put": 137,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a138",
+     "expect": {
+      "put": 138,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a139",
+     "expect": {
+      "put": 139,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a140",
+     "expect": {
+      "put": 140,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a141",
+     "expect": {
+      "put": 141,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a142",
+     "expect": {
+      "put": 142,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a143",
+     "expect": {
+      "put": 143,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a144",
+     "expect": {
+      "put": 144,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a145",
+     "expect": {
+      "put": 145,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a146",
+     "expect": {
+      "put": 146,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a147",
+     "expect": {
+      "put": 147,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a148",
+     "expect": {
+      "put": 148,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a149",
+     "expect": {
+      "put": 149,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a150",
+     "expect": {
+      "put": 150,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a151",
+     "expect": {
+      "put": 151,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a152",
+     "expect": {
+      "put": 152,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a153",
+     "expect": {
+      "put": 153,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a154",
+     "expect": {
+      "put": 154,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a155",
+     "expect": {
+      "put": 155,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a156",
+     "expect": {
+      "put": 156,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a157",
+     "expect": {
+      "put": 157,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a158",
+     "expect": {
+      "put": 158,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a159",
+     "expect": {
+      "put": 159,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a160",
+     "expect": {
+      "put": 160,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a161",
+     "expect": {
+      "put": 161,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a162",
+     "expect": {
+      "put": 162,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a163",
+     "expect": {
+      "put": 163,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a164",
+     "expect": {
+      "put": 164,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a165",
+     "expect": {
+      "put": 165,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a166",
+     "expect": {
+      "put": 166,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a167",
+     "expect": {
+      "put": 167,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a168",
+     "expect": {
+      "put": 168,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a169",
+     "expect": {
+      "put": 169,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a170",
+     "expect": {
+      "put": 170,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a171",
+     "expect": {
+      "put": 171,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a172",
+     "expect": {
+      "put": 172,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a173",
+     "expect": {
+      "put": 173,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a174",
+     "expect": {
+      "put": 174,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a175",
+     "expect": {
+      "put": 175,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a176",
+     "expect": {
+      "put": 176,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a177",
+     "expect": {
+      "put": 177,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a178",
+     "expect": {
+      "put": 178,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a179",
+     "expect": {
+      "put": 179,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a180",
+     "expect": {
+      "put": 180,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a181",
+     "expect": {
+      "put": 181,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a182",
+     "expect": {
+      "put": 182,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a183",
+     "expect": {
+      "put": 183,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a184",
+     "expect": {
+      "put": 184,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a185",
+     "expect": {
+      "put": 185,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a186",
+     "expect": {
+      "put": 186,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a187",
+     "expect": {
+      "put": 187,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a188",
+     "expect": {
+      "put": 188,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a189",
+     "expect": {
+      "put": 189,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a190",
+     "expect": {
+      "put": 190,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a191",
+     "expect": {
+      "put": 191,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a192",
+     "expect": {
+      "put": 192,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a193",
+     "expect": {
+      "put": 193,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a194",
+     "expect": {
+      "put": 194,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a195",
+     "expect": {
+      "put": 195,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a196",
+     "expect": {
+      "put": 196,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a197",
+     "expect": {
+      "put": 197,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a198",
+     "expect": {
+      "put": 198,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a199",
+     "expect": {
+      "put": 199,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a200",
+     "expect": {
+      "put": 200,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a201",
+     "expect": {
+      "put": 201,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a202",
+     "expect": {
+      "put": 202,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a203",
+     "expect": {
+      "put": 203,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a204",
+     "expect": {
+      "put": 204,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a205",
+     "expect": {
+      "put": 205,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a206",
+     "expect": {
+      "put": 206,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a207",
+     "expect": {
+      "put": 207,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a208",
+     "expect": {
+      "put": 208,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a209",
+     "expect": {
+      "put": 209,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a210",
+     "expect": {
+      "put": 210,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a211",
+     "expect": {
+      "put": 211,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a212",
+     "expect": {
+      "put": 212,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a213",
+     "expect": {
+      "put": 213,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a214",
+     "expect": {
+      "put": 214,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a215",
+     "expect": {
+      "put": 215,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a216",
+     "expect": {
+      "put": 216,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a217",
+     "expect": {
+      "put": 217,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a218",
+     "expect": {
+      "put": 218,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a219",
+     "expect": {
+      "put": 219,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a220",
+     "expect": {
+      "put": 220,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a221",
+     "expect": {
+      "put": 221,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a222",
+     "expect": {
+      "put": 222,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a223",
+     "expect": {
+      "put": 223,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a224",
+     "expect": {
+      "put": 224,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a225",
+     "expect": {
+      "put": 225,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a226",
+     "expect": {
+      "put": 226,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a227",
+     "expect": {
+      "put": 227,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a228",
+     "expect": {
+      "put": 228,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a229",
+     "expect": {
+      "put": 229,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a230",
+     "expect": {
+      "put": 230,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a231",
+     "expect": {
+      "put": 231,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a232",
+     "expect": {
+      "put": 232,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a233",
+     "expect": {
+      "put": 233,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a234",
+     "expect": {
+      "put": 234,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a235",
+     "expect": {
+      "put": 235,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a236",
+     "expect": {
+      "put": 236,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a237",
+     "expect": {
+      "put": 237,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a238",
+     "expect": {
+      "put": 238,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a239",
+     "expect": {
+      "put": 239,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a240",
+     "expect": {
+      "put": 240,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a241",
+     "expect": {
+      "put": 241,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a242",
+     "expect": {
+      "put": 242,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a243",
+     "expect": {
+      "put": 243,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a244",
+     "expect": {
+      "put": 244,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a245",
+     "expect": {
+      "put": 245,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a246",
+     "expect": {
+      "put": 246,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a247",
+     "expect": {
+      "put": 247,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a248",
+     "expect": {
+      "put": 248,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a249",
+     "expect": {
+      "put": 249,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a250",
+     "expect": {
+      "put": 250,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a251",
+     "expect": {
+      "put": 251,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a252",
+     "expect": {
+      "put": 252,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a253",
+     "expect": {
+      "put": 253,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a254",
+     "expect": {
+      "put": 254,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "a255",
+     "expect": {
+      "put": 255,
+      "state": "firing"
+     }
+    },
+    {
+     "raise": "Z",
+     "expect": {
+      "refused": "bound"
+     }
+    },
+    {
+     "resolve": "a7",
+     "expect": {
+      "put": 7,
+      "state": "resolved"
+     }
+    },
+    {
+     "raise": "Z",
+     "expect": {
+      "put": 7,
+      "state": "firing"
+     }
+    }
+   ]
+  },
+  {
+   "note": "a restart mid-incident: A is adopted on its slot, B's rule is no longer evaluated and it is put resolved, R was resolved and its slot is free, P's words do not derive its key and nothing is put. A raise then takes the lowest slot on which the new instance holds no firing record: B's",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "R",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "R",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "R",
+     "expect": {
+      "put": 2,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "R",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "raise": "P",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "P",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "restart": {
+      "record": {
+       "0": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "1": {
+        "id": "B",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": false
+       },
+       "2": {
+        "id": "R",
+        "state": "resolved",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "3": {
+        "id": "P",
+        "state": "firing",
+        "reads": true,
+        "derives": false,
+        "evaluated": true
+       }
+      },
+      "bound": 256
+     },
+     "expect": {
+      "0": "adopted",
+      "1": "resolved",
+      "2": "free",
+      "3": "free"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "C",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "R",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "C",
+       "state": "firing"
+      },
+      "2": {
+       "id": "R",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 3,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "C",
+       "state": "firing"
+      },
+      "2": {
+       "id": "R",
+       "state": "firing"
+      },
+      "3": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a restart with no source adopts nothing: the same alarms, found again, start from slot 0",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 0,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "restart": {
+      "record": null,
+      "bound": 256
+     },
+     "expect": {},
+     "holds": {}
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "A",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "B",
+       "state": "firing"
+      },
+      "1": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a restart under a lowered bound: slot 2 is at the new bound and is neither put nor resolved; the new instance holds two alarms and refuses a third",
+   "bound": 4,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "C",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "restart": {
+      "record": {
+       "0": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "1": {
+        "id": "B",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "2": {
+        "id": "C",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       }
+      },
+      "bound": 2
+     },
+     "expect": {
+      "0": "adopted",
+      "1": "adopted",
+      "2": "left"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "refused": "bound"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 0,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "an entry that does not read is not adopted, as one whose words do not derive its key is not: its slot is free",
+   "bound": 256,
+   "events": [
+    {
+     "restart": {
+      "record": {
+       "0": {
+        "id": "A",
+        "state": "firing",
+        "reads": false,
+        "derives": true,
+        "evaluated": true
+       },
+       "1": {
+        "id": "B",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "5": {
+        "id": "C",
+        "state": "resolved",
+        "reads": false,
+        "derives": true,
+        "evaluated": true
+       }
+      },
+      "bound": 256
+     },
+     "expect": {
+      "0": "free",
+      "1": "adopted",
+      "5": "free"
+     },
+     "holds": {
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "D",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "D",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "E",
+     "expect": {
+      "put": 2,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "D",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      },
+      "2": {
+       "id": "E",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "an adopted alarm keeps its slot through two restarts, and resolves on it",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "restart": {
+      "record": {
+       "0": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "1": {
+        "id": "B",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       }
+      },
+      "bound": 256
+     },
+     "expect": {
+      "0": "adopted",
+      "1": "adopted"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "restart": {
+      "record": {
+       "0": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "1": {
+        "id": "B",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       }
+      },
+      "bound": 256
+     },
+     "expect": {
+      "0": "adopted",
+      "1": "adopted"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 0,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "B",
+     "expect": {
+      "put": 1,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "B",
+       "state": "resolved"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a rule no longer evaluated at a restart: put resolved, on its slot, and its slot is then free",
+   "bound": 256,
+   "events": [
+    {
+     "raise": "A",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "restart": {
+      "record": {
+       "0": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": false
+       }
+      },
+      "bound": 256
+     },
+     "expect": {
+      "0": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "A",
+       "state": "resolved"
+      }
+     }
+    },
+    {
+     "raise": "B",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "A",
+     "expect": {
+      "put": 1,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "B",
+       "state": "firing"
+      },
+      "1": {
+       "id": "A",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "note": "a record that holds one identity firing on two slots: A is adopted on the lower, 1, and nothing is put on 3, which is free. A raise of A is then no act, and the next new identity after C takes 3",
+   "bound": 256,
+   "events": [
+    {
+     "restart": {
+      "record": {
+       "1": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "2": {
+        "id": "B",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       },
+       "3": {
+        "id": "A",
+        "state": "firing",
+        "reads": true,
+        "derives": true,
+        "evaluated": true
+       }
+      },
+      "bound": 256
+     },
+     "expect": {
+      "1": "adopted",
+      "2": "adopted",
+      "3": "free"
+     },
+     "holds": {
+      "1": {
+       "id": "A",
+       "state": "firing"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "A",
+     "expect": {
+      "none": "firing"
+     },
+     "holds": {
+      "1": {
+       "id": "A",
+       "state": "firing"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "C",
+     "expect": {
+      "put": 0,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "A",
+       "state": "firing"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "raise": "D",
+     "expect": {
+      "put": 3,
+      "state": "firing"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "A",
+       "state": "firing"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      },
+      "3": {
+       "id": "D",
+       "state": "firing"
+      }
+     }
+    },
+    {
+     "resolve": "A",
+     "expect": {
+      "put": 1,
+      "state": "resolved"
+     },
+     "holds": {
+      "0": {
+       "id": "C",
+       "state": "firing"
+      },
+      "1": {
+       "id": "A",
+       "state": "resolved"
+      },
+      "2": {
+       "id": "B",
+       "state": "firing"
+      },
+      "3": {
+       "id": "D",
+       "state": "firing"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "views": [
+  {
+   "note": "each identity on one slot",
+   "present_run": "0007",
+   "held": [
+    {
+     "slot": 0,
+     "run": "0007",
+     "seq": 3,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "run": "0007",
+     "seq": 4,
+     "alert_key": "abb089906038056a",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "a659f813308ad1da": 0,
+     "abb089906038056a": 1
+    },
+    "double": []
+   }
+  },
+  {
+   "note": "an owner that restarted with no record put A on slot 0, and the reader still holds its previous instance's A on slot 2: it takes the present run's",
+   "present_run": "0008",
+   "held": [
+    {
+     "slot": 0,
+     "run": "0008",
+     "seq": 1,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "run": "0007",
+     "seq": 3,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "run": "0007",
+     "seq": 4,
+     "alert_key": "abb089906038056a",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "a659f813308ad1da": 0,
+     "abb089906038056a": null
+    },
+    "double": []
+   }
+  },
+  {
+   "note": "the same, the earlier instance's slot the lower one",
+   "present_run": "0008",
+   "held": [
+    {
+     "slot": 0,
+     "run": "0007",
+     "seq": 9,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 3,
+     "run": "0008",
+     "seq": 2,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "a659f813308ad1da": 3
+    },
+    "double": []
+   }
+  },
+  {
+   "note": "two slots of the present run name one identity: the owner broke §2.2. The reader takes the later by seq",
+   "present_run": "0007",
+   "held": [
+    {
+     "slot": 0,
+     "run": "0007",
+     "seq": 3,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 4,
+     "run": "0007",
+     "seq": 9,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "run": "0007",
+     "seq": 4,
+     "alert_key": "abb089906038056a",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "a659f813308ad1da": 4,
+     "abb089906038056a": 1
+    },
+    "double": [
+     "a659f813308ad1da"
+    ]
+   }
+  },
+  {
+   "note": "the later by seq is the lower slot",
+   "present_run": "0007",
+   "held": [
+    {
+     "slot": 0,
+     "run": "0007",
+     "seq": 12,
+     "alert_key": "a659f813308ad1da",
+     "state": "resolved"
+    },
+    {
+     "slot": 4,
+     "run": "0007",
+     "seq": 9,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "a659f813308ad1da": 0
+    },
+    "double": [
+     "a659f813308ad1da"
+    ]
+   }
+  },
+  {
+   "note": "unnamed alarms are not compared: two slots with no alert key are two alarms",
+   "present_run": "0007",
+   "held": [
+    {
+     "slot": 0,
+     "run": "0007",
+     "seq": 3,
+     "alert_key": null,
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "run": "0007",
+     "seq": 4,
+     "alert_key": null,
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "run": "0007",
+     "seq": 5,
+     "alert_key": "335f24192ff5d0d4",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "335f24192ff5d0d4": 2
+    },
+    "double": []
+   }
+  },
+  {
+   "note": "a 16-bit run and a 32-bit run of the same value are two runs",
+   "present_run": "00000007",
+   "held": [
+    {
+     "slot": 0,
+     "run": "0007",
+     "seq": 3,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "run": "00000007",
+     "seq": 1,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "a659f813308ad1da": 1
+    },
+    "double": []
+   }
+  },
+  {
+   "note": "nothing held",
+   "present_run": "0007",
+   "held": [],
+   "expect": {
+    "takes": {},
+    "double": []
+   }
+  },
+  {
+   "note": "no run stated, as across a face: no slot is taken, A's two slots included, and nothing is a break",
+   "present_run": null,
+   "held": [
+    {
+     "slot": 0,
+     "run": "0007",
+     "seq": 3,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    },
+    {
+     "slot": 1,
+     "run": "0007",
+     "seq": 4,
+     "alert_key": "abb089906038056a",
+     "state": "firing"
+    },
+    {
+     "slot": 2,
+     "run": "0008",
+     "seq": 1,
+     "alert_key": "a659f813308ad1da",
+     "state": "firing"
+    }
+   ],
+   "expect": {
+    "takes": {
+     "a659f813308ad1da": null,
+     "abb089906038056a": null
+    },
+    "double": []
+   }
+  }
+ ]
+}
