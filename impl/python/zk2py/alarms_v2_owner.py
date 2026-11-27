@@ -97,8 +97,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {f}: {c.codes}", file=sys.stderr)
             return 2
         if c.interface == a2.IFACE:
-            ttl = next(r["annotations"]["freshness.ttl_s"] for r in c.canonical["resources"]
-                       if r["template"] == "alarms/{slot}")
+            ttl = next((r.get("annotations", {}).get("freshness.ttl_s") for r in c.canonical["resources"]
+                        if r["template"] == "alarms/{slot}"), None)
+            if ttl is None:
+                print(f"error: {f}: no `alarms/{{slot}}` with a `freshness.ttl_s` (alarms.v2 §2.7)", file=sys.stderr)
+                return 2
             continue
         own.append(c)
     bound = None

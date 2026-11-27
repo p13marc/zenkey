@@ -104,9 +104,7 @@ class OwnerProc:
                                        f"{{{'alert_key' if v1_owner else 'slot'}}}={bound}"]
         for t in tokenless:
             flags += ["--tokenless", t]
-        if run_file and impl == "rust":
-            flags += ["--run-file", run_file]
-        elif run_file:
+        if run_file:
             flags += ["--run-file", run_file]
         if impl == "rust":
             cmd = [str(OWNER), "--connect", endpoint, "--alarms" if v1_owner else "--alarms-v2", *flags, address,
