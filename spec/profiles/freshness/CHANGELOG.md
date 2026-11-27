@@ -29,6 +29,20 @@ cannot tell that from a face."
   the deployment names for that owner. The reference's tools take the
   last given as that one, and the note now says so.
 
+- **A slow owner's read** (zk2py's round 125, F-616, a contradiction in
+  this entry's first draft). zenoh ends a GET its owner answers after the
+  read's timeout with a `Timeout` error reply, the querier's or a
+  router's: 24 of 24 late answers drew one, and a GET no queryable
+  answered drew nothing. §2.5 had called a slow owner's read "no reply",
+  beside the bullet that calls any error reply a failure. It is now a
+  failed read: the deployment's word stands only for a read that drew no
+  reply at all. The reference read it so already, and zk2py moves.
+- **What a subscriber holds** behind a read is bounded twice: past the
+  first bound a put is read the first way, in its turn behind those held,
+  and past a second it may be dropped unread, its key then reading a gap.
+  So a slow read holds a bounded count whatever the put rate (the
+  reference, #1146: 64 waiting for the read, 256 in all).
+
 **Which implementation moves.** The reference read silence so: `zenctl
 watch --catalog` printed 9 confirmation rows beside an owner whose
 descriptor answers no GET. zk2py read each group `unknown_catalog`. The

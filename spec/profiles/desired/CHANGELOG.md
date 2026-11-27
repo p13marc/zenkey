@@ -26,9 +26,14 @@ step 4 was also the reference's J4 finding: its test runs both readings.
   none, so it never reverts. Each implementation's v1 target did so
   under each one's v2 author, in all four pairings.
 - **Now (§2.18):** each case is said. A deployment MUST NOT bind such a
-  target to such an author where a router between the two timestamps.
-  `[Sc: §16]` That is the narrowest rule that keeps the move safe. It
-  binds only the deployments that 0.1's claim misled.
+  target to such an author where a router between the two, or the
+  target's own session, timestamps. `[Sc: §16]` That is the narrowest
+  rule that keeps the move safe. It binds only the deployments that 0.1's
+  claim misled.
+  - **The target's own session** was added after zk2py's round 125
+    (F-617, a gap in this entry's first draft). A v1 target whose session
+    timestamps stamps each put it receives with its own id, acts, and
+    never reverts, in all four pairings, whatever the routers do.
 - **Not taken:** a rule on the author, which cannot know its targets'
   builds; and a new major of the author's interface, which v1's
   requirement would not name. Both reach further than the fault.
