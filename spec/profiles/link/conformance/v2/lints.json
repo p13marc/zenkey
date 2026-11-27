@@ -259,7 +259,7 @@
         }
       ],
       "note": "a binding v2 does not name: `bad_value`, and the link protocols are not checked against it (§2.1, §2.4)",
-      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.2\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\", \"carrier-pigeon\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.0\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\", \"carrier-pigeon\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
     },
     {
       "expect": [
@@ -1389,6 +1389,23 @@
           "severity": "error"
         }
       ]
+    },
+    {
+      "expect": [
+        {
+          "at": "select.link_protocols",
+          "code": "unknown_protocol",
+          "face": "radio",
+          "severity": "error"
+        }
+      ],
+      "note": "`unixsock-dgram` under `zenoh-1.10.2`, which refuses it as 1.10.1 does: `unknown_protocol` (§2.4). Written by reading link.v2 0.25",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.2\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-dgram\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "expect": [],
+      "note": "`unixsock-stream` under `zenoh-1.10.2`, one of its nine: no finding (§2.4). Written by reading link.v2 0.25",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"radio-a\"]\nbinding  = \"zenoh-1.10.2\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = true\nreply_timeout_ms = 15000\n"
     }
   ],
   "description": "link.v2's linter (v2.md §2.1, §2.4, §2.10, §2.11, §2.16), a face's `frames`, `events` and `horizon_s` among it. Each case is a face policy, `policy`, and `expect`, every finding of it, sorted by face (none first), `at`, then `code`, as link.v1's lints.json writes them. A policy with no `profile` is link.v1's, read finding for finding as link.v1 §2.1 says. A device face (§2.5) is `attach = \"device\"` with `devices`. A case may carry link.v1's `block`, read as link.v1's lints.json reads it, `zk_not_denied` on a device face read as §2.15 says. The device cases, from case 40, and the `events` cases, from case 63, were written by reading the text, not derived by the reference. A case may give a deployment and its windows as link.v1's lints.json does (`implements`, `contracts` or `interfaces`, `windows`): the plan is derived, and `window_under_outage` reads §2.11's floor."

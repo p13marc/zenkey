@@ -7,6 +7,70 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.25 — 2026-11-27: the binding `zenoh-1.10.2`, stock zenoh 1.10.2: §2.4's list and §2.19's column, no keyword changed (#1165)
+
+The reference moves to zenoh 1.10.2, and core 0.114 is specified
+against it ([`../../CHANGELOG.md`](../../CHANGELOG.md)). A stock 1.10.2
+router had no binding: a policy could name 1.10.1 or the fork alone.
+
+**What changed.**
+- **§2.1.** `binding` takes `"zenoh-1.10.2"` beside `"zenoh-1.10.1"`
+  and `"zm-1.10.2-r1"`. An optional key of `[transport]` defaults to
+  every binding's value, where the text said 1.10.1's. All three
+  bindings share those four defaults.
+- **§2.4.** `zenoh-1.10.2`'s list is 1.10.1's nine, in its order. It was
+  read from zenoh-config 1.10.2's `InterceptorLink`, which is 1.10.1's
+  (`lib.rs:320`, `:317` in 1.10.1). Stock 1.10.2 refuses
+  `unixsock-dgram` as 1.10.1 does, so a policy naming it under
+  `zenoh-1.10.2` is `unknown_protocol`.
+- **§2.4, the fork's `wait_before_close`.** A new item says that the
+  fork's 10 s default is its own change, not 1.10.2's: stock 1.10.2
+  keeps 5 s. The fork's commit is `bde589f5d`, "keep wait_before_close
+  at or above the lease".
+- **§2.19's table** gains the column `zenoh-1.10.2`. It was read from
+  zenoh-config 1.10.2's `defaults.rs`, which is 1.10.1's byte for byte:
+  a 10 s lease, 4 keep-alives, 5,000,000 µs, `32bit`, 65,535 and three
+  timeouts of 10,000. A `null` reads as both releases read it: their
+  loader, `_from_file`, and its parsers are the same.
+- **§2.19's reference note.** `zenctl check face` reads a file through
+  zenoh's loader under both stock bindings. It links 1.10.2.
+- **The reference.** `zenkey_model::link::Binding::Zenoh1_10_2` has
+  1.10.1's list and column. Each tool's `--binding` takes it, and
+  zenwatch's `binding` too.
+
+**What deliberately did not change.**
+- **`zenoh-1.10.1` stays a binding,** with its list and its column.
+  1.10.1's routers stay in the field.
+- **A link.v1 policy** still reads as `zenoh-1.10.1` (§2.4). Its
+  defaults are 1.10.2's too, so nothing it checks would differ.
+- **The fork's list and column** are as they were. `zm-1.10.2-r1` is
+  stock 1.10.2 with four branches. Only `wait_before_close` and
+  `unixsock-dgram` reach this text.
+- **No keyword.** No rule moved. Every finding reads the binding's list
+  or its column, as before.
+- **Other mentions of 1.10.1** stay. Core §0 now says that 1.10.2 does
+  what they say unless core Appendix B says otherwise.
+- **The header** is still written against core 0.108.
+
+**The cases, each written by reading this text.**
+- **`v2/lints.json`.** Case 20 named `zenoh-1.10.2` as the binding v2
+  does not name. It now names `zenoh-1.10.0`, and still draws
+  `bad_value` alone. Case 75 is case 21 under `zenoh-1.10.2`:
+  `unixsock-dgram`, `unknown_protocol`. Case 76 is case 22 under
+  `zenoh-1.10.2` on `unixsock-stream`: no finding. 77 cases.
+- **`v2/transport.json`.** Case 32 is case 3's configuration under
+  `zenoh-1.10.2`. Stock 1.10.2 runs 5 s, not the fork's 10 s, so it
+  draws case 4's three findings. Case 33 is case 1's under
+  `zenoh-1.10.2`, and draws case 1's six. 34 cases.
+- **`v2/plan.json`.** Case 51 is case 0's router on `zenoh-1.10.2`. Its
+  plan is case 0's but for its `binding`, and each principal is
+  narrowed over the same nine. 52 cases.
+
+**Why.** A policy names the zenoh its router runs. The reference, and
+every adopter, now resolves 1.10.2. A deployment on a stock 1.10.2
+router had to claim 1.10.1, and a tool would read its defaults by the
+wrong release. They happen to be the same.
+
 ## link.v2 0.24 — 2026-11-27: editorial: `v2/plan.json`'s case 50, a `desired.v2` desired resource at a leading parameter keeps its floor, no rule changed (#986)
 
 0.23 took a `desired.v2` desired resource off §2.11's floor, "unless its
