@@ -274,6 +274,11 @@
     "over": 0,
     "tags": 0
   },
+  "spec/profiles/redundancy/scenarios-v2.md": {
+    "mean": 11.28,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/redundancy/scenarios.md": {
     "mean": 16.7,
     "over": 0,
