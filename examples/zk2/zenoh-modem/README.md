@@ -281,8 +281,11 @@ Each of the three:
 A full record with every reading present is 1,542 bits, 199 B of body: 207 B of payload after an
 envelope with a 32-bit run, 205 B with a 16-bit run. That is `frames/paid`'s largest frame
 (`link.v1` §2.8), a full record every frame. `frames/fast`'s and `frames/slow`'s may hold a delta
-record that includes every reading, a bit per reading longer (`link.v1` 0.16): 216 B, within RF's
-220 B batch and LoRa's 224 B, and above SF9's 117 B alone (`frame_over_batch`). A device writes a
+record that includes every reading, a bit per reading longer (`link.v1` 0.16): 216 B. A frame
+fits one batch with what zenoh writes beside it, 10 B on these faces (`link.v1` 0.22 §2.8, #1136),
+so 216 B fits none of RF's 222 B, LoRa's 224 B and SF9's 117 B, and RF, SF7, SF9 and SF12 warn
+(`frame_over_batch`). `frames/paid`'s 207 B fits SBD's 271 B. link.md's `frame_over_batch` says
+what zenoh-modem can do (zenoh-modem#213 item 7). A device writes a
 reading it lacks absent, one bit, so rf0's full record, 18 readings present, is 66 B of payload,
 and a delta 39 B.
 

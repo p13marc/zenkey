@@ -25,7 +25,11 @@
 # 927 s, over the duty, and 576 s. Its 1,800 s horizon is the face's
 # `horizon_s`, so it is liveness evidence here, as 3.2's frames/link was
 # not. frames/fast and frames/paid are the faster media's and SBD's
-# (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
+# (`frame_unlisted`), and the chip has no ARQ (`no_arq`). Its largest
+# frame, a delta of all 73 readings, is 216 B, and with the 10 B zenoh
+# writes beside it (link.v1 0.22 §2.8, #1136) it does not fit the 224 B
+# batch: the plan warns `frame_over_batch` (link.md says what zenoh-modem
+# can do).
 #
 # Events (modem.v3 3.4, #991): the face lists none, `events = []` (link.v2
 # 0.12 §2.7), so the plan denies every event: beside frames/slow's 785 s,

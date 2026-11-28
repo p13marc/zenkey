@@ -27,7 +27,11 @@
 # day, 336 measured under the lean stack (v2 Appendix B). frames/slow and
 # frames/paid are LoRa SF12's and SBD's, and draw `frame_unlisted` here: rf0
 # does not publish them. The radio repairs no lost frame, so the linter
-# warns `no_arq`.
+# warns `no_arq`. frames/fast's largest frame, a delta of all 73 readings,
+# is 216 B, and with the 10 B zenoh writes beside it (link.v1 0.22 §2.8,
+# #1136: the put's 5, the frame's 3 and the batch's 2-byte length,
+# measured on this face) it does not fit the 222 B batch: the plan warns
+# `frame_over_batch` (link.md says what zenoh-modem can do).
 #
 # Events (modem.v3 3.4, #991): the face lists the three `face/` events
 # (link.v2 0.12 §2.7), which cross whole, and the plan denies the four JSON

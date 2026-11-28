@@ -405,7 +405,12 @@ it leaves out. The other warnings differ:
   SF12 `interval_over_horizon` and `horizon_under_face` on `frames/link`;
 - on 3.3, `keep_alive_not_suppressed` on every face, since `link.v2` 0.17 warns at the
   keep-alive interval too (§3.3), and `frame_over_batch` at SF9, whose largest frame, 216 B, a
-  delta of all 73 readings, is above its 117 B batch.
+  delta of all 73 readings, is above its 117 B batch;
+- since `link.v1` 0.22 and `link.v2` 0.30 (#1136), `frame_over_batch` on RF, SF7 and SF12 too: the
+  plan weighs a frame with what zenoh writes beside it, 10 B on these faces, and 216 B with its
+  10 B fits neither 222 B nor 224 B. SBD's `frames/paid`, 207 B, fits its 271 B. What zenoh-modem
+  can do, its policies' `batch_bytes` among it (zenoh-modem#213 item 7), is link.md's
+  `frame_over_batch`.
 
 ### 3.2 Generating and checking
 
