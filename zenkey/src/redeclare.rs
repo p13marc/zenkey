@@ -44,11 +44,14 @@
 //!   - **It delivers nothing.** A sample reaches the session once, and the
 //!     subscription's own subscriber delivers what it matches; a key that
 //!     only extends the repair's chunk is dropped.
-//!   - **Up to [`zenkey_model::link::REPAIRS`]**, each further left in the
-//!     chunk, since another reader behind the router may hold the same
-//!     one. Past them, the subscription is declared again as at first.
+//!   - **Up to [`zenkey_model::link::REPAIRS`] in its life**, each further
+//!     left in the chunk, since another reader behind the router may hold
+//!     the same one. Past them, the subscription is declared again as at
+//!     first, and nothing more is declared beside it: a repair held again
+//!     would join the one held, and declare nothing (#1185's review).
 //!   - **A sample heard** ends the run: the next silence starts from a
-//!     re-declaration again, the repairs held staying.
+//!     re-declaration again, the repairs held staying, and a repair after
+//!     it is the next one not held yet.
 //! - **Not through a session cut off**: it holds no link
 //!   ([`crate::presence::cut_off`]), so a declaration goes nowhere, and the
 //!   transport that opens again declares everything anyway.
@@ -130,7 +133,8 @@ struct Slot {
     /// Its repair subscriptions, kept while it stands.
     repairs: Vec<(String, Subscriber<()>)>,
     /// The times it was due since it last heard a sample: the first
-    /// declares it again, each later one a repair.
+    /// declares it again, each later one a repair while it holds fewer
+    /// than [`zenkey_model::link::REPAIRS`].
     dues: u32,
     /// When it last was declared again or repaired, ns since `base`: a
     /// sample after it ends the dues.
@@ -178,11 +182,12 @@ impl Slot {
             self.dues += 1;
             self.heard.store(now, Ordering::SeqCst);
             self.acted = now;
-            let repair = self
-                .dues
-                .checked_sub(1)
-                .filter(|&n| n > 0)
-                .and_then(|n| zenkey_model::link::repair_key(self.key.as_str(), n));
+            // The next repair is the first it does not hold: the repairs
+            // stay across runs, so three in its life (core §8.5).
+            let next = u32::try_from(self.repairs.len() + 1).unwrap_or(u32::MAX);
+            let repair = (self.dues > 1)
+                .then(|| zenkey_model::link::repair_key(self.key.as_str(), next))
+                .flatten();
             match repair.map(OwnedKeyExpr::new) {
                 Some(Ok(key)) => What::Repair(key),
                 _ => What::Declare {
@@ -229,9 +234,12 @@ struct Inner {
     /// tick.
     shortest: Mutex<Option<Duration>>,
     _events: zenoh::session::TransportEventsListener<()>,
-    /// How many declarations to refuse, the tests' failure.
+    /// How many declarations to refuse, the tests' failure, after
+    /// `allow` more pass.
     #[cfg(test)]
     refuse: std::sync::atomic::AtomicU32,
+    #[cfg(test)]
+    allow: std::sync::atomic::AtomicU32,
 }
 
 /// The subscriptions of one reader across a face that are declared again,
@@ -293,6 +301,8 @@ impl Redeclaring {
             _events: events,
             #[cfg(test)]
             refuse: std::sync::atomic::AtomicU32::new(0),
+            #[cfg(test)]
+            allow: std::sync::atomic::AtomicU32::new(0),
         });
         let weak = Arc::downgrade(&inner);
         let task = tokio::spawn(async move {
@@ -419,6 +429,14 @@ impl Redeclaring {
             .collect()
     }
 
+    /// The tests' failure (`cfg(test)`): `allowed` declarations pass,
+    /// then the next `refused` fail.
+    #[cfg(test)]
+    pub(crate) fn refuse_after(&self, allowed: u32, refused: u32) {
+        self.inner.allow.store(allowed, Ordering::SeqCst);
+        self.inner.refuse.store(refused, Ordering::SeqCst);
+    }
+
     /// The key expressions of the repair subscriptions it holds, each
     /// slot's in the order declared.
     #[must_use]
@@ -473,13 +491,18 @@ impl Inner {
         subscribe(&self.session, key, callback, heard, self.base)
     }
 
-    /// The tests' failure: a declaration refused while `refuse` counts.
+    /// The tests' failure: a declaration refused while `refuse` counts,
+    /// once `allow` more have passed.
     fn refused(&self) -> Result<()> {
         #[cfg(test)]
         if self
-            .refuse
+            .allow
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-            .is_ok()
+            .is_err()
+            && self
+                .refuse
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
         {
             return Err(zenoh("refused for the test"));
         }
@@ -604,12 +627,10 @@ impl Inner {
                 totals.repaired += 1;
             }
             Err(e) => {
+                // A repair that failed is held by none, so the next time
+                // due tries the same one again.
                 slot.counts.failed += 1;
                 totals.failed += 1;
-                if slot.subscriber.is_some() {
-                    // A repair that failed: the same one is tried again.
-                    slot.dues = slot.dues.saturating_sub(1);
-                }
                 let now = since(self.base);
                 let horizon = slot.horizon.or_else(|| lock(&self.shortest).map(|s| s / 2));
                 if slot
@@ -769,8 +790,10 @@ mod tests {
     /// three, then declared again as at first. A subscription with no
     /// horizon is due beside it, and is repaired the same way. A sample
     /// heard ends the run, and the next silence declares it again first;
-    /// the repairs stay. A repair delivers nothing: the subscription's
-    /// own subscriber delivers each sample once.
+    /// the repairs stay, three in its life, so a second whole run declares
+    /// it again each time and no repair beside it. A repair delivers
+    /// nothing: the subscription's own subscriber delivers each sample
+    /// once.
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn a_silent_subscription_is_declared_again_then_repaired_up_to_three_times() {
         let (router, client) = pair().await;
@@ -847,10 +870,18 @@ mod tests {
             .unwrap();
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(heard.load(Ordering::SeqCst), before + 1, "each sample once");
-        // Heard: the next silence starts the run again.
-        let after = step().await.0;
-        assert_eq!(after, one(3, 3), "declared again first, the repairs held");
-        assert_eq!(r.repair_keys().len(), 6);
+        // Heard: the next silence starts the run again, declared again
+        // first; and a second whole run declares no repair beside it, the
+        // three being held (#1185's review): declared again each time.
+        for redeclared in 3..=7 {
+            assert_eq!(
+                step().await.0,
+                one(redeclared, 3),
+                "a second run: declared again, no repair"
+            );
+        }
+        assert_eq!(r.repair_keys().len(), 6, "no repair added");
+        assert_eq!(r.repaired(), 6);
         assert!(r.undeclare(level).await.unwrap());
         assert_eq!(r.repair_keys().len(), 3, "its repairs undeclared with it");
         r.forget(&[trip]);
