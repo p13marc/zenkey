@@ -1,0 +1,105 @@
+{
+  "description": "core §8.5, a repair subscription's key expression. Computed by a reading of the text (Python, standard library), never blessed. Each case: `selector`, a subscription's key expression across a face, base-relative or under a namespace; `repairs`, its repair subscriptions' key expressions in the order a reader declares them: `$*` in the last chunk of its literal prefix (the chunks before its first wildcard), at that chunk's end, then one character further left for each later one, up to three, and none where that chunk is not one of its resource's. Each repair matches every key its selector does, and its literal prefix ends a chunk earlier.",
+  "cases": [
+    {
+      "name": "a resource by its exact key, rf0's frames",
+      "selector": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+      "repairs": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast$*",
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fas$*t",
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fa$*st"
+      ]
+    },
+    {
+      "name": "an event's selector: its occurrence chunk is a wildcard, so the chunk before it",
+      "selector": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*",
+      "repairs": [
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault$*/*",
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_faul$*t/*",
+        "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fau$*lt/*"
+      ]
+    },
+    {
+      "name": "a template's selector: the last chunk before its first parameter",
+      "selector": "zk2/s/v/faced.v1/stream/port/*/rx",
+      "repairs": [
+        "zk2/s/v/faced.v1/stream/port$*/*/rx",
+        "zk2/s/v/faced.v1/stream/por$*t/*/rx",
+        "zk2/s/v/faced.v1/stream/po$*rt/*/rx"
+      ]
+    },
+    {
+      "name": "a one-character chunk: two repairs, `$*` at its end and at its start",
+      "selector": "zk2/s/v/faced.v1/stream/a",
+      "repairs": [
+        "zk2/s/v/faced.v1/stream/a$*",
+        "zk2/s/v/faced.v1/stream/$*a"
+      ]
+    },
+    {
+      "name": "a state resource",
+      "selector": "zk2/s/v/faced.v1/state/level",
+      "repairs": [
+        "zk2/s/v/faced.v1/state/level$*",
+        "zk2/s/v/faced.v1/state/leve$*l",
+        "zk2/s/v/faced.v1/state/lev$*el"
+      ]
+    },
+    {
+      "name": "an explicit kind: the resource's chunk, never the verbatim kind",
+      "selector": "zk2/s/v/faced.v1/@stream/scan",
+      "repairs": [
+        "zk2/s/v/faced.v1/@stream/scan$*",
+        "zk2/s/v/faced.v1/@stream/sca$*n",
+        "zk2/s/v/faced.v1/@stream/sc$*an"
+      ]
+    },
+    {
+      "name": "a heartbeat's key: its interface chunk is the resource's last",
+      "selector": "zk2/s/v/freshness.v2/stream/heartbeat/modem.v3",
+      "repairs": [
+        "zk2/s/v/freshness.v2/stream/heartbeat/modem.v3$*",
+        "zk2/s/v/freshness.v2/stream/heartbeat/modem.v$*3",
+        "zk2/s/v/freshness.v2/stream/heartbeat/modem.$*v3"
+      ]
+    },
+    {
+      "name": "an owner heartbeat's key",
+      "selector": "zk2/s/v/freshness.v2/stream/heartbeats/host",
+      "repairs": [
+        "zk2/s/v/freshness.v2/stream/heartbeats/host$*",
+        "zk2/s/v/freshness.v2/stream/heartbeats/hos$*t",
+        "zk2/s/v/freshness.v2/stream/heartbeats/ho$*st"
+      ]
+    },
+    {
+      "name": "a namespace in front of zk2: a tool's wire key",
+      "selector": "prod/zk2/s/v/faced.v1/stream/level",
+      "repairs": [
+        "prod/zk2/s/v/faced.v1/stream/level$*",
+        "prod/zk2/s/v/faced.v1/stream/leve$*l",
+        "prod/zk2/s/v/faced.v1/stream/lev$*el"
+      ]
+    },
+    {
+      "name": "a template of parameters alone: no repair, `$*` on the kind would leave the grants",
+      "selector": "zk2/s/v/faced.v1/stream/*",
+      "repairs": []
+    },
+    {
+      "name": "a selector over a kind's subtree: its literal prefix ends at the kind",
+      "selector": "zk2/s/v/faced.v1/events/**",
+      "repairs": []
+    },
+    {
+      "name": "no zk2 data selector: no repair",
+      "selector": "a/b/c",
+      "repairs": []
+    },
+    {
+      "name": "a presence key: no kind, no repair",
+      "selector": "zk2/s/v/@zk/instance/*",
+      "repairs": []
+    }
+  ]
+}

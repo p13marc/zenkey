@@ -12,11 +12,13 @@
 #    DeclareSubscribers toward A, which name the key expressions A holds, are lost, and the
 #    transport stays up.
 # 3. CASE=shared: R2, the same reader again, starts 15 s after the restore.
-# 4. 720 s, more than two of frames/fast's 300-s horizons: R1 declares again at 600 s of silence.
-# R1.jsonl and R2.jsonl hold what each heard; the capture is bare, so zdecode.py reads every
-# declaration that crossed.
+# 4. WATCH_S (720 s), more than two of frames/fast's 300-s horizons: R1 declares again at 600 s
+#    of silence. Since core 0.121 (#1185) it declares a repair subscription at 1,200 s, so the
+#    re-soak watches 1,380 s (WATCH_S=1380).
+# R1.jsonl and R2.jsonl hold what each heard, and R1.log and R2.log each re-declaration and
+# repair (READER_LOG); the capture is bare, so zdecode.py reads every declaration that crossed.
 #
-# Environment: wire.sh's (WORK, INST, BASE, CORES, FACE_POLICY), CASE.
+# Environment: wire.sh's (WORK, INST, BASE, CORES, FACE_POLICY), CASE, WATCH_S, READER_LOG.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -26,6 +28,8 @@ export INST=${INST:-redeclare}
 export BASE=${BASE:-17800}
 export LOSS_START=0 LIFE=${LIFE:-40m}
 NAME=${1:?run name}
+WATCH_S=${WATCH_S:-720}
+READER_LOG=${READER_LOG:-warn,zenkey::redeclare=info}
 : "${FACE_POLICY:?a link.v2 face policy: examples/zk2/zenoh-modem/faces/zenohd-rf0.face.toml}"
 [[ ${CASE:-} == alone || ${CASE:-} == shared ]] || { echo "CASE=alone or CASE=shared" >&2; exit 2; }
 export LOGS=$WORK/logs/$NAME
@@ -40,7 +44,7 @@ B=tcp/127.0.0.1:$((BASE + 2))
 now() { python3 -I -c 'import time; print(f"{time.time():.6f}")'; }
 mark() { echo "{\"t\": $(now), \"mark\": \"$1\"}" >>"$LOGS/acts.jsonl"; echo "mark $1 $(date -u +%T)"; }
 reader() { # name
-  $W start "$1" bash -c "$Z echo --namespace '' --across-face $DEV --face-policy $FACE_POLICY --face rf \
+  $W start "$1" bash -c "RUST_LOG='$READER_LOG' $Z echo --namespace '' --across-face $DEV --face-policy $FACE_POLICY --face rf \
     --contracts $M --catalog $M/catalog.json --zenoh-config $WORK/cfg/auth/local.json5 --format ndjson \
     -c $B | python3 -I -u $HERE/stamp.py $LOGS/$1.jsonl --all"
 }
@@ -50,13 +54,15 @@ $W up rf-zk2c bare
 sleep 5
 mark gen
 $W start gen "$Z" gen --namespace '' "$DEV" modem.v3 --contracts "$M" --catalog "$M/catalog.json" \
-  --zenoh-config "$WORK/cfg/auth/rf-node.json5" --rate 0.016666666666666666 --duration 1200 \
+  --zenoh-config "$WORK/cfg/auth/rf-node.json5" --rate 0.016666666666666666 --duration $((WATCH_S + 480)) \
   -c tcp/127.0.0.1:$((BASE + 1)) --format ndjson
 sleep 35
 mark r0
 reader r0
 sleep 70
-kill -TERM "$(awk '$2 == "r0" {print $1}' "$WORK/run/$INST/pids")"   # its timeout's PID
+r0=$(awk '$2 == "r0" {print $1}' "$WORK/run/$INST/pids" | head -n1)   # its timeout's PID
+[[ -n $r0 ]] || { echo "no pid recorded for r0" >&2; exit 2; }
+kill -TERM "$r0"
 mark r0_stop
 sleep 10
 $W cut
@@ -72,5 +78,5 @@ if [[ $CASE == shared ]]; then
   mark r2
   reader r2
 fi
-sleep 720
+sleep "$WATCH_S"
 mark end

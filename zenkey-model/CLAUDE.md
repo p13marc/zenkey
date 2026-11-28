@@ -516,6 +516,14 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `silence` = `SILENT_HORIZONS` × horizon; `FarSideRefusal::{NotV2,
   NoFace}`), and `redeclare_horizon(c, r)` / `redeclare_heartbeat_horizon(c)`
   (a `freshness.v2` state has none of its own) for core §8.5.
+  `repair_key(selector, n)` and `REPAIRS` (3) are core 0.121 §8.5's repair
+  subscription (#1185): `$*` in the last chunk of the selector's literal
+  prefix, a resource chunk after the kind (found past `zk2`, a namespace
+  in front allowed), at its end for `n` = 1 and a character further left
+  for each later one; `None` past three, past the chunk's start, for no
+  zk2 data selector, or where the literal prefix ends at the kind.
+  `tests/conformance.rs`' `repairs` reads `spec/conformance/repair/keys.json`
+  (computed by a reading of the text, never blessed).
   The conditional read (#986's J1, core 0.110 §7.5 and §4.2, adopted by
   no profile until `desired.v2`). In `wire`: `HeldStamp { stamp }`
   (`new`, `parse`, `header`, `write`: `CH · run · seq`, form 7, tag 0),

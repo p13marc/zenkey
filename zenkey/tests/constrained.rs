@@ -3,8 +3,8 @@
 //! name a zenoh-pico owner; here a session without a namespace stands in
 //! for it, and the pico itself is spike S15's. §7 counts the bytes that
 //! cross toward a far client through a TCP proxy, the link's stand-in, and
-//! §9's proxy loses the batch carrying a far client's declaration, as a
-//! medium with no ARQ does.
+//! §9's proxy loses the batch carrying a far client's declaration, or a far
+//! router's, as a medium with no ARQ does.
 
 mod common;
 
@@ -441,6 +441,7 @@ async fn level_owner(ep: &str) -> (zenkey::Service, tokio::task::JoinHandle<()>)
     let mut b = ServiceBuilder::new(&owner, config("v/level"));
     b.implement(imp("faced.v1")).unwrap();
     b.expose(&faced, "@op/slow").unwrap();
+    b.expose(&faced, "events/trip").unwrap();
     let level = b
         .declare_writer(&faced, "stream/level", &Bindings::new())
         .await
@@ -477,8 +478,9 @@ enum Lost {
 ///   silent.
 /// - **The key expression's declaration lost**: declared again, it stays
 ///   silent, since zenoh 1.10.1 declares a prefix toward its router once a
-///   transport (core Appendix B). Only a transport that opens again
-///   repairs it.
+///   transport (core Appendix B). Two horizons later its repair
+///   subscription (`…/level$*`) crosses with a key expression of its own,
+///   and the stream is delivered from then on (#1185).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s9_a_lost_declaration_is_declared_again_after_two_silent_horizons() {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -571,14 +573,188 @@ async fn s9_a_lost_declaration_is_declared_again_after_two_silent_horizons() {
             (Lost::KeyExpr, _) => {
                 tokio::time::sleep(Duration::from_millis(1500)).await;
                 assert!(sub.redeclared() >= 1, "{case}: declared again");
+                assert_eq!(sub.repaired(), 0, "{case}: not yet repaired");
                 assert_eq!(
                     heard.load(Ordering::SeqCst),
                     0,
                     "{case}: a lost DeclareKeyExpr is not declared again on this transport"
                 );
+                let deadline = Instant::now() + common::SETTLE;
+                while heard.load(Ordering::SeqCst) == 0 {
+                    assert!(
+                        Instant::now() < deadline,
+                        "{case}: never repaired, repairs {}",
+                        sub.repaired()
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                let after = t.elapsed();
+                assert!(
+                    after >= Duration::from_secs(4),
+                    "{case}: four horizons first: {after:?}"
+                );
+                assert_eq!(
+                    (sub.redeclared(), sub.repaired()),
+                    (1, 1),
+                    "{case}: declared again, then repaired once"
+                );
             }
         }
         drop(sub);
+        session.close().await.unwrap();
+    }
+    puts.abort();
+}
+
+/// A far router's owner for §9 step 5: `faced.v1`'s `stream/level` every
+/// 100 ms, its payload a counter, and an event `events/trip` every 200 ms.
+async fn level_and_trip_owner(ep: &str) -> (zenkey::Service, tokio::task::JoinHandle<()>) {
+    let owner = client(ep).await;
+    let faced: IfaceId = "faced.v1".parse().unwrap();
+    let mut b = ServiceBuilder::new(&owner, config("v/level"));
+    b.implement(imp("faced.v1")).unwrap();
+    b.expose(&faced, "@op/slow").unwrap();
+    let level = b
+        .declare_writer(&faced, "stream/level", &Bindings::new())
+        .await
+        .unwrap();
+    let trip = b
+        .event_writer(&faced, "events/trip", &Bindings::new())
+        .unwrap();
+    let svc = b.start().await.unwrap();
+    let puts = tokio::spawn(async move {
+        let mut n = 0u64;
+        loop {
+            let _ = level.put(n.to_string()).await;
+            if n.is_multiple_of(2) {
+                let _ = trip.put("trip").await;
+            }
+            n += 1;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    (svc, puts)
+}
+
+/// §9 step 5 (core §8.5, #1185): two readers, each a consumer of the
+/// stream and of an event, behind one far router, which attaches through
+/// the proxy. The far router declared the keys' prefixes with a first
+/// subscription, and the proxy drops every batch it sends for 1.5 s while
+/// the readers subscribe, the second 0.5 s after the first: their
+/// router's `DeclareSubscriber`s.
+/// - **Nothing for two horizons**, then each subscription is declared
+///   again, the event's beside the stream's, and still nothing: the far
+///   router holds the other reader's, and sends nothing.
+/// - **At four horizons** the first reader's repairs cross,
+///   `…/stream/level$*` and `…/events/trip$*/*`, new at the far router, and
+///   both readers hear the stream and the event from then on, each sample
+///   once. The second reader, hearing again before its own four horizons,
+///   declares no repair.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s9_two_readers_behind_one_far_router_are_repaired_after_four_silent_horizons() {
+    use std::sync::Mutex;
+    use zenkey::consumer::Consumer;
+    let (_ra, ep) = router(None).await;
+    let (_svc, puts) = level_and_trip_owner(&ep).await;
+    let level = "zk2/v/level/faced.v1/stream/level";
+    let trip = "zk2/v/level/faced.v1/events/trip/*";
+    let link = common::lossy_link_to(&ep).await;
+    let (_rb, ep_b) = common::router_via(&link).await;
+    // The far router declares the keys' prefixes toward the near one with
+    // a first subscription of each, which hears and goes.
+    let primer = client(&ep_b).await;
+    for key in [level, trip] {
+        let first = primer
+            .declare_subscriber(key)
+            .with(flume::unbounded::<Sample>())
+            .await
+            .unwrap();
+        tokio::time::timeout(common::SETTLE, first.recv_async())
+            .await
+            .unwrap_or_else(|_| panic!("the first subscription to {key} hears"))
+            .unwrap();
+        first.undeclare().await.unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    link.lose_up_for(Duration::from_millis(1500));
+    let contract = Arc::new(contract("faced.v1"));
+    type Heard = Arc<Mutex<Vec<(Duration, String)>>>;
+    let t = Instant::now();
+    let mut readers = Vec::new();
+    for i in 0..2 {
+        if i == 1 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let session = client(&ep_b).await;
+        let consumer = Consumer::for_tool(
+            &session,
+            Arc::clone(&contract),
+            &["v/level"],
+            &Default::default(),
+        )
+        .unwrap()
+        .with_presence(Presence::Unavailable)
+        .across(&far(1000, false));
+        let (levels, trips): (Heard, Heard) = Default::default();
+        let (l, tr) = (Arc::clone(&levels), Arc::clone(&trips));
+        let s_level = consumer
+            .subscribe("stream/level", move |d| {
+                let v = String::from_utf8_lossy(&d.sample.payload().to_bytes()).into_owned();
+                l.lock().unwrap().push((t.elapsed(), v));
+            })
+            .await
+            .unwrap();
+        let s_trip = consumer
+            .subscribe("events/trip", move |d| {
+                tr.lock()
+                    .unwrap()
+                    .push((t.elapsed(), d.sample.key_expr().to_string()));
+            })
+            .await
+            .unwrap();
+        readers.push((session, s_level, s_trip, levels, trips));
+    }
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    assert!(
+        link.lost_up() >= 1,
+        "the far router's declarations were lost"
+    );
+    for (_, s_level, s_trip, levels, trips) in &readers {
+        assert!(
+            levels.lock().unwrap().is_empty() && trips.lock().unwrap().is_empty(),
+            "nothing for three horizons and a half"
+        );
+        assert_eq!(s_level.redeclared(), 1, "declared again once");
+        assert_eq!(s_trip.redeclared(), 1, "the event's beside it");
+        assert_eq!((s_level.repaired(), s_trip.repaired()), (0, 0));
+    }
+    eventually("both readers hear the stream and the event", || async {
+        readers.iter().all(|(_, _, _, levels, trips)| {
+            levels.lock().unwrap().len() >= 10 && !trips.lock().unwrap().is_empty()
+        })
+    })
+    .await;
+    for (i, (_, s_level, s_trip, levels, trips)) in readers.iter().enumerate() {
+        let levels = levels.lock().unwrap();
+        assert!(
+            levels[0].0 >= Duration::from_secs(4),
+            "four horizons first: {:?}",
+            levels[0].0
+        );
+        assert!(trips.lock().unwrap()[0].0 >= Duration::from_secs(4));
+        // Each sample once: the counter only rises.
+        let n: Vec<u64> = levels.iter().map(|(_, v)| v.parse().unwrap()).collect();
+        assert!(n.windows(2).all(|w| w[0] < w[1]), "each once: {n:?}");
+        assert_eq!((s_level.redeclared(), s_trip.redeclared()), (1, 1));
+        let repairs = if i == 0 { (1, 1) } else { (0, 0) };
+        assert_eq!(
+            (s_level.repaired(), s_trip.repaired()),
+            repairs,
+            "the first reader's repairs serve both"
+        );
+    }
+    for (session, s_level, s_trip, _, _) in readers {
+        drop((s_level, s_trip));
         session.close().await.unwrap();
     }
     puts.abort();

@@ -4,6 +4,14 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the scope across a face repaired, and an event's watched again (#1185)
+
+Core 0.121 §8.5: the Deployment pane's scope across a face whose medium
+repairs no lost frame is declared again after two silent horizons, as
+before, and repaired each later two. An event's selector is declared
+again and repaired beside the others, where it was declared once. No
+flag, file or scene changed, so no pixel moved.
+
 ## Unreleased (`main`, zk2) — the archive's compact attachment (#980's C3)
 
 Core 0.120 §4.4: an archive given a catalog answers with a 3-byte

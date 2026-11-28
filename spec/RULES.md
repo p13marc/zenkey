@@ -52,12 +52,12 @@ The owner, consumer and caller sections each point to them.
 | Role | Rules |
 |---|---|
 | [Owner](#owner) | 92 |
-| [Consumer](#consumer) | 35 |
+| [Consumer](#consumer) | 37 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 19 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 91, 31 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 93, 31 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 87 |
-| Every rule, once | 310 |
+| Every rule, once | 312 |
 | [Rule ids](#rule-ids) | 86 |
 
 ## Owner
@@ -354,6 +354,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§8.5](core.md#85-constrained-faces) | A consumer across a constrained face SHOULD subscribe to each concrete resource it reads by its exact key, and to a template by its literal prefix up to the first parameter. | `[Sc: constrained.md §7]` |
 | [§8.5](core.md#85-constrained-faces) | A consumer across a constrained face SHOULD NOT use a selector wider than what it reads. | `[Sc: constrained.md §7]` |
 | [§8.5](core.md#85-constrained-faces) | A consumer or a tool across a constrained face whose medium repairs no lost frame SHOULD declare a subscription again when it has heard nothing on it for two of its horizons while its session's transport stayed up. | `[Sc: constrained.md §9]` |
+| [§8.5](core.md#85-constrained-faces) | A consumer or a tool whose subscription stays silent for two more of its horizons after declaring it again SHOULD declare a **repair subscription** for it. | `[F: repair/keys.json]` `[Sc: constrained.md §9]` |
+| [§8.5](core.md#85-constrained-faces) | A consumer or a tool SHOULD declare a subscription to what has **no horizon**, such as an event's, again and repair it beside its subscriptions across the face that have one. | `[Sc: constrained.md §9]` |
 
 ### [core §11.1 Grant shapes](core.md#111-grant-shapes)
 
@@ -574,6 +576,8 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§8.5](core.md#85-constrained-faces) | A consumer or a tool across a constrained face whose medium repairs no lost frame SHOULD declare a subscription again when it has heard nothing on it for two of its horizons while its session's transport stayed up. | `[Sc: constrained.md §9]` |
+| [§8.5](core.md#85-constrained-faces) | A consumer or a tool whose subscription stays silent for two more of its horizons after declaring it again SHOULD declare a **repair subscription** for it. | `[F: repair/keys.json]` `[Sc: constrained.md §9]` |
+| [§8.5](core.md#85-constrained-faces) | A consumer or a tool SHOULD declare a subscription to what has **no horizon**, such as an event's, again and repair it beside its subscriptions across the face that have one. | `[Sc: constrained.md §9]` |
 
 ### [core §8.6 The deployment catalog](core.md#86-the-deployment-catalog)
 
@@ -733,7 +737,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face SHOULD subscribe as core §8.5 says, by the scopes the contracts in hand give for the addresses it reads. | `[Sc: constrained.md §7]` `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | A tool given the face SHOULD NOT declare a scope for a resource the plan keeps off it. | `[F: scope/faces.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | **A selector given.** … A tool MUST NOT drop silently a selector it was given that meets none of its scopes: it refuses the read, declaring none of the selectors, and names each such selector and why. | `[F: scope/faces.json]` |
-| [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, as core §8.5 says. | `[Sc: constrained.md §9]` |
+| [§7.5](observer.md#75-reading-across-a-face) | A tool across a constrained face whose medium repairs no lost frame SHOULD declare a scope again when it has heard nothing on it for two of its horizons while its session's transport stayed up, and repair it when two more pass, as core §8.5 … | `[Sc: constrained.md §9]` |
 | [§7.5](observer.md#75-reading-across-a-face) | **The revision of a key.** … A tool that reads a mutation, an event, a frame or a heartbeat with no descriptor naming the owner's revision MUST read it with the revision chosen in this order. | `[F: envelope/tags.json]` |
 | [§7.5](observer.md#75-reading-across-a-face) | A tool MUST read an owner heartbeat's group with the revision its index names in the catalog the tool was given, as core §8.6 reads an index, and never with one these steps would choose. | `[F: heartbeat/owner.json]` |
 

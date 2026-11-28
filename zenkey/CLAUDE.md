@@ -880,7 +880,34 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   undeclared), and a failed declaration is counted
   (`Redeclaring::failed`, `Subscription::redeclare_failed`) and warned of
   once a horizon per slot; its unit test refuses declarations through a
-  `cfg(test)` counter (`Inner::refuse`).
+  `cfg(test)` counter (`Inner::refuse`). #1185 (core 0.121 §8.5): a slot
+  due again after its re-declaration declares a repair instead,
+  `link::repair_key(key, n)` (`$*` in the literal prefix's last chunk,
+  each later one a character further left, up to `link::REPAIRS` = 3,
+  then re-declared again), kept in the slot (`repairs`) until it is
+  undeclared, three in the slot's life (the next is `repairs.len() + 1`,
+  so a second silent run re-declares only, #1185's review), its callback delivering nothing (the session hands each
+  sample to every matching subscriber, so the slot's own delivers it
+  once and a key only the repair matches is dropped); the run (`dues`)
+  ends at a sample heard after the last act (`heard` > `acted`). It fixes
+  a second reader of the key behind the same router (a router declares a
+  key expression toward another once) and a lost `DeclareKeyExpr` (the
+  repair's prefix is a chunk shorter). A slot declared with no horizon
+  (`declare(key, None, cb)`, an event's or a `freshness.v2` state's)
+  follows: due at a check where a slot with one is due, if quiet as long.
+  The slots lock is a `std::sync::Mutex` now; `Counts` per slot
+  (`counts(&ids)`), totals `redeclared`/`repaired`/`failed`,
+  `repair_keys()`, and `forget(&ids)` for a holder's `Drop`. A
+  `Consumer` holds one `Redeclaring` for itself and its clones (an
+  `Arc<OnceCell>`, fresh at `across`), so its event subscription follows
+  its stream's; a `Subscription` keeps its slot ids and forgets them on
+  drop (`Subscription::repaired`), and one that fails partway forgets
+  those it declared (`Slots`, a guard; `consumer::tests`, through the
+  `cfg(test)` `Redeclaring::refuse_after`). Tests: `redeclare::tests`' run,
+  `constrained.rs` §9 step 4 (a lost key expression repaired at four
+  horizons) and step 5 (two readers behind a far router via
+  `common::router_via`, the proxy losing every batch for 1.5 s,
+  `Link::lose_up_for`; `faced.v1` gained `events/trip`).
   #1028 (the suite's timing windows): a step waits for its condition,
   never a longer sleep. A put before its writer matches is dropped at its
   source (`Writer::matching`, a publisher's `matching_status`), and a

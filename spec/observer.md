@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.38 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.39 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.108 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -1336,27 +1336,28 @@ reads. `[Sc: constrained.md §7]` `[F: scope/faces.json]`
   `zk2` (core Appendix B).
 - **What a scope costs.** Each is one declaration across the face, made
   again at every reconnect. Where the medium repairs no lost frame, one
-  with a horizon is declared again after two horizons of silence too
-  (below). Nothing of a resource the plan keeps off the face crosses to
+  is declared again after two horizons of silence too, and repaired
+  after two more (below). Nothing of a resource the plan keeps off the face crosses to
   end that silence, so its scope would be declared again for as long as
   the tool reads.
 
 **Declaring again after silence** is core §8.5's, for a tool.
 - A tool across a constrained face whose medium repairs no lost frame
   SHOULD declare a scope again when it has heard nothing on it for two of
-  its horizons while its session's transport stayed up, as core §8.5
-  says. `[Sc: constrained.md §9]`
+  its horizons while its session's transport stayed up, and repair it
+  when two more pass, as core §8.5 says. `[Sc: constrained.md §9]`
   - **Its horizon** comes from the contracts in hand, as its scope does:
     the shortest horizon of the resources the scope reads that have one.
     A heartbeat's is the shortest of the collections it covers (core
-    §8.5). A scope with none is never declared again.
+    §8.5). A scope with none, an event's, is declared again and repaired
+    beside the tool's scopes that have one.
   - **What the face says.** The face policy gives the medium's `arq`
     (`link.v2` §2.1). A tool given none takes the medium for one that
     repairs.
-  - **What it concludes.** Silence on a scope declared again is still
-    silence (§2): no verdict on its owner, nor on the face. A lost
-    `DeclareKeyExpr` stays lost until the transport opens again (core
-    §8.5).
+  - **What it concludes.** Silence on a scope declared again, or
+    repaired, is still silence (§2): no verdict on its owner, nor on the
+    face. Its repair crosses beside another reader of the scope behind
+    the same router, and repairs a lost `DeclareKeyExpr` (core §8.5).
 - **A tool's own timeouts** across such a face are core §8.1's: at least
   the face's `reply_timeout_ms` for each reply it asks for. Its session
   runs the face's `[transport]`, so that both ends run one lease

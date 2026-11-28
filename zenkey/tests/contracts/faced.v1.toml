@@ -1,6 +1,6 @@
 # constrained.md §8–§9: across a face, an operation whose contract
-# recommends a 1 s timeout, its reply slower, and a stream with a 1 s
-# horizon.
+# recommends a 1 s timeout, its reply slower, a stream with a 1 s
+# horizon, and an event, which has none (§9 step 5).
 [interface]
 name  = "faced"
 major = 1
@@ -18,3 +18,9 @@ timeout_ms = 1000
 kind        = "stream"
 type        = { raw = "text/plain" }
 annotations = { "freshness.ttl_s" = 1 }
+
+[resources.trip]
+kind      = "event"
+type      = { raw = "text/plain" }
+rate      = "burst(36000/h)"
+retention = "1h"

@@ -1806,7 +1806,7 @@ up to 420 s.
     InitSyns, every 12 s to 14 s, drew no answer for 200 s.
   - After router B's first restart, one SDU of router B's declarations was lost, and the far
     reader's re-declaration did not repair it (finding 2).
-- **`telemetry` answered every round the link was back in:** `not_established`, 146 samples of
+- **`telemetry` answered all but one round the link was back in:** `not_established`, 146 samples of
   73 members, 51 established pairs, exit 0, 11 times. It exited 2 twice. After the 3rd reopen a
   full record was lost in its window, so no pair formed (`unobservable`). After the 4th no
   sample arrived ("silence is never a verdict").
@@ -1873,7 +1873,8 @@ up to 420 s.
      Each reader's silence is honest, but it is never ended.
    - Not fixed here (the brief's rule). The evidence is
      `results/rc-023-redeclare-{alone,shared}-1/`: the decoded declarations and what each
-     reader heard, and the bare captures.
+     reader heard, and the bare captures. Fixed since by core 0.121's repair subscription
+     (#1185), below.
 3. **On W2's path no reopen brought the link back, which is zenoh-modem#210's, not zenkey's.**
    After driver A's first restart, W2's device and gen behind router A, no far reader got a
    sample for 1 h 50 min, through 11 more reopens of all four kinds. Every probe exited 2,
@@ -1894,11 +1895,53 @@ up to 420 s.
    (`zenkey::redeclare`: "a subscription to what has none is declared once"). In
    `rc-023-redeclare-alone-1` the repaired reader got frames again and never another
    `face/device_fault`, which gen put once a minute. A face that lists events loses them for
-   as long as the transport stays up once their declaration is lost.
+   as long as the transport stays up once their declaration is lost. Fixed since by core
+   0.121 (#1185): an event's subscription is declared again and repaired beside the reader's
+   others, below.
 7. **Memory.** No zenkey process grew without levelling off in two hours: the owners and gen
    by 0.5 MB to 1 MB, slowing; the far readers by 0.6 MB. The management-plane readers held
    38–43 MB, but for driver B's in the face soak, which stepped to 47–49 MB at the driver's
    second restart and held there. Two hours do not show where the owners' slow growth ends.
+
+### The repair (#1185, core 0.121)
+
+Finding 2 was fixed before 0.23.0 shipped. Core 0.121 §8.5 adds a **repair subscription**:
+a subscription still silent two horizons after it was declared again subscribes to its key
+with `$*` appended to its literal prefix's last chunk (`…/frames/fast$*`), and keeps it. No
+reader's own subscription declares that key expression, so router B declares it toward router
+A, and router A routes the key's samples to router B, for every reader behind it.
+
+**The check, before the rule** (`rc-023-repair-check-1`, bare, main at 1dbce36f's binaries).
+`redeclare.sh`'s shared case, then two more sessions on router B, by hand:
+- **Neither reader's re-declaration crossed**, at 600 s and 624 s, and nothing crossed B->A
+  from 0.7 s to 796 s: the shared case is not repaired today.
+- **At 796 s a zenoh-python session** ([`rawsub.py`](rawsub.py); zenctl refuses `$*` in a
+  selector) subscribed to `…/frames/fast$*`. Router B sent a `DeclareKeyExpr` of
+  `…/stream/frames` (57 B) and the `DeclareSubscriber` of `/fast$*` (14 B), and nothing else.
+  Router A's next frame, at 845.8 s, reached R1, R2 and the session.
+- **At 875 s a fourth** subscribed to `…/face/device_fault$*/*`: a `DeclareKeyExpr` of
+  `…/events/face` (55 B) and the `DeclareSubscriber` (24 B). The next two events reached R1
+  and R2.
+
+**The re-soak** (`rc-023-redeclare-shared-2`, bare, zenctl with the repair, `WATCH_S=1380`).
+`redeclare.sh`'s shared case, R1's four `DeclareSubscriber`s lost in the cut as before:
+
+| s after the cut | What crossed, or what each reader did |
+|---:|---|
+| 0.6–0.7 | B->A: R1's four `DeclareSubscriber`s, lost |
+| 600.5, 624 | R1, then R2, declares its four subscriptions again, the events' beside frames/fast's; nothing crosses |
+| 1,202.2–1,202.6 | B->A: R1's four repairs, `…/stream/frames` and `…/events/face` as key expressions (52 B and 55 B) and four `DeclareSubscriber`s (14 B to 32 B), 205 B in all |
+| 1,205.5, 1,206.2 | A->B: the next event and frame, each reaching R1 and R2 |
+| 1,206 to 1,404 | four frames and four events A->B, each reader hearing each once; R2 declares no repair, hearing before its own fell due |
+
+- **Repaired at 1,206 s**, two of frames/fast's horizons after the re-declaration that
+  changed nothing. `rc-023-redeclare-shared-1` was never repaired in 735 s.
+- **What it costs**: 205 B B->A once, the repairs kept while R1 reads. Nothing else crossed
+  either way but keep-alives.
+- **Events too** (finding 6): R1's three event subscriptions were declared again and repaired
+  beside frames/fast's, and both readers got every `face/device_fault` after.
+- Each reader's re-declarations and repairs are in its log (`READER_LOG`), in the run's
+  `analysis.json` under `reader_acts`.
 
 ## Reproduce
 
@@ -2065,6 +2108,19 @@ INST=rdA BASE=18400 CASE=alone FACE_POLICY=$F/zenohd-rf0.face.toml \
   timeout 30m taskset -c 4-5 ./redeclare.sh rc-023-redeclare-alone-1
 INST=rdB BASE=18600 CASE=shared FACE_POLICY=$F/zenohd-rf0.face.toml \
   timeout 30m taskset -c 4-5 ./redeclare.sh rc-023-redeclare-shared-1
+# #1185's check (main at 1dbce36f's binaries): the shared case, its window 1,000 s, and two
+# zenoh-python sessions on router B past both readers' re-declarations (the venv
+# impl/python/bootstrap.py makes), with the tools' credentials
+INST=v1185 BASE=19400 CASE=shared WATCH_S=1000 FACE_POLICY=$F/zenohd-rf0.face.toml \
+  timeout 40m taskset -c 4-5 ./redeclare.sh rc-023-repair-check-1 &
+P=$R/target/py-venv/bin/python; A=$WORK/cfg/auth/local.json5; K=zk2/h-3fa9c2d41b7e/rf0/modem.v3
+sleep 920; timeout 10m taskset -c 4-5 $P -I rawsub.py $A tcp/127.0.0.1:19402 "$K/stream/frames/fast\$*" \
+  $WORK/logs/rc-023-repair-check-1/r3p.jsonl 260 &
+sleep 80; timeout 10m taskset -c 4-5 $P -I rawsub.py $A tcp/127.0.0.1:19402 "$K/events/face/device_fault\$*/*" \
+  $WORK/logs/rc-023-repair-check-1/r4p.jsonl 200
+# The re-soak (#1185's branch, about 26 minutes): R1 repairs at 1,200 s
+INST=rd2 BASE=19600 CASE=shared WATCH_S=1380 FACE_POLICY=$F/zenohd-rf0.face.toml \
+  timeout 45m taskset -c 4-5 ./redeclare.sh rc-023-redeclare-shared-2
 
 # Analysis: analyze.py as above for the five measured runs, then
 python3 -I honesty.py $WORK/logs/rc-023-honesty-1 --json results/rc-023-honesty.json
@@ -2080,7 +2136,10 @@ face soak with the probes at 90 s, was stopped after two reopens, since `telemet
 inside the lease the link takes to come back. The soak smoke of `rc-023-soak-smoke-2` ran the
 same earlier `soak.py`. `results/rc-023-redeclare-*/analysis.json` holds each declaration the
 bare capture decodes and what each reader heard, by a few lines of Python over
-`zdecode.decode`'s listing.
+`zdecode.decode`'s listing. `rc-023-repair-check-1` was run from a copy of `redeclare.sh`'s
+shared case whose two more readers were zenctl, which refused `$*` at its start
+(`analysis.json`'s `notes`); the two zenoh-python sessions were then started by hand, at 796 s
+and 875 s, as above.
 
 The check that no owner heartbeat crosses to readers with no catalog was
 made by hand, and keeps no record in `results/`: `INST=nocat BASE=17800
@@ -2133,11 +2192,12 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | `setup-loss.py` | what a declaration lost in the setup cost a bare W2 run |
 | `bound.sh`, `bound.py` | #1136's bound: puts of chosen lengths and QoS across rf0's face, bare, the routers' ids fixing the first sequence number; each put's batch or fragments, decoded, and the largest payload that fit at each QoS and sequence width |
 | `soak.py`, `soak-analyze.py` | rc-023's soak: the zenoh-modem mapping's owners and the host's tools for hours, the link reopened every 10 minutes by a driver's or a router's restart, the probes once the link is back, each process's memory once a minute; `--face` W1-73's path across rf0's plan. Each reopen, what crossed after it, each probe's verdict, and each process's RssAnon and VmSwap over its life |
-| `redeclare.sh` | rc-023: a far reader's DeclareSubscriber lost in a cut across rf0's face, and whether its re-declaration (core §8.5) repairs it, alone (`CASE=alone`) and beside a second reader (`CASE=shared`) |
+| `redeclare.sh` | rc-023: a far reader's DeclareSubscriber lost in a cut across rf0's face, and whether its re-declaration (core §8.5) repairs it, alone (`CASE=alone`) and beside a second reader (`CASE=shared`); `WATCH_S` the window after the restore, `READER_LOG` the readers' log filter (#1185) |
+| `rawsub.py` | #1185's live check: a plain zenoh-python subscriber on one key expression, a client of one router, each sample a JSON line; zenctl refuses `$*` in a selector |
 | `model.py` | runs the report's Appendix A and states its figures per direction; `--zk2c` its zk2c column, each LoRa face's uplink a range by link.v2 §2.16, asserted against its run, and W2's owner heartbeat by its layout, asserted against `zk2c-w2-lean-2` and `-bare-2` |
 | `summary.py` | the README's W2, LoRa and zk2c tables, from `results/`, and the heartbeat element with three heartbeats and with one owner heartbeat; the v2 runs' messages, elements and acts |
 | `train-dictionary.sh`, `rf.zdict`, `w2.zdict` | the compress layer's dictionaries: `rf.zdict` from `bare-1` (W1), `w2.zdict` from `w2-rf-bare-2` (W2) |
-| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/`; for the bound runs (`bound-16bit-1`, `bound-32bit-1`) the capture `air.jsonl` too (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs; `zk2c-w2-owner-honesty.json` and each owner-heartbeat run's `catalog.json` for #1110's; each v2 run's probes, `probe_desired-*.json` and `probe_alarms-*.json`, as `zenctl` printed them, and the watch run's `tasking.v2.toml` (#986's J5, #984's S4); rc-023's runs, `rc-023-honesty.json`, the soaks' `analysis.json`, and the re-declaration runs' bare captures (`rc-023-redeclare-*/air.jsonl`) |
+| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/`; for the bound runs (`bound-16bit-1`, `bound-32bit-1`) the capture `air.jsonl` too (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs; `zk2c-w2-owner-honesty.json` and each owner-heartbeat run's `catalog.json` for #1110's; each v2 run's probes, `probe_desired-*.json` and `probe_alarms-*.json`, as `zenctl` printed them, and the watch run's `tasking.v2.toml` (#986's J5, #984's S4); rc-023's runs, `rc-023-honesty.json`, the soaks' `analysis.json`, and the re-declaration runs' bare captures (`rc-023-redeclare-*/air.jsonl`, and #1185's `rc-023-repair-check-1/air.jsonl`), with each reader's re-declarations and repairs in `rc-023-redeclare-shared-2/analysis.json` |
 
 Each relay summary's `loss` is the loss it started with. Under `LOSS_START=0`
 that is 0, and the windows' loss was set later on the control port.

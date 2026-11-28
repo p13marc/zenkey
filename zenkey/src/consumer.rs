@@ -381,6 +381,11 @@ pub struct Consumer {
     /// The face its providers sit across (core §8.1, §8.5;
     /// [`Consumer::across`]). `None`: no face.
     far: Option<zenkey_model::link::FarSide>,
+    /// Across a face whose medium repairs no lost frame, where its
+    /// subscriptions are declared again and repaired (core §8.5): one for
+    /// the consumer and its clones, made at its first subscription, so a
+    /// subscription with no horizon follows its others (#1185).
+    redeclaring: Arc<tokio::sync::OnceCell<Arc<crate::redeclare::Redeclaring>>>,
     /// The deployment catalogs it holds (core §8.6): what it reads an
     /// owner heartbeat's indices through. None: every group it hears is
     /// refused `unknown_catalog`, and confirms nothing.
@@ -402,10 +407,14 @@ pub struct Subscription {
     _subs: Vec<Subscriber<()>>,
     /// Each bound provider's heartbeat subscriber, for a collection.
     _heartbeats: Vec<Subscriber<()>>,
-    /// Across a face whose medium repairs no lost frame, the subscribers
-    /// declared again after silence (core §8.5), in place of the two
-    /// above for those with a horizon.
-    redeclaring: Option<crate::redeclare::Redeclaring>,
+    /// Across a face whose medium repairs no lost frame, its consumer's
+    /// subscriptions declared again, and repaired, after silence (core
+    /// §8.5), and its own slots among them, in place of the two above:
+    /// forgotten when it drops.
+    redeclaring: Option<(
+        Arc<crate::redeclare::Redeclaring>,
+        Vec<crate::redeclare::SlotId>,
+    )>,
     /// The collection it follows by heartbeats, if any.
     followed: Option<Arc<Followed>>,
     seen: Arc<Seen>,
@@ -413,6 +422,53 @@ pub struct Subscription {
     /// and the origin of its deadlines (`timing.v1` §2.5).
     since: Instant,
     timing: Option<timing::Running>,
+}
+
+/// A subscription's slots in its consumer's
+/// [`crate::redeclare::Redeclaring`] while it is built: forgotten when it
+/// drops unbuilt, so a subscription that fails partway leaves none live
+/// (#1185's review).
+struct Slots {
+    rd: Option<Arc<crate::redeclare::Redeclaring>>,
+    ids: Vec<crate::redeclare::SlotId>,
+}
+
+impl Slots {
+    fn new(rd: Option<Arc<crate::redeclare::Redeclaring>>) -> Self {
+        Self {
+            rd,
+            ids: Vec::new(),
+        }
+    }
+
+    /// The subscription is built: its slots are its own from now on.
+    fn built(
+        mut self,
+    ) -> Option<(
+        Arc<crate::redeclare::Redeclaring>,
+        Vec<crate::redeclare::SlotId>,
+    )> {
+        let ids = std::mem::take(&mut self.ids);
+        self.rd.take().map(|rd| (rd, ids))
+    }
+}
+
+impl Drop for Slots {
+    fn drop(&mut self) {
+        if let Some(rd) = &self.rd {
+            rd.forget(&self.ids);
+        }
+    }
+}
+
+impl Drop for Subscription {
+    /// Its slots leave its consumer's [`crate::redeclare::Redeclaring`],
+    /// their subscribers and repairs dropped, as its own subscribers are.
+    fn drop(&mut self) {
+        if let Some((rd, slots)) = self.redeclaring.take() {
+            rd.forget(&slots);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -705,6 +761,7 @@ impl Consumer {
             epoch: zenkey_model::catalog::EPOCH_WITHOUT_CATALOG,
             far: None,
             catalogs: Arc::default(),
+            redeclaring: Arc::default(),
         })
     }
 
@@ -732,6 +789,7 @@ impl Consumer {
         self.reread_timeout = far.at_least(self.reread_timeout);
         self.catalog_timeout = far.at_least(self.catalog_timeout);
         self.far = Some(far.clone());
+        self.redeclaring = Arc::default();
         self
     }
 
@@ -747,13 +805,21 @@ impl Consumer {
         self.far.as_ref().map_or(timeout, |f| f.at_least(timeout))
     }
 
-    /// Where this consumer's subscriptions re-declare after silence: a face
-    /// whose medium repairs no lost frame.
-    async fn redeclaring(&self) -> Result<Option<crate::redeclare::Redeclaring>> {
+    /// Where this consumer's subscriptions re-declare, and are repaired,
+    /// after silence: a face whose medium repairs no lost frame. One for
+    /// the consumer, so that a subscription with no horizon follows the
+    /// others (core §8.5).
+    async fn redeclaring(&self) -> Result<Option<Arc<crate::redeclare::Redeclaring>>> {
         match &self.far {
-            Some(f) if f.redeclares() => Ok(Some(
-                crate::redeclare::Redeclaring::start(&self.session).await?,
-            )),
+            Some(f) if f.redeclares() => Ok(Some(Arc::clone(
+                self.redeclaring
+                    .get_or_try_init(|| async {
+                        crate::redeclare::Redeclaring::start(&self.session)
+                            .await
+                            .map(Arc::new)
+                    })
+                    .await?,
+            ))),
             _ => Ok(None),
         }
     }
@@ -1246,11 +1312,14 @@ impl Consumer {
         let callback = Arc::new(callback);
         let followed = self.followed(&r).map(Arc::new);
         // Core §8.5: across a face whose medium repairs no lost frame, a
-        // subscription with a horizon is declared again after silence.
+        // subscription is declared again, and repaired, after silence: by
+        // its horizon, or beside the consumer's others with none.
+        // Its slots are forgotten unless the subscription is built: a `?`
+        // below would otherwise leave them live in the consumer's
+        // `Redeclaring` for its life (#1185's review).
         let redeclaring = self.redeclaring().await?;
-        let horizon = redeclaring
-            .as_ref()
-            .and(zenkey_model::link::redeclare_horizon(&self.contract, &r));
+        let mut slots = Slots::new(redeclaring.clone());
+        let horizon = zenkey_model::link::redeclare_horizon(&self.contract, &r);
         let heartbeats = match &followed {
             Some(f) => {
                 let on_confirm = Arc::new(on_confirm);
@@ -1259,7 +1328,8 @@ impl Consumer {
                         f,
                         &seen,
                         &on_confirm,
-                        redeclaring.as_ref(),
+                        redeclaring.as_deref(),
+                        &mut slots.ids,
                         gate.as_ref(),
                     )
                     .await?;
@@ -1268,7 +1338,8 @@ impl Consumer {
                         f,
                         &seen,
                         &on_confirm,
-                        redeclaring.as_ref(),
+                        redeclaring.as_deref(),
+                        &mut slots.ids,
                         gate.as_ref(),
                     )
                     .await?,
@@ -1451,11 +1522,9 @@ impl Consumer {
                     occurred,
                 });
             });
-            match (&redeclaring, horizon) {
-                (Some(rd), Some(h)) => {
-                    rd.declare(ke, h, on_sample).await?;
-                }
-                _ => subs.push(
+            match &redeclaring {
+                Some(rd) => slots.ids.push(rd.declare(ke, horizon, on_sample).await?),
+                None => subs.push(
                     self.session
                         .declare_subscriber(ke)
                         .callback(move |sample: Sample| on_sample(sample))
@@ -1482,7 +1551,7 @@ impl Consumer {
         Ok(Subscription {
             _subs: subs,
             _heartbeats: heartbeats,
-            redeclaring,
+            redeclaring: slots.built(),
             followed,
             seen,
             since,
@@ -1508,14 +1577,13 @@ impl Consumer {
         seen: &Arc<Seen>,
         on_confirm: &Arc<F>,
         redeclaring: Option<&crate::redeclare::Redeclaring>,
+        slots: &mut Vec<crate::redeclare::SlotId>,
         gate: Option<&Arc<dyn BeatGate>>,
     ) -> Result<Vec<Subscriber<()>>>
     where
         F: Fn(HeartbeatRead) + Send + Sync + 'static,
     {
-        let horizon = redeclaring.and(zenkey_model::link::redeclare_heartbeat_horizon(
-            &self.contract,
-        ));
+        let horizon = zenkey_model::link::redeclare_heartbeat_horizon(&self.contract);
         let rt = tokio::runtime::Handle::try_current().ok();
         let mut out = Vec::new();
         for p in &self.providers {
@@ -1619,11 +1687,9 @@ impl Consumer {
                     None => read(),
                 }
             });
-            match (redeclaring, horizon) {
-                (Some(rd), Some(h)) => {
-                    rd.declare(ke, h, on_sample).await?;
-                }
-                _ => out.push(
+            match redeclaring {
+                Some(rd) => slots.push(rd.declare(ke, horizon, on_sample).await?),
+                None => out.push(
                     self.session
                         .declare_subscriber(ke)
                         .callback(move |sample: Sample| on_sample(sample))
@@ -1681,6 +1747,7 @@ impl Consumer {
         seen: &Arc<Seen>,
         on_confirm: &Arc<F>,
         redeclaring: Option<&crate::redeclare::Redeclaring>,
+        slots: &mut Vec<crate::redeclare::SlotId>,
         gate: Option<&Arc<dyn BeatGate>>,
     ) -> Result<Vec<Subscriber<()>>>
     where
@@ -1690,10 +1757,7 @@ impl Consumer {
             return Ok(Vec::new());
         }
         let class = f.class();
-        let horizon = redeclaring.and(zenkey_model::link::redeclare_owner_heartbeat_horizon(
-            &self.contract,
-            class,
-        ));
+        let horizon = zenkey_model::link::redeclare_owner_heartbeat_horizon(&self.contract, class);
         let rt = tokio::runtime::Handle::try_current().ok();
         // Core §8.5, §8.6: where presence is unavailable no descriptor
         // crosses, and the last catalog held is the deployment's word.
@@ -1808,11 +1872,9 @@ impl Consumer {
                     None => read(),
                 }
             });
-            match (redeclaring, horizon) {
-                (Some(rd), Some(h)) => {
-                    rd.declare(ke, h, on_sample).await?;
-                }
-                _ => out.push(
+            match redeclaring {
+                Some(rd) => slots.push(rd.declare(ke, horizon, on_sample).await?),
+                None => out.push(
                     self.session
                         .declare_subscriber(ke)
                         .callback(move |sample: Sample| on_sample(sample))
@@ -2625,22 +2687,35 @@ impl Consumer {
 }
 
 impl Subscription {
+    /// What was done for its subscribers across a face after silence (core
+    /// §8.5, [`Consumer::across`]).
+    fn redeclare_counts(&self) -> crate::redeclare::Counts {
+        self.redeclaring
+            .as_ref()
+            .map(|(rd, slots)| rd.counts(slots))
+            .unwrap_or_default()
+    }
+
     /// How many times one of its subscribers was declared again after two
     /// horizons of silence across a face (core §8.5, [`Consumer::across`]).
     #[must_use]
     pub fn redeclared(&self) -> u64 {
-        self.redeclaring
-            .as_ref()
-            .map_or(0, crate::redeclare::Redeclaring::redeclared)
+        self.redeclare_counts().redeclared
     }
 
-    /// How many times declaring one of its subscribers again failed, each
-    /// retried at the next check and warned of once a horizon (#1047).
+    /// How many repair subscriptions it declared for its subscribers,
+    /// each after a declaration again that two more horizons of silence
+    /// followed (core §8.5, #1185).
+    #[must_use]
+    pub fn repaired(&self) -> u64 {
+        self.redeclare_counts().repaired
+    }
+
+    /// How many times declaring one of its subscribers again, or a repair,
+    /// failed, each retried and warned of once a horizon (#1047).
     #[must_use]
     pub fn redeclare_failed(&self) -> u64 {
-        self.redeclaring
-            .as_ref()
-            .map_or(0, crate::redeclare::Redeclaring::failed)
+        self.redeclare_counts().failed
     }
 
     /// Samples discarded as expired (`timing.v1` §2.6): older than their
@@ -3458,4 +3533,52 @@ fn replay_order(
         .collect();
     keyed.sort_by_key(|a| a.0);
     keyed.into_iter().map(|(_, d)| d).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #1185's review: a subscription whose declarations fail partway, its
+    /// first slot declared in the consumer's `Redeclaring` and its second
+    /// refused, leaves no slot there: none is declared again or repaired
+    /// for the consumer's life.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_subscription_that_fails_partway_leaves_no_slot_behind() {
+        let mut c = zenoh::Config::default();
+        c.insert_json5("scouting/multicast/enabled", "false")
+            .unwrap();
+        c.insert_json5("scouting/gossip/enabled", "false").unwrap();
+        let session = zenoh::open(c).await.unwrap();
+        let text = "[interface]\nname = \"faced\"\nmajor = 1\nminor = 0\nuses = [\"freshness.v1\"]\n\n\
+                    [resources.level]\nkind = \"stream\"\ntype = { raw = \"text/plain\" }\n\
+                    annotations = { \"freshness.ttl_s\" = 1 }\n";
+        let loaded = zenkey_model::contract::load_str(text, std::path::Path::new("."), None);
+        let contract = Arc::new(loaded.contract.expect("the contract loads"));
+        let far = zenkey_model::link::FarSide {
+            face: "radio".into(),
+            reply_timeout_ms: 1000,
+            arq: false,
+            transport: zenkey_model::link::Binding::Zenoh1_10_1.defaults(),
+        };
+        // Two providers: one selector each, so two slots.
+        let consumer = Consumer::for_tool(&session, contract, &["v/a", "v/b"], &BTreeMap::new())
+            .unwrap()
+            .with_presence(Presence::Unavailable)
+            .across(&far);
+        let rd = consumer
+            .redeclaring()
+            .await
+            .unwrap()
+            .expect("across a face");
+        rd.refuse_after(1, 1);
+        let refused = consumer.subscribe("stream/level", |_| {}).await;
+        assert!(refused.is_err(), "the second declaration is refused");
+        assert!(rd.keys().is_empty(), "no slot left: {:?}", rd.keys());
+        // Built whole, its slots are its own while it stands.
+        let sub = consumer.subscribe("stream/level", |_| {}).await.unwrap();
+        assert_eq!(rd.keys().len(), 2);
+        drop(sub);
+        assert!(rd.keys().is_empty(), "forgotten when it drops");
+    }
 }

@@ -52,7 +52,9 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   its selectors (`update::deployment::face_rewatch`;
   `update::deployment::watch_scope` →
   `services::watch::scope_across`: unseeded, `Monitor::watch_across` by a
-  selector's horizon where the face says `arq = false`), a custom scope's
+  selector's horizon where the face says `arq = false`, one with none
+  following the others and each repaired after its re-declaration, #1185),
+  a custom scope's
   selectors narrowed to it, no subtree watch, every session opened by the
   fleet's `open_*_across` (`services::link::Transport::far`), the default
   `--timeout` the face's `reply_timeout_ms`; shots scene `across-face`

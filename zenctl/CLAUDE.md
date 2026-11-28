@@ -271,7 +271,10 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `reply_timeout_ms` the default `--timeout` below a flag or context, every
   session on the `_across` openers), `FaceScope::watch` →
   `Monitor::watch_across` by each selector's horizon (`FaceScope::horizon`)
-  where `arq = false`, in `echo`, `rate`, `record`, `timeline`; `check
+  where `arq = false`, in `echo`, `rate`, `record`, `timeline` (since
+  #1185, core 0.121, every selector, one with no horizon following the
+  others, each repaired two horizons after its re-declaration; the stderr
+  note and `--face-policy`'s help say so, `help-wire.trycmd`); `check
   conform` and `alarms` take `--face-policy` for the routers' lease and
   `wait_before_close` (`zk2::routers`; `--lease`/`--wait-before-close` are
   `Option` now, #1011's item 3; since its last chunk `zk2::routers` is the

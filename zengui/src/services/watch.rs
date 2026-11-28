@@ -179,8 +179,9 @@ pub fn scope(
 /// Watch the scope across a constrained face (#990 V7; core §8.5,
 /// observer §7.5): each of `selectors`, the face scope's or narrowed to
 /// it, unseeded, declared again after two horizons of silence where the
-/// face's medium repairs no lost frame and the selector has a horizon, as
-/// zenctl's `FaceScope::watch` does.
+/// face's medium repairs no lost frame, and repaired each later two, a
+/// selector with no horizon beside the others, as zenctl's
+/// `FaceScope::watch` does.
 pub fn scope_across(
     monitor: Arc<Monitor>,
     scope: Arc<zenkey_fleet::FaceScope>,
@@ -193,9 +194,10 @@ pub fn scope_across(
                 .is_some_and(zenkey_model::link::FarSide::redeclares);
             let mut ids = Vec::new();
             for sel in &selectors {
-                let watched = match scope.horizon(sel).filter(|_| redeclares) {
-                    Some(h) => monitor.watch_across(sel, h).await,
-                    None => monitor.watch(sel).await,
+                let watched = if redeclares {
+                    monitor.watch_across(sel, scope.horizon(sel)).await
+                } else {
+                    monitor.watch(sel).await
                 };
                 match watched {
                     Ok(id) => ids.push(id),

@@ -1,6 +1,9 @@
-//! `spec/scenarios/constrained.md` §9 step 2 (core §8.5, observer §7.5;
-//! #988 L4): a tool's watch across a face whose medium repairs no lost
-//! frame is declared again after two horizons of silence, and heals.
+//! `spec/scenarios/constrained.md` §9 steps 2 and 5 (core §8.5, observer
+//! §7.5; #988 L4, #1185): a tool's watch across a face whose medium
+//! repairs no lost frame is declared again after two horizons of silence,
+//! and heals; behind a far router another watch of the key shares, it is
+//! repaired two horizons later, and heals with the event watched beside
+//! it.
 //!
 //! The far client dials the router through a relay that drops the next
 //! batch it sends toward the router but a keep-alive, and forwards
@@ -29,11 +32,12 @@ use zenkey_fleet::{FleetEvent, Monitor, MonitorSpec, StreamItem};
 
 /// A TCP relay to `upstream` that, while armed, drops the next batch the
 /// dialling side sends but a keep-alive (each batch after the stream link's
-/// 2-byte little-endian length), once; and, while stalled, reads nothing the
-/// dialling side sends.
+/// 2-byte little-endian length), once, or every one until an instant; and,
+/// while stalled, reads nothing the dialling side sends.
 struct LossyRelay {
     endpoint: String,
     armed: Arc<Mutex<bool>>,
+    until: Arc<Mutex<Option<Instant>>>,
     lost: Arc<AtomicU64>,
     stalled: Arc<AtomicBool>,
     _accept: tokio::task::JoinHandle<()>,
@@ -46,9 +50,15 @@ impl LossyRelay {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endpoint = format!("tcp/{}", listener.local_addr().unwrap());
         let armed: Arc<Mutex<bool>> = Arc::default();
+        let until: Arc<Mutex<Option<Instant>>> = Arc::default();
         let lost = Arc::new(AtomicU64::new(0));
         let stalled: Arc<AtomicBool> = Arc::default();
-        let (a, l, st) = (Arc::clone(&armed), Arc::clone(&lost), Arc::clone(&stalled));
+        let (a, u, l, st) = (
+            Arc::clone(&armed),
+            Arc::clone(&until),
+            Arc::clone(&lost),
+            Arc::clone(&stalled),
+        );
         let accept = tokio::spawn(async move {
             while let Ok((down, _)) = listener.accept().await {
                 let Ok(up) = tokio::net::TcpStream::connect(&target).await else {
@@ -56,7 +66,12 @@ impl LossyRelay {
                 };
                 let (mut down_rd, mut down_wr) = down.into_split();
                 let (mut up_rd, mut up_wr) = up.into_split();
-                let (a, l, st) = (Arc::clone(&a), Arc::clone(&l), Arc::clone(&st));
+                let (a, u, l, st) = (
+                    Arc::clone(&a),
+                    Arc::clone(&u),
+                    Arc::clone(&l),
+                    Arc::clone(&st),
+                );
                 tokio::spawn(async move {
                     let _ = tokio::io::copy(&mut up_rd, &mut down_wr).await;
                 });
@@ -82,7 +97,8 @@ impl LossyRelay {
                             let mut armed = a.lock().unwrap();
                             // zenoh 1.10.1's `KeepAlive`: one byte, 0x04.
                             let keep_alive = batch.len() == 3 && batch[2] == 0x04;
-                            if *armed && !keep_alive {
+                            let window = u.lock().unwrap().is_some_and(|t| Instant::now() < t);
+                            if (*armed || window) && !keep_alive {
                                 *armed = false;
                                 l.fetch_add(1, Ordering::SeqCst);
                             } else {
@@ -99,6 +115,7 @@ impl LossyRelay {
         LossyRelay {
             endpoint,
             armed,
+            until,
             lost,
             stalled,
             _accept: accept,
@@ -107,6 +124,11 @@ impl LossyRelay {
 
     fn lose_next(&self) {
         *self.armed.lock().unwrap() = true;
+    }
+
+    /// Drops every batch but a keep-alive for `window`.
+    fn lose_for(&self, window: Duration) {
+        *self.until.lock().unwrap() = Some(Instant::now() + window);
     }
 
     fn stall(&self, stalled: bool) {
@@ -151,7 +173,7 @@ async fn s9_a_watch_across_a_face_is_declared_again_after_two_silent_horizons() 
     relay.lose_next();
     let t = Instant::now();
     monitor
-        .watch_across(key, Duration::from_secs(1))
+        .watch_across(key, Some(Duration::from_secs(1)))
         .await
         .unwrap();
     let deadline = tokio::time::Instant::now() + util::SETTLE;
@@ -190,6 +212,134 @@ async fn s9_a_watch_across_a_face_is_declared_again_after_two_silent_horizons() 
     stop.store(true, Ordering::SeqCst);
     puts.await.unwrap();
     monitor.shutdown().await.unwrap();
+}
+
+/// §9 step 5, a tool's half (core §8.5, observer §7.5; #1185): two
+/// monitors, each watching a stream across the face and an event beside
+/// it, behind one far router, which attaches through the relay. The relay
+/// drops every batch the far router sends for 1.5 s while they watch, the
+/// second 0.5 s after the first. Each watch is declared again at two
+/// horizons, the event's beside the stream's, and nothing crosses: the
+/// far router holds the other monitor's. At four horizons the first
+/// monitor's repairs cross, and both monitors hear the stream and the
+/// event.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s9_two_watches_behind_one_far_router_are_repaired_after_four_silent_horizons() {
+    let (_near, ep) = router(None).await;
+    let owner = client(&ep).await;
+    let key = "zk2/v/beacon/beacon.v1/stream/level";
+    let trip = "zk2/v/beacon/beacon.v1/events/trip/*";
+    let stop = Arc::new(AtomicBool::new(false));
+    let s = Arc::clone(&stop);
+    let puts = tokio::spawn(async move {
+        let mut n = 0u64;
+        while !s.load(Ordering::SeqCst) {
+            let _ = owner.put(key, "1").await;
+            if n.is_multiple_of(2) {
+                let _ = owner
+                    .put(format!("zk2/v/beacon/beacon.v1/events/trip/{n}"), "t")
+                    .await;
+            }
+            n += 1;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    let relay = LossyRelay::to(&ep).await;
+    let (_far_router, ep_b) = router(Some(&relay.endpoint)).await;
+    // The far router declares the keys' prefixes toward the near one with
+    // a first subscription of each, which hears and goes.
+    let primer = client(&ep_b).await;
+    for k in [key, trip] {
+        let first = primer.declare_subscriber(k).await.unwrap();
+        tokio::time::timeout(util::SETTLE, first.recv_async())
+            .await
+            .unwrap_or_else(|_| panic!("the first subscription to {k} hears"))
+            .unwrap();
+        first.undeclare().await.unwrap();
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    relay.lose_for(Duration::from_millis(1500));
+    let t = Instant::now();
+    let mut monitors = Vec::new();
+    for i in 0..2 {
+        if i == 1 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        let far = zenkey_fleet::bus::session::open(std::slice::from_ref(&ep_b), &[], false)
+            .await
+            .expect("a far client");
+        let monitor = Monitor::start(&far, MonitorSpec::default()).await.unwrap();
+        let events = monitor.events();
+        monitor
+            .watch_across(key, Some(Duration::from_secs(1)))
+            .await
+            .unwrap();
+        monitor.watch_across(trip, None).await.unwrap();
+        monitors.push((far, monitor, events));
+    }
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    assert!(
+        relay.lost.load(Ordering::SeqCst) >= 1,
+        "the far router's declarations were lost"
+    );
+    for (_, monitor, events) in &mut monitors {
+        let mut heard = 0;
+        while let Some(item) = events.try_recv() {
+            if let StreamItem::Event(FleetEvent::Sample(_)) = item {
+                heard += 1;
+            }
+        }
+        assert_eq!(heard, 0, "nothing for three horizons and a half");
+        assert_eq!(
+            monitor.redeclared(),
+            2,
+            "the stream's and the event's, once each"
+        );
+        assert_eq!(monitor.repaired(), 0);
+    }
+    for (i, (_, monitor, events)) in monitors.iter_mut().enumerate() {
+        let deadline = tokio::time::Instant::now() + util::SETTLE;
+        let (mut level, mut event) = (None, None);
+        while level.is_none() || event.is_none() {
+            let item = tokio::time::timeout_at(deadline, events.recv())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "monitor {i}: never repaired: repairs {}, heard level {level:?} trip {event:?}",
+                        monitor.repaired()
+                    )
+                })
+                .expect("the monitor runs");
+            if let StreamItem::Event(FleetEvent::Sample(sample)) = item {
+                let at = t.elapsed();
+                if sample.key.contains("/events/trip/") {
+                    event.get_or_insert(at);
+                } else {
+                    level.get_or_insert(at);
+                }
+            }
+        }
+        let (level, event) = (level.unwrap(), event.unwrap());
+        assert!(
+            level >= Duration::from_secs(4),
+            "four horizons first: {level:?}"
+        );
+        assert!(
+            event >= Duration::from_secs(4),
+            "four horizons first: {event:?}"
+        );
+        let repairs = if i == 0 { 2 } else { 0 };
+        assert_eq!(
+            monitor.repaired(),
+            repairs,
+            "the first monitor's repairs serve both"
+        );
+    }
+    stop.store(true, Ordering::SeqCst);
+    puts.await.unwrap();
+    for (_, monitor, _) in monitors {
+        monitor.shutdown().await.unwrap();
+    }
 }
 
 /// A far client of the relay whose declarations wait behind its data
@@ -237,7 +387,7 @@ async fn unwatch_returns_while_a_watch_is_declared_again_across_a_slow_link() {
     let monitor = Monitor::start(&far, MonitorSpec::default()).await.unwrap();
     // Silent from the start: declared again two horizons on.
     let horizon = Duration::from_secs(2);
-    let id = monitor.watch_across(key, horizon).await.unwrap();
+    let id = monitor.watch_across(key, Some(horizon)).await.unwrap();
     let t = Instant::now();
 
     // The link backs up: the relay reads nothing, and blocking puts fill

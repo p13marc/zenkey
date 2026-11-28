@@ -206,9 +206,14 @@ pub(crate) struct AcrossFaceArgs {
     /// (core §8.1); and where the face says `arq = false`, each selector
     /// with a horizon in the contracts in hand is declared again after two
     /// horizons of silence while the transport stays up, which repairs a
-    /// subscriber's declaration its medium lost; a lost key expression
-    /// stays lost until the transport reopens (core §8.5, observer §7.5).
-    /// A `link.v1` policy states none of that and is refused, exit 2.
+    /// subscriber's declaration its medium lost, and each later two
+    /// horizons repaired by a subscriber on its key with `$*` in its
+    /// literal prefix's last chunk (`…/frames/fast$*`), which its router
+    /// declares across even beside another reader of the key, and which
+    /// repairs a lost key expression too; a selector with no horizon (an
+    /// event's) is declared again and repaired beside them (core §8.5,
+    /// observer §7.5). A `link.v1` policy states none of that and is
+    /// refused, exit 2.
     #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
     pub(crate) face_policy: Option<PathBuf>,
     /// The face of --face-policy, by its name (`[face.<name>]`).
@@ -232,8 +237,9 @@ pub(crate) struct OwnerFaceArgs {
     /// the default --timeout is the face's `reply_timeout_ms`, and `call`'s
     /// a floor under its contract's `timeout_ms` (core §8.1); and `watch`
     /// declares each subscriber again after two horizons of silence where
-    /// the face says `arq = false`. A `link.v1` policy states none of that
-    /// and is refused, exit 2.
+    /// the face says `arq = false`, and repairs it each later two (core
+    /// §8.5). A `link.v1` policy states none of that and is refused, exit
+    /// 2.
     #[arg(long = "face-policy", value_name = "FILE", requires_all = ["across_face", "face"])]
     pub(crate) face_policy: Option<PathBuf>,
     /// The face of --face-policy, by its name (`[face.<name>]`).

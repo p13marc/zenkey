@@ -6,6 +6,23 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a watch across a face repaired where declaring it again changes nothing (#1185, 0.23's release candidate)
+
+Core 0.121 §8.5, observer 0.39 §7.5: where the face says `arq = false`,
+a watch silent for two horizons is declared again, as before. Silent for
+two more, it is repaired: a subscriber on its key with `$*` in its
+literal prefix's last chunk (`…/frames/fast$*`), up to three, kept while
+the verb reads. Its router declares that across even beside another
+reader of the key, and it repairs a lost key expression too. An event's
+selector, which has no horizon, is declared again and repaired beside
+the others. No flag or exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `echo`, `rate`, `record` and `timeline` `--across-face --face-policy F --face N`, `arq = false`: a watch declared again after two silent horizons, a lost key expression staying lost, an event's never declared again | declared again, then repaired each later two horizons; an event's beside them | the repair delivers nothing of its own: a key that merely extends the chunk is dropped |
+| `watch --across-face --face-policy`: declared again | declared again, then repaired | `zenkey`'s consumer, one for the verb |
+| the stderr note: "each selector with a horizon declared again after two horizons of silence" | "… and repaired each later two, one with none beside them" | `--face-policy`'s help says so |
+
 ## Unreleased (`main`, zk2) — a first-hop device read with the catalog alone (#975, 0.23's release candidate)
 
 Core §8.4: an owner on a first hop holds no bundle, and its deployment

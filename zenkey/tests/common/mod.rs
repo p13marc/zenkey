@@ -267,6 +267,13 @@ impl Link {
         *self.loss.armed.lock().unwrap() = Some(Arm::Next);
     }
 
+    /// Drops every batch the connecting side sends but a keep-alive for
+    /// `window`, the transport left up: a radio's short outage, as
+    /// `redeclare.sh`'s cut (see [`Link`]).
+    pub fn lose_up_for(&self, window: Duration) {
+        *self.loss.armed.lock().unwrap() = Some(Arm::Until(std::time::Instant::now() + window));
+    }
+
     /// How many batches [`Link::lose_up`] dropped.
     pub fn lost_up(&self) -> u64 {
         self.loss.lost.load(std::sync::atomic::Ordering::SeqCst)
@@ -286,6 +293,8 @@ enum Arm {
     Text(Vec<u8>),
     /// The next one but a keep-alive.
     Next,
+    /// Every one but a keep-alive until then.
+    Until(std::time::Instant),
 }
 
 /// zenoh 1.10.1's `KeepAlive`, a transport message with no field: a batch
@@ -326,14 +335,19 @@ async fn pump_framed(
             let batch: Vec<u8> = pending.drain(..2 + len).collect();
             let mut armed = loss.armed.lock().unwrap();
             let keep_alive = batch.len() == 3 && batch[2] == KEEP_ALIVE;
+            if matches!(armed.as_ref(), Some(Arm::Until(t)) if std::time::Instant::now() >= *t) {
+                *armed = None;
+            }
             let hit = !keep_alive
                 && match armed.as_ref() {
                     Some(Arm::Text(t)) => batch.windows(t.len()).any(|w| w == t.as_slice()),
-                    Some(Arm::Next) => true,
+                    Some(Arm::Next | Arm::Until(_)) => true,
                     None => false,
                 };
             if hit {
-                *armed = None;
+                if !matches!(armed.as_ref(), Some(Arm::Until(_))) {
+                    *armed = None;
+                }
                 loss.lost.fetch_add(1, Ordering::SeqCst);
             } else {
                 out.extend_from_slice(&batch);
