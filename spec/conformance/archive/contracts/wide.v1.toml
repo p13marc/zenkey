@@ -1,0 +1,528 @@
+# A revision of 130 states, for the attachment fixtures: a compact
+# attachment's resource is 7 bits, so its states past the 128th are
+# written in the JSON form.
+[interface]
+name    = "wide"
+major   = 1
+minor   = 0
+summary = "Many states, for the archive attachment fixtures"
+
+[resources.s000]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s001]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s002]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s003]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s004]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s005]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s006]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s007]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s008]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s009]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s010]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s011]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s012]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s013]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s014]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s015]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s016]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s017]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s018]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s019]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s020]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s021]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s022]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s023]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s024]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s025]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s026]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s027]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s028]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s029]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s030]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s031]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s032]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s033]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s034]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s035]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s036]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s037]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s038]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s039]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s040]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s041]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s042]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s043]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s044]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s045]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s046]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s047]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s048]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s049]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s050]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s051]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s052]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s053]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s054]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s055]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s056]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s057]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s058]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s059]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s060]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s061]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s062]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s063]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s064]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s065]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s066]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s067]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s068]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s069]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s070]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s071]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s072]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s073]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s074]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s075]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s076]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s077]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s078]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s079]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s080]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s081]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s082]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s083]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s084]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s085]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s086]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s087]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s088]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s089]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s090]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s091]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s092]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s093]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s094]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s095]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s096]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s097]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s098]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s099]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s100]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s101]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s102]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s103]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s104]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s105]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s106]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s107]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s108]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s109]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s110]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s111]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s112]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s113]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s114]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s115]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s116]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s117]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s118]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s119]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s120]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s121]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s122]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s123]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s124]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s125]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s126]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s127]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s128]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.s129]
+kind = "state"
+type = { raw = "text/plain" }

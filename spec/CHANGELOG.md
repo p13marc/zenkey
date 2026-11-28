@@ -3,7 +3,7 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.120 — 2026-11-28: §3.3's compact descriptor, defined: its bytes, its decoding through a catalog and its revisions, its refusals, and the checks on what it decodes; then adopted: a reader reads both forms, and an owner on a first hop given a catalog writes it (#980 C5a, C5c)
+## 0.120 — 2026-11-28: §3.3's compact descriptor, defined: its bytes, its decoding through a catalog and its revisions, its refusals, and the checks on what it decodes; then adopted: a reader reads both forms, and an owner on a first hop given a catalog writes it; and §4.4's archive attachment in two forms, the compact one 3 bytes (#980 C5a, C5c, C3)
 
 #980's C5 cuts a descriptor to a few bytes for an owner across a
 constrained first hop (#982). zenoh-modem's node descriptor, `modem.v3`,
@@ -167,6 +167,80 @@ stay describable.
   state put before the tokens included; at a new run 0, as at a re-mint.
 - **No new version.** C5c extends 0.120's entry, since the form was not
   yet adopted and nothing merged between.
+
+**C3: the archive attachment's compact form.** Each archive reply's
+attachment named the value's type identity as JSON: `iface`, a 71-B
+fingerprint, the type object (its own 71-B schema id) and `confirmed`,
+248 B for zenoh-modem's `modem.v3/state/oper` (the memo's measurement).
+The memo's C3 row names the revision by its catalog index and the resource
+by its place: 3 bytes. Its questions 6 and 8 kept their defaults: the
+resource stays, a checked index, and an archive given a catalog SHOULD,
+not MUST, write the compact form.
+- **§4.4, "Each reply's attachment".** Two forms, told apart by their
+  length: exactly 3 bytes is the compact form, any other the JSON form,
+  unchanged. A JSON object holding the four members is never that short.
+  `[F: archive/attachments.json]`
+- **"Writing it".** An archive given a catalog SHOULD write the compact
+  form. `[Sc: state.md §5]` It writes JSON for a revision its catalog
+  does not list and a resource past the 128th, and with no catalog. The
+  archive's catalog is the one its descriptor names, or across a
+  constrained face the deployment's word, as §8.6 says of an owner's.
+- **"Reading it".** A reader of an archive's replies MUST read both forms.
+  `[F: archive/attachments.json]` `[Sc: state.md §5]` The `confirmed` bit
+  needs no catalog. The identity is read through the archive's catalog as
+  §8.6 reads an index, and decodes to the JSON form's three members.
+- **"What a reply confirms"** reads the peer's confirmation in either form.
+- **"The compact attachment".** The layout, index 10 · resource 7 ·
+  confirmed 1 · extension 1 · reserved 5, most significant bit first; the
+  writer's MUST; the decoding; and seven refusals in order: `extension`,
+  `reserved`, `unknown_catalog` (an archive naming no catalog too),
+  `unknown_index`, `unknown_revision`, `resource`, `origin`. The first two
+  leave nothing read, the key unconfirmed; a later one leaves `confirmed`
+  read and the identity unknown, never guessed.
+- **`state.md` §5, step 4.** Both archives given the catalog: each reply's
+  attachment is 3 bytes; the vehicle's archive, starting empty, aligns
+  from the owner-side archive and holds v4 confirmed as its compact
+  attachment says; a consumer holding the catalog reads the identity,
+  and one holding none reads `confirmed` alone.
+- **Appendix C and E** index `archive/`. `RULES.md` gains four rules: the
+  reader's MUST under observer marked *reader*, the archive's SHOULD
+  under owner, and the writer's and the refusals' MUSTs, static. Its
+  "Where it reads" lists gain §4.4, and its baseline mean moves from 12.25
+  to 12.31 by hand, as for C5c.
+
+**Decided where the memo left it open (C3).**
+- **The refusals and their order.** The memo had a mismatch with the
+  origin key "undecodable". The text names each: the bits, then the
+  catalog as §8.6 reads an index, the revision, the resource, the origin.
+- **A resource that is not a state** is refused `resource`: an archive
+  records only state (`state` and `@state`), so an index naming an
+  operation or a stream names nothing it could hold.
+- **The origin check** covers the interface as well as the resource: the
+  pair's interface must be the origin key's, a major included, and the
+  kind token and the chunks must match the resource's template.
+- **Which catalog.** The memo said the archive's catalog, the one its
+  descriptor names. Three bytes carry no id, so a reader learns it there;
+  a reader with no descriptor of the archive reads no identity.
+- **Where JSON stays.** A revision the catalog does not list, and a
+  resource past the 128th, which 7 bits cannot name.
+
+**The cases (C3).** `archive/attachments.json` reuses four revisions of
+`descriptors/` and holds two of its own in `archive/contracts/`: `log.v1`
+(a state, an explicit state under a template, a stream) and `wide.v1`
+(130 states). Three catalogs: `a`, `b` succeeding it and listing a
+`ghost.v1` no one holds, and `c`, unrelated, listing two of `a`'s
+revisions at other indices.
+- **`writes`:** 12, nine compact and three JSON (an unlisted revision,
+  the 129th resource, no catalog).
+- **`reads`:** 44: 12 accepted, through the archive's catalog and through
+  a successor, never through `c`; 29 refused, every token at least once
+  and each order between two refusals that the text names; 3 of the JSON
+  form by their length.
+- **How they were made.** One reading of the text (Python, standard
+  library) wrote every case and its expectation, a revision's facts from
+  lane P's canonicalizer. A second reading, written from the finished text
+  without the first, recomputed every write, read and catalog id from the
+  fixture alone. They agreed on every case. Never blessed.
 
 ## 0.117 — 2026-11-28: §9.2's E051, a packed type whose layout tag is 0; §7.5 accepts a heartbeat's tag 0, and says why (#1152)
 

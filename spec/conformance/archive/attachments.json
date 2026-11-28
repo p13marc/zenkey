@@ -1,0 +1,2251 @@
+{
+  "description": "core §4.4's archive attachment (#980 C3): its two forms, told by their length; the compact form's 3 bytes written for a value, its revision and its resource; and each read with the origin key, the catalog the archive's descriptor names, the catalogs held and the revisions lacked, to the JSON form's members or the first refusal in §4.4's order. Computed twice, never blessed.",
+  "revisions": {
+    "nav.v2": {
+      "file": "../descriptors/contracts/nav.v2.toml",
+      "iface": "nav.v2",
+      "fingerprint": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+      "resources": [
+        {
+          "name": "@op/arm",
+          "type": null
+        },
+        {
+          "name": "state/covariance",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        },
+        {
+          "name": "state/diagnostics",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        },
+        {
+          "name": "state/position",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        },
+        {
+          "name": "state/tracks/{track}",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        }
+      ]
+    },
+    "nav.v2 other": {
+      "file": "../descriptors/compact/contracts/other/nav.v2.toml",
+      "iface": "nav.v2",
+      "fingerprint": "sha256:10051e570744d5fd1194bed052370b129d4749acc62a119474f56649283d8a3c",
+      "resources": [
+        {
+          "name": "@op/arm",
+          "type": null
+        },
+        {
+          "name": "state/covariance",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/diagnostics",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/heading",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/position",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/tracks/{track}",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        }
+      ]
+    },
+    "geo.v1": {
+      "file": "../descriptors/compact/contracts/geo.v1.toml",
+      "iface": "geo.v1",
+      "fingerprint": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+      "resources": [
+        {
+          "name": "state/diagnostics",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/fence",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/tracks/{track}",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        }
+      ]
+    },
+    "cap.v1": {
+      "file": "../descriptors/compact/contracts/cap.v1.toml",
+      "iface": "cap.v1",
+      "fingerprint": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+      "resources": [
+        {
+          "name": "@op/calibrate",
+          "type": null
+        },
+        {
+          "name": "state/baro",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/cam",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/depth",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/fix",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/heat",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/lidar",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/mag",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/odom",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/radar",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/samples/{sample}",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/zones/{zone}",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        },
+        {
+          "name": "stream/imu_raw",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/octet-stream",
+            "media_param": null
+          }
+        }
+      ]
+    },
+    "log.v1": {
+      "file": "contracts/log.v1.toml",
+      "iface": "log.v1",
+      "fingerprint": "sha256:bdea295175922718d55872db05184badd9d268513150dd23632ce8a596de60ee",
+      "resources": [
+        {
+          "name": "@state/journal/{entry}",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/octet-stream",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/level",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "stream/ticks",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/octet-stream",
+            "media_param": null
+          }
+        }
+      ]
+    },
+    "wide.v1": {
+      "file": "contracts/wide.v1.toml",
+      "iface": "wide.v1",
+      "fingerprint": "sha256:046e016c70c3fdaa4c30538875b6069cfc85f85028f2f4c91cbdb430712725c7",
+      "resources": [
+        {
+          "name": "state/s000",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s001",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s002",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s003",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s004",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s005",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s006",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s007",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s008",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s009",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s010",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s011",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s012",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s013",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s014",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s015",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s016",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s017",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s018",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s019",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s020",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s021",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s022",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s023",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s024",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s025",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s026",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s027",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s028",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s029",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s030",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s031",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s032",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s033",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s034",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s035",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s036",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s037",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s038",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s039",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s040",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s041",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s042",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s043",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s044",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s045",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s046",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s047",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s048",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s049",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s050",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s051",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s052",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s053",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s054",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s055",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s056",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s057",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s058",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s059",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s060",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s061",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s062",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s063",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s064",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s065",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s066",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s067",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s068",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s069",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s070",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s071",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s072",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s073",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s074",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s075",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s076",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s077",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s078",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s079",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s080",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s081",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s082",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s083",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s084",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s085",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s086",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s087",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s088",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s089",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s090",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s091",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s092",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s093",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s094",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s095",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s096",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s097",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s098",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s099",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s100",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s101",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s102",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s103",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s104",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s105",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s106",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s107",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s108",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s109",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s110",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s111",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s112",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s113",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s114",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s115",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s116",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s117",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s118",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s119",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s120",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s121",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s122",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s123",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s124",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s125",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s126",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s127",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s128",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        },
+        {
+          "name": "state/s129",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        }
+      ]
+    }
+  },
+  "unheld": {
+    "iface": "ghost.v1",
+    "contract": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+  },
+  "catalogs": {
+    "a": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "nav.v2",
+          "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd"
+        },
+        {
+          "index": 1,
+          "iface": "geo.v1",
+          "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6"
+        },
+        {
+          "index": 2,
+          "iface": "log.v1",
+          "contract": "sha256:bdea295175922718d55872db05184badd9d268513150dd23632ce8a596de60ee"
+        }
+      ]
+    },
+    "b": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "lineage": [
+        {
+          "id": "6625170e",
+          "entries": 3
+        }
+      ],
+      "entries": [
+        {
+          "index": 0,
+          "iface": "nav.v2",
+          "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd"
+        },
+        {
+          "index": 1,
+          "iface": "geo.v1",
+          "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6"
+        },
+        {
+          "index": 2,
+          "iface": "log.v1",
+          "contract": "sha256:bdea295175922718d55872db05184badd9d268513150dd23632ce8a596de60ee"
+        },
+        {
+          "index": 3,
+          "iface": "cap.v1",
+          "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26"
+        },
+        {
+          "index": 4,
+          "iface": "nav.v2",
+          "contract": "sha256:10051e570744d5fd1194bed052370b129d4749acc62a119474f56649283d8a3c"
+        },
+        {
+          "index": 5,
+          "iface": "wide.v1",
+          "contract": "sha256:046e016c70c3fdaa4c30538875b6069cfc85f85028f2f4c91cbdb430712725c7"
+        },
+        {
+          "index": 6,
+          "iface": "ghost.v1",
+          "contract": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+        }
+      ]
+    },
+    "c": {
+      "format": "zk2-catalog/1",
+      "epoch": 1767225600,
+      "entries": [
+        {
+          "index": 0,
+          "iface": "geo.v1",
+          "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6"
+        },
+        {
+          "index": 1,
+          "iface": "nav.v2",
+          "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd"
+        }
+      ]
+    }
+  },
+  "ids": {
+    "a": "6625170e",
+    "b": "ec27abd9",
+    "c": "277925a8"
+  },
+  "writes": [
+    {
+      "note": "a state, catalog a, confirmed",
+      "catalog": "a",
+      "revision": "nav.v2",
+      "resource": "state/position",
+      "confirmed": true,
+      "expect": {
+        "form": "compact",
+        "hex": "0001c0"
+      }
+    },
+    {
+      "note": "a template, unconfirmed",
+      "catalog": "a",
+      "revision": "nav.v2",
+      "resource": "state/tracks/{track}",
+      "confirmed": false,
+      "expect": {
+        "form": "compact",
+        "hex": "000200"
+      }
+    },
+    {
+      "note": "another revision of catalog a",
+      "catalog": "a",
+      "revision": "geo.v1",
+      "resource": "state/fence",
+      "confirmed": true,
+      "expect": {
+        "form": "compact",
+        "hex": "0040c0"
+      }
+    },
+    {
+      "note": "an explicit state, @state",
+      "catalog": "a",
+      "revision": "log.v1",
+      "resource": "@state/journal/{entry}",
+      "confirmed": true,
+      "expect": {
+        "form": "compact",
+        "hex": "008040"
+      }
+    },
+    {
+      "note": "the resource after it",
+      "catalog": "a",
+      "revision": "log.v1",
+      "resource": "state/level",
+      "confirmed": false,
+      "expect": {
+        "form": "compact",
+        "hex": "008080"
+      }
+    },
+    {
+      "note": "an index past catalog a, in its successor b",
+      "catalog": "b",
+      "revision": "cap.v1",
+      "resource": "state/zones/{zone}",
+      "confirmed": true,
+      "expect": {
+        "form": "compact",
+        "hex": "00c5c0"
+      }
+    },
+    {
+      "note": "a second revision of nav.v2, by its own index",
+      "catalog": "b",
+      "revision": "nav.v2 other",
+      "resource": "state/heading",
+      "confirmed": false,
+      "expect": {
+        "form": "compact",
+        "hex": "010180"
+      }
+    },
+    {
+      "note": "the 128th resource, the last the form names",
+      "catalog": "b",
+      "revision": "wide.v1",
+      "resource": "state/s127",
+      "confirmed": true,
+      "expect": {
+        "form": "compact",
+        "hex": "017fc0"
+      }
+    },
+    {
+      "note": "the same value under the successor, at the same index",
+      "catalog": "b",
+      "revision": "nav.v2",
+      "resource": "state/position",
+      "confirmed": true,
+      "expect": {
+        "form": "compact",
+        "hex": "0001c0"
+      }
+    },
+    {
+      "note": "past the 128th resource: the JSON form",
+      "catalog": "b",
+      "revision": "wide.v1",
+      "resource": "state/s128",
+      "confirmed": true,
+      "expect": {
+        "form": "json"
+      }
+    },
+    {
+      "note": "a revision the catalog does not list: the JSON form",
+      "catalog": "a",
+      "revision": "cap.v1",
+      "resource": "state/baro",
+      "confirmed": true,
+      "expect": {
+        "form": "json"
+      }
+    },
+    {
+      "note": "an archive given no catalog: the JSON form",
+      "catalog": null,
+      "revision": "nav.v2",
+      "resource": "state/position",
+      "confirmed": true,
+      "expect": {
+        "form": "json"
+      }
+    }
+  ],
+  "reads": [
+    {
+      "note": "a state through the archive's catalog",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "identity": {
+          "iface": "nav.v2",
+          "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        }
+      }
+    },
+    {
+      "note": "a template's member",
+      "hex": "000200",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/tracks/t-1",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": false,
+        "identity": {
+          "iface": "nav.v2",
+          "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        }
+      }
+    },
+    {
+      "note": "geo.v1's fence",
+      "hex": "0040c0",
+      "origin": "zk2/ground/fleet-mgr/geo.v1/state/fence",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "identity": {
+          "iface": "geo.v1",
+          "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        }
+      }
+    },
+    {
+      "note": "an explicit state's member",
+      "hex": "008040",
+      "origin": "zk2/ground/fleet-mgr/log.v1/@state/journal/e7",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "identity": {
+          "iface": "log.v1",
+          "contract": "sha256:bdea295175922718d55872db05184badd9d268513150dd23632ce8a596de60ee",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/octet-stream",
+            "media_param": null
+          }
+        }
+      }
+    },
+    {
+      "note": "log.v1's level, unconfirmed",
+      "hex": "008080",
+      "origin": "zk2/ground/fleet-mgr/log.v1/state/level",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": false,
+        "identity": {
+          "iface": "log.v1",
+          "contract": "sha256:bdea295175922718d55872db05184badd9d268513150dd23632ce8a596de60ee",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        }
+      }
+    },
+    {
+      "note": "an index of b's own",
+      "hex": "00c5c0",
+      "origin": "zk2/ground/fleet-mgr/cap.v1/state/zones/z1",
+      "archive_catalog": "b",
+      "holds": [
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "identity": {
+          "iface": "cap.v1",
+          "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        }
+      }
+    },
+    {
+      "note": "a second revision of one interface",
+      "hex": "010180",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/heading",
+      "archive_catalog": "b",
+      "holds": [
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": false,
+        "identity": {
+          "iface": "nav.v2",
+          "contract": "sha256:10051e570744d5fd1194bed052370b129d4749acc62a119474f56649283d8a3c",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        }
+      }
+    },
+    {
+      "note": "the 128th resource",
+      "hex": "017fc0",
+      "origin": "zk2/ground/fleet-mgr/wide.v1/state/s127",
+      "archive_catalog": "b",
+      "holds": [
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "identity": {
+          "iface": "wide.v1",
+          "contract": "sha256:046e016c70c3fdaa4c30538875b6069cfc85f85028f2f4c91cbdb430712725c7",
+          "type": {
+            "kind": "raw",
+            "media_type": "text/plain",
+            "media_param": null
+          }
+        }
+      }
+    },
+    {
+      "note": "through a successor: the archive names a, the reader holds b",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "identity": {
+          "iface": "nav.v2",
+          "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        }
+      }
+    },
+    {
+      "note": "through b among others, never c",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "c",
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "identity": {
+          "iface": "nav.v2",
+          "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        }
+      }
+    },
+    {
+      "note": "the archive's own catalog among two held",
+      "hex": "00c5c0",
+      "origin": "zk2/ground/fleet-mgr/cap.v1/state/zones/z1",
+      "archive_catalog": "b",
+      "holds": [
+        "a",
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "identity": {
+          "iface": "cap.v1",
+          "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+          "type": {
+            "kind": "raw",
+            "media_type": "application/json",
+            "media_param": null
+          }
+        }
+      }
+    },
+    {
+      "note": "the confirmed bit clear",
+      "hex": "000180",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": false,
+        "identity": {
+          "iface": "nav.v2",
+          "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+          "type": {
+            "kind": "jsonschema",
+            "name": "Position",
+            "schema": "sha256:3fe74e792f67ec73be7f613f82410f256d8a7bcc4a97aee191bfb1435d066d2d"
+          }
+        }
+      }
+    },
+    {
+      "note": "the extension bit",
+      "hex": "0001e0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "refused": "extension"
+      }
+    },
+    {
+      "note": "a reserved bit",
+      "hex": "0001c1",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "refused": "reserved"
+      }
+    },
+    {
+      "note": "the highest reserved bit",
+      "hex": "000190",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "refused": "reserved"
+      }
+    },
+    {
+      "note": "the extension bit before a reserved one",
+      "hex": "0001e3",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "refused": "extension"
+      }
+    },
+    {
+      "note": "three bytes of JSON text are the compact form",
+      "hex": "7b7d20",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "refused": "extension"
+      }
+    },
+    {
+      "note": "no catalog held",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "the archive names no catalog",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": null,
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "the archive names b, the reader holds a, which b succeeds",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "b",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "another catalog listing the pair: never read through it",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "c"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "an unknown catalog before a resource past the revision's",
+      "hex": "0004c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_catalog"
+      }
+    },
+    {
+      "note": "through b, an index past a's count",
+      "hex": "00c5c0",
+      "origin": "zk2/ground/fleet-mgr/cap.v1/state/zones/z1",
+      "archive_catalog": "a",
+      "holds": [
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_index"
+      }
+    },
+    {
+      "note": "b's count",
+      "hex": "01c040",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "b",
+      "holds": [
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_index"
+      }
+    },
+    {
+      "note": "the highest index",
+      "hex": "ffc040",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "b",
+      "holds": [
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_index"
+      }
+    },
+    {
+      "note": "a catalogued revision no one holds",
+      "hex": "018040",
+      "origin": "zk2/ground/fleet-mgr/ghost.v1/state/x",
+      "archive_catalog": "b",
+      "holds": [
+        "b"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_revision"
+      }
+    },
+    {
+      "note": "the revision lacked",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "lacks": [
+        "nav.v2"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_revision"
+      }
+    },
+    {
+      "note": "the other revision held, never read in its place",
+      "hex": "010180",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/heading",
+      "archive_catalog": "b",
+      "holds": [
+        "b"
+      ],
+      "lacks": [
+        "nav.v2 other"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": false,
+        "refused": "unknown_revision"
+      }
+    },
+    {
+      "note": "a revision lacked before a resource past its own",
+      "hex": "0004c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "lacks": [
+        "nav.v2"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "unknown_revision"
+      }
+    },
+    {
+      "note": "the revision's count of resources",
+      "hex": "0002c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "resource"
+      }
+    },
+    {
+      "note": "the highest resource",
+      "hex": "003fc0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "resource"
+      }
+    },
+    {
+      "note": "an operation",
+      "hex": "000040",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/@op/arm",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "resource"
+      }
+    },
+    {
+      "note": "a stream",
+      "hex": "008140",
+      "origin": "zk2/ground/fleet-mgr/log.v1/stream/ticks",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "resource"
+      }
+    },
+    {
+      "note": "a resource past the revision's before an origin elsewhere",
+      "hex": "0002c0",
+      "origin": "zk2/ground/fleet-mgr/geo.v1/state/fence",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "resource"
+      }
+    },
+    {
+      "note": "another interface's key",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/geo.v1/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "origin"
+      }
+    },
+    {
+      "note": "another major's key",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v3/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "origin"
+      }
+    },
+    {
+      "note": "another resource's key",
+      "hex": "0001c0",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/covariance",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "origin"
+      }
+    },
+    {
+      "note": "a template's member with no chunk",
+      "hex": "000200",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/tracks",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": false,
+        "refused": "origin"
+      }
+    },
+    {
+      "note": "a template's member with two chunks",
+      "hex": "000200",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/tracks/a/b",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": false,
+        "refused": "origin"
+      }
+    },
+    {
+      "note": "a plain state's kind token for an explicit one",
+      "hex": "008040",
+      "origin": "zk2/ground/fleet-mgr/log.v1/state/journal/e7",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": true,
+        "refused": "origin"
+      }
+    },
+    {
+      "note": "an explicit kind token for a plain state",
+      "hex": "008080",
+      "origin": "zk2/ground/fleet-mgr/log.v1/@state/level",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "compact",
+        "confirmed": false,
+        "refused": "origin"
+      }
+    },
+    {
+      "note": "the JSON form",
+      "hex": "7b22636f6e6669726d6564223a747275652c22636f6e7472616374223a227368613235363a66656132353230623261333630396538393633386636316165363038353430653566356235626466656662343866646532366432333066613230363562616664222c226966616365223a226e61762e7632222c2274797065223a7b226b696e64223a226a736f6e736368656d61222c226e616d65223a22506f736974696f6e222c22736368656d61223a227368613235363a33666537346537393266363765633733626537663631336638323431306632353664386137626363346139376165653139316266623134333564303636643264227d7d",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "json"
+      }
+    },
+    {
+      "note": "two bytes",
+      "hex": "7b7d",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "json"
+      }
+    },
+    {
+      "note": "four bytes",
+      "hex": "0001c000",
+      "origin": "zk2/ground/fleet-mgr/nav.v2/state/position",
+      "archive_catalog": "a",
+      "holds": [
+        "a"
+      ],
+      "expect": {
+        "form": "json"
+      }
+    }
+  ]
+}
