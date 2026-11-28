@@ -958,6 +958,7 @@ impl Consumer {
             params: &self.params,
             epsilon: self.epsilon,
             selectors: Vec::new(),
+            held: self.held(),
         };
         let declared = crate::arbitration::arbitrated(&inputs)?;
         inputs.selectors = self.selectors(&declared.resource())?;
@@ -1470,6 +1471,7 @@ impl Consumer {
                         session: self.session.clone(),
                         watch: self.watch.clone(),
                         providers: self.providers.clone(),
+                        held: self.held(),
                     },
                     on_timing,
                 )

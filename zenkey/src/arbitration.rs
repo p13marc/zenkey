@@ -374,6 +374,9 @@ pub(crate) struct Inputs<'a> {
     pub(crate) params: &'a BTreeMap<String, String>,
     pub(crate) epsilon: Option<Duration>,
     pub(crate) selectors: Vec<zenoh::key_expr::OwnedKeyExpr>,
+    /// What a holder's descriptor is read through, a compact one included
+    /// (core §3.3): the consumer's catalogs and contract.
+    pub(crate) held: crate::presence::Held,
 }
 
 /// The declaration of `role`, arbitrated, or why it is not (§2.2).
@@ -646,6 +649,7 @@ where
                     session: i.session.clone(),
                     watch: None,
                     providers: i.providers.to_vec(),
+                    held: i.held.clone(),
                 },
                 |_| {},
             )
@@ -660,13 +664,14 @@ where
         for p in i.providers {
             let (sys, svc) = p.chunks();
             let c = Arc::clone(&core);
+            let held = i.held.clone();
             let sub = i
                 .session
                 .declare_subscriber(format!("zk2/{sys}/{svc}/@zk/instance/*"))
                 .callback(move |s: Sample| {
                     let mut core = lock(&c);
                     let major = core.major;
-                    if let Some((addr, instance, d)) = described(&s, &core.iface, major)
+                    if let Some((addr, instance, d)) = described(&s, &held, &core.iface, major)
                         && let Some(inc) = core.incumbents.as_mut()
                     {
                         inc.describe(&addr, instance, d);
@@ -678,6 +683,7 @@ where
         }
         tasks.push(tokio::spawn(describe(
             i.session.clone(),
+            i.held.clone(),
             Arc::clone(&core),
             describe_rx,
         )));
@@ -787,20 +793,18 @@ where
     })
 }
 
-/// A descriptor put's address, instance, and what it says to the fence.
+/// A descriptor put's address, instance, and what it says to the fence,
+/// read by its form through what `held` holds ([`crate::presence::heard`]):
+/// one not read here is asked by its holder's next sight ([`describe`]),
+/// which retrieves what it names.
 fn described(
     s: &Sample,
+    held: &crate::presence::Held,
     iface: &IfaceId,
     major: zenkey_model::redundancy::Major,
 ) -> Option<(Addr, InstanceId, zenkey_model::redundancy::Described)> {
-    if s.kind() != SampleKind::Put {
-        return None;
-    }
-    let Ok(ZkKey::Instance { addr, instance }) = parse(s.key_expr().as_str()) else {
-        return None;
-    };
-    let v: serde_json::Value = serde_json::from_slice(&s.payload().to_bytes()).ok()?;
-    Some((addr, instance, describe_value(&v, iface, major)))
+    let (addr, instance, found) = crate::presence::heard(s, held)?;
+    Some((addr, instance, describe_value(&found.json()?, iface, major)))
 }
 
 /// What one descriptor says to the fence (text 0.7): its run, as
@@ -855,17 +859,14 @@ async fn read_descriptors(
 /// its descriptor's put reached this session.
 async fn describe(
     session: zenoh::Session,
+    held: crate::presence::Held,
     core: Arc<Mutex<Core>>,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<(Addr, InstanceId)>,
 ) {
     while let Some((addr, instance)) = rx.recv().await {
-        let found = crate::presence::descriptor(&session, &addr, &instance, READ_TIMEOUT).await;
-        let v = match found {
-            Ok(crate::presence::Found::Descriptor(_, bytes)) => {
-                serde_json::from_slice::<serde_json::Value>(&bytes).ok()
-            }
-            _ => None,
-        };
+        let found =
+            crate::presence::descriptor_held(&session, &addr, &instance, &held, READ_TIMEOUT).await;
+        let v = found.ok().and_then(|f| f.json());
         let mut c = lock(&core);
         let (iface, major) = (c.iface.clone(), c.major);
         // A descriptor stating neither a `meta.zid` a v1 incumbent is

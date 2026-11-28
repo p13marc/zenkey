@@ -1256,7 +1256,8 @@ impl Service {
             &b.providers,
             &b.params,
         )?
-        .with_deployment_epoch(self.deployment_epoch()))
+        .with_deployment_epoch(self.deployment_epoch())
+        .with_catalogs(self.catalog().cloned()))
     }
 
     /// The `unavailable` queryables this instance declared at start (O3):

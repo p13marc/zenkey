@@ -253,3 +253,88 @@ async fn eventually_found(tool: &zenoh::Session, address: &str, held: &Held) -> 
     .await;
     get().await.unwrap()
 }
+
+/// The runtime's other readers (#980 C5b2): a `Client` given the catalog
+/// finds a tokenless provider by its compact descriptor, one given none
+/// leaves it undescribed; `presence::heard` reads a compact descriptor's
+/// put by its form, and `Found::zid` its `meta.zid`, which `timing` and
+/// `arbitration` attribute a stamp by.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_client_and_a_put_read_the_compact_form() {
+    use zenkey::Client;
+    let (_r, ep) = router(None).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let (nav, ping) = revisions();
+    let revs = [&nav, &ping];
+    let catalog = compact_owner::catalog(&revs);
+    let d = compact_owner::descriptor(
+        COMPACT,
+        INSTANCE,
+        &catalog,
+        &revs,
+        false,
+        &["imu"],
+        Some("a1b2"),
+    );
+    let bytes = compact_owner::compact(&d, &catalog, &revs);
+    // The put first, heard by a subscriber holding the catalog and both
+    // revisions, and by one holding no catalog.
+    let held = Held::new(
+        Arc::new(vec![catalog.clone()]),
+        vec![Arc::new(nav.clone()), Arc::new(ping.clone())],
+    );
+    type Heard = Vec<(bool, Option<u128>)>;
+    let heard: Arc<std::sync::Mutex<Heard>> = Arc::default();
+    let h = Arc::clone(&heard);
+    let _sub = tool
+        .declare_subscriber("zk2/lab/*/@zk/instance/*")
+        .callback(move |s| {
+            for (with, held) in [(true, &held), (false, &Held::default())] {
+                if let Some((_, _, found)) = presence::heard(&s, held) {
+                    h.lock().unwrap().push((with, found.zid()));
+                }
+            }
+        })
+        .await
+        .unwrap();
+    let key = format!("zk2/{COMPACT}/@zk/instance/{INSTANCE}");
+    eventually("the put is heard both ways", || async {
+        owner
+            .put(key.as_str(), bytes.clone())
+            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+            .await
+            .unwrap();
+        heard.lock().unwrap().len() >= 2
+    })
+    .await;
+    let got = heard.lock().unwrap().clone();
+    assert!(got.contains(&(true, Some(0xa1b2))), "{got:?}");
+    assert!(got.contains(&(false, None)), "never a guess: {got:?}");
+
+    let mut compact = compact_owner::serve(&owner, &d, Form::Compact, bytes).await;
+    compact.hold(&ping).await;
+    let with = Client::new(&tool, Arc::new(nav.clone()), &["lab/*"])
+        .unwrap()
+        .with_catalogs([catalog]);
+    eventually(
+        "the client finds the provider by its compact descriptor",
+        || async {
+            with.presence(T)
+                .await
+                .is_ok_and(|p| p.complete && p.providers == vec![addr(COMPACT)])
+        },
+    )
+    .await;
+    let without = Client::new(&tool, Arc::new(nav), &["lab/*"]).unwrap();
+    let p = without.presence(T).await.unwrap();
+    assert!(p.providers.is_empty(), "{p:?}");
+    assert_eq!(p.undescribed, vec![addr(COMPACT)], "{p:?}");
+    let fleet = with.fleet();
+    eventually("its fleet keeps the catalog", || async {
+        fleet
+            .presence(T)
+            .await
+            .is_ok_and(|p| p.providers == vec![addr(COMPACT)])
+    })
+    .await;
+}
