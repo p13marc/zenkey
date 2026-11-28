@@ -1088,3 +1088,38 @@ confirmation; `check conform` reads an unbound role's baseline record;
 `health` reads a `health.v2` record with no time from an owner whose
 catalog it lacks; `zk2 contract lint` prints the fingerprint after a
 profile's errors.
+
+**The compact descriptor, defined (#980 C5a, core 0.120; renumbered at
+merge behind two unmerged chunks).** §3.3's second form, adopted by no
+rule: C5b has the readers read both forms (the reader's MUST), C5c has a
+first-hop owner write it (§8.1's SHOULD), and C3 is §4.4's compact
+attachment. It is §7.5's mutation form on the instance key, under
+`zenoh/bytes`, the `Encoding` telling it from JSON. The body: the catalog
+id, a byte of flags (the count, 1–15, `minted`, `has_zid` and 2
+extension bits), a 14-bit entry per interface (index, `token`, `standby`, `has_unav`,
+`has_card`), a bitmap per entry over the capabilities its revision gates
+on (sorted bytewise), the unavailable lists then the cardinality lists
+(an 8-bit count, items of a resource in ⌈log₂ n⌉ bits and a cause coded
+as §7.5's error byte, or a bound as a snapshot's integer), the zid, the
+pad. It leaves out `minor`, `requires` (a descriptor with one has no
+compact form), `profiles` (derived from the revisions' `uses` and
+`minted`), `meta` but the zid, each `reason` and an ungated capability.
+The run and seq are the as-of mark (§5.1). Decisions the memo left open,
+recorded in the changelog: `unknown_revision` (a bitmap's width is its
+revision's), the three-step reading field by field, entries by index with
+an index allowed twice (D003) and lists strictly ascending (`order`), the
+bits of one capability agreeing (`capability`), counts of 0, a cause of 0
+and the extension bits refused, and `minted` part of the decoded value so
+the bytes write back. §12 names its rules static. The fixtures,
+`descriptors/compact/`: five revisions of their own in `contracts/`
+(`other/nav.v2.toml`, `geo.v1`, `archive.v1`, `cap.v1` with ten gated
+capabilities and an unbounded template, `host.v1` listing `hostid.v1`)
+beside `descriptors/contracts/nav.v2.toml`; `vectors.json` (three catalogs,
+`second` succeeding `first` and listing a `ghost.v1` no one holds; 17
+writes, 77 reads, all 14 tokens) and `checks.json` (26 cases, 18 twins of
+the JSON cases a compact form can carry, each drawing that case's codes).
+Both were computed by `/srv/dev/scratch/zenkey/py/980-c5a/a_gen.py` and
+again by `b_check.py`, written from the finished text, which agreed on
+every case; the revisions' fingerprints are lane P's canonicalizer's
+(`lib/canon.py`), which the reference matches. zenoh-modem's node is 22 B
+compact (`tests/examples.rs`), against 1,344 B of JSON.
