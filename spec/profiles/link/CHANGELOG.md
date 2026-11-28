@@ -7,7 +7,7 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
-## link.v2 0.29 — 2026-11-28: editorial: `v2/plan.json`'s case 54, a collection two revisions disagree on, read `host` for the horizon and the longest put, no keyword changed (#975)
+## link.v2 0.28 — 2026-11-28: editorial: `v2/plan.json`'s case 54, a collection two revisions disagree on, read `host` for the horizon and the longest put, no keyword changed (#975)
 
 zk2py's round 117 filed F-573: none of the plan's cases drew
 `exposure_disagrees`, so none held a collection the revisions disagree

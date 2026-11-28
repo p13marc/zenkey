@@ -3,7 +3,7 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.119 — 2026-11-28: editorial: §9.2's cascades 7 and 8 read E044 as a type's placement, never its declaration, as both linters do, no keyword changed (#1152)
+## 0.118 — 2026-11-28: editorial: §9.2's cascades 7 and 8 read E044 as a type's placement, never its declaration, as both linters do, no keyword changed (#1152)
 
 zk2py's round 126 filed F-618 against 0.117's cascade 7: "E051 reads a
 type with none of E038 to E045". Read literally, that range holds E044,
