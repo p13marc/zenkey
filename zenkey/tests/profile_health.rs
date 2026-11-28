@@ -644,12 +644,18 @@ async fn bring_up(on: On) {
     assert!(!e.token, "\"token\": false");
     assert_eq!(got.status.unwrap().1.read(), Read::Level(Level::Ok));
     // The instance token reaches the tool's read a little after its
-    // subscriber heard it, so the read is asked until it holds one.
-    eventually("the instance token read", || async {
-        !tokens_of(&ts, "lab/quiet").await.is_empty()
-    })
-    .await;
-    let quiet_tokens = tokens_of(&ts, "lab/quiet").await;
+    // subscriber heard it, so the read is asked until it holds one, and
+    // that read is the one checked: a second read beside a loaded suite
+    // could end at its timeout with nothing (#1151, the flake check).
+    let deadline = Instant::now() + common::SETTLE;
+    let quiet_tokens = loop {
+        let read = tokens_of(&ts, "lab/quiet").await;
+        if !read.is_empty() {
+            break read;
+        }
+        assert!(Instant::now() < deadline, "never: the instance token read");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
     assert_eq!(
         quiet_tokens.len(),
         1,
