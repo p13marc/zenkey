@@ -9,9 +9,9 @@ others the runtime's.
 
 **Who runs them.** The reference runs §1 to §11 and §13 to §15 as tests
 of `zenkey`, one per section, named after it. They are in
-`zenkey/tests/profile_redundancy_v2.rs`. §12 is to run as a test of
-`zenctl` and of the doctor (`zenctl/tests/live_zk2.rs`). No tool runs it
-yet.
+`zenkey/tests/profile_redundancy_v2.rs`. §12 is a tool's: the
+reference tool runs it as a test of `zenctl` and of the doctor
+(`zenctl/tests/live_zk2.rs`, `redundancy_v2_s12_…`).
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.10) are v2.md's rules; `v1 §n`
@@ -180,8 +180,7 @@ Expected added:
   its descriptor states it: A's beside A, B's beside B (§2.15).
 
 v1's step 6 reads `hostid.v1` §2.12's recognised standby, which names a
-standby of `redundancy.v1` alone today. Under this major it runs once
-that section names either major.
+standby of either major.
 
 ## §13 A takeover seen by a follower (§2.6, §2.10)
 
