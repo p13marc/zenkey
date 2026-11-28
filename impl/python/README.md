@@ -9878,6 +9878,74 @@ first), F-630 and F-631 (minor) and F-632 (an index error). See "At core
 0.119, redundancy.v2 0.1, freshness.v2 0.14, link.v2 0.29,
 arbitration.v1 0.7 and hostid.v1 0.10" in `SPEC-FINDINGS.md`.
 
+## Observer 0.38 and `redundancy.v2` 0.1, the mend: F-629 to F-632 answered (round 128's mend)
+
+Round 128's mend read this tree at ea4f363c (#987), its black boxes
+built from it. The reference's follower is changed with the text.
+- **Observer 0.38 §3.6:** "A read never undoes a token heard since it
+  was asked." A reader MUST NOT apply a read's absence to a token the
+  watch heard declared after the read was asked (F-629). RULES.md lists
+  299 rules.
+- **`redundancy.v2` §2.10:** "How often" says a follower started after
+  a standby's claim learns its run at the takeover from its descriptor,
+  and holds a sample between the two (F-631). "Seed again" merges the
+  new incumbent's answers, a `redundancy.v1` incumbent's replies per key
+  among them, with no omission rule over those (F-630). §13 gains the
+  step over 39 takeovers.
+- **The entries** of `redundancy.v2` 0.1 and core 0.119 say what is
+  now verified (F-632).
+
+**`just py-conformance`: 8859 of 8859.** Re-keyed first (9fc73ea3),
+from 8842 of 8854 to 8858 of 8858: twelve readings took 299 rules, and
+the classes walk gave the new row its verdict. `_round128b_readings` pins each sentence the
+mend changed, and runs the rule over PresenceView and the follower.
+
+### What changed in zk2py
+
+- **`redundancy_v2_live.Follower`:**
+  - **Its read again** never undoes a token the watch heard declared
+    since the ask, by the watch's own time of hearing it. It never
+    brings back one the watch heard withdrawn since (F-635). A
+    withdrawal heard while a read is in flight owes another.
+  - **Its start:** an incumbent is chosen only after the history, the
+    round trip and a complete read. §9's first run here had K take B,
+    A's token not yet told, and merge B's snapshot.
+  - **Its seeded line's `complete`** is the GET's, as the reference's
+    says.
+- **`redundancy_v2_scenarios`:**
+  - `hb-takeover --repeat N` checks §13's new step and counts each
+    follower's incumbent lost;
+  - `perkey` runs `interop/redundancy/tally.v1.toml`, a `redundancy.v2`
+    interface whose state is per key by core §4.2's first row;
+  - §13 notes Appendix B's bytes under this major.
+
+### Live
+
+```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.redundancy_v2_scenarios \
+  --pairing ref-cand|zk2py-cand [--only 1|9|13|14|15|hb|hb-takeover|perkey|tool] [--repeat N] \
+  --bin /srv/dev/scratch/zenkey/bin/ea4f363c
+```
+
+| Run | Result |
+|---|---|
+| §13's takeover of `beacon-governed-run.v2`, the reference's candidates, both followers started after B's claim, 39 takeovers, twice | The reference's follower lost its incumbent in **0 of 78** (6 of 39 in round 128). zk2py's: 0 of 78. 156 of 156 |
+| The same with zk2py's candidates, 15 takeovers, twice | 0 of 30 each. 60 of 60 |
+| A heartbeat between B's token and its descriptor's read, held then accepted (F-631) | zk2py's follower: 1 of 78 and 2 of 30. The reference's: none in 108 |
+| The whole runner, ref-cand (zk2py's follower as K) | 67 of 67, after §9's one failure moved the follower's start |
+| The whole runner, zk2py-cand (the reference's follower as K) | 67 of 67 |
+| `perkey`, `tally.v1` per key under `redundancy.v2`, both pairings | 5 of 5 each: answered per key, stamped with each candidate's own id (F-637), merged at the seed again, and A's value kept where B answers nothing (F-636) |
+| §13's bytes under this major (F-638) | B's descriptor 339 or 340 B marked, 324 or 325 B unmarked; `b1` a 10 B payload, R1's id on it |
+
+**Not run:** F-635's mirror live, a token declared and withdrawn while
+a read again is in flight; `tally.v1` under a `redundancy.v1`
+incumbent; core §4.2's other two per-key rows under this major.
+
+The mend resolves F-629 to F-632. It files F-635 (a gap), F-636
+(minor), F-637 (a contradiction, the one to settle first) and F-638 (an
+index error). See "At observer
+0.38 (round 128's mend)" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -10269,9 +10337,11 @@ impl/python/
     redundancy_scenarios.py redundancy.v1 scenarios.md §1–§12 and a re-mint, zk2py against itself
     redundancy_v2.py  redundancy.v2 the declaration, the governance, a descriptor's run, a sample's run, the fence,
                                 the hold for one read, the draw again (round 128)
-    redundancy_v2_live.py redundancy.v2 the follower as a process, on consume --follow's command line (round 128)
+    redundancy_v2_live.py redundancy.v2 the follower as a process, on consume --follow's command line (round 128);
+                                its read again by observer 0.38, its start after a complete read (round 128's mend)
     redundancy_v2_scenarios.py redundancy.v2 scenarios-v2.md §1, §9, §13–§15, the heartbeats and the tools, in
-                                both pairings with the reference's owner, consume and zenctl (round 128)
+                                both pairings with the reference's owner, consume and zenctl (round 128);
+                                hb-takeover --repeat and perkey, a per-key state (round 128's mend)
     timing.py         timing.v1 the declaration, the deadline tracker and a tool's held time, the lifespan
                                 judgement, the period window, §5's conclusions and roll-up, the profile's linter
     timing_live.py    timing.v1 a consumer's deadline events and lifespan discard on a bus, a tool's window,
@@ -10373,8 +10443,9 @@ impl/python/
                       telemetry/ meter.v1 and meter.json, telemetry.v1's scenarios' contract, and meterx.v1,
                       zk2py's own, a declaration invalid for §5's over many samples;
                       rev/ holds bringup's minor 1; stand-in/ an archive.v1 id (§4.4);
-                      redundancy/ ledger.v1 and valve.v1, redundancy.v1's scenarios' contracts, and
-                      ledger-vote.v1, §11's invalid election; security/ section4.enrollment.toml,
+                      redundancy/ ledger.v1 and valve.v1, redundancy.v1's scenarios' contracts,
+                      ledger-vote.v1, §11's invalid election, and tally.v1, a per-key state under
+                      redundancy.v2 (round 128's mend); security/ section4.enrollment.toml,
                       security.md §4's two principals for `zenctl acl gen`; timing/ pace.v1,
                       timing.v1's scenarios' contract; arbitration/ steer.v1 and rudder.v1,
                       arbitration.v1's scenarios' contracts; grammar/ zk2py_guard.v1, grammar.md §1's owner;
