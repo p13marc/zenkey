@@ -7,6 +7,49 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `redundancy.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## redundancy.v2 draft — 2026-11-28: used by ZenSight (#1149, Z2)
+
+The text's status moves from `experimental` to `draft`. That is the
+status of a profile an adopter's mapping uses
+([`../README.md`](../README.md), "The process"). #1149's Z2, with #987's
+N4, moves ZenSight's two singletons onto this major: `zs.catalog.v1` 1.2
+and `zs.desired.v1` 1.3 list `redundancy.v2` in place of
+`redundancy.v1`, each a review-class `uses_changed` revision published
+in `examples/zk2/.history`.
+
+**Changed: the status, and Appendix C.** The index lists `redundancy.v2`
+in its first table, used by zensight, and the header's status reads
+`draft`. Appendix C, which said ZenSight's singletons stayed on
+`redundancy.v1`, now says which revisions list this major, and that
+their state is answered by snapshot.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.1, written against core 0.119, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **Appendix B.** Its bytes are the ledger's. The takeover is not
+  measured again on ZenSight's singletons here, which stays #987's.
+
+## `v1.md` experimental — 2026-11-28: no user left (#1149, Z2)
+
+The text's status moves from `draft` to `experimental`. That is the
+status of a profile that no adopter's mapping and no shipped service
+uses ([`../README.md`](../README.md), "The process"). #1149's Z2, with
+#987's N4, moves ZenSight's two singletons onto this major:
+`zs.catalog.v1` 1.2 and `zs.desired.v1` 1.3 list `redundancy.v2` in
+place of `redundancy.v1`, each a review-class `uses_changed` revision
+published in `examples/zk2/.history`. They were its only adopters.
+
+**Changed: the status alone.** The index lists `redundancy.v1` in its
+second table, "Experimental: no adopter yet", and the header's status
+reads `experimental`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.11, written against core 0.73, and its
+  fixtures, scenarios, runtime and tools are as they were.
+  `redundancy.v2` restates its election by reference.
+- **Appendix B, which maps ZenSight's two singletons,** is left as
+  written, for the text's next version.
+
 ## redundancy.v2 0.1 — 2026-11-28: a new major: no session stamp, the fence by the incumbent's run, the state answered by snapshot (#987)
 
 `redundancy.v2` is `redundancy.v1` without the session's HLC. It is a
