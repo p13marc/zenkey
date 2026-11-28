@@ -55,9 +55,9 @@ The owner, consumer and caller sections each point to them.
 | [Consumer](#consumer) | 35 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 19 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 87, 27 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 88, 28 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 81 |
-| Every rule, once | 298 |
+| Every rule, once | 299 |
 | [Rule ids](#rule-ids) | 86 |
 
 ## Owner
@@ -621,6 +621,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§3.6](observer.md#36-absence), *reader* | **A withdrawal heard live is a reason to read again, never absence by itself.** … A reader MUST NOT conclude absence from a withdrawal alone. | `[Sc: presence.md §8]` |
 | [§3.6](observer.md#36-absence), *reader* | A reader that follows presence live SHOULD read again soon after a withdrawal that leaves one of these with nothing held: (3 items) | `[Sc: presence.md §8]` |
 | [§3.6](observer.md#36-absence), *reader* | The reader SHOULD report what that read establishes: absent when the read is complete and shows no such token held, present when it shows one. | `[Sc: presence.md §8]` |
+| [§3.6](observer.md#36-absence), *reader* | **A read never undoes a token heard since it was asked.** … A reader MUST NOT apply such a read's absence to a token heard since. | `[Sc: profiles/redundancy/scenarios-v2.md §13]` |
 | [§3.6](observer.md#36-absence), *reader* | A reader MUST find an interface's providers by instance tokens and their descriptors. | `[Sc: presence.md §5; constrained.md §10]` |
 | [§3.6](observer.md#36-absence), *reader* | **A provider is found by its instance token.** … A reader MUST NOT conclude a provider absent for want of an interface token. | `[Sc: presence.md §5; constrained.md §10]` |
 

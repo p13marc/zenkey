@@ -199,12 +199,18 @@ has seeded: it holds A's `balance`, `a1`.
 2. K hears A's tokens withdrawn, and sees no incumbent.
    - **B's put of `b1`** arrives before or after B's interface token,
      since the two ride two priorities. Before the token, K discards it,
-     `no_incumbent`. After it, K accepts it under B's run, which B's
-     descriptor stated from its claim on.
+     `no_incumbent`. After it, K accepts it under B's run. K learns
+     that run from B's descriptor, read at B's token. A put between the
+     two is held.
    - **K seeds again** when B's token appears (§2.10): one GET by core
      S4. B answers it with one snapshot of `balance`, under B's run,
      never a reply per key (§2.6).
    - K holds `b1` either way, within a round trip of B's token.
+   - **K reads again after A's withdrawal** (observer §3.6). The read
+     may come back without B's token, which K's watch heard after the
+     read was asked. K keeps B as its incumbent: the read says nothing
+     of that token. Over 39 takeovers, K never reads B gone. It accepts
+     each later heartbeat of B's.
 3. B's snapshot of `balance` is complete and lists no entry. K applies
    core §4.2's omission rule: it drops `a2`, and holds no value for
    `balance`. Under v1, K kept `a2` until B's next put.

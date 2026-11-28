@@ -51,10 +51,10 @@ either major. Two now read both, and one stays `redundancy.v1`'s.
 - **No fixture moved.** No contract in `conformance/` uses
   `redundancy.v2`.
 
-**Not verified.** No implementation has read this entry's wording. The
-reference still refuses a candidate whose session runs without
-timestamping, whichever major its contract uses: its change is #987's
-runtime work.
+**Verified.** The reference's `redundancy.v2` candidate runs its
+session without timestamping, and only a `redundancy.v1` candidate's
+stamps (#987's N2). zk2py's round 128 read this entry cold and ran both
+majors' candidates live.
 
 ## 0.118 — 2026-11-28: editorial: §9.2's cascades 7 and 8 read E044 as a type's placement, never its declaration, as both linters do, no keyword changed (#1152)
 

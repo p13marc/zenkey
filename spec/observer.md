@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Text version** | 0.37 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
+| **Text version** | 0.38 ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)) |
 | **Status** | draft |
 | **Written against** | core 0.108 ([`core.md`](core.md)) |
 | **Evidence** | the core's: [`conformance/`](conformance/), [`scenarios/`](scenarios/), and the profiles' under [`profiles/`](profiles/) |
@@ -350,6 +350,12 @@ a first hop, re-minting and the caller's timeouts stay in core §8.1.
     shows no such token held, present when it shows one. Until then what
     was withdrawn is **unconfirmed**: an address unobservable, never down,
     and a withdrawn token not yet gone.
+  - **A read never undoes a token heard since it was asked.** The read and
+    the watch ride two sessions, which no router orders (§3.7). A token
+    the watch hears declared after the read is asked stands, whatever
+    the read shows: the read establishes nothing of it. A reader MUST
+    NOT apply such a read's absence to a token heard since.
+    `[Sc: profiles/redundancy/scenarios-v2.md §13]`
   - A make-before-break re-mint (core §8.1) leaves nothing with nothing
     held, so it owes no read: another instance holds throughout.
   - A read not made (above) leaves the withdrawal unconfirmed until the

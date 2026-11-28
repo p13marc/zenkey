@@ -139,13 +139,20 @@ twice. Each matches the design's figure.
   seed of them is 28.3 KB in 100 replies, and one snapshot of 22.5 KB.
 
 **Not verified.**
-- **No implementation has run a fixture or a scenario.** The reference
-  implements none of this yet.
+- **Two implementations ran it, after the text.** The reference runs
+  the fixtures and scenarios §1 to §15 as tests (#987's N2 and N3), and
+  zk2py's round 128 ran all 153 fixture cases and §1, §9 and §13 to §15
+  live in both pairings (F-629 to F-632).
 - **No byte crossed a wire under this major.** The payloads measured
   are `redundancy.v1`'s.
 - **The descriptor and sample race** was not reproduced at a run's
   change within an instance. `scenarios-v2.md` §14 forces it with a
   delayed subscriber.
+
+**After zk2py's round 128.**
+- **"How often"** (F-631): a follower that holds none of the new holder's runs, started after its claim, learns the run at the takeover from its descriptor. A sample between the token and that read is held. "Never at a takeover" held only for a follower that had read the standby's descriptor. §13's Expected 2 says so.
+- **"Seed again"** (F-630) merges the new incumbent's answers: snapshots, or a `redundancy.v1` incumbent's replies per key. No omission rule applies to the latter.
+- **observer 0.38 §3.6** (F-629): a read never undoes a token heard since it was asked. §13 gains the step, over 39 takeovers.
 
 **What deliberately did not change.** The election, the heal, a
 vacancy, the standby's mark and what it holds, twin detection, the
