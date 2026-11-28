@@ -144,6 +144,10 @@ usage: consume <endpoint> <system>/<service> <contract.toml> <state> <operation>
     {\"follow\": \"omitted\", \"provider\", \"key\", \"at_ms\"}
     {\"follow\": \"seeded\", \"provider\", \"incumbent\": <id>|null, \"complete\": <bool>,
       \"snapshots\": <n>, \"at_ms\"}
+    {\"follow\": \"heartbeat\"|\"heartbeat_discarded\"|\"heartbeat_held\", \"provider\",
+      \"key\", \"run\", \"seq\": <n>, \"at_ms\", \"reason\": <reason> (discarded)}: a
+      heartbeat covering the interface, or an owner heartbeat, read into the view only
+      under the incumbent's runs (redundancy.v2 §2.10)
     <reason>: no_incumbent, no_run, not_incumbent, unattributed, no_stamp, as
       redundancy.v2's fences.json writes them
 
@@ -646,6 +650,32 @@ pub mod follow {
                 "follow": "seeded", "provider": provider.to_string(),
                 "incumbent": incumbent.as_ref().map(|i| i.as_str().to_owned()),
                 "complete": complete, "snapshots": snapshots, "at_ms": at_ms,
+            }),
+            FollowEvent::Heartbeat {
+                provider,
+                key,
+                stamp,
+            } => serde_json::json!({
+                "follow": "heartbeat", "provider": provider.to_string(), "key": key,
+                "run": stamp.run.hex(), "seq": stamp.seq.get(), "at_ms": at_ms,
+            }),
+            FollowEvent::HeartbeatDiscarded {
+                provider,
+                key,
+                stamp,
+                why,
+            } => serde_json::json!({
+                "follow": "heartbeat_discarded", "provider": provider.to_string(), "key": key,
+                "run": stamp.run.hex(), "seq": stamp.seq.get(), "reason": why.as_str(),
+                "at_ms": at_ms,
+            }),
+            FollowEvent::HeartbeatHeld {
+                provider,
+                key,
+                stamp,
+            } => serde_json::json!({
+                "follow": "heartbeat_held", "provider": provider.to_string(), "key": key,
+                "run": stamp.run.hex(), "seq": stamp.seq.get(), "at_ms": at_ms,
             }),
         }
     }
