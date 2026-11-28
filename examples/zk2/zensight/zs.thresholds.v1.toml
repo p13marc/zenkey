@@ -8,16 +8,21 @@
 #
 # Three writers, as in v1: the file baseline, the desired author (bound below), and `set`.
 # `applied/{topic}` says which one won. The rule is last writer wins by arrival.
+#
+# Revision 1.2 (#1149 Z2): desired.v2, for the role bound below. Its author, zs.desired.v1 1.2,
+# uses desired.v2, so this target reports the role in the profile's packed Report
+# (desired.v2 §2.10, §3), `desired/report`, beside `applied/{topic}`, which stays.
 
 [interface]
 name    = "zs.thresholds"
 major   = 1
-minor   = 1
+minor   = 2
 summary = "The threshold rules a service evaluates against its own telemetry, and what is in force"
-uses    = ["freshness.v2"]
+uses    = ["desired.v2", "freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.common.json"]
+packed     = ["../../../spec/profiles/desired/desired.v2.json"]
 
 [resources.thresholds]
 kind        = "state"
@@ -53,6 +58,23 @@ The effective-config marker for EVERY reconcilable topic of this service, not on
 startup and on every change, so drift between desired and effective is visible before any
 desired document exists. This is desired.v1's 'target reports what it observed', with
 desired_timestamp as the observed revision."""
+
+[resources."desired/report"]
+kind     = "state"
+type     = "packed:Report"
+optional = true
+doc      = """
+The report of the role `desired` (desired.v2 §2.10): what is in force, the last act's outcome, the
+version observed and the one in force, and a refusal's code, place and line, in 3 to 27 bytes.
+Put before the tokens, `baseline`, and again whenever an act ends or a version is adopted; an
+unbound role (the kill switch) reports the baseline (§2.12). Optional, so a provider of 1.1 is
+still one of 1.2: a required resource added would be breaking (§2.18)."""
+
+[resources."desired/report".annotations]
+"desired.report"   = "desired"
+"desired.pointers" = ["", "/default_for_secs", "/default_recover_after_secs", "/rules"]
+"desired.details"  = ["a metric glob that matches nothing", "a duplicate rule name"]
+"freshness.ttl_s"  = 900
 
 # The fleet author's document for this service. Bound at deployment to fleet/desired, with {host}
 # and {service} bound to the implementer's own system and service (R2; Gap G5: `self` is

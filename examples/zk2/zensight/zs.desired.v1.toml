@@ -31,13 +31,22 @@
 # (zensight-sensor-core/src/desired.rs:274-279). Durability is the owner (S4) plus an archive for last-known (r4).
 # Cardinality: v1's 10000 hosts per subject. thresholds spans 15 producers, so its template bound
 # is 15 x 10000.
+#
+# Revision 1.2 (#1149 Z2): desired.v2 in place of desired.v1 (desired.v2 §2.18), its keys
+# unchanged. A version is the put's in-band stamp, a run and a seq, never the author's clock
+# (§2.4, §2.6). Under redundancy.v1 every desired resource stays per key: a reply per key with a
+# Zenoh timestamp beside the stamp, and a conditional read answered whole (§2.4), until #987 moves
+# this contract to redundancy.v2. The documents keep freshness.ttl_s = 0: 210,000 of them take no
+# heartbeat bit each, and their targets re-read on the deployment's period (§2.2, §2.13). Each
+# target reports in desired.v2's packed Report (zs.thresholds.v1's `desired/report`), and targets
+# move before this author (§2.18).
 
 [interface]
 name    = "zs.desired"
 major   = 1
-minor   = 1
+minor   = 2
 summary = "Fleet runtime policy for every host's services, as documents keyed by target"
-uses    = ["desired.v1", "redundancy.v1", "freshness.v2"]
+uses    = ["desired.v2", "redundancy.v1", "freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.common.json", "schemas/zs.snmp.v1.json", "schemas/zs.desired.v1.json"]
