@@ -186,7 +186,10 @@ fn every_example_is_published_and_compatible_with_its_history() {
 /// each declared by `telemetry.kind` and 23 by `telemetry.unit` (`dBm` and
 /// `us` among them), netring's two declared units, and every resource typed
 /// by the profile's Point with no kind, which is not invalid. No example
-/// writes the vocabulary on an event or an operation.
+/// writes the vocabulary on an event or an operation. A contract carrying
+/// the Point lists `telemetry.v1`, or `telemetry.v2`, which reads every
+/// resource that is no frame resource as v1 does (telemetry.v2 §1):
+/// ZenSight's four since #1149.
 #[test]
 fn every_example_telemetry_declaration_is_valid() {
     use zenkey_model::telemetry::{self, Carrier, Declaration};
@@ -204,8 +207,9 @@ fn every_example_telemetry_declaration_is_valid() {
                     points += usize::from(d.carrier == Carrier::Point);
                     if d.carrier == Carrier::Point {
                         assert!(
-                            c.uses.iter().any(|u| u.to_string() == telemetry::PROFILE),
-                            "{at}: a contract carrying the Point lists telemetry.v1 (§2.1)"
+                            c.uses.iter().any(|u| u.to_string() == telemetry::PROFILE)
+                                || telemetry::uses_v2(&c),
+                            "{at}: a contract carrying the Point lists telemetry.v1 (§2.1) or telemetry.v2 (§1)"
                         );
                     }
                 }
@@ -375,6 +379,11 @@ fn the_zenoh_modem_catalog_holds_its_contracts() {
 /// (round 99). `frames/message` and `frames/paid`, a full record every
 /// frame, and `frames/fast`, a delta of all 73 readings, fit RF's 220-B
 /// batch; only SF9's 117-B batch draws `frame_over_batch`.
+/// `examples/zk2/zensight/README.md` ("Frames") states ZenSight's five
+/// (#1149): each fits one RF SDU under the lean stack, 196 B of payload
+/// at the most (220 B, less the stack's 16, the face's 3-byte frame and
+/// the put's 5), which is why sysinfo's and netring's readings take two
+/// frames each.
 #[test]
 fn every_adopter_frame_has_its_largest_frame() {
     use std::collections::BTreeMap;
@@ -417,4 +426,78 @@ fn every_adopter_frame_has_its_largest_frame() {
             .join("../docs/zk2/measurements/wire-baseline/contracts/gendev.v1.toml"),
     );
     assert_eq!(gendev["frames/sample"], 100);
+    let mut zensight = BTreeMap::new();
+    for f in ["zs.sysinfo.v1", "zs.snmp.v1", "zs.netring.v1"] {
+        zensight.extend(largest(examples().join(format!("zensight/{f}.toml"))));
+    }
+    let want: BTreeMap<String, u64> = [
+        ("frames/device", 41),
+        ("frames/flows", 147),
+        ("frames/host", 187),
+        ("frames/pressure", 150),
+        ("frames/protocols", 123),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    assert_eq!(zensight, want, "zensight/README.md's payloads");
+    for (f, bytes) in &zensight {
+        assert!(*bytes <= 196, "{f}: one RF SDU under the lean stack");
+    }
+}
+
+/// ZenSight's frames (#1149): each of its five frame resources reads its
+/// `telemetry.series` declared (telemetry.v2 §2.16), every field of its
+/// record a series, and every series inline, with a kind and a unit and no
+/// mirror: its readings' Point streams declare no `telemetry.kind`, so a
+/// mirror would be `kind_missing`. The 106 + 18 + 66 fields are
+/// `examples/zk2/zensight/README.md`'s ("Frames").
+#[test]
+fn every_zensight_frame_declares_its_series() {
+    use std::collections::BTreeMap;
+    use zenkey_model::telemetry::{self, frames::Series};
+    let mut got = BTreeMap::new();
+    for f in ["zs.sysinfo.v1", "zs.snmp.v1", "zs.netring.v1"] {
+        let c = load_path(&examples().join(format!("zensight/{f}.toml")))
+            .contract
+            .expect("validated above");
+        assert!(telemetry::uses_v2(&c), "{f} uses telemetry.v2");
+        for r in &c.resources {
+            let Some(read) = telemetry::frames::series_of(&c, r) else {
+                continue;
+            };
+            let at = format!("{f} {}", r.template.as_str());
+            let Series::Declared(series) = read else {
+                panic!("{at}: {read:?}");
+            };
+            let layout = zenkey_model::frame::Layout::of_resource(&c, r)
+                .expect("its layout reads")
+                .expect("a frame resource");
+            assert_eq!(
+                series.len(),
+                layout.fields().len(),
+                "{at}: every field a series"
+            );
+            for s in &series {
+                assert!(s.mirror.is_none(), "{at}: {} is inline", s.field);
+                assert!(
+                    s.unit.is_some() || s.kind == telemetry::MetricKind::Text,
+                    "{at}: {} has a unit",
+                    s.field
+                );
+            }
+            got.insert(r.template.as_str().to_owned(), series.len());
+        }
+    }
+    let want: BTreeMap<String, usize> = [
+        ("frames/device", 18),
+        ("frames/flows", 35),
+        ("frames/host", 57),
+        ("frames/pressure", 49),
+        ("frames/protocols", 31),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    assert_eq!(got, want);
 }
