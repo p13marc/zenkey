@@ -33473,6 +33473,7 @@ reference's half lands after this.
   the next appearance, or the bound".
 - **Changes:** nothing zk2py does. A reader who stops at "Only" builds
   the unbounded hold.
+- **Resolved** (the lead): "A read after such a token that names none leaves the deployment's word, as the bound below does."
 
 ### F-634 · minor · `alarms` `v2/conclusions.json`: reading 27 gives a descriptor not read a fresh alarm, and the description's reasons lack `not_a_horizon`
 
@@ -33496,6 +33497,7 @@ reference's half lands after this.
   "reason": "not_a_horizon"}, and `not_a_horizon` in the list.
 - **Changes:** nothing any reader concludes. zk2py's alarms family
   runs both readings as written.
+- **Resolved** (the lead): reading 27's `freshness` is unobservable, `not_a_horizon`, and the description lists `not_a_horizon`.
 
 ### Counts after review-bot on #1176
 

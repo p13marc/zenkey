@@ -5971,8 +5971,9 @@ def _round127b_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                "finds none stating the run holds that run's versions still. A read that draws no "
                                "descriptor at all finds none stating it. The target reads again when an instance "
                                "token of the author's appears after it first saw the run: the token follows its "
-                               "descriptor (core §8.2, steps 3 and 4). Only a read after such a token that names "
-                               "none leaves the deployment's word. `[Sc: §16]` An author MAY put a version before "
+                               "descriptor (core §8.2, steps 3 and 4). A read after such a token that names none "
+                               "leaves the deployment's word, as the bound below does. `[Sc: §16]` An author MAY "
+                               "put a version before "
                                "its descriptor (core §8.2 orders a value before step 4, not after step 3), so the "
                                "first read can find nothing.",
                           "- **Where descriptors reach the target** is the deployment's, never what a read drew: "
