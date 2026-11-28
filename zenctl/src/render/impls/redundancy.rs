@@ -1,4 +1,5 @@
-//! `redundancy.v1` (#841, RC): `zenctl redundancy`'s report.
+//! `redundancy` (#841, RC; #987's N3): `zenctl redundancy`'s report, of
+//! either major.
 
 use zenkey_fleet::report::{
     DoctorSeverity, RedundancyAnswer, RedundancyAnswerToken, RedundancyReport, RedundancyRole,
@@ -28,9 +29,12 @@ fn says(a: &RedundancyAnswer) -> String {
     format!("{} ({}) — {}", answer_word(a.answer), a.reason, a.says)
 }
 
-/// `redundancy.v1` (#841, RC): §5's four answers per governed interface,
-/// in the profile's tokens and in words. One row per address and interface
-/// (`interface`), its instances as lines beneath it, each with its role. In
+/// `redundancy` (#841, RC; #987's N3): §5's four answers per interface
+/// either major governs, in the profile's tokens and in words. One row per
+/// address and interface (`interface`), its instances as lines beneath it,
+/// each with its role, and the run and zid its descriptor states
+/// (`redundancy.v2` §2.15). The header names the majors the rows' governed
+/// revisions use, `redundancy` when none or both. In
 /// the table, "is it served by exactly one incumbent?" leads each row with
 /// its own mark — `✓` one, `✗` a finding (a split, a vacancy in both reads,
 /// a twin), `?` no verdict — and the run's judgement leads the envelope.
@@ -54,8 +58,19 @@ impl Render for RedundancyReport {
 
     fn table(&self, t: &mut Table) {
         use crate::render::style;
+        let mut majors: Vec<&str> = self
+            .interfaces
+            .iter()
+            .flat_map(|r| r.majors.iter().map(String::as_str))
+            .collect();
+        majors.sort_unstable();
+        majors.dedup();
+        let profile = match majors.as_slice() {
+            [one] => *one,
+            _ => "redundancy",
+        };
         t.line(format!(
-            "redundancy.v1 in {}{}{} — {} interface(s), two reads {:.1}s apart{}",
+            "{profile} in {}{}{} — {} interface(s), two reads {:.1}s apart{}",
             namespace_words(&self.namespace),
             self.service
                 .as_ref()
@@ -120,13 +135,20 @@ impl Render for RedundancyReport {
                     RedundancyRole::NotACandidate => "no candidate",
                     RedundancyRole::Unknown => "unknown",
                 };
+                let stated: Vec<String> = i
+                    .run
+                    .iter()
+                    .map(|r| format!("run {r}"))
+                    .chain(i.zid.iter().map(|z| format!("zid {z}")))
+                    .collect();
                 detail.push(format!(
                     "    {}{} {role}: {}",
                     i.instance,
-                    i.zid
-                        .as_ref()
-                        .map(|z| format!(" (zid {z})"))
-                        .unwrap_or_default(),
+                    if stated.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", stated.join(", "))
+                    },
                     says(&i.twin)
                 ));
             }

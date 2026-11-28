@@ -101,7 +101,7 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
         }
         out
     };
-    let governed = super::serve::governed(&revisions);
+    let governed = super::serve::Governed::of(&revisions);
     let run_store = super::serve::run_store(run_file, &governed)?;
     let spec = GenSpec {
         address,
@@ -128,12 +128,12 @@ pub async fn run(cli: crate::cli::GenArgs) -> Result<()> {
     }
 
     // An owner's session, timestamping off as an owner's is (core §8.2),
-    // on for a candidate: a session a retrieval opened above is a
-    // reader's, and is not reused.
+    // on for a redundancy.v1 candidate alone (redundancy.v2 §2.10): a
+    // session a retrieval opened above is a reader's, and is not reused.
     if let Some(reader) = session.take() {
         let _ = reader.close().await;
     }
-    let session = dep.owner_session(!governed.is_empty()).await?;
+    let session = dep.owner_session(governed.stamps()).await?;
     super::serve::guard_address(&session, &spec.address, &dep, i_know).await?;
     let mut spec = spec;
     spec.elect = super::serve::elect(&dep, &governed).await?;

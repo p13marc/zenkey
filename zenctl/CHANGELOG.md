@@ -6,6 +6,24 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `redundancy`, the doctor and `check conform` read `redundancy.v2` (#987's N3)
+
+`redundancy.v2` 0.1 §2.2, §2.10, §2.15, §2.17; `arbitration.v1` 0.7
+§2.5; `hostid.v1` 0.10 §2.12. Every verb that reads governance reads it
+from both majors of `redundancy`: a `redundancy.v1` candidate and a
+`redundancy.v2` one with one election are one election. No flag is new,
+and no exit code changed. `redundancy.v1`'s answers do not move.
+
+| Before | Now | Notes |
+|---|---|---|
+| `redundancy`: an interface whose contract lists `redundancy.v2`, `not_governed`, left out; beside a `redundancy.v1` candidate, `disagree` | governed, its election read by its own major; beside a `redundancy.v1` candidate with the same election, one election | the `interface` row adds `majors` (`redundancy.v1`, `redundancy.v2`), and `governance_says` names them. Words: "use redundancy.v1 and redundancy.v2, one election, claim" |
+| `redundancy`'s instances: `instance`, `zid` | `run` beside them, as the instance's descriptor states it, 4 or 8 lowercase hex digits (v2 §2.15) | the table: `000000000000000a (run 8b035ad7, zid …) the incumbent: …`. Its header names the one major its rows use, else `redundancy` |
+| `doctor`'s `split-brain` and `redundancy-vacancy`: `redundancy.v2` read as not governed, so its split was core §6's exposure rule | either major's first and second questions; the finding names the major, "redundancy.v2 governs it", or "redundancy.v1 and redundancy.v2 govern it" | the clean words: "1 interface(s) redundancy.v2 governs" |
+| `doctor`'s `hostid-duplicate`: a `redundancy.v2` standby on a minted system counted, so an incumbent and its standby a finding | recognised, as a `redundancy.v1` one is (`hostid.v1` 0.10 §2.12) | its clean words name each recognised standby, every interface it lists governed by a major of `redundancy` |
+| `check conform`'s `redundancy-declaration` and `redundancy-standby` of a `redundancy.v2` revision: not asked | asked: the declaration read by v2 §2.2, `explicit_stream` among its reasons; the standby by the rules both majors share | a pass says "governed by redundancy.v2, election claim" |
+| `arbitration`'s view of a role whose required interface `redundancy.v2` governs: every sample `not_incumbent`, by zid | outcome 6 by the major of each holder's revision: by `meta.zid` under v1, by its runs under v2, one held unattributed counted `not_incumbent` while one read of the address's descriptors runs (text 0.7) | the runtime's arbitration counts it so since #987's N2 |
+| `serve`, `gen` of a `redundancy.v2` revision: not elected, so the runtime refused the governed interface at start | a candidate, as of `redundancy.v1`, its session not stamping (v2 §2.10); only a `redundancy.v1` candidate's stamps | `--run-file` beside either major is still refused, exit 2: "--run-file: redundancy.v2 governs ledger.v1, …" |
+
 ## Unreleased (`main`, zk2) — `desired --across-face` (#986's J5)
 
 `desired.v1` 0.14 §2.14, §2.17 step 2; `desired.v2` 0.1 §2.5, §2.14;

@@ -59,38 +59,92 @@ pub(crate) async fn guard_address(
     Ok(())
 }
 
-/// The interfaces of `revisions` that `redundancy.v1` governs: each lists
-/// the profile in `uses` (#841, RC). A mock owner of one is a candidate,
-/// whose session stamps (core §8.2's exception, `redundancy.v1` §2.10).
-pub(crate) fn governed(
-    revisions: &[std::sync::Arc<zenkey_fleet::model::catalog::Revision>],
-) -> Vec<String> {
-    revisions
-        .iter()
-        .filter(|r| {
-            zenkey_model::redundancy::declaration_of(r.contract(), false)
-                != zenkey_model::redundancy::Declaration::NotGoverned
-        })
-        .map(|r| r.iface().to_string())
-        .collect()
+/// The interfaces of a mock owner's revisions a major of `redundancy`
+/// governs: each lists `redundancy.v1` or `redundancy.v2` in `uses`, read
+/// as a reader of both majors reads it (#841, RC; `redundancy.v2` §2.2,
+/// #987's N3). A mock owner of one is a candidate. Only a `redundancy.v1`
+/// candidate's session stamps (core §8.2's exception, `redundancy.v1`
+/// §2.10); a `redundancy.v2` one's runs without, as any owner's
+/// (`redundancy.v2` §2.10).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Governed(Vec<(String, zenkey_model::redundancy::Major)>);
+
+impl Governed {
+    /// The governed interfaces of `revisions`, each with its major.
+    pub(crate) fn of(
+        revisions: &[std::sync::Arc<zenkey_fleet::model::catalog::Revision>],
+    ) -> Governed {
+        Governed(
+            revisions
+                .iter()
+                .filter(|r| {
+                    zenkey_model::redundancy::either_declaration_of(r.contract(), false)
+                        != zenkey_model::redundancy::Declaration::NotGoverned
+                })
+                .map(|r| {
+                    (
+                        r.iface().to_string(),
+                        zenkey_model::redundancy::Major::of(&r.contract().uses)
+                            .unwrap_or(zenkey_model::redundancy::Major::V1),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Whether the mock owner's session stamps: it is a candidate of an
+    /// interface `redundancy.v1` governs (core §8.2's exception).
+    pub(crate) fn stamps(&self) -> bool {
+        self.0
+            .iter()
+            .any(|(_, m)| *m == zenkey_model::redundancy::Major::V1)
+    }
+
+    /// "redundancy.v1 governs steer.v1", "redundancy.v1 and redundancy.v2
+    /// govern a.v1, b.v1".
+    fn words(&self) -> String {
+        let mut majors: Vec<zenkey_model::redundancy::Major> =
+            self.0.iter().map(|(_, m)| *m).collect();
+        majors.sort_unstable();
+        majors.dedup();
+        format!(
+            "{} {} {}",
+            zenkey_fleet::model::redundancy::profile_words(&majors),
+            if majors.len() > 1 {
+                "govern"
+            } else {
+                "governs"
+            },
+            self.0
+                .iter()
+                .map(|(i, _)| i.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 /// The record `--run-file` names, as the runtime's run store (core §4.3):
 /// each instance's 16-bit run made durable there before it writes. Refused
-/// beside a `governed` interface, whose candidates draw 32-bit runs, as the
-/// runtime refuses it at start, but before any session opens.
+/// beside a `governed` interface, of either major, whose candidates draw
+/// 32-bit runs, as the runtime refuses it at start, but before any session
+/// opens.
 pub(crate) fn run_store(
     run_file: Option<std::path::PathBuf>,
-    governed: &[String],
+    governed: &Governed,
 ) -> Result<Option<std::sync::Arc<dyn zenkey::run::RunStore>>> {
     let Some(path) = run_file else {
         return Ok(None);
     };
     if !governed.is_empty() {
         return Err(unaskable!(
-            "--run-file: redundancy.v1 governs {}, and a candidate draws a random 32-bit run at \
-             each start (core §4.3), so it keeps no run record",
-            governed.join(", ")
+            "--run-file: {}, and a candidate draws a random 32-bit run at each start (core \
+             §4.3), so it keeps no run record",
+            governed.words()
         ));
     }
     Ok(Some(std::sync::Arc::new(zenkey::run::FileRunStore::new(
@@ -99,16 +153,16 @@ pub(crate) fn run_store(
 }
 
 /// How a mock owner of a governed interface elects (`redundancy.v1`,
-/// #841, RC), when `governed` names one: a reader that holds no liveliness
-/// subscriber and no claim, and a watch session, both of their own in the
-/// namespace (§2.5 step 1, §2.7; text 0.2, F-204). The watch is the
-/// runtime's candidate's, which spells base-relative keys and keeps its
-/// own history, so it is a session in the namespace, never a tool's watch
-/// session on the wire (#875). `None` when nothing is governed, and no
-/// session opens.
+/// #841, RC; either major, the election being one text), when `governed`
+/// names one: a reader that holds no liveliness subscriber and no claim,
+/// and a watch session, both of their own in the namespace (§2.5 step 1,
+/// §2.7; text 0.2, F-204). The watch is the runtime's candidate's, which
+/// spells base-relative keys and keeps its own history, so it is a session
+/// in the namespace, never a tool's watch session on the wire (#875).
+/// `None` when nothing is governed, and no session opens.
 pub(crate) async fn elect(
     dep: &Deployment,
-    governed: &[String],
+    governed: &Governed,
 ) -> Result<Option<zenkey::redundancy::RedundancyStartup>> {
     if governed.is_empty() {
         return Ok(None);
@@ -116,9 +170,14 @@ pub(crate) async fn elect(
     let reader = dep.session().await?;
     let watch = dep.session().await?;
     eprintln!(
-        "redundancy.v1 governs {}: this mock is a candidate, serving once elected and standing by \
-         otherwise, on a reader and a watch session of its own",
-        governed.join(", ")
+        "{}: this mock is a candidate, serving once elected and standing by otherwise, on a \
+         reader and a watch session of its own{}",
+        governed.words(),
+        if governed.stamps() {
+            ""
+        } else {
+            ", its session not stamping (redundancy.v2 §2.10)"
+        }
     );
     let mut startup = zenkey::redundancy::RedundancyStartup::new(reader).with_watch(watch);
     startup.timeout = dep.timeout();
@@ -235,15 +294,15 @@ pub async fn run(cli: crate::cli::ServeArgs) -> Result<()> {
         }
     };
 
-    let governed = governed(std::slice::from_ref(&revision));
+    let governed = Governed::of(std::slice::from_ref(&revision));
     let run_store = run_store(run_file, &governed)?;
     // An owner's session, timestamping off as an owner's is (core §8.2),
-    // on for a candidate: a session a retrieval opened above is a
-    // reader's, and is not reused.
+    // on for a redundancy.v1 candidate alone (redundancy.v2 §2.10): a
+    // session a retrieval opened above is a reader's, and is not reused.
     if let Some(reader) = session.take() {
         let _ = reader.close().await;
     }
-    let session = dep.owner_session(!governed.is_empty()).await?;
+    let session = dep.owner_session(governed.stamps()).await?;
     guard_address(&session, &address, &dep, i_know).await?;
     let elect = elect(&dep, &governed).await?;
     let mut served = zenkey_fleet::serve_operation(
