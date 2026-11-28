@@ -1203,7 +1203,7 @@ default; the GET answers the form of the last put. `constrained.md` §10
 step 7 counts the descriptor's put across the hop, under a quarter of step
 3's JSON one (the reference: 47 B against 695 B, the payload 36 B with the
 zid, which §3.3's SHOULD keeps, against 664 B), and reads it through the
-catalog and without. `RULES.md` gains three rules (305); its generated
+catalog and without. `RULES.md` gains three rules (306); its generated
 "Where it reads" lists gain core §3.3, so its baseline mean went from
 12.19 to 12.25 by hand.
 
@@ -1228,5 +1228,5 @@ measured 3 B against 196 B). `archive/attachments.json`: revisions from
 (unrelated); 12 writes and 44 reads, computed by
 `/srv/dev/scratch/zenkey/py/980-c3/a_gen.py` and again by `b_check.py`,
 written from the finished text, which agreed on every case. `RULES.md`:
-309 rules, its baseline mean 12.25 → 12.31 by hand (the generated "Where it
+310 rules, its baseline mean 12.25 → 12.31 by hand (the generated "Where it
 reads" lists gain §4.4).

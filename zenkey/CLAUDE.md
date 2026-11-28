@@ -1019,9 +1019,15 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `entries_of`'s `stray_reply_del` read through; `start` holds none.
   `desired`'s target (`TargetInner::held`: the service's catalog and the
   author's revision) reads `owner_revisions` (now taking a `Held`),
-  `owner_revision_held` and `owner_catalog_held`. Left catalog-less: the pub
-  `presence::descriptor`, `answer::owner_revision` and `owner_catalog`,
-  which read either form and leave a compact one unread.
+  `run_revision` (taking one too; `owner_revision_held` reads through it)
+  and `owner_catalog_held`. #987's follower (`follow`) reads through
+  `Consumer::held()`: a put by `heard`, `read_descriptors` each reply
+  through `read_held` (the arbitration fence's reads too), a holder's
+  descriptor by `descriptor_held`; `Found::json` is the read as the JSON
+  form's members, what `redundancy::read_descriptor` reads. Left
+  catalog-less: the pub `presence::descriptor`, `answer::owner_revision`
+  and `owner_catalog`, which read either form and leave a compact one
+  unread.
   `tests/compact_descriptor.rs`' `a_client_and_a_put_read_the_compact_form`.
 
   C5c (#980, core 0.120's §8.1 SHOULD): the owner writes the compact form.
