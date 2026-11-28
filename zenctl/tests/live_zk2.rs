@@ -747,7 +747,12 @@ async fn service_show_renders_a_compact_descriptor_through_the_catalog() {
 /// guess; the doctor, given `--contracts` (new), judges the owner. Once a
 /// holder serves it, `service show`, the doctor and `telemetry` given only
 /// `--catalog` read the owner: the descriptor served, the doctor's checks
-/// judged clean, and `meter.v1`'s metric resources in scope.
+/// judged clean, and `meter.v1`'s metric resources in scope. The doctor
+/// is told `lab/hop` is on a first hop by a face policy listing it on a
+/// device face; told nothing, it asks the holders of the two standard
+/// bundles all the same, and none serving them is the owner's
+/// `contract-unavailable` error (core §8.2), its compiled-in copies
+/// proving nothing of it.
 ///
 /// Bug 2, core §8.2 step 3 and §8.4: no holder serves `health.v1`'s bundle.
 /// `check conform lab/hop health.v1`, told nothing, calls it the owner's
@@ -828,7 +833,22 @@ async fn a_first_hop_owner_reads_with_the_catalog_alone() {
         "{run}"
     );
 
-    // The doctor given meter.v1 by --contracts reads it.
+    let rf =
+        std::fs::read_to_string(examples().join("link/media/rf.face.toml")).expect("the RF policy");
+    let text = rf
+        .replace("services = [\"radio-a\"]", "services = []")
+        .replace(
+            "far              = \"ground\"\nattach           = \"client\"\n",
+            "far              = \"hop\"\nattach           = \"device\"\n\
+         devices          = [\"lab/hop\"]\n",
+        );
+    assert_ne!(text, rf, "the edit applies");
+    let policy = bus.home.join("device.face.toml");
+    std::fs::write(&policy, text).expect("the policy's file");
+    let policy = policy.to_str().expect("a UTF-8 path").to_owned();
+
+    // The doctor given meter.v1 by --contracts, told lab/hop is on a first
+    // hop, reads it.
     let checks = [
         "--check",
         "descriptor-invalid",
@@ -838,6 +858,8 @@ async fn a_first_hop_owner_reads_with_the_catalog_alone() {
         "token-missing",
         "--catalog",
         &cat,
+        "--face-policy",
+        &policy,
     ];
     let mut given = doctor_args(&checks);
     given.extend(["--contracts", &meter_path, "--format", "json"]);
@@ -928,8 +950,35 @@ async fn a_first_hop_owner_reads_with_the_catalog_alone() {
         summary
             .as_str()
             .is_some_and(|s| s.starts_with("3 revision(s)")
-                && s.contains("held by this reader (2")),
-        "the two standard revisions held, never retrieved: {run}"
+                && s.contains("compiled in (2)")
+                && !s.contains("§8.5")),
+        "the two standard revisions held, a first hop's (§8.4): {run}"
+    );
+
+    // Told nothing, lab/hop is any owner: the holders of the two standard
+    // bundles are asked, and none serving them is its error (§8.2).
+    let unlisted: Vec<&str> = alone
+        .iter()
+        .copied()
+        .filter(|a| *a != "--face-policy" && *a != policy.as_str())
+        .collect();
+    let run = bus.zenctl(&unlisted).await;
+    exits(&run, 1);
+    let doc = run.json();
+    let row = check_row(&doc, "contract-unavailable");
+    let findings = row["findings"].as_array().expect("findings");
+    assert!(findings.iter().all(|f| f["severity"] == "error"), "{run}");
+    let subjects: BTreeSet<String> = findings
+        .iter()
+        .filter_map(|f| f["subject"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        subjects,
+        BTreeSet::from([
+            format!("freshness.v2 sha256:{}", zenkey::heartbeat::FINGERPRINT),
+            format!("health.v1 sha256:{}", zenkey::health::FINGERPRINT),
+        ]),
+        "{run}"
     );
 
     let run = bus
@@ -997,19 +1046,7 @@ async fn a_first_hop_owner_reads_with_the_catalog_alone() {
     let told_nothing = served_case(&run.json());
     assert_eq!(told_nothing["verdict"]["answer"], "established", "{run}");
 
-    let rf =
-        std::fs::read_to_string(examples().join("link/media/rf.face.toml")).expect("the RF policy");
-    let text = rf
-        .replace("services = [\"radio-a\"]", "services = []")
-        .replace(
-            "far              = \"ground\"\nattach           = \"client\"\n",
-            "far              = \"hop\"\nattach           = \"device\"\n\
-         devices          = [\"lab/hop\"]\n",
-        );
-    assert_ne!(text, rf, "the edit applies");
-    let policy = bus.home.join("device.face.toml");
-    std::fs::write(&policy, text).expect("the policy's file");
-    let args = conform(&["--face-policy", policy.to_str().expect("a UTF-8 path")]);
+    let args = conform(&["--face-policy", &policy]);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let run = bus.zenctl(&args).await;
     let doc = run.json();

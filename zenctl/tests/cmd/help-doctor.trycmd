@@ -78,7 +78,7 @@ Options:
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
           
-          A compact descriptor reads through --catalog and every revision it names: one held here, a standard one every tool holds compiled in (health.v1, health.v2, freshness.v2, alarms.v1, alarms.v2, config.v1), or one a holder serves. An owner on a first hop holds no bundle (core §8.4): give its other contracts here where no holder on this side of its hop serves them. A revision held here is never retrieved (§8.5), so contract-unavailable does not ask its holders. A path that loads nothing is refused (exit 2).
+          A compact descriptor reads through --catalog and every revision it names: one held here, a standard one every tool holds compiled in (health.v1, health.v2, freshness.v2, alarms.v1, alarms.v2, config.v1), or one a holder serves. An owner on a first hop holds no bundle (core §8.4): give its other contracts here where no holder on this side of its hop serves them. A revision held here is never retrieved (§8.5), so contract-unavailable does not ask its holders. A standard one compiled in proves nothing of an owner: its holders are asked unless every owner naming it is a device --face-policy lists. A path that loads nothing is refused (exit 2).
 
       --face-policy <FILE>
           A `link.v2` face policy whose device faces (`attach = "device"`) list owners on a first hop (link.v2 §2.5): `first-hop-token` asks whether each holds an interface token or a contract queryable, which an owner on a first hop holds none of (core §8.1, §8.4). Without one, `first-hop-token` is not asked. A policy the linter refuses, or one with no device face, is refused (exit 2)

@@ -1139,10 +1139,14 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `OwnerRevisions`' `described`, a `zenkey::presence::Held`, reads them
   as every runtime `Held` does, and the lens's #990 heartbeat revision is
   `standard`'s. The doctor's `contract-unavailable`
-  counts revisions held by the reader (`--contracts`, standard), never
-  retrieved, in its summary, and a bundle no holder serves of a device
-  `DoctorSpec::first_hop` lists is a warning, the deployment's (§8.4),
-  where any other owner's is the error (§8.2). `ConformSpec::first_hop`
+  counts the revisions `--contracts` gave, never retrieved (§8.5), in its
+  summary; a standard revision held compiled in (`standard::is_compiled`,
+  by pointer, so a copy `--contracts` gave is not one) is asked of the
+  holders all the same where an owner off a first hop names it
+  (`DoctorObservation::holders`, a store of their own), and counted the
+  reader's own, §8.4, only where devices `DoctorSpec::first_hop` lists
+  name it alone; a bundle no holder serves of such a device is a warning,
+  the deployment's (§8.4), where any other owner's is the error (§8.2). `ConformSpec::first_hop`
   (the face policy's word, observer §3.11): `contract-served` passes a
   first hop's bundle a near-side holder serves and does not ask one none
   serves; `bus::conform::observe` judges against `--contracts`, else the
@@ -1151,7 +1155,8 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `judge::conform`'s
   `contract_served_asks_no_bundle_of_an_owner_on_a_first_hop`,
   `judge::doctor`'s
-  `a_first_hop_owners_bundle_no_holder_serves_is_the_deployments_warning`,
+  `a_first_hop_owners_bundle_no_holder_serves_is_the_deployments_warning`
+  and `a_compiled_in_standard_revision_is_asked_of_an_off_hop_owners_holders`,
   zenctl's `a_first_hop_owner_reads_with_the_catalog_alone`.
 - **`frame_over_batch` and `block_over_batch`'s words** (`model/acl.rs`'s
   `link_says`, #1136): a largest frame or longest put that does not fit one

@@ -681,7 +681,9 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   with `--catalog` alone, the standard revisions every tool's own
   (`zenkey_fleet::model::standard`, core §8.4). `zk2::describing` (moved
   from `cmd/service.rs`) is every verb's; `doctor` gains `--contracts`
-  (its run's store seeded, `contract-unavailable` saying what it held),
+  (its run's store seeded, `contract-unavailable` saying what it held;
+  a compiled-in standard revision still asked of the holders for an owner
+  `--face-policy` does not list),
   and `iface list` and `graph` gain `ContractArgs`, while `iface show`
   now reads through its `--catalog` (`help-doctor`, `help-iface`,
   `help-wire` re-blessed). `cache refresh` still reads none: it remembers

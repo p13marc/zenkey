@@ -577,7 +577,9 @@ pub(crate) struct DoctorArgs {
     /// no bundle (core §8.4): give its other contracts here where no
     /// holder on this side of its hop serves them. A revision held here is
     /// never retrieved (§8.5), so contract-unavailable does not ask its
-    /// holders. A path that loads nothing is refused (exit 2).
+    /// holders. A standard one compiled in proves nothing of an owner: its
+    /// holders are asked unless every owner naming it is a device
+    /// --face-policy lists. A path that loads nothing is refused (exit 2).
     #[arg(long = "contracts", value_name = "PATH")]
     pub(crate) contracts: Vec<PathBuf>,
     /// A `link.v2` face policy whose device faces (`attach = "device"`)

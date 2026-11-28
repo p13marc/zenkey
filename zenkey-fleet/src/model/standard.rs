@@ -47,6 +47,16 @@ pub fn revision(iface: &IfaceId, fingerprint: &Fingerprint) -> Option<&'static A
     STANDARD.get(iface, fingerprint)
 }
 
+/// Whether `revision` is the one compiled in, this set's own: what a
+/// reader holds with nothing given and nothing retrieved, so its holding
+/// says nothing of whether anyone on the bus serves the bundle. The same
+/// revision given by `--contracts` or retrieved is another value.
+pub fn is_compiled(revision: &Arc<Revision>) -> bool {
+    STANDARD
+        .get(revision.iface(), revision.fingerprint())
+        .is_some_and(|r| Arc::ptr_eq(r, revision))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

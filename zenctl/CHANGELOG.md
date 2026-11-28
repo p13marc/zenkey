@@ -20,7 +20,7 @@ and `graph`. No exit code changed.
 | Before | Now | Notes |
 |---|---|---|
 | `service list` and `show`, the doctor, `telemetry` and every reader of a descriptor: a first-hop owner's compact descriptor `unknown_revision` without `health.v1`'s and `freshness.v2`'s contracts by `--contracts` | read through `--catalog`, the standard revisions compiled in | an owner's other revisions still come from `--contracts` or a holder on the near side |
-| `doctor`: no `--contracts` | `--contracts` seeds its store | a revision held so is never retrieved: `contract-unavailable`'s summary counts those its holders were not asked of |
+| `doctor`: no `--contracts` | `--contracts` seeds its store | a revision held so is never retrieved (§8.5): `contract-unavailable`'s summary counts those its holders were not asked of. A standard revision compiled in is still asked of the holders for every owner `--face-policy` does not list on a device face, none serving it the owner's error as before |
 | `doctor --face-policy`: a listed device's bundle no holder serves, an error citing §8.2 | a warning, the deployment's (§8.4) | any other owner's stays the error |
 | `iface list`, `graph`: no `--catalog`; `iface show` took it and read no compact descriptor through it | each reads a compact descriptor through `--catalog` | |
 | `check conform --face-policy F`: an owner F lists on a device face, its bundle no holder serves, a `contract-served` violation | `contract-served` not asked; served by a near-side holder, passed | the rest is judged against `--contracts`, else the standard revision; told nothing, the owner is any owner |

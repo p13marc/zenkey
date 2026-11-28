@@ -656,8 +656,10 @@ so it runs on the node's side, with `--catalog`. An owner on a first hop holds n
 it holds compiled in and each other revision `--contracts` gives or a holder on the near side
 serves; one that none of these has leaves each of its checks unobservable (`unknown_revision`).
 A revision `--contracts` holds is never retrieved, so `contract-unavailable` does not ask its
-holders. With `--face-policy`, a bundle no holder serves of a device on a device face is the
-deployment's warning, never the owner's error.
+holders. A standard one compiled in says nothing of an owner: give `--face-policy` with the
+device on a device face, or the doctor asks the holders of its `health.v1` and `freshness.v2`
+bundles, and none serving them is the owner's error (§8.2). With the policy, a bundle no
+holder serves of such a device is the deployment's warning, never the owner's error.
 
 **zengui and zenwatch across a face.** zengui takes `--catalog` and `--contracts`. Its Inspector
 reads a frame's fields, its Series plots them, its Config tool drives `config.v1` and
