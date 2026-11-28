@@ -106,7 +106,7 @@ pub fn compact(d: &Descriptor, catalog: &Catalog, revisions: &[&Contract]) -> Ve
 /// The owner, while it is held.
 pub struct Owner {
     session: zenoh::Session,
-    _token: zenoh::liveliness::LivelinessToken,
+    _token: Option<zenoh::liveliness::LivelinessToken>,
     _descriptor: Queryable<()>,
     held: Vec<Queryable<()>>,
 }
@@ -115,6 +115,22 @@ pub struct Owner {
 /// queryable answering the JSON form under `application/json`, or the
 /// compact one (`bytes`, [`compact`]'s) under `zenoh/bytes`.
 pub async fn serve(s: &zenoh::Session, d: &Descriptor, form: Form, bytes: Vec<u8>) -> Owner {
+    let mut o = answer(s, d, form, bytes).await;
+    let key = format!("zk2/{}/@zk/instance/{}", d.service, d.instance);
+    o._token = Some(
+        s.liveliness()
+            .declare_token(key.as_str())
+            .await
+            .expect("an instance token"),
+    );
+    o
+}
+
+/// Answers `d`'s descriptor GET on `s` in `form`, holding no token: the
+/// twin of a runtime owner whose own descriptor a router's access control
+/// keeps from every reader ([`deny_descriptors`]), the instance token the
+/// owner's own.
+pub async fn answer(s: &zenoh::Session, d: &Descriptor, form: Form, bytes: Vec<u8>) -> Owner {
     let key = format!("zk2/{}/@zk/instance/{}", d.service, d.instance);
     let (body, encoding) = match form {
         Form::Json => (
@@ -135,17 +151,72 @@ pub async fn serve(s: &zenoh::Session, d: &Descriptor, form: Form, bytes: Vec<u8
         })
         .await
         .expect("a descriptor queryable");
-    let token = s
-        .liveliness()
-        .declare_token(key.as_str())
-        .await
-        .expect("an instance token");
     Owner {
         session: s.clone(),
-        _token: token,
+        _token: None,
         _descriptor: q,
         held: Vec::new(),
     }
+}
+
+/// A router's `access_control` that keeps the descriptors of the session
+/// whose zid is `zid` from every reader: its descriptor queryable is never
+/// declared to the router, and its descriptor puts and replies are dropped
+/// there. Its tokens, its data and its bundles pass. With it, a runtime
+/// owner's descriptor is whatever [`answer`] serves in its place.
+#[must_use]
+pub fn deny_descriptors(zid: &str) -> String {
+    serde_json::json!({
+        "enabled": true,
+        "default_permission": "allow",
+        "rules": [{
+            "id": "no-descriptor",
+            "permission": "deny",
+            "flows": ["ingress"],
+            "messages": ["declare_queryable", "put", "reply"],
+            "key_exprs": ["zk2/*/*/@zk/instance/*"],
+        }],
+        "subjects": [{"id": "owner", "zids": [zid]}],
+        "policies": [{"rules": ["no-descriptor"], "subjects": ["owner"]}],
+    })
+    .to_string()
+}
+
+/// A runtime owner's descriptor as it serves it (`json`), and its compact
+/// twin: the catalog of every revision it names, each retrieved from the
+/// bus through `tool` (§8.4), the descriptor naming that catalog, and its
+/// bytes.
+pub async fn twin_of(
+    tool: &zenoh::Session,
+    json: &[u8],
+) -> (Catalog, Descriptor, Vec<u8>, Vec<Contract>) {
+    let mut d: Descriptor = serde_json::from_slice(json).expect("the owner's descriptor");
+    let mut revisions = Vec::new();
+    for e in &d.interfaces {
+        let iface: zenkey::model::grammar::IfaceId = e.iface.parse().expect("an interface");
+        let fp = Fingerprint::parse(&e.contract).expect("a fingerprint");
+        let mut got = None;
+        for _ in 0..50 {
+            if let Ok(zenkey::retrieval::Retrieved::Bundle(b, _)) = zenkey::retrieval::fetch_bundle(
+                tool,
+                &iface,
+                &fp,
+                std::time::Duration::from_secs(1),
+            )
+            .await
+            {
+                got = Some(Contract::from_bundle(&b).expect("a bundle that reads"));
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        revisions.push(got.unwrap_or_else(|| panic!("{iface} {fp} is retrieved")));
+    }
+    let refs: Vec<&Contract> = revisions.iter().collect();
+    let catalog = catalog(&refs);
+    d.catalog = Some(catalog.id().hex());
+    let bytes = compact(&d, &catalog, &refs);
+    (catalog, d, bytes, revisions)
 }
 
 impl Owner {

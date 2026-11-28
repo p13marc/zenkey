@@ -178,6 +178,11 @@ struct Inner {
     window: Duration,
     horizon: Option<Duration>,
     refuse: AtomicU32,
+    /// What an owner's descriptor is read through when it aligns, a
+    /// compact one included (core §3.3): the catalogs it was given
+    /// ([`Archive::start_through`]) and the revisions it records, each
+    /// other one named retrieved.
+    held: crate::presence::Held,
 }
 
 /// Where an alignment read from.
@@ -465,6 +470,7 @@ impl Inner {
                 &from,
                 &src.selector,
                 src.rec.implementation.contract(),
+                &self.held,
             )
             .await;
             let mut seen = Vec::new();
@@ -532,7 +538,7 @@ impl Inner {
                         &h.key,
                         h.run,
                         contract,
-                        &crate::presence::Held::default(),
+                        &self.held,
                         timeout,
                     )
                     .await
@@ -646,6 +652,7 @@ async fn entries_of(
     from: &AlignedFrom,
     selector: &OwnedKeyExpr,
     contract: &zenkey_model::contract::Contract,
+    held: &crate::presence::Held,
 ) -> Vec<Sample> {
     let mut out = Vec::with_capacity(replies.len());
     let mut owners = std::collections::BTreeMap::new();
@@ -658,7 +665,7 @@ async fn entries_of(
                 s.key_expr().as_str(),
                 stamp.run,
                 contract,
-                &crate::presence::Held::default(),
+                held,
                 timeout,
                 &mut owners,
             )
@@ -753,6 +760,19 @@ impl Archive {
     /// ([`Error::ReadBesideSubscriber`], #830): `align` reads presence on
     /// `session`.
     pub async fn start(session: &zenoh::Session, config: ArchiveConfig) -> Result<Self> {
+        Self::start_through(session, config, Vec::new()).await
+    }
+
+    /// [`Archive::start`], an owner's compact descriptor (core §3.3) read
+    /// through `catalogs`, the deployment's (§8.6), when it aligns: the
+    /// revision it names under a snapshot's run decides what the snapshot
+    /// omits (core §4.2). Without the catalog it names, the archive drops
+    /// nothing, never a guess. It writes under none of them.
+    pub async fn start_through(
+        session: &zenoh::Session,
+        config: ArchiveConfig,
+        catalogs: Vec<zenkey_model::catalog::Catalog>,
+    ) -> Result<Self> {
         let window = config
             .service
             .tombstone_window_s
@@ -776,6 +796,14 @@ impl Archive {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let held = crate::presence::Held::new(
+            Arc::new(catalogs),
+            sources
+                .iter()
+                .map(|s| Arc::new(s.rec.implementation.contract().clone()))
+                .collect(),
+        )
+        .retrieving();
         let inner = Arc::new(Inner {
             session: session.clone(),
             me,
@@ -785,6 +813,7 @@ impl Archive {
             window,
             horizon: config.unconfirmed_horizon,
             refuse: AtomicU32::new(0),
+            held,
         });
         let mut subs = Vec::new();
         for src in &inner.sources {

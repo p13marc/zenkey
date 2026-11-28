@@ -3220,6 +3220,21 @@ impl Service {
         &self.session
     }
 
+    /// What it reads a descriptor through (core §3.3): the catalog it
+    /// writes under and the revisions it implements, each other revision a
+    /// compact descriptor names retrieved (§8.4). An instance of its own
+    /// address names its revisions, so a peer's reads with none retrieved.
+    pub(crate) fn held(&self) -> crate::presence::Held {
+        crate::presence::Held::new(
+            Arc::new(self.catalog.as_deref().into_iter().cloned().collect()),
+            self.impls
+                .iter()
+                .map(|s| Arc::new(s.imp.contract().clone()))
+                .collect(),
+        )
+        .retrieving()
+    }
+
     pub(crate) fn served(&self) -> Arc<Served> {
         Arc::clone(&self.served)
     }

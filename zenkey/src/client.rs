@@ -323,6 +323,11 @@ struct Settings {
     /// The deployment epoch a packed record's `time` fields count from
     /// (core §7.6, §8.6): the service's, a tool's catalog's, else 0.
     epoch: i64,
+    /// The deployment catalogs a provider's compact descriptor (core §3.3)
+    /// is read through: the service's, a tool's ([`Client::with_catalogs`]),
+    /// else none, so a compact one is not read and its address stays
+    /// undescribed, never guessed.
+    catalogs: Arc<Vec<zenkey_model::catalog::Catalog>>,
 }
 
 impl Settings {
@@ -332,7 +337,16 @@ impl Settings {
             metadata: None,
             face: None,
             epoch: crate::codec::EPOCH_WITHOUT_CATALOG,
+            catalogs: Arc::default(),
         }
+    }
+
+    /// What a provider's descriptor is read through (core §3.3): the
+    /// catalogs held and `contract`, each other revision a compact one
+    /// names retrieved (§8.4).
+    fn held(&self, contract: &Arc<Contract>) -> crate::presence::Held {
+        crate::presence::Held::new(Arc::clone(&self.catalogs), vec![Arc::clone(contract)])
+            .retrieving()
     }
 
     /// The client's own timeout; else the operation's `timeout_ms`, else
@@ -466,6 +480,18 @@ impl Client {
     #[must_use]
     pub fn with_deployment_epoch(mut self, epoch: i64) -> Self {
         self.settings.epoch = epoch;
+        self
+    }
+
+    /// Reads a provider's compact descriptor (core §3.3) through
+    /// `catalogs`, the deployment's (§8.6): a tool's, given its catalog. A
+    /// client from a service's role holds the service's.
+    #[must_use]
+    pub fn with_catalogs(
+        mut self,
+        catalogs: impl IntoIterator<Item = zenkey_model::catalog::Catalog>,
+    ) -> Self {
+        self.settings.catalogs = Arc::new(catalogs.into_iter().collect());
         self
     }
 
@@ -713,7 +739,7 @@ impl Client {
             &self.session,
             &self.providers,
             &self.contract.iface,
-            &held(&self.contract),
+            &self.settings.held(&self.contract),
             timeout,
             None,
         )
@@ -761,13 +787,6 @@ pub struct Present {
     /// that fails its checks (§3.3) or was not asked before a deadline.
     /// Whether they serve the interface, tokenless, is unknown. Sorted.
     pub undescribed: Vec<Addr>,
-}
-
-/// What a client reads a provider's descriptor through (core §3.3): its
-/// contract, and no deployment catalog, so a compact descriptor is not read
-/// (`unknown_catalog`) and its address stays undescribed, never guessed.
-fn held(contract: &Arc<Contract>) -> crate::presence::Held {
-    crate::presence::Held::new(Arc::default(), vec![Arc::clone(contract)])
 }
 
 /// The selection without the providers another one already covers, so that
@@ -843,6 +862,18 @@ impl Fleet {
     #[must_use]
     pub fn deployment_epoch(&self) -> i64 {
         self.settings.epoch
+    }
+
+    /// Reads a provider's compact descriptor (core §3.3) through
+    /// `catalogs`: [`Client::with_catalogs`]'s, which a client's fleet
+    /// keeps.
+    #[must_use]
+    pub fn with_catalogs(
+        mut self,
+        catalogs: impl IntoIterator<Item = zenkey_model::catalog::Catalog>,
+    ) -> Self {
+        self.settings.catalogs = Arc::new(catalogs.into_iter().collect());
+        self
     }
 
     /// Fans out across a constrained face: [`Client::across`]'s timeout.
@@ -1022,7 +1053,7 @@ impl Fleet {
             &self.session,
             &self.selection,
             &self.contract.iface,
-            &held(&self.contract),
+            &self.settings.held(&self.contract),
             timeout,
             None,
         )

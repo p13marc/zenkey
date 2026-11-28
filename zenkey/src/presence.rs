@@ -1217,7 +1217,41 @@ async fn held_for(
     revisions
 }
 
+/// A descriptor put heard on an instance key (core §3.3: an owner puts
+/// each it serves), read by its form through what `held` holds, here and
+/// now: no revision is retrieved, since a subscriber's callback cannot
+/// wait, so a compact one naming a revision `held` lacks is
+/// [`Found::Unread`] and its reader asks [`descriptor_held`] instead.
+/// `None` for a delete or a key that is no instance key.
+#[must_use]
+pub fn heard(sample: &zenoh::sample::Sample, held: &Held) -> Option<(Addr, InstanceId, Found)> {
+    if sample.kind() != zenoh::sample::SampleKind::Put {
+        return None;
+    }
+    let Ok(ZkKey::Instance { addr, instance }) = parse(sample.key_expr().as_str()) else {
+        return None;
+    };
+    let revisions: Vec<&Contract> = held.revisions.iter().map(|c| &**c).collect();
+    let found = Served::of(sample).read(&addr, &instance, &held.catalogs, &revisions);
+    Some((addr, instance, found))
+}
+
 impl Found {
+    /// The `meta.zid` its descriptor states (core §3.3), read as zenoh
+    /// writes a zid: `None` for no descriptor read, or one that states none,
+    /// as a compact one written without its zid does.
+    #[must_use]
+    pub fn zid(&self) -> Option<u128> {
+        match self {
+            Self::Descriptor(d, _) => d
+                .meta
+                .get("zid")
+                .and_then(serde_json::Value::as_str)
+                .and_then(zenkey_model::timing::zid_value),
+            _ => None,
+        }
+    }
+
     /// The descriptor, or an error naming why there is none.
     pub fn into_descriptor(self) -> Result<Descriptor> {
         match self {

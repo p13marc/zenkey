@@ -308,10 +308,11 @@ pub(crate) async fn owner_revisions(
     session: &zenoh::Session,
     owner: &zenkey_model::grammar::Addr,
     iface: &zenkey_model::grammar::IfaceId,
+    held: &Held,
     timeout: Duration,
 ) -> OwnerRevisions {
     let selector = format!("zk2/{}/{}/@zk/instance/*", owner.system, owner.service);
-    match descriptors(session, "", &selector, iface, &Held::default(), timeout).await {
+    match descriptors(session, "", &selector, iface, held, timeout).await {
         Ok(read) if !read.named.is_empty() => OwnerRevisions::Named(read.named),
         Ok(read) if !read.heard && read.failed.is_none() => OwnerRevisions::Unreached,
         Ok(_) | Err(_) => OwnerRevisions::Unread,

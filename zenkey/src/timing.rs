@@ -679,6 +679,9 @@ pub(crate) struct Sources {
     /// The watch session handed in, where the liveliness subscribers go.
     pub(crate) watch: Option<zenoh::Session>,
     pub(crate) providers: Vec<Provider>,
+    /// What a provider's descriptor is read through, a compact one
+    /// included (core §3.3): the consumer's catalogs and contract.
+    pub(crate) held: crate::presence::Held,
 }
 
 /// A subscription's engine, made before its data subscribers are
@@ -766,11 +769,12 @@ impl Prepared {
                 let (sys, svc) = p.chunks();
                 let sel = format!("zk2/{sys}/{svc}/@zk/instance/*");
                 let e = Arc::clone(&engine);
+                let held = sources.held.clone();
                 let sub = sources
                     .session
                     .declare_subscriber(sel.clone())
                     .callback(move |s: Sample| {
-                        if let Some((addr, zid)) = descriptor_zid(&s) {
+                        if let Some((addr, zid)) = descriptor_zid(&s, &held) {
                             lock(&e).set_owners(&addr, [zid].into());
                         }
                     })
@@ -783,8 +787,8 @@ impl Prepared {
                 }
                 // Every provider's GET at once: a cut-off session costs one
                 // timeout, not one per provider.
-                let session = sources.session.clone();
-                gets.spawn(async move { read_descriptors(&session, &sel).await });
+                let (session, held) = (sources.session.clone(), sources.held.clone());
+                gets.spawn(async move { read_descriptors(&session, &sel, &held).await });
             }
             while let Some(got) = gets.join_next().await {
                 for (addr, zids) in got.unwrap_or_default() {
@@ -792,10 +796,11 @@ impl Prepared {
                 }
             }
             let (e, session) = (Arc::clone(&engine), sources.session.clone());
+            let held = sources.held.clone();
             tasks.push(tokio::spawn(async move {
                 while let Some(addr) = refresh_rx.recv().await {
                     let sel = format!("zk2/{}/{}/@zk/instance/*", addr.system, addr.service);
-                    for (a, zids) in read_descriptors(&session, &sel).await {
+                    for (a, zids) in read_descriptors(&session, &sel, &held).await {
                         lock(&e).set_owners(&a, zids);
                     }
                 }
@@ -893,23 +898,24 @@ impl Prepared {
     }
 }
 
-/// A descriptor put's address and `meta.zid`.
-fn descriptor_zid(s: &Sample) -> Option<(Addr, u128)> {
-    if s.kind() != SampleKind::Put {
-        return None;
-    }
-    let Ok(ZkKey::Instance { addr, .. }) = parse(s.key_expr().as_str()) else {
-        return None;
-    };
-    let v: serde_json::Value = serde_json::from_slice(&s.payload().to_bytes()).ok()?;
-    let zid = zid_value(v.get("meta")?.get("zid")?.as_str()?)?;
-    Some((addr, zid))
+/// A descriptor put's address and `meta.zid`, read by its form through
+/// what `held` holds ([`crate::presence::heard`]): a compact one whose
+/// revisions are not all held attributes nothing here, and the GET of
+/// [`read_descriptors`], which retrieves them, reads it.
+fn descriptor_zid(s: &Sample, held: &crate::presence::Held) -> Option<(Addr, u128)> {
+    let (addr, _, found) = crate::presence::heard(s, held)?;
+    Some((addr, found.zid()?))
 }
 
 /// GETs the descriptors under `selector`: each instance's address and its
-/// `meta.zid`. An instance whose descriptor states none attributes nothing
-/// (core §3.3).
-async fn read_descriptors(session: &zenoh::Session, selector: &str) -> Vec<(Addr, BTreeSet<u128>)> {
+/// `meta.zid`, each read by its form through what `held` holds, a compact
+/// one's revisions retrieved where it lacks them (core §3.3). An instance
+/// whose descriptor states none, or is not read, attributes nothing.
+async fn read_descriptors(
+    session: &zenoh::Session,
+    selector: &str,
+    held: &crate::presence::Held,
+) -> Vec<(Addr, BTreeSet<u128>)> {
     let rx = match session
         .get(selector)
         .consolidation(zenoh::query::ConsolidationMode::None)
@@ -926,7 +932,13 @@ async fn read_descriptors(session: &zenoh::Session, selector: &str) -> Vec<(Addr
     let mut out: BTreeMap<Addr, BTreeSet<u128>> = BTreeMap::new();
     while let Ok(reply) = rx.recv_async().await {
         let Ok(s) = reply.into_result() else { continue };
-        if let Some((addr, zid)) = descriptor_zid(&s) {
+        let Ok(ZkKey::Instance { addr, instance }) = parse(s.key_expr().as_str()) else {
+            continue;
+        };
+        let served = crate::presence::Served::of(&s);
+        let found =
+            crate::presence::read_held(session, served, &addr, &instance, held, READ_TIMEOUT).await;
+        if let Some(zid) = found.zid() {
             out.entry(addr).or_default().insert(zid);
         }
     }

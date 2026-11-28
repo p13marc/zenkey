@@ -1704,6 +1704,10 @@ struct TargetInner {
     ty: Option<Value>,
     json: bool,
     session: zenoh::Session,
+    /// What the author's descriptor is read through, a compact one
+    /// included (core §3.3): the service's catalog and the author's
+    /// revision given, each other one named retrieved.
+    held: crate::presence::Held,
     report: Option<StateWriter>,
     handler: Arc<dyn Handler>,
     startup: TargetStartup,
@@ -1947,6 +1951,11 @@ impl Target {
                 bundle,
                 ty,
                 session: b.session().clone(),
+                held: crate::presence::Held::new(
+                    Arc::new(b.catalog_held().into_iter().cloned().collect()),
+                    vec![Arc::new(contract.clone())],
+                )
+                .retrieving(),
                 report,
                 handler,
                 reread: tokio::sync::watch::Sender::new(startup.reread),
@@ -2151,6 +2160,7 @@ impl TargetInner {
             &self.session,
             author,
             &self.author_iface,
+            &self.held,
             self.startup.timeout,
         )
         .await;
@@ -2193,11 +2203,12 @@ impl TargetInner {
         let named = match rv.runs.get(&at) {
             Some(n) => n.clone(),
             None => {
-                let n = match crate::answer::owner_revision(
+                let n = match crate::answer::owner_revision_held(
                     &self.session,
                     key,
                     run,
                     &self.author_iface,
+                    &self.held,
                     self.startup.timeout,
                 )
                 .await

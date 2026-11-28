@@ -839,10 +839,11 @@ impl TargetInner {
         let named = match known {
             Some((named, retry)) if retry.is_none_or(|at| Instant::now() < at) => named,
             _ => {
-                let (named, retry) = match crate::answer::owner_catalog(
+                let (named, retry) = match crate::answer::owner_catalog_held(
                     &self.session,
                     key,
                     stamp.run,
+                    &self.held,
                     self.startup.timeout,
                 )
                 .await

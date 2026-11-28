@@ -255,6 +255,28 @@ pub async fn split_brain(
     grace: Duration,
     timeout: Duration,
 ) -> Result<Diagnosis> {
+    split_brain_held(
+        session,
+        selector,
+        grace,
+        timeout,
+        &crate::presence::Held::default(),
+    )
+    .await
+}
+
+/// [`split_brain`], each holder's descriptor read by its form through what
+/// `held` holds (core §3.3): a compact one through its catalogs, each
+/// revision it names retrieved where `held` retrieves. A holder whose
+/// descriptor is not read names no revision, as one silent does, and its
+/// candidate is undecided, never guessed.
+pub async fn split_brain_held(
+    session: &zenoh::Session,
+    selector: &str,
+    grace: Duration,
+    timeout: Duration,
+    held: &crate::presence::Held,
+) -> Result<Diagnosis> {
     let before = crate::presence::tokens(session, selector, timeout).await?;
     tokio::time::sleep(grace).await;
     let after = crate::presence::tokens(session, selector, timeout).await?;
@@ -264,7 +286,7 @@ pub async fn split_brain(
     for c in &candidates {
         for i in &c.instances {
             if let Found::Descriptor(d, _) =
-                crate::presence::descriptor(session, &c.service, i, timeout).await?
+                crate::presence::descriptor_held(session, &c.service, i, held, timeout).await?
             {
                 let iface = c.iface.to_string();
                 fingerprints.extend(
