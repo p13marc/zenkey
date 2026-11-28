@@ -160,6 +160,13 @@ def read_address(session: zenoh.Session, address: str, iface: str, *, below: str
 
 def governance_of(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
                   offline: dict[str, dict[str, Any]] | None = None) -> tuple[str, list[str]]:
+    """:func:`governance_detail`'s governance and reasons."""
+    gov, reasons, _ = governance_detail(session, iface, docs, offline)
+    return gov, reasons
+
+
+def governance_detail(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
+                      offline: dict[str, dict[str, Any]] | None = None) -> tuple[str, list[str], list[str]]:
     """§2.15's third premise (0.3): the governance "read from the contract
     each candidate's descriptor names (§2.2)": ``claim``/``external``,
     ``not_governed``, ``no_contract`` (a contract not read, or one whose
@@ -167,9 +174,19 @@ def governance_of(session: zenoh.Session, iface: str, docs: list[dict[str, Any]]
     reasons beside the answer"), or ``disagree``. Returns it with those
     reasons. ``offline`` holds canonical contracts by fingerprint: "A tool
     that holds the contract offline reads governance from it whatever the
-    bus serves"; any other is retrieved (core §8.4)."""
+    bus serves"; any other is retrieved (core §8.4).
+
+    ``redundancy.v2`` §2.15 (round 128): "A tool reads it from every
+    candidate's revision, as §2.2 says. A redundancy.v1 candidate and a
+    redundancy.v2 one, with one election, are one election": each revision's
+    declaration is read by the major it lists
+    (:func:`zk2py.redundancy_v2.either_declaration`). Returns too the majors
+    the governed revisions use."""
+    from . import redundancy_v2 as rv2
+
     seen: set[str] = set()
     reasons: list[str] = []
+    majors: set[int] = set()
     for doc in docs:
         for e in doc.get("interfaces") or []:
             if not isinstance(e, dict) or e.get("iface") != iface:
@@ -179,21 +196,24 @@ def governance_of(session: zenoh.Session, iface: str, docs: list[dict[str, Any]]
             if canonical is None:
                 r = live.retrieve_bundle(session, iface, fp)
                 if not r.verified:
-                    return "no_contract", []
+                    return "no_contract", [], []
                 canonical = r.verified.contract
-            d = rd.declaration_of(canonical)
+            major, d = rv2.either_declaration(canonical)
+            if d.governed and major is not None:
+                majors.add(major)
             if d.declaration == "invalid":
                 seen.add("invalid")
                 reasons += [x for x in d.reasons if x not in reasons]
             else:
                 seen.add(d.election if d.governed else "not_governed")
+    names = [f"redundancy.v{m}" for m in sorted(majors)]
     if not seen:
-        return "no_contract", []
+        return "no_contract", [], names
     if "invalid" in seen:
-        return "no_contract", reasons
+        return "no_contract", reasons, names
     if len(seen) > 1:
-        return "disagree", []
-    return seen.pop(), []
+        return "disagree", [], names
+    return seen.pop(), [], names
 
 
 def governance(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
@@ -324,6 +344,19 @@ class ToolReading:
     findings: list[tuple[str, str]] = field(default_factory=list)
     #: by operation, why the probe left it out (F-221)
     not_probed: dict[str, str] = field(default_factory=dict)
+    #: redundancy.v2 §2.15 (round 128): the majors the governed revisions use
+    majors: list[str] = field(default_factory=list)
+
+    def runs(self) -> dict[str, str | None]:
+        """redundancy.v2 §2.15: "A tool SHOULD show each candidate's run
+        beside its instance, as the candidate's descriptor states it"."""
+        from .redundancy_v2 import Run
+
+        out = {}
+        for i, d in sorted(self.docs.items()):
+            r = Run.parse(d.get("run"))
+            out[i] = None if r is None else str(r)
+        return out
 
     @property
     def exposure(self) -> str | None:
@@ -390,10 +423,10 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
     time.sleep(max(0.0, grace_s - (time.monotonic() - t)))
     r2, p2, d2 = read_address(session, address, iface)
     docs = {**d1, **d2}
-    gov, reasons = governance_of(session, iface, list(docs.values()), offline)
+    gov, reasons, majors = governance_detail(session, iface, list(docs.values()), offline)
     reading = rd.Reading(gov, r1, r2, across_face)
     found = probe_findings(reading, docs, answered) if answered is not None else []
-    return ToolReading(reading, [p1, p2], docs, reasons, answered, found, skipped)
+    return ToolReading(reading, [p1, p2], docs, reasons, answered, found, skipped, majors)
 
 
 def split_findings(session: zenoh.Session, address: str, ifaces: Iterable[str], grace_s: float = 2.0,
@@ -408,10 +441,14 @@ def split_findings(session: zenoh.Session, address: str, ifaces: Iterable[str], 
     out = []
     contracts = list(contracts)
     for iface in ifaces:
-        r = read_tool(session, address, iface, grace_s, contracts=contracts).reading
+        tr = read_tool(session, address, iface, grace_s, contracts=contracts)
+        r = tr.reading
         if r.governance in (rd.CLAIM, rd.EXTERNAL):
             if rd.one_incumbent(r).reason == "split":
-                out.append((iface, sorted(r.second.holders(), key=rd.id_key), "redundancy.v1"))
+                # whose rule: the major the governed revisions use, v1's
+                # where both are (round 128)
+                who = "redundancy.v2" if tr.majors == ["redundancy.v2"] else "redundancy.v1"
+                out.append((iface, sorted(r.second.holders(), key=rd.id_key), who))
         elif r.governance == "not_governed":
             def exposing(read: rd.Read) -> set[str]:
                 return {i.id for i in read.instances if i.token and i.descriptor == rd.SERVING}
@@ -865,7 +902,11 @@ class Candidate:
         (scenarios.md; a valve's position the same)."""
         if self.takeover_puts_nothing:
             return
-        rid = "balance" if self.iface.startswith("ledger.") else "position"
+        rid = "balance" if self.iface.startswith("ledger.") else "position" if self.iface.startswith("valve.") \
+            else next((r["template"] for r in self.contract.canonical["resources"]
+                       if r["kind"] == "state" and "{" not in r["template"]), None)
+        if rid is None:
+            return
         owner.set_state(f"zk2/{self.address}/{self.iface}/state/{rid}", self.name.encode())
 
     def put(self, rid: str, value: str) -> str:

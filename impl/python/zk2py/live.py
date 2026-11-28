@@ -1901,7 +1901,7 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
             recognised = sorted((inst for inst, _, first, sb in rows if first == "yes" and sb is True), key=str)
             return "no", ("one complete read, every descriptor read, shows at most one meta.zid"
                           + (f", and {len(recognised)} recognised standby, not counted: "
-                             f"{', '.join(recognised)} (redundancy.v1 §2.15, 0.3; hostid.v1 §2.12)"
+                             f"{', '.join(recognised)} (redundancy.v1 or redundancy.v2 §2.15; hostid.v1 §2.12)"
                              if recognised else "")), reads
     return "unobservable", ("the finding is not established, and a descriptor could not be read, a counted "
                             "instance states no meta.zid, an instance lists hostid.v1 while whether it is "
