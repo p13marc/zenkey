@@ -6167,12 +6167,15 @@ def _round128b_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  [int(reader.group(1)), int(reader.group(2))] if reader else None]
                 + missing(obs, "- **A read never undoes a token heard since it was asked.** The read and the watch "
                                "ride two sessions, which no router orders (§3.7). A token the watch hears declared "
-                               "after the read is asked stands, whatever the read shows: the read establishes "
-                               "nothing of it. A reader MUST NOT apply such a read's absence to a token heard since. "
-                               "`[Sc: profiles/redundancy/scenarios-v2.md §13]`")
+                               "or withdrawn after the read is asked stands as the watch heard it: the read "
+                               "establishes nothing of it. A reader MUST NOT apply such a read's absence to a token "
+                               "heard declared since, nor its showing to one heard withdrawn since. "
+                               "`[Sc: profiles/redundancy/scenarios-v2.md §13]` That one is unconfirmed, and owes "
+                               "a read.")
                 + missing(rules, "| [§3.6](observer.md#36-absence), *reader* | **A read never undoes a token heard "
                                  "since it was asked.** … A reader MUST NOT apply such a read's absence to a token "
-                                 "heard since. | `[Sc: profiles/redundancy/scenarios-v2.md §13]` |")
+                                 "heard declared since, nor its showing to one heard withdrawn since. | "
+                                 "`[Sc: profiles/redundancy/scenarios-v2.md §13]` |")
                 + missing(olog, "## 0.38 — 2026-11-29: §3.6: a read never undoes a token heard since it was asked "
                                 "(#987)",
                           "**What deliberately did not change.** The read again after a withdrawal, its SHOULD and "
@@ -6227,10 +6230,10 @@ def _round128b_readings(root: Path) -> list[tuple[str, Any, Any]]:
                              "the two is held. Otherwise, only at an incumbent's new run within its instance:",
                         "- **Seed again.** A follower whose incumbent changes SHOULD read the interface's state "
                         "again by core S4, and merge only the new incumbent's answers. `[Sc: §13, §15]` They are "
-                        "its snapshots, or its replies per key under a `redundancy.v1` incumbent (v1 §2.10).",
-                        "leaves the follower's view. `[Sc: §13]` No omission rule applies to replies per key. Under "
-                        "a `redundancy.v1` incumbent the follower keeps what the last incumbent held, as v1 "
-                        "§2.10's does.")
+                        "its snapshots, or its replies per key: a `redundancy.v1` incumbent's (v1 §2.10), and a per-key "
+                        "resource's (§2.6).",
+                        "leaves the follower's view. `[Sc: §13]` No omission rule applies to replies per key. For "
+                        "those members the follower keeps what the last incumbent held, as v1 §2.10's does.")
                 + ["Never at a takeover" in r2t, "merge only the new incumbent's snapshots" in r2t]
                 + missing(r2s, "After it, K accepts it under B's run. K learns that run from B's descriptor, read at "
                                "B's token. A put between the two is held.",

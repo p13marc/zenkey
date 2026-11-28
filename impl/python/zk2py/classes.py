@@ -582,7 +582,7 @@ WALK: list[tuple[str, str, str, str, str]] = [
     ("observer", "observer §3.6", "The reader SHOULD report what that read establishes", MET,
      "presence.PresenceFollower (presence_scenarios §8)"),
     # observer 0.38 (#987, F-629), round 128's mend.
-    ("observer", "observer §3.6", "A reader MUST NOT apply such a read's absence to a token heard since", MET,
+    ("observer", "observer §3.6", "A reader MUST NOT apply such a read's absence to a token heard declared since", MET,
      "presence.PresenceView.answered folds a read as of when it was asked, a token heard since standing over its "
      "absence (the conformance walk's _round128b_readings); redundancy_v2_live.Follower's read again "
      "(redundancy_v2_scenarios hb-takeover) (round 128's mend, observer 0.38)"),

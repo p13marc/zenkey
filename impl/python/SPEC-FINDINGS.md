@@ -33903,6 +33903,7 @@ its incumbent in 0 of 108 takeovers.
   such a read's absence to a token heard declared since, nor its
   showing to one heard withdrawn since. That one is unconfirmed, and
   owes a read."
+- **Resolved** (the lead, observer 0.38): "A token the watch hears declared or withdrawn after the read is asked stands as the watch heard it … nor its showing to one heard withdrawn since. That one is unconfirmed, and owes a read."
 
 ### F-636 · minor · `redundancy.v2` §2.10, "Seed again": the answers it lists leave out a `redundancy.v2` incumbent's replies per key, which §2.6 allows
 
@@ -33940,6 +33941,7 @@ its incumbent in 0 of 108 takeovers.
   (§2.6). No omission rule applies to replies per key: for those
   members the follower keeps what the last incumbent held, as v1
   §2.10's does."
+- **Resolved** (the lead): "They are its snapshots, or its replies per key: a `redundancy.v1` incumbent's (v1 §2.10), and a per-key resource's (§2.6)."
 
 ### F-637 · contradiction · `redundancy.v2` §2.10, "No session stamp" and "A clock ahead", against core §4.3's table: a candidate's per-key state carries the Zenoh timestamp its owner sets
 
@@ -33978,6 +33980,7 @@ its incumbent in 0 of 108 takeovers.
 - **Changes:** no follower's decision: under a `redundancy.v2`
   incumbent the rule reads the run. A candidate built from §2.10 alone
   strips the timestamp that `freshness.v1` ages a reply by.
+- **Resolved** (the lead): a candidate sets no Zenoh timestamp "but where core §4.3's table lists the resource", and the clock guard holds those as any owner's.
 
 ### F-638 · index · `redundancy.v2` 0.1's entry heads "Two implementations ran it" with "Not verified", beside "No byte crossed a wire under this major"; Appendix B says the same
 
@@ -34003,6 +34006,7 @@ its incumbent in 0 of 108 takeovers.
   crossed a wire" and Appendix B's last sentence with what crossed:
   the descriptor's two sizes and the put's payload, measured under
   this major.
+- **Resolved** (the lead): 0.1's entry heads its first item "Verified.", and Appendix B says what crossed a wire under this major.
 
 ### Not run
 
