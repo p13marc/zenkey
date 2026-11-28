@@ -696,8 +696,24 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   omission rule over each complete snapshot of the incumbent's (a member
   put under its run past its asof stays). `FollowEvent::{Incumbent,
   Accepted{seeded}, Discarded, Held, Superseded, SeedDiscarded, Omitted,
-  Seeded}` in decision order from a task of its own. A heartbeat covering
-  the interface is not fenced yet. scenarios-v2.md §1–§11 and §13–§15 are
+  Seeded}` in decision order from a task of its own. Heartbeats (#987's
+  N3, v2 §2.10 "A heartbeat"): the follower subscribes through
+  `Consumer::subscribe_gated` (crate-private), whose `BeatGate` gets each
+  admitted heartbeat covering the interface and each owner heartbeat
+  before the view reads it, with a closure that reads it; `follow`'s
+  `FollowGate` offers it to the same fence (`Member::Alone`, its
+  envelope's stamp, `follow::beat_sample`), the fence's item now
+  `Item::{Data, Beat}`, so the view reads only the incumbent's, now or
+  once a read of the descriptors attributes it
+  (`FollowEvent::{Heartbeat, HeartbeatDiscarded, HeartbeatHeld}`,
+  `FollowCounts::{heartbeats, heartbeats_discarded, heartbeats_held}`;
+  `consume --follow` prints them). Without a gate nothing moved.
+  `profile_redundancy_v2.rs`'s `a_follower_reads_its_incumbents_heartbeats_alone`
+  over `tests/contracts/beacon-governed-run.v2.toml` (hand-built
+  holders: another holder's two heartbeats discarded and never read, so
+  K's view is not due a read where P's is; one under no stated run held
+  then discarded `unattributed`; the incumbent's new run read after its
+  descriptor's GET). scenarios-v2.md §1–§11 and §13–§15 are
   `tests/profile_redundancy_v2.rs` (v1's harness restated over
   `tests/contracts/{ledger-run,valve-run}.v1.toml`, no session stamping,
   S recording runs and stamp ids; K is `Consumer::follow`, §15's K1 the
