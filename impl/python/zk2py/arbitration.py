@@ -657,14 +657,24 @@ class View:
     active: str | None
 
 
+def view_major(revisions: Iterable[dict[str, Any]]) -> int | None:
+    """§2.12 (text 0.7, round 128): a tool's view "reads §2.5's outcome 6
+    with the required interface governed when every revision of it the tool
+    holds lists one major of redundancy, and by that major": 1 or 2, or None
+    where a revision lists none, or two revisions list two majors. A
+    descriptor names no revision of the required interface, so the tool
+    cannot pick the consumer's; with none held, there is no view (the
+    declaration is unread)."""
+    from .redundancy_v2 import governing_major
+
+    majors = {governing_major(r.get("uses") or []) for r in revisions}
+    return majors.pop() if len(majors) == 1 and None not in majors else None
+
+
 def view_governed(revisions: Iterable[dict[str, Any]]) -> bool:
-    """§2.14 (text 0.3): a tool's view "reads §2.5's outcome 6 with the
-    required interface governed when every revision of it the tool holds
-    lists ``redundancy.v1``". A descriptor names no revision of the required
-    interface, so the tool cannot pick the consumer's; with none held, there
-    is no view (the declaration is unread)."""
-    revs = list(revisions)
-    return bool(revs) and all("redundancy.v1" in (r.get("uses") or []) for r in revs)
+    """:func:`view_major` is not None: text 0.3's reading, with either major
+    since 0.7."""
+    return view_major(revisions) is not None
 
 
 def listened_ns(subscribed_ns: Iterable[int], now_ns: int) -> int:

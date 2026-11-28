@@ -4450,6 +4450,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round123_readings(root) + _round124_readings(root) + _round125_readings(root) \
         + _round126_readings(root) + _round127_readings(root) + _round127b_readings(root) \
         + _round127c_readings(root)
+        + _round128_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -5977,6 +5978,158 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "so, and acts on neither put. `Rp` and `Run` receive nothing."),
                 [[], ["0007"], [("sample", "0007/1", stop), ("sample", "0007/0", stop), ("no_entry", "0007", stop),
                                 ("sample", "0008/0", "given")]]))
+    return out
+
+
+def _round128_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.119, redundancy.v2 0.1, freshness.v2 0.14, link.v2 0.29,
+    arbitration.v1 0.7 and hostid.v1 0.10 (#609, round 128; #987): each
+    text at its version with its entry; the sentences that now read either
+    major, as zk2py's owner, its arbitration view and its device check read
+    them; and the reference's five new contracts as zk2py lints them. No
+    session is opened."""
+    import re
+
+    from . import arbitration as ab, link_v2, redundancy_v2 as r2
+    from .contract import load_contract
+    from .owner import Owner, OwnerRefused
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    def at(rel: str) -> str | None:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", flat(rel))
+        return m.group(1) if m else None
+
+    core, index = flat("core.md"), flat("profiles/README.md")
+    core_at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
+    log, rlog = flat("CHANGELOG.md"), flat("profiles/redundancy/CHANGELOG.md")
+    flog, llog = flat("profiles/freshness/CHANGELOG.md"), flat("profiles/link/CHANGELOG.md")
+    alog, hlog = flat("profiles/arbitration/CHANGELOG.md"), flat("profiles/hostid/CHANGELOG.md")
+    r2t, r2s = flat("profiles/redundancy/v2.md"), flat("profiles/redundancy/scenarios-v2.md")
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("round 128's texts at their versions or later, each with its entry: core 0.119, redundancy.v2 "
+                "0.1 (experimental, written against core 0.119, 15 scenario sections), freshness.v2 0.14, link.v2 "
+                "0.29, arbitration.v1 0.7 (written against core 0.119) and hostid.v1 0.10; the index's row",
+                [core_at is not None and _at_least(core_at.group(1), "0.119"),
+                 _at_least(at("profiles/redundancy/v2.md"), "0.1"), _at_least(at("profiles/freshness/v2.md"), "0.14"),
+                 _at_least(at("profiles/link/v2.md"), "0.29"), _at_least(at("profiles/arbitration/v1.md"), "0.7"),
+                 _at_least(at("profiles/hostid/v1.md"), "0.10"),
+                 re.search(r"\| \[`redundancy\.v2`\]\(redundancy/v2\.md\) \| 0\.1 \| experimental \| none \| 0\.119 \|",
+                           index) is not None,
+                 len(re.findall(r"## §(\d+) ", (spec / "profiles/redundancy/scenarios-v2.md").read_text()))]
+                + missing(log, "## 0.119 — 2026-11-28: a candidate of either major of `redundancy` draws a 32-bit "
+                               "run and is refused a tokenless interface; only `redundancy.v1`'s session stamps, no "
+                               "keyword changed (#987)")
+                + missing(rlog, "## redundancy.v2 0.1 — 2026-11-28: a new major: no session stamp, the fence by the "
+                                "incumbent's run, the state answered by snapshot (#987)")
+                + missing(flog, "## `v2.md` 0.14 — 2026-11-28: editorial: a standby of either major of `redundancy` "
+                                "sends no heartbeat")
+                + missing(llog, "## link.v2 0.29 — 2026-11-28: §2.5: a device implementing an interface whose "
+                                "revision uses `redundancy.v2` is refused, `presence_required`")
+                + missing(alog, "## 0.7 — 2026-11-28: §2.5's outcome 6 reads either major of redundancy (#987)")
+                + missing(hlog, "## 0.10 — 2026-11-28: a recognised standby is one of either major of `redundancy` "
+                                "(#987)")
+                + missing(r2t, "| **Written against** | core 0.119 (")
+                + missing(flat("profiles/arbitration/v1.md"), "| **Written against** | core 0.119 ("),
+                [True] * 7 + [15]))
+
+    # -- core 0.119's three sentences, as zk2py's owner reads them -------------------------------
+    cdir = repo / "zenkey" / "tests" / "contracts"
+    ledger_run = load_contract(cdir / "ledger-run.v1.toml", spec_dir=spec)
+    ledger_v1 = load_contract(cdir / "ledger.v1.toml", spec_dir=spec)
+
+    def posture(c: Any, **kw: Any) -> list[Any]:
+        o = Owner("lab", "ledger", [c], connect="tcp/127.0.0.1:1", standby={c.interface}, **kw)
+        try:
+            o._plan()
+            refusal = None
+        except OwnerRefused as e:
+            refusal = str(e).split(": ", 1)[1].split(" (")[0]
+        o.session = None
+        run = o.take_run()
+        return [o.candidate, o.stamping_candidate, o.hlc, run[0], refusal]
+
+    out.append(("core 0.119 §4.3, §8.2 step 2 and the posture's exception, as zk2py's owner reads them: a "
+                "candidate of either major draws a 32-bit run; only a redundancy.v1 candidate's session stamps; "
+                "step 2 refuses a governed interface of either major in the tokenless set, and a first hop's",
+                [posture(ledger_v1), posture(ledger_run), posture(ledger_run, tokenless=["ledger.v1"])[4],
+                 posture(ledger_v1, tokenless=["ledger.v1"])[4]]
+                + missing(core, "when it is a candidate of a governed interface, under either major of the profile",
+                          "And it refuses one whose tokenless set names an interface it implements whose contract "
+                          "uses `redundancy.v1` or `redundancy.v2`.",
+                          "**No exception under `redundancy.v2`.** Its candidate's session runs as any owner's"),
+                [[True, True, True, 32, None], [True, False, False, 32, None],
+                 "its redundancy.v2 declaration is invalid: tokenless",
+                 "its redundancy.v1 declaration is invalid: tokenless"]))
+
+    # -- the reference's five new contracts, as zk2py reads them ----------------------------------
+    # The fingerprints are the reference's `zk2 contract fingerprint` of 91c62f0e, run as a black box.
+    ref_fp = {"ledger-run.v1": "a2c4c2ef6b8d67f8", "ledger-run-appendall.v1": "20675b0368a25f31",
+              "beacon-governed-run.v2": "450f61d133e318e4", "steer-governed-run.v1": "7a39c6bfc74b0595",
+              "valve-run.v1": "19a5d56da2d87f84"}
+    got_c = {}
+    for name in ref_fp:
+        c = load_contract(cdir / f"{name}.toml", spec_dir=spec)
+        major, d = r2.either_declaration(c.canonical)
+        got_c[name] = [c.valid, c.fingerprint.removeprefix("sha256:")[:16] == ref_fp[name], major, d.as_json(),
+                       r2.lint(c.canonical)]
+    out.append(("the reference's five new contracts (zenkey/tests/contracts/): each lints clean, has the "
+                "reference's fingerprint, and is governed by redundancy.v2, under claim but valve-run.v1's external",
+                got_c,
+                {"ledger-run.v1": [True, True, 2, {"declaration": "governed", "election": "claim"}, []],
+                 "ledger-run-appendall.v1": [True, True, 2, {"declaration": "governed", "election": "claim"}, []],
+                 "beacon-governed-run.v2": [True, True, 2, {"declaration": "governed", "election": "claim"}, []],
+                 "steer-governed-run.v1": [True, True, 2, {"declaration": "governed", "election": "claim"}, []],
+                 "valve-run.v1": [True, True, 2, {"declaration": "governed", "election": "external"}, []]}))
+
+    # -- redundancy.v2 §2.2's lint, either major ---------------------------------------------------
+    def canon(uses: list[str], election: Any, explicit: bool) -> dict[str, Any]:
+        return {"uses": uses, "resources": [
+            {"kind": "state", "token": "state", "template": "balance", "annotations": {"redundancy.election": election}},
+            {"kind": "stream", "token": "@stream" if explicit else "stream", "template": "entries",
+             "explicit": explicit, "annotations": {"redundancy.election": election}}]}
+
+    out.append(("redundancy.v2 §2.2: \"A contract linter SHOULD warn of explicit_stream, as v1 §2.2 says of value "
+                "and disagrees\": zk2py's lint, either major, as the reference's `zk2 contract lint` warns (live, "
+                "round 128): an explicit stream under v2 alone; value on each resource under either",
+                [r2.lint(canon(["redundancy.v2"], "claim", True)), r2.lint(canon(["redundancy.v1"], "claim", True)),
+                 r2.lint(canon(["redundancy.v2"], "bogus", False)), r2.lint(canon(["redundancy.v1"], "bogus", False))]
+                + missing(r2t, "A contract linter SHOULD warn of `explicit_stream`, as v1 §2.2 says of `value` and "
+                               "`disagrees`."),
+                [[("explicit_stream", "@stream/entries")], [],
+                 [("value", "state/balance"), ("value", "stream/entries")],
+                 [("value", "state/balance"), ("value", "stream/entries")]]))
+
+    # -- link.v2 0.29's case 55 ------------------------------------------------------------------
+    plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    c55 = plan[55]
+    variant = {**c55, "interfaces": {"gov.v1": {**c55["interfaces"]["gov.v1"], "uses": ["freshness.v2"]}}}
+    out.append(("link.v2 0.29 §2.5: case 55, case 25's device on gov.v1 under redundancy.v2, is refused "
+                "presence_required by zk2py's plan; the same interface using no major of redundancy plans",
+                [link_v2.plan(c55["policy"], c55["implements"], _link_interfaces(c55), c55.get("catalog")),
+                 "refused" in link_v2.plan(variant["policy"], variant["implements"], _link_interfaces(variant),
+                                           variant.get("catalog"))]
+                + missing(flat("profiles/link/v2.md"), "A device implements `archive.v1`, or an interface a revision "
+                                                       "given of which uses `redundancy.v1` or `redundancy.v2` (§2.5)."),
+                [c55["expect"], False]))
+
+    # -- arbitration.v1 0.7 §2.12's view -----------------------------------------------------------
+    v1u, v2u, nou = {"uses": ["timing.v1", "redundancy.v1"]}, {"uses": ["timing.v1", "redundancy.v2"]}, \
+        {"uses": ["timing.v1"]}
+    out.append(("arbitration.v1 0.7 §2.12: the tool's view reads outcome 6 \"governed when every revision of it "
+                "the tool holds lists one major of redundancy, and by that major\": zk2py's view_major",
+                [ab.view_major([v1u]), ab.view_major([v2u, v2u]), ab.view_major([v1u, v2u]), ab.view_major([v2u, nou]),
+                 ab.view_major([])]
+                + missing(flat("profiles/arbitration/v1.md"),
+                          "governed when every revision of it the tool holds lists one major of `redundancy`, and by "
+                          "that major.",
+                          "**An unattributed sample** is `not_incumbent`."),
+                [1, 2, None, None, None]))
     return out
 
 

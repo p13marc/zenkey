@@ -1744,7 +1744,10 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
     0.6's **recognised standby** "lists only interfaces whose contracts use
     redundancy.v1, at least one, and that profile's question 'is this
     instance a standby, or a twin?' answers no, standby, of each, from the
-    same two reads". So each read is of the address's whole ``@zk/**``,
+    same two reads". 0.10 (round 128) reads "a major of redundancy,
+    redundancy.v1 or redundancy.v2", each interface's governance as
+    ``redundancy.v2`` §2.15 reads it, from every instance's revision
+    (:func:`zk2py.redundancy_v2.governance`). So each read is of the address's whole ``@zk/**``,
     instance and interface tokens at once (``redundancy.v1`` §0), and the
     standby question is :func:`zk2py.redundancy.twin` over the two.
 
@@ -1765,7 +1768,7 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
 
     Each read is (complete, [(instance, descriptor or None, first answer,
     standby: True recognised, False counted, None unobservable)])."""
-    from . import hostid, redundancy as rd
+    from . import hostid, redundancy as rd, redundancy_v2 as rv2
 
     contracts: dict[tuple[str, str], dict[str, Any] | None] = {}
 
@@ -1818,6 +1821,22 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
             seen.append(rd.Seen(inst, inst in holders, desc))
         return rd.Read(pres.complete, tuple(seen))
 
+    def governed_by(iface: str) -> str:
+        """redundancy.v2 §2.15's governance of ``iface`` at the address, from
+        the revision each instance of the first read names (§2.2 "Across
+        revisions"): an unread one gives none."""
+        revs = []
+        for doc in pres_reads[0][1].values():
+            for e in (doc or {}).get("interfaces") or []:
+                if isinstance(e, dict) and e.get("iface") == iface:
+                    c = canonical(e)
+                    if c is None:
+                        revs.append({"declaration": "unread"})
+                        continue
+                    major, d = rv2.either_declaration(c)
+                    revs.append({"declaration": d.declaration, "election": d.election, "major": major})
+        return rv2.governance(revs)
+
     def standby(inst: str, doc: dict[str, Any] | None) -> bool | None:
         """0.6: True a recognised standby, False counted, None unobservable
         (it lists only governed interfaces, and the question is
@@ -1833,10 +1852,16 @@ def hostid_collision(session: zenoh.Session, address: str, grace_s: float = 2.0)
             if c is None:
                 answers.append(None)
                 continue
-            d = rd.declaration_of(c)
+            # hostid.v1 0.10 (round 128): "only interfaces whose contracts use
+            # a major of redundancy, redundancy.v1 or redundancy.v2"
+            _, d = rv2.either_declaration(c)
             if not d.governed:
-                return False  # "an instance that lists an interface no contract of the profile governs"
-            reading = rd.Reading(d.election or rd.CLAIM, red_read(0, str(e["iface"])), red_read(1, str(e["iface"])))
+                return False  # "an instance that lists an interface no major of the profile governs"
+            # "Each interface's governance is read as redundancy.v2 §2.15
+            # reads it. A redundancy.v1 candidate and a redundancy.v2 one with
+            # one election are one election": from every instance's revision
+            reading = rd.Reading(governed_by(str(e["iface"])), red_read(0, str(e["iface"])),
+                                 red_read(1, str(e["iface"])))
             a = rd.twin(reading, inst)
             answers.append(True if (a.answer, a.reason) == (rd.NO, "standby")
                            else None if a.answer == rd.UNOBSERVABLE else False)
