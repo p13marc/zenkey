@@ -32,6 +32,31 @@ pub mod compact;
 /// The format tag of this version of the record.
 pub const FORMAT: &str = "zk2-descriptor/0.1";
 
+/// The form a descriptor travels in (core §3.3, "What carries it"), told
+/// by its put's or its reply's `Encoding` alone, never by its bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Form {
+    /// The JSON form, under `application/json`.
+    Json,
+    /// The compact form ([`compact`]), under `zenoh/bytes`.
+    Compact,
+}
+
+impl Form {
+    /// The form `encoding` says, as zenoh writes an `Encoding`:
+    /// `zenoh/bytes` exactly ([`crate::wire::ENCODING`]) is the compact
+    /// form, and any other is read as JSON, where one that does not read is
+    /// D000. So a reader never decides by the bytes.
+    #[must_use]
+    pub fn of(encoding: &str) -> Form {
+        if encoding == crate::wire::ENCODING {
+            Form::Compact
+        } else {
+            Form::Json
+        }
+    }
+}
+
 /// One instance's descriptor.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -659,7 +684,22 @@ fn is_name(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::Descriptor;
+    use super::{Descriptor, Form};
+
+    /// §3.3, "What carries it": `zenoh/bytes` exactly is the compact form,
+    /// and every other `Encoding` the JSON one, a schema suffix included.
+    #[test]
+    fn the_encoding_alone_tells_the_two_forms_apart() {
+        assert_eq!(Form::of("zenoh/bytes"), Form::Compact);
+        for other in [
+            "application/json",
+            "text/plain",
+            "zenoh/bytes;x",
+            "application/octet-stream",
+        ] {
+            assert_eq!(Form::of(other), Form::Json, "{other}");
+        }
+    }
 
     /// §3.3's compact exposure: a missing capability implies an optional
     /// resource absent, as a listed one is; a required resource is always
