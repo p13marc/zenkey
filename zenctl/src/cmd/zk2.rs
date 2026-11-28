@@ -81,7 +81,19 @@ pub async fn presence(
     session: &zenoh::Session,
     scope: &PresenceScope,
 ) -> Result<Catalog> {
-    let observed = zenkey_fleet::observe_presence(session, scope, dep.timeout()).await?;
+    presence_through(dep, session, scope, &zenkey_fleet::Describing::default()).await
+}
+
+/// [`presence`], each descriptor read by its form (core §3.3) through what
+/// `describing` holds: a compact one through `--catalog` and the store.
+pub async fn presence_through(
+    dep: &Deployment,
+    session: &zenoh::Session,
+    scope: &PresenceScope,
+    describing: &zenkey_fleet::Describing,
+) -> Result<Catalog> {
+    let observed =
+        zenkey_fleet::observe_presence_through(session, scope, dep.timeout(), describing).await?;
     let catalog = Catalog::new(&observed);
     crate::completion::remember_presence(
         dep.link().context_name(),

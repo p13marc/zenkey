@@ -87,6 +87,10 @@ pub struct PresenceKey {
     pub monitor: Arc<Monitor>,
     /// The contract store the lens retrieves into.
     pub store: BundleStore,
+    /// The deployment catalogs the window holds (`--catalog`, Settings):
+    /// what the lens reads an owner's compact descriptor through (core
+    /// §3.3, §8.6). With none, a compact one is not read, never guessed.
+    pub catalogs: Arc<zenkey_fleet::Catalogs>,
     pub timeout: Duration,
 }
 
@@ -113,7 +117,7 @@ pub fn subscribe(key: PresenceKey) -> Subscription<Message> {
 /// can drive it against a real deployment without a window.
 pub fn stream(key: PresenceKey) -> impl iced::futures::Stream<Item = Message> {
     async_stream::stream! {
-        let PresenceKey { epoch, session, monitor, store, timeout } = key;
+        let PresenceKey { epoch, session, monitor, store, catalogs, timeout } = key;
         // The monitor runs on the namespaced session, so its keys are
         // base-relative and the projection's wire namespace is empty.
         let live = LivePresence::new(PresenceScope::all());
@@ -150,7 +154,7 @@ pub fn stream(key: PresenceKey) -> impl iced::futures::Stream<Item = Message> {
         // retrieves what their descriptors name; a read that could not be
         // made leaves it without a catalog, and every zk2 key then says
         // presence was not read (O4).
-        let (lens, error) = LensFeed::open(&session, &store, timeout).await;
+        let (lens, error) = LensFeed::open_through(&session, &store, &catalogs, timeout).await;
         if let Some(e) = error {
             tracing::warn!("the lens's presence read failed: {}", zenkey_fleet::one_line(&e));
         }

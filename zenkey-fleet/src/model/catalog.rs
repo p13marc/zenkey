@@ -757,8 +757,14 @@ fn member_token(addr: &Addr, member: &MemberId, epoch: &InstanceId) -> ZkKey {
 pub enum DescriptorRead {
     /// A descriptor that passes the syntax checks.
     Served(Box<Descriptor>),
-    /// A reply that fails the descriptor check, with its findings.
+    /// A reply that fails the descriptor check, with its findings: a JSON
+    /// one, or a compact one refused for its bytes (core §3.3).
     Invalid(String),
+    /// A compact descriptor (core §3.3) not read for what the reader does
+    /// not hold: the catalog it names (`--catalog`), an index, or a
+    /// revision it lists. Never guessed (§8.6), and not a verdict: what it
+    /// says of the instance is unknown.
+    Unread(String),
     /// No reply within the timeout. Not a verdict.
     Silent,
     /// The GET could not be put on the bus.
@@ -770,6 +776,7 @@ impl From<zenkey::presence::Found> for DescriptorRead {
         match found {
             zenkey::presence::Found::Descriptor(d, _) => DescriptorRead::Served(d),
             zenkey::presence::Found::Invalid(why) => DescriptorRead::Invalid(why),
+            zenkey::presence::Found::Unread(why) => DescriptorRead::Unread(why),
             zenkey::presence::Found::Nothing => DescriptorRead::Silent,
         }
     }
@@ -793,6 +800,9 @@ impl DescriptorRead {
             DescriptorRead::Invalid(findings) => DescriptorAnswer::Invalid {
                 findings: findings.clone(),
             },
+            DescriptorRead::Unread(reason) => DescriptorAnswer::Unread {
+                reason: reason.clone(),
+            },
             DescriptorRead::Silent => DescriptorAnswer::Silent,
             DescriptorRead::Failed(reason) => DescriptorAnswer::Failed {
                 reason: reason.clone(),
@@ -800,11 +810,13 @@ impl DescriptorRead {
         }
     }
 
-    /// The answer's tag: `served`, `invalid`, `silent` or `failed`.
+    /// The answer's tag: `served`, `invalid`, `unread`, `silent` or
+    /// `failed`.
     pub fn tag(&self) -> &'static str {
         match self {
             DescriptorRead::Served(_) => "served",
             DescriptorRead::Invalid(_) => "invalid",
+            DescriptorRead::Unread(_) => "unread",
             DescriptorRead::Silent => "silent",
             DescriptorRead::Failed(_) => "failed",
         }

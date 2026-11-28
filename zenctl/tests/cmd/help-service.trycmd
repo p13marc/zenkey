@@ -30,7 +30,7 @@ Options:
 $ zenctl service list --help
 Every running service: instances, interfaces, descriptors.
 
-One liveliness read of `zk2/*/*/@zk/**` in the deployment's namespace (spec §8.1), then every instance's descriptor (§3.3). Each interface row keeps its two sources apart — the token's fingerprint prefix beside the descriptor's full fingerprint — and an interface in the tokenless set (U22) is known from the descriptor alone. A pure consumer is listed too: every instance holds an instance token. A read that ran to its timeout, or to its session's interests timeout (`routing/interests/timeout`), is possibly incomplete, and says so: a service missing from it may still be up.
+One liveliness read of `zk2/*/*/@zk/**` in the deployment's namespace (spec §8.1), then every instance's descriptor (§3.3). Each interface row keeps its two sources apart — the token's fingerprint prefix beside the descriptor's full fingerprint — and an interface in the tokenless set (U22) is known from the descriptor alone. A pure consumer is listed too: every instance holds an instance token. A read that ran to its timeout, or to its session's interests timeout (`routing/interests/timeout`), is possibly incomplete, and says so: a service missing from it may still be up. A compact descriptor (§3.3, under `zenoh/bytes`) is read through --catalog, each revision it names held by --contracts or retrieved; without the catalog it names it is not read (`unknown_catalog`), and lists nothing.
 
 Usage: zenctl service list [OPTIONS]
 
@@ -40,6 +40,16 @@ Options:
 
       --face-policy <FILE>
           A `link.v2` face policy whose device faces (`attach = "device"`) list owners on a first hop (link.v2 §2.5): each device's instance token follows its link, so its absence reads `link_closed`, never down (observer §3.11). A policy the linter refuses, or one with no device face, is refused (exit 2)
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
 
       --namespace <NS>
           The deployment namespace: the session is opened in it.
@@ -98,7 +108,7 @@ Options:
 $ zenctl service show --help
 One service: each instance's tokens and the descriptor it serves.
 
-The descriptor as served (spec §3.3): its interfaces with their full fingerprints, the tokenless set, capabilities, unavailable resources and cardinality bounds, and every role with its bindings. Exit 2 when presence shows no instance: silence is not an answer.
+The descriptor as served (spec §3.3): its interfaces with their full fingerprints, the tokenless set, capabilities, unavailable resources and cardinality bounds, and every role with its bindings. A compact descriptor (under `zenoh/bytes`) is shown as the JSON form's members, read through --catalog and each revision it names, held by --contracts or retrieved; without the catalog it names it is not read (`unknown_catalog`), never guessed. Exit 2 when presence shows no instance: silence is not an answer.
 
 Usage: zenctl service show [OPTIONS] <SYSTEM/SERVICE>
 
@@ -109,6 +119,16 @@ Arguments:
 Options:
       --face-policy <FILE>
           A `link.v2` face policy whose device faces (`attach = "device"`) list owners on a first hop (link.v2 §2.5): each device's instance token follows its link, so its absence reads `link_closed`, never down (observer §3.11). A policy the linter refuses, or one with no device face, is refused (exit 2)
+
+      --contracts <PATH>
+          Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.
+          
+          They seed the contract store, so a revision held here is never retrieved from the bus (spec §8.5) — and a question they answer alone opens no session at all. A file that is not a valid contract is reported on stderr; a path that loads nothing is refused (exit 2).
+
+      --catalog <PATH>
+          The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions, never fetched from the bus.
+          
+          An owner's packed `time` fields are then read under the epoch of the catalog its descriptor names, read through these (a successor included); with no descriptor in hand, across a constrained face or from a capture, these state it, the deployment's word. Without one, an owner whose descriptor names no catalog counts from 0, and one that names a catalog none of these is or succeeds is refused (`unknown_catalog`). `gen` and `serve` write under the one given, and state its id in their descriptor; the doctor's `catalog-missing` judges each running revision against it; `check face` compares the one the far side holds with the face policy's `catalog` (link.v2 §2.19). A file that is not a catalog is refused (exit 2).
 
       --namespace <NS>
           The deployment namespace: the session is opened in it.

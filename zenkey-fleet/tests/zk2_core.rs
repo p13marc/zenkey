@@ -18,6 +18,11 @@ use util::zk2::{T, addr, client, config, eventually, example, iface, router};
 #[path = "../../zenkey/tests/common/forms_owner.rs"]
 mod forms_owner;
 
+/// An owner answering core §3.3's compact descriptor (#980's C5b), the
+/// runtime's suites' and zenctl's too.
+#[path = "../../zenkey/tests/common/compact_owner.rs"]
+mod compact_owner;
+
 use zenkey::{Implementation, Service, ServiceBuilder};
 use zenkey_fleet::bus::contracts::BundleStore;
 use zenkey_fleet::bus::presence::{Scope, observe, service_listing};
@@ -1370,4 +1375,129 @@ async fn a_tombstone_is_a_deletion_and_a_stray_reply_del_is_undecodable() {
         r.envelopes.get(stray).map(|e| e.map_err(|r| r.token())),
         Some(Err("form"))
     );
+}
+
+/// `bus::presence` and a `LensFeed` read a compact descriptor (core §3.3,
+/// #980 C5b) beside a JSON one: through the catalog given, each revision
+/// it names retrieved into the store (§8.4), to the JSON form's members,
+/// and a tokenless interface it lists resolves to its provider. Given no
+/// catalog, it is `Unread` (`unknown_catalog`) and lists nothing, never a
+/// guess; the JSON one reads either way.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_compact_descriptor_is_read_through_the_catalog_given() {
+    use zenkey_fleet::bus::presence::{Describing, observe_through};
+    use zenkey_fleet::model::catalog::DescriptorRead;
+    use zenkey_model::descriptor::Form;
+
+    let (_r, ep) = router(None).await;
+    let (owner, tool) = (client(&ep).await, client(&ep).await);
+    let nav = load_path_of("nav.v2");
+    let ping = load_path_of("ping.v1");
+    let revisions = [&nav, &ping];
+    let catalog = compact_owner::catalog(&revisions);
+    const INSTANCE: &str = "00000000000000c6";
+    let d = |a| {
+        compact_owner::descriptor(
+            a,
+            INSTANCE,
+            &catalog,
+            &revisions,
+            false,
+            &["imu"],
+            Some("c6"),
+        )
+    };
+    let _json = compact_owner::serve(&owner, &d("lab/json"), Form::Json, Vec::new()).await;
+    let bytes = compact_owner::compact(&d("lab/compact"), &catalog, &revisions);
+    let mut compact = compact_owner::serve(&owner, &d("lab/compact"), Form::Compact, bytes).await;
+    compact.hold(&nav).await;
+    compact.hold(&ping).await;
+
+    let store = BundleStore::new(T);
+    let catalogs = zenkey_fleet::Catalogs::new(vec![catalog.clone()]);
+    let describing = Describing::new(&catalogs, &store);
+    let id: zenkey_model::grammar::InstanceId = INSTANCE.parse().unwrap();
+    let read_of = |o: &zenkey_fleet::model::catalog::Observed, a: &str| {
+        o.descriptor_of(&addr(a), &id).cloned()
+    };
+    let mut seen = None;
+    for _ in 0..50 {
+        let o = observe_through(&tool, &Scope::all(), T, &describing)
+            .await
+            .expect("a read");
+        if matches!(read_of(&o, "lab/compact"), Some(DescriptorRead::Served(_)))
+            && matches!(read_of(&o, "lab/json"), Some(DescriptorRead::Served(_)))
+        {
+            seen = Some(o);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let o = seen.expect("both descriptors read");
+    let (Some(DescriptorRead::Served(c)), Some(DescriptorRead::Served(j))) =
+        (read_of(&o, "lab/compact"), read_of(&o, "lab/json"))
+    else {
+        unreachable!()
+    };
+    assert_eq!(c.capabilities, j.capabilities);
+    assert_eq!(
+        c.meta.get("zid"),
+        j.meta.get("zid"),
+        "the zid rides the compact form"
+    );
+    assert_eq!(
+        c.interfaces
+            .iter()
+            .map(|e| (&e.iface, &e.contract, e.token))
+            .collect::<Vec<_>>(),
+        j.interfaces
+            .iter()
+            .map(|e| (&e.iface, &e.contract, e.token))
+            .collect::<Vec<_>>()
+    );
+    let lens = Catalog::new(&o);
+    assert!(
+        lens.provides(&addr("lab/compact"), &nav.iface),
+        "tokenless, by its descriptor"
+    );
+
+    // Given no catalog: not read, and the JSON one read as ever.
+    let o = observe(&tool, &Scope::all(), T).await.expect("a read");
+    match read_of(&o, "lab/compact") {
+        Some(DescriptorRead::Unread(why)) => assert!(why.starts_with("unknown_catalog"), "{why}"),
+        other => panic!("not read without a catalog: {other:?}"),
+    }
+    assert!(matches!(
+        read_of(&o, "lab/json"),
+        Some(DescriptorRead::Served(_))
+    ));
+    let lens = Catalog::new(&o);
+    assert!(
+        !lens.provides(&addr("lab/compact"), &nav.iface),
+        "never a guess"
+    );
+    assert!(lens.provides(&addr("lab/json"), &nav.iface));
+
+    // The lens feed, given the catalog: its first read resolves both.
+    let (feed, error) = zenkey_fleet::LensFeed::open_through(&tool, &store, &catalogs, T).await;
+    assert!(error.is_none(), "{error:?}");
+    let lens = feed.catalog().expect("a catalog");
+    assert!(lens.provides(&addr("lab/compact"), &nav.iface));
+    assert!(lens.provides(&addr("lab/json"), &nav.iface));
+    let (feed, _) = zenkey_fleet::LensFeed::open(&tool, &store, T).await;
+    assert!(
+        !feed
+            .catalog()
+            .expect("a catalog")
+            .provides(&addr("lab/compact"), &nav.iface)
+    );
+}
+
+/// A runtime test contract, `zenkey/tests/contracts/<name>.toml`.
+fn load_path_of(name: &str) -> zenkey_model::contract::Contract {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../zenkey/tests/contracts/{name}.toml"));
+    let l = zenkey_model::contract::load_path(&path);
+    l.contract
+        .unwrap_or_else(|| panic!("{name} does not load:\n{}", l.report))
 }

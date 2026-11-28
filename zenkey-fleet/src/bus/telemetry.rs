@@ -727,10 +727,18 @@ async fn owners_answer(
         asked: wanted.len(),
         ..RoundTrips::default()
     };
-    let reads = crate::bus::presence::describe_each(session, wanted.clone(), t).await;
+    let reads = crate::bus::presence::describe_each(
+        session,
+        wanted.clone(),
+        t,
+        &crate::bus::presence::Describing::default(),
+    )
+    .await;
     for (addr, instance) in &wanted {
         match reads.get(&(addr.clone(), instance.clone())) {
-            Some(DescriptorRead::Served(_) | DescriptorRead::Invalid(_)) => trips.answered += 1,
+            Some(
+                DescriptorRead::Served(_) | DescriptorRead::Invalid(_) | DescriptorRead::Unread(_),
+            ) => trips.answered += 1,
             Some(DescriptorRead::Silent) => {
                 trips.silent += 1;
                 trips.unanswered.push(format!(

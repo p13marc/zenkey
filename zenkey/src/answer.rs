@@ -13,6 +13,13 @@
 //!   descriptor that does not read, is no such word: the reader drops
 //!   nothing, and the entries still merge. A reader that holds several
 //!   revisions, as a tool does, asks [`owner_revision`] which one.
+//! - **Either form** (core §3.3): each descriptor is read by its form, told
+//!   by its reply's `Encoding` ([`crate::presence::Served`]). A compact
+//!   one's run is its envelope's, and the revision it names its entry's,
+//!   read through the catalogs the reader holds and each revision it
+//!   names, the reader's own or retrieved (§8.4). A reader holding no
+//!   catalog that is or succeeds the one it names does not read it, which
+//!   is no word either (§8.6).
 //! - **A GET's selector** (`collection_read`): a reader that wants a
 //!   collection whole asks its snapshot key followed by `/**`, so that the
 //!   owner answers by snapshot and its absences are evidence; a member
@@ -28,6 +35,8 @@ use zenkey_model::grammar::{ZkKey, parse};
 use zenkey_model::wire::Run;
 use zenoh::query::{ConsolidationMode, Reply};
 
+use crate::presence::{Held, Served};
+
 /// Whether the owner of `key` runs `contract`'s revision under `run` (core
 /// §4.2, "The owner's revision maps the index"), as [`owner_revision`]
 /// reads its descriptors: `true` where one names `contract`'s fingerprint,
@@ -39,9 +48,10 @@ pub(crate) async fn runs_revision(
     key: &str,
     run: Run,
     contract: &Contract,
+    held: &Held,
     timeout: Duration,
 ) -> bool {
-    match owner_revision(session, key, run, &contract.iface, timeout).await {
+    match owner_revision_held(session, key, run, &contract.iface, held, timeout).await {
         OwnerRevision::Named(fp) => fp == Fingerprint::of(contract).to_string(),
         OwnerRevision::Unreached => true,
         OwnerRevision::Unread => false,
@@ -66,6 +76,7 @@ pub(crate) async fn stray_reply_del(
     key: &str,
     run: Run,
     contract: &Contract,
+    held: &Held,
     timeout: Duration,
     asked: &mut std::collections::BTreeMap<(String, String), Option<std::sync::Arc<Contract>>>,
 ) -> bool {
@@ -74,7 +85,9 @@ pub(crate) async fn stray_reply_del(
     let theirs = match asked.get(&at) {
         Some(c) => c.clone(),
         None => {
-            let c = match owner_revision(session, key, run, &contract.iface, timeout).await {
+            let c = match owner_revision_held(session, key, run, &contract.iface, held, timeout)
+                .await
+            {
                 OwnerRevision::Named(fp) if fp == Fingerprint::of(contract).to_string() => {
                     Some(std::sync::Arc::new(contract.clone()))
                 }
@@ -130,11 +143,13 @@ pub enum OwnerRevision {
 }
 
 /// The revision of `iface` the owner of `key` runs under `run`, as its
-/// descriptors say ([`OwnerRevision`]). A key with a namespace in front,
-/// as a session in no namespace hears one, asks its descriptors under that
-/// namespace. What the consumer's GET and an archive's alignment map a
-/// snapshot's index with, and a tool that holds several revisions picks
-/// one by (#977's E4: the fleet's seed).
+/// descriptors say ([`OwnerRevision`]), holding no catalog: a compact
+/// descriptor (core §3.3) does not read, so it is no word
+/// ([`owner_revision_held`]). A key with a namespace in front, as a session
+/// in no namespace hears one, asks its descriptors under that namespace.
+/// What the consumer's GET and an archive's alignment map a snapshot's
+/// index with, and a tool that holds several revisions picks one by
+/// (#977's E4: the fleet's seed).
 pub async fn owner_revision(
     session: &zenoh::Session,
     key: &str,
@@ -142,7 +157,24 @@ pub async fn owner_revision(
     iface: &zenkey_model::grammar::IfaceId,
     timeout: Duration,
 ) -> OwnerRevision {
-    match run_revision(session, key, run, iface, timeout).await {
+    owner_revision_held(session, key, run, iface, &Held::default(), timeout).await
+}
+
+/// [`owner_revision`], each descriptor read by its form (core §3.3)
+/// through what `held` holds ([`crate::presence::read_held`]): the run a
+/// compact one states is its envelope's, and the fingerprint it names its
+/// entry's, read through the catalogs held. One that does not read, its
+/// catalog not held among them, is a read that failed: no word, never a
+/// guess (§8.6).
+pub async fn owner_revision_held(
+    session: &zenoh::Session,
+    key: &str,
+    run: Run,
+    iface: &zenkey_model::grammar::IfaceId,
+    held: &Held,
+    timeout: Duration,
+) -> OwnerRevision {
+    match run_revision(session, key, run, iface, held, timeout).await {
         RunRevision::Read(r) => r,
         // Descriptors reach the reader and none states the run: no omission
         // rule applies over that snapshot (core §4.2, 0.102).
@@ -172,6 +204,7 @@ pub(crate) async fn run_revision(
     key: &str,
     run: Run,
     iface: &zenkey_model::grammar::IfaceId,
+    held: &Held,
     timeout: Duration,
 ) -> RunRevision {
     let Some((prefix, addr)) = owner_of(key) else {
@@ -181,7 +214,7 @@ pub(crate) async fn run_revision(
         "{prefix}zk2/{}/{}/@zk/instance/*",
         addr.system, addr.service
     );
-    let read = match descriptors(session, &selector, iface, timeout).await {
+    let read = match descriptors(session, prefix, &selector, iface, held, timeout).await {
         Ok(read) => read,
         Err(why) => {
             unread(key, &why);
@@ -219,12 +252,16 @@ struct Descriptors {
     failed: Option<&'static str>,
 }
 
-/// One GET of the descriptors at `selector`, each read for what it names
-/// of `iface` (core §3.3). `Err` where the GET could not be asked.
+/// One GET of the descriptors at `selector`, each read by its form (core
+/// §3.3) through what `held` holds for what it names of `iface`. `prefix`
+/// is the namespace in front of the selector, which a reply's key carries
+/// too. `Err` where the GET could not be asked.
 async fn descriptors(
     session: &zenoh::Session,
+    prefix: &str,
     selector: &str,
     iface: &zenkey_model::grammar::IfaceId,
+    held: &Held,
     timeout: Duration,
 ) -> Result<Descriptors, String> {
     let rx = session
@@ -242,11 +279,7 @@ async fn descriptors(
             continue;
         };
         out.heard = true;
-        let bytes = sample.payload().to_bytes();
-        let d = std::str::from_utf8(&bytes)
-            .ok()
-            .and_then(|text| zenkey_model::descriptor::check(text, &[]).0);
-        let Some(d) = d else {
+        let Some(d) = read(session, prefix, sample, held, timeout).await else {
             out.failed = Some("a descriptor that does not read");
             continue;
         };
@@ -255,6 +288,30 @@ async fn descriptors(
         }
     }
     Ok(out)
+}
+
+/// The descriptor a reply on an instance key reads as, by its form (core
+/// §3.3), through what `held` holds: a JSON one that parses, a compact one
+/// decoded with the instance the reply's key names. `None` where none
+/// reads: D000, a compact one refused (its catalog not held among them,
+/// never guessed), or a key that is no instance key.
+async fn read(
+    session: &zenoh::Session,
+    prefix: &str,
+    sample: &zenoh::sample::Sample,
+    held: &Held,
+    timeout: Duration,
+) -> Option<zenkey_model::descriptor::Descriptor> {
+    let served = Served::of(sample);
+    let Some(Ok(ZkKey::Instance { addr, instance })) =
+        sample.key_expr().as_str().strip_prefix(prefix).map(parse)
+    else {
+        return None;
+    };
+    crate::presence::decode_held(session, &served, &addr, &instance, held, timeout)
+        .await
+        .ok()
+        .map(|(d, _)| d)
 }
 
 /// What an owner's descriptors name of one of its interfaces, each under
@@ -282,7 +339,7 @@ pub(crate) async fn owner_revisions(
     timeout: Duration,
 ) -> OwnerRevisions {
     let selector = format!("zk2/{}/{}/@zk/instance/*", owner.system, owner.service);
-    match descriptors(session, &selector, iface, timeout).await {
+    match descriptors(session, "", &selector, iface, &Held::default(), timeout).await {
         Ok(read) if !read.named.is_empty() => OwnerRevisions::Named(read.named),
         Ok(read) if !read.heard && read.failed.is_none() => OwnerRevisions::Unreached,
         Ok(_) | Err(_) => OwnerRevisions::Unread,
@@ -309,11 +366,27 @@ pub enum OwnerCatalog {
 /// say ([`OwnerCatalog`]): what a reader reads an owner heartbeat's
 /// indices through (core §7.5, §8.6; #1110). A key with a namespace in
 /// front asks its descriptors under that namespace, as [`owner_revision`]
-/// does.
+/// does. Holding no catalog: a compact descriptor does not read
+/// ([`owner_catalog_held`]).
 pub async fn owner_catalog(
     session: &zenoh::Session,
     key: &str,
     run: Run,
+    timeout: Duration,
+) -> OwnerCatalog {
+    owner_catalog_held(session, key, run, &Held::default(), timeout).await
+}
+
+/// [`owner_catalog`], each descriptor read by its form (core §3.3) through
+/// what `held` holds: a compact one states its run in its envelope and its
+/// catalog in its body, and reads only through a catalog held that is or
+/// succeeds it, with each revision it names. One that does not read is a
+/// read that failed: no word, never a guess (§8.6).
+pub async fn owner_catalog_held(
+    session: &zenoh::Session,
+    key: &str,
+    run: Run,
+    held: &Held,
     timeout: Duration,
 ) -> OwnerCatalog {
     let Some((prefix, addr)) = owner_of(key) else {
@@ -340,11 +413,7 @@ pub async fn owner_catalog(
             continue;
         };
         heard = true;
-        let bytes = sample.payload().to_bytes();
-        let d = std::str::from_utf8(&bytes)
-            .ok()
-            .and_then(|text| zenkey_model::descriptor::check(text, &[]).0);
-        match d {
+        match read(session, prefix, sample, held, timeout).await {
             Some(d) if d.run.as_deref() == Some(run.as_str()) => {
                 named = Some(d.stated_catalog());
             }

@@ -532,6 +532,7 @@ impl Inner {
                         &h.key,
                         h.run,
                         contract,
+                        &crate::presence::Held::default(),
                         timeout,
                     )
                     .await
@@ -657,6 +658,7 @@ async fn entries_of(
                 s.key_expr().as_str(),
                 stamp.run,
                 contract,
+                &crate::presence::Held::default(),
                 timeout,
                 &mut owners,
             )

@@ -824,10 +824,20 @@ impl Consumer {
         self
     }
 
-    /// The catalogs it reads an owner heartbeat's indices through.
+    /// The catalogs it reads an owner heartbeat's indices through, and a
+    /// provider's compact descriptor (core §3.3).
     #[must_use]
     pub fn catalogs(&self) -> &[zenkey_model::catalog::Catalog] {
         &self.catalogs
+    }
+
+    /// What it reads a provider's descriptor through (core §3.3): the
+    /// catalogs it holds and its contract, each other revision a compact
+    /// descriptor names retrieved (§8.4). Without a catalog, a compact
+    /// descriptor is not read (`unknown_catalog`), never guessed (§8.6).
+    pub(crate) fn held(&self) -> crate::presence::Held {
+        crate::presence::Held::new(Arc::clone(&self.catalogs), vec![Arc::clone(&self.contract)])
+            .retrieving()
     }
 
     /// The deployment epoch its typed reads count `time` fields from.
@@ -2312,6 +2322,7 @@ impl Consumer {
                             &key,
                             stamp.run,
                             &self.contract,
+                            &self.held(),
                             timeout,
                             &mut owners,
                         )
@@ -2416,6 +2427,7 @@ impl Consumer {
                         &snapshots[i].key,
                         snapshots[i].run,
                         &self.contract,
+                        &self.held(),
                         timeout,
                     )
                     .await
@@ -2492,6 +2504,7 @@ impl Consumer {
             &self.session,
             &self.providers,
             &self.contract.iface,
+            &self.held(),
             timeout,
             None,
         )
@@ -2521,10 +2534,12 @@ impl Consumer {
             }
             // Each read waits at most 1 s and none past the deadline, so a
             // round the deadline cuts short still returns what it found.
+            let held = self.held();
             let read = crate::presence::serving(
                 &self.session,
                 &self.providers,
                 &self.contract.iface,
+                &held,
                 Duration::from_secs(1),
                 Some(deadline),
             );
@@ -2586,6 +2601,7 @@ impl Consumer {
                     &self.session,
                     &[Provider::exact(provider)],
                     &self.contract.iface,
+                    &self.held(),
                     timeout,
                     None,
                 )
@@ -3067,11 +3083,16 @@ where
                 Some(_) => None,
                 None => {
                     self.seen.catalog_reads.fetch_add(1, Ordering::Relaxed);
+                    // A compact descriptor reads through the catalogs held,
+                    // each revision it names retrieved (core §3.3).
+                    let held =
+                        crate::presence::Held::new(Arc::clone(&self.held), Vec::new()).retrieving();
                     Some(
-                        crate::answer::owner_catalog(
+                        crate::answer::owner_catalog_held(
                             &self.session,
                             &beat.key,
                             beat.stamp.run,
+                            &held,
                             self.catalog_timeout,
                         )
                         .await,

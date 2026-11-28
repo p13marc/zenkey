@@ -713,6 +713,7 @@ impl Client {
             &self.session,
             &self.providers,
             &self.contract.iface,
+            &held(&self.contract),
             timeout,
             None,
         )
@@ -760,6 +761,13 @@ pub struct Present {
     /// that fails its checks (§3.3) or was not asked before a deadline.
     /// Whether they serve the interface, tokenless, is unknown. Sorted.
     pub undescribed: Vec<Addr>,
+}
+
+/// What a client reads a provider's descriptor through (core §3.3): its
+/// contract, and no deployment catalog, so a compact descriptor is not read
+/// (`unknown_catalog`) and its address stays undescribed, never guessed.
+fn held(contract: &Arc<Contract>) -> crate::presence::Held {
+    crate::presence::Held::new(Arc::default(), vec![Arc::clone(contract)])
 }
 
 /// The selection without the providers another one already covers, so that
@@ -1014,6 +1022,7 @@ impl Fleet {
             &self.session,
             &self.selection,
             &self.contract.iface,
+            &held(&self.contract),
             timeout,
             None,
         )

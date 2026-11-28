@@ -153,6 +153,9 @@ pub(crate) fn redundancy(
         dep.namespace().to_string(),
         addr,
         dep.store.clone(),
+        dep.contracts
+            .as_ref()
+            .map_or_else(Default::default, |c| (*c.catalogs).clone()),
         dep.timeout(),
     )
 }

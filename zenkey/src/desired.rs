@@ -2356,6 +2356,7 @@ impl TargetInner {
                     key,
                     run,
                     &self.author_iface,
+                    &crate::presence::Held::default(),
                     self.startup.timeout,
                 )
                 .await;

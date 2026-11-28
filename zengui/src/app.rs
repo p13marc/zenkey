@@ -194,6 +194,11 @@ impl Zengui {
             session: self.dep.session.clone()?,
             monitor: self.obs.presence_monitor.clone()?,
             store: self.dep.store.clone(),
+            catalogs: self
+                .dep
+                .contracts
+                .as_ref()
+                .map_or_else(Default::default, |c| std::sync::Arc::clone(&c.catalogs)),
             timeout: self.dep.timeout(),
         })
     }

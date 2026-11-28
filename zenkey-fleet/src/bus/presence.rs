@@ -42,6 +42,15 @@
 //! completeness flag rides along, so a read that timed out is reported as
 //! possibly incomplete, never as absence.
 //!
+//! **Both forms of a descriptor** (core §3.3, #980 C5b) are read, each by
+//! its reply's `Encoding` ([`zenkey::presence::Served`]): the JSON one as
+//! ever, a compact one decoded through what a read is given
+//! ([`Describing`]): the deployment catalogs (`--catalog`, §8.6) and the
+//! store whose revisions its entries name, held or retrieved (§8.4). A
+//! read given no catalog that reads it, [`observe`]'s, leaves it
+//! [`DescriptorRead::Unread`] (`unknown_catalog`): never guessed, and no
+//! verdict.
+//!
 //! The zk2 functions take a bare `&Session` and spell base-relative keys: a
 //! zk2 tool reads through a session in the deployment's namespace (decided
 //! 2026-10-08, FJ plan item 1), unlike v1's un-namespaced explorer.
@@ -60,11 +69,16 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
 
+use std::sync::Arc;
+
+use zenkey_model::contract::Contract;
 use zenkey_model::grammar::{Addr, CONTROL, GRAMMAR, Name};
 use zenoh::Session;
 
+use crate::bus::contracts::BundleStore;
 use crate::bus::monitor::{EventStream, FleetEvent, StreamItem};
 use crate::model::catalog::{Catalog, DescriptorRead, Observed};
+use crate::model::deployment::{Catalogs, DeploymentCatalog};
 use crate::model::presence_live::{LivePresence, PresenceBasis};
 use crate::report::PresenceTransition;
 use crate::report::{NamespaceListing, ServiceListing};
@@ -240,21 +254,85 @@ pub async fn read_tokens(session: &Session, scope: &Scope, timeout: Duration) ->
     Ok(Observed::from_read(selector, &read))
 }
 
+/// What a presence read decodes a compact descriptor with (core §3.3,
+/// "Reading"; #980 C5b): the deployment catalogs given (`--catalog`,
+/// §8.6), which read its indices, and the store that holds the revisions
+/// its entries name, or retrieves them (§8.4), since a bitmap's width is
+/// its revision's. A JSON descriptor needs neither. With no catalog that
+/// is or succeeds the one it names, a compact descriptor is
+/// [`DescriptorRead::Unread`] (`unknown_catalog`); with a revision the
+/// store cannot have, `unknown_revision`: never guessed. The default holds
+/// nothing, which is [`describe`]'s and [`observe`]'s.
+#[derive(Debug, Clone, Default)]
+pub struct Describing {
+    catalogs: Arc<Vec<DeploymentCatalog>>,
+    store: Option<BundleStore>,
+}
+
+impl Describing {
+    /// The catalogs `catalogs` holds with their entries, and `store`.
+    pub fn new(catalogs: &Catalogs, store: &BundleStore) -> Describing {
+        Describing {
+            catalogs: Arc::new(catalogs.held().to_vec()),
+            store: Some(store.clone()),
+        }
+    }
+
+    /// The deployment catalogs it reads a compact descriptor's indices
+    /// through.
+    pub fn catalogs(&self) -> &[DeploymentCatalog] {
+        &self.catalogs
+    }
+
+    /// One descriptor reply that came on `addr`'s instance key, read by
+    /// its form: a compact one's revisions named fetched through the store
+    /// first, each cached there.
+    pub async fn read(
+        &self,
+        session: &Session,
+        served: zenkey::presence::Served,
+        addr: &Addr,
+        instance: &zenkey_model::grammar::InstanceId,
+    ) -> DescriptorRead {
+        let mut revisions: Vec<Arc<Contract>> = Vec::new();
+        if let Some(store) = &self.store {
+            for (iface, fp) in served.names(&self.catalogs) {
+                if let Ok(Some(c)) = store.contract(session, &iface, &fp).await {
+                    revisions.push(c);
+                }
+            }
+        }
+        let revisions: Vec<&Contract> = revisions.iter().map(|c| &**c).collect();
+        DescriptorRead::from(served.read(addr, instance, &self.catalogs, &revisions))
+    }
+}
+
 /// GETs the descriptor of every instance `observed` names (§3.3), at most
 /// [`DESCRIBE_CONCURRENCY`] at once, each bounded by `timeout`, and records
 /// each answer — silence and a failed GET included — in
-/// `observed.descriptors`.
+/// `observed.descriptors`. Given no catalog: a compact descriptor is
+/// [`DescriptorRead::Unread`] ([`describe_where`] reads one through what it
+/// is given).
 pub async fn describe(session: &Session, observed: &mut Observed, timeout: Duration) {
-    describe_where(session, observed, timeout, |_, _| true).await;
+    describe_where(
+        session,
+        observed,
+        timeout,
+        &Describing::default(),
+        |_, _| true,
+    )
+    .await;
 }
 
-/// [`describe`], for the instances `keep` selects only: the doctor's first
-/// presence read describes the instances `hostid-duplicate` counts (#721,
-/// PF), and no other. The ones left out have no entry.
+/// [`describe`] through what `describing` holds, for the instances `keep`
+/// selects only: the doctor's first presence read describes the instances
+/// `hostid-duplicate` counts (#721, PF), and no other. The ones left out
+/// have no entry.
 pub async fn describe_where(
     session: &Session,
     observed: &mut Observed,
     timeout: Duration,
+    describing: &Describing,
     keep: impl Fn(&Addr, &zenkey_model::grammar::InstanceId) -> bool,
 ) {
     let wanted: Vec<_> = observed
@@ -262,17 +340,19 @@ pub async fn describe_where(
         .into_iter()
         .filter(|(a, i)| keep(a, i))
         .collect();
-    observed.descriptors = Some(describe_each(session, wanted, timeout).await);
+    observed.descriptors = Some(describe_each(session, wanted, timeout, describing).await);
 }
 
 /// The descriptor of each instance in `wanted` (§3.3), at most
 /// [`DESCRIBE_CONCURRENCY`] GETs in flight, each bounded by `timeout`; every
-/// answer recorded, silence and a failed GET included. What [`describe`]
-/// and a [`crate::LensFeed`] following presence both run.
+/// answer recorded, silence and a failed GET included, and each read by its
+/// form through what `describing` holds. What [`describe`] and a
+/// [`crate::LensFeed`] following presence both run.
 pub(crate) async fn describe_each(
     session: &Session,
     wanted: Vec<(Addr, zenkey_model::grammar::InstanceId)>,
     timeout: Duration,
+    describing: &Describing,
 ) -> BTreeMap<(Addr, zenkey_model::grammar::InstanceId), DescriptorRead> {
     let mut pending = wanted.into_iter();
     let mut tasks = tokio::task::JoinSet::new();
@@ -282,11 +362,16 @@ pub(crate) async fn describe_each(
             let Some((addr, instance)) = pending.next() else {
                 break;
             };
-            let session = session.clone();
+            let (session, describing) = (session.clone(), describing.clone());
             tasks.spawn(async move {
                 let read =
-                    match zenkey::presence::descriptor(&session, &addr, &instance, timeout).await {
-                        Ok(found) => DescriptorRead::from(found),
+                    match zenkey::presence::descriptor_reply(&session, &addr, &instance, timeout)
+                        .await
+                    {
+                        Ok(Some(served)) => {
+                            describing.read(&session, served, &addr, &instance).await
+                        }
+                        Ok(None) => DescriptorRead::Silent,
                         Err(e) => DescriptorRead::Failed(e.to_string()),
                     };
                 ((addr, instance), read)
@@ -304,9 +389,22 @@ pub(crate) async fn describe_each(
 }
 
 /// [`read_tokens`], then [`describe`]: what every zk2 view starts from.
+/// Given no catalog, so a compact descriptor is
+/// [`DescriptorRead::Unread`]: [`observe_through`] reads one.
 pub async fn observe(session: &Session, scope: &Scope, timeout: Duration) -> Result<Observed> {
+    observe_through(session, scope, timeout, &Describing::default()).await
+}
+
+/// [`observe`], each descriptor read by its form through what
+/// `describing` holds (core §3.3).
+pub async fn observe_through(
+    session: &Session,
+    scope: &Scope,
+    timeout: Duration,
+    describing: &Describing,
+) -> Result<Observed> {
     let mut observed = read_tokens(session, scope, timeout).await?;
-    describe(session, &mut observed, timeout).await;
+    describe_where(session, &mut observed, timeout, describing, |_, _| true).await;
     Ok(observed)
 }
 

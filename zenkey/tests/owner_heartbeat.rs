@@ -682,10 +682,13 @@ async fn past_the_bound_an_owner_heartbeat_keeps_its_place_behind_those_held() {
 
     // The read is answered: its owner names the catalog under run 7.
     let q = held.lock().unwrap().pop().expect("the read");
-    zenoh::Wait::wait(q.reply(
-        "zk2/lab/trio/@zk/instance/000000000000000a",
-        bare_descriptor(),
-    ))
+    zenoh::Wait::wait(
+        q.reply(
+            "zk2/lab/trio/@zk/instance/000000000000000a",
+            bare_descriptor(),
+        )
+        .encoding(zenoh::bytes::Encoding::APPLICATION_JSON),
+    )
     .unwrap();
     drop(q);
     eventually("every one is read", || async {
@@ -770,10 +773,13 @@ async fn past_what_it_may_hold_an_owner_heartbeat_is_dropped_and_its_key_reads_a
     assert_eq!(sub.owner_heartbeats(), 0, "none read while the read runs");
 
     let q = held.lock().unwrap().pop().expect("the read");
-    zenoh::Wait::wait(q.reply(
-        "zk2/lab/trio/@zk/instance/000000000000000a",
-        bare_descriptor(),
-    ))
+    zenoh::Wait::wait(
+        q.reply(
+            "zk2/lab/trio/@zk/instance/000000000000000a",
+            bare_descriptor(),
+        )
+        .encoding(zenoh::bytes::Encoding::APPLICATION_JSON),
+    )
     .unwrap();
     drop(q);
     eventually("every one held is read", || async {
