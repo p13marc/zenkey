@@ -21,15 +21,14 @@
 //! | v2 §2.10 the rule, by run; v1 §2.10 by `meta.zid` under a `redundancy.v1` incumbent | each sample's in-band stamp and Zenoh timestamp's id to [`Fence::offer`], a state's by its key ([`Member::Key`]), any other alone |
 //! | v2 §2.10 an unattributed sample held for one read of the descriptors asked after it, one read at a time | each read the fence asks: a GET of the address's `@zk/instance/*` on the consumer's session, its end handed back ([`Fence::read_ended`]) |
 //! | v2 §2.10 a change of incumbent: seed again, merge only the incumbent's snapshots, the omission rule | a state's S4 GET of that provider ([`Consumer::get_answer`]'s, through a gate): each reply judged by its run (a snapshot's page by its header's), an unattributed one decided after one read of the descriptors; what is admitted merged into the view by core §4.3's consumer rule, and each member of the provider's a complete snapshot of the incumbent's lists neither live nor as a tombstone dropped, unless it was put under the snapshot's run past its asof |
+//! | v2 §2.10 "A heartbeat": the heartbeats that cover the interface, read under the incumbent's runs alone | for a collection followed by heartbeats (`freshness.v2`), each heartbeat covering the interface and each owner heartbeat of its class, once admitted, offered to the fence by its envelope's stamp, held alone ([`Member::Alone`]): read into the subscription's view only when accepted, now or once a read of the descriptors attributes it; another run's, or one still unattributed when that read ends, never read, so it is neither a loss nor a divergence ([`FollowEvent::HeartbeatDiscarded`]) |
 //!
 //! **What it holds.** For a state, the address's word: each member's value
 //! as the incumbent's samples and seeds left it ([`Following::value`]).
 //! For a stream or an event, nothing: each accepted sample is handed over,
-//! and a held one is handed over once decided.
-//!
-//! **Not here.** A heartbeat covering the interface is read by the
-//! subscription's views as before, unfenced; v2 §2.10 says a follower reads
-//! its incumbent's alone, which no scenario of the reference's checks yet.
+//! and a held one is handed over once decided. The subscription's views
+//! ([`Following::subscription`]) hold what the incumbent's heartbeats
+//! confirmed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -121,6 +120,30 @@ pub enum FollowEvent {
     /// A member that left the view: a complete snapshot of the incumbent's
     /// lists it neither live nor as a tombstone (core §4.2).
     Omitted { provider: Addr, key: String },
+    /// A heartbeat covering the interface, or an owner heartbeat, on `key`,
+    /// the rule accepted: the subscription's view read it (v2 §2.10).
+    Heartbeat {
+        provider: Addr,
+        key: String,
+        stamp: Stamp,
+    },
+    /// One the rule discarded, with its reason: another instance's run, or
+    /// a run still unattributed when a read of the descriptors ended. The
+    /// view never read it: no heartbeat of the incumbent's, neither a loss
+    /// nor a divergence (v2 §2.10).
+    HeartbeatDiscarded {
+        provider: Addr,
+        key: String,
+        stamp: Stamp,
+        why: Discard,
+    },
+    /// One held unattributed, until a read of the address's descriptors
+    /// asked after it ends (v2 §2.10).
+    HeartbeatHeld {
+        provider: Addr,
+        key: String,
+        stamp: Stamp,
+    },
     /// A seed made, after the incumbent at `provider` changed: whether its
     /// GET was complete, and how many snapshots of the incumbent's it
     /// merged.
@@ -147,6 +170,78 @@ pub struct FollowCounts {
     pub reads: u64,
     /// Seeds made.
     pub seeds: u64,
+    /// Heartbeats the rule accepted, which the subscription's view read.
+    pub heartbeats: u64,
+    /// Heartbeats the rule discarded, by its reason.
+    pub heartbeats_discarded: BTreeMap<&'static str, u64>,
+    /// Heartbeats held unattributed.
+    pub heartbeats_held: u64,
+}
+
+/// What the fence holds of one sample: a delivery of the resource, or a
+/// heartbeat covering it, its view's read to make once accepted.
+enum Item {
+    Data(Box<Delivery>),
+    Beat(Beat),
+}
+
+/// A heartbeat the fence holds or decides (v2 §2.10).
+struct Beat {
+    provider: Addr,
+    key: String,
+    stamp: Stamp,
+    /// The subscription's view reads it.
+    read: Box<dyn FnOnce() + Send>,
+}
+
+/// A heartbeat as the fence reads it (v2 §2.10's table: a heartbeat's run
+/// is its envelope's): its in-band stamp, and its Zenoh timestamp's id,
+/// which a `redundancy.v1` incumbent's is read by.
+pub(crate) fn beat_sample(s: &Sample, stamp: Stamp) -> model::Sample {
+    model::Sample {
+        stamp: Some(stamp),
+        timestamp_id: s.timestamp().and_then(crate::timing::stamp_id),
+    }
+}
+
+/// The follower's gate before its subscription's heartbeats
+/// ([`crate::consumer::BeatGate`]): each offered to the fence, read into
+/// the view only once accepted.
+struct FollowGate {
+    core: Arc<Mutex<Core>>,
+}
+
+impl crate::consumer::BeatGate for FollowGate {
+    fn beat(
+        &self,
+        provider: Addr,
+        key: String,
+        sample: model::Sample,
+        read: Box<dyn FnOnce() + Send>,
+    ) {
+        let Some(stamp) = sample.stamp else {
+            return;
+        };
+        let mut c = lock(&self.core);
+        let beat = Beat {
+            provider: provider.clone(),
+            key: key.clone(),
+            stamp,
+            read,
+        };
+        let out = c
+            .fence
+            .offer(&provider, sample, Member::Alone, Item::Beat(beat));
+        if out.held {
+            c.counts.heartbeats_held += 1;
+            c.emit(FollowEvent::HeartbeatHeld {
+                provider: provider.clone(),
+                key,
+                stamp,
+            });
+        }
+        c.outcome(&provider, out);
+    }
 }
 
 fn lock(core: &Mutex<Core>) -> MutexGuard<'_, Core> {
@@ -161,7 +256,7 @@ struct Seeding {
 
 /// The follower's state, behind one lock.
 struct Core {
-    fence: Fence<Delivery>,
+    fence: Fence<Item>,
     iface: IfaceId,
     /// The consumer's revision's fingerprint, as a descriptor's entry
     /// spells it, and the major it uses.
@@ -233,22 +328,48 @@ impl Core {
     }
 
     /// Does what one call to the fence decided.
-    fn outcome(&mut self, addr: &Addr, out: Outcome<Delivery>) {
-        for d in out.accepted {
-            self.accept(d, false);
+    fn outcome(&mut self, addr: &Addr, out: Outcome<Item>) {
+        for item in out.accepted {
+            match item {
+                Item::Data(d) => self.accept(*d, false),
+                Item::Beat(b) => {
+                    self.counts.heartbeats += 1;
+                    (b.read)();
+                    self.emit(FollowEvent::Heartbeat {
+                        provider: b.provider,
+                        key: b.key,
+                        stamp: b.stamp,
+                    });
+                }
+            }
         }
-        for (d, why) in out.discarded {
-            *self.counts.discarded.entry(why.as_str()).or_default() += 1;
-            self.emit(FollowEvent::Discarded {
-                delivery: Box::new(d),
-                why,
-            });
+        for (item, why) in out.discarded {
+            match item {
+                Item::Data(d) => {
+                    *self.counts.discarded.entry(why.as_str()).or_default() += 1;
+                    self.emit(FollowEvent::Discarded { delivery: d, why });
+                }
+                Item::Beat(b) => {
+                    *self
+                        .counts
+                        .heartbeats_discarded
+                        .entry(why.as_str())
+                        .or_default() += 1;
+                    self.emit(FollowEvent::HeartbeatDiscarded {
+                        provider: b.provider,
+                        key: b.key,
+                        stamp: b.stamp,
+                        why,
+                    });
+                }
+            }
         }
-        for d in out.superseded {
-            self.counts.superseded += 1;
-            self.emit(FollowEvent::Superseded {
-                delivery: Box::new(d),
-            });
+        for item in out.superseded {
+            // A heartbeat is held alone, never superseded.
+            if let Item::Data(d) = item {
+                self.counts.superseded += 1;
+                self.emit(FollowEvent::Superseded { delivery: d });
+            }
         }
         if out.asks_read {
             let _ = self.reads.send(addr.clone());
@@ -785,31 +906,40 @@ impl Consumer {
                 on_event(e);
             }
         }));
-        // The data: each sample to the fence.
+        // The data: each sample to the fence; and each heartbeat covering
+        // the resource, through the gate (v2 §2.10, "A heartbeat").
         let c = Arc::clone(&core);
+        let gate: Arc<dyn crate::consumer::BeatGate> = Arc::new(FollowGate {
+            core: Arc::clone(&core),
+        });
         let subscription = self
-            .subscribe(resource, move |d: Delivery| {
-                let s = model::Sample {
-                    stamp: d.inband,
-                    timestamp_id: d.stamp.as_ref().and_then(crate::timing::stamp_id),
-                };
-                let mut core = lock(&c);
-                let member = if core.state {
-                    Member::Key(d.sample.key_expr().as_str().to_owned())
-                } else {
-                    Member::Alone
-                };
-                let addr = d.provider.clone();
-                let copy = d.clone();
-                let out = core.fence.offer(&addr, s, member, d);
-                if out.held {
-                    core.counts.held += 1;
-                    core.emit(FollowEvent::Held {
-                        delivery: Box::new(copy),
-                    });
-                }
-                core.outcome(&addr, out);
-            })
+            .subscribe_gated(
+                resource,
+                move |d: Delivery| {
+                    let s = model::Sample {
+                        stamp: d.inband,
+                        timestamp_id: d.stamp.as_ref().and_then(crate::timing::stamp_id),
+                    };
+                    let mut core = lock(&c);
+                    let member = if core.state {
+                        Member::Key(d.sample.key_expr().as_str().to_owned())
+                    } else {
+                        Member::Alone
+                    };
+                    let addr = d.provider.clone();
+                    let copy = d.clone();
+                    let out = core.fence.offer(&addr, s, member, Item::Data(Box::new(d)));
+                    if out.held {
+                        core.counts.held += 1;
+                        core.emit(FollowEvent::Held {
+                            delivery: Box::new(copy),
+                        });
+                    }
+                    core.outcome(&addr, out);
+                },
+                |_| {},
+                gate,
+            )
             .await?;
         let rt = tokio::runtime::Handle::current();
         let mut subs = Vec::new();
