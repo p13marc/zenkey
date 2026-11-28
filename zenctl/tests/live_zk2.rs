@@ -643,6 +643,99 @@ async fn service_list_shows_tokens_descriptors_and_the_tokenless_set() {
     assert!(by["tc.scenario.v1"].get("providers").is_none());
 }
 
+/// `service show` renders a compact descriptor (core §3.3, #980 C5b) as the
+/// JSON form's members, read through `--catalog` and each revision it
+/// names, retrieved here from the owner's holder (§8.4). Without the
+/// catalog it names it is `unread`, `unknown_catalog` its reason, and its
+/// interfaces are not listed: never a guess (§8.6).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn service_show_renders_a_compact_descriptor_through_the_catalog() {
+    use scenario::compact_owner;
+    use zenkey::model::descriptor::Form;
+    let mut bus = Bus::bare(None).await;
+    let at = |name: &str| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../zenkey/tests/contracts/{name}.toml"));
+        load_path(&path).contract.expect("a test contract")
+    };
+    let (nav, ping) = (at("nav.v2"), at("ping.v1"));
+    let revisions = [&nav, &ping];
+    let catalog = compact_owner::catalog(&revisions);
+    let d = compact_owner::descriptor(
+        "lab/compact",
+        "00000000000000c7",
+        &catalog,
+        &revisions,
+        false,
+        &["imu"],
+        None,
+    );
+    let bytes = compact_owner::compact(&d, &catalog, &revisions);
+    assert!(bytes.len() < 30, "{} bytes", bytes.len());
+    let mut owner = compact_owner::serve(&bus.owners, &d, Form::Compact, bytes).await;
+    owner.hold(&nav).await;
+    owner.hold(&ping).await;
+    bus.keep(owner);
+    let dir = tempfile::tempdir().expect("a directory");
+    let file = dir.path().join("catalog.json");
+    std::fs::write(&file, catalog.to_jcs()).expect("the catalog's file");
+    let file = file.to_str().expect("a UTF-8 path");
+
+    let show = ["service", "show", "lab/compact", "--format", "json"];
+    let given: Vec<&str> = show.iter().copied().chain(["--catalog", file]).collect();
+    let run = bus
+        .until(&given, |r| {
+            r.code == 0 && r.json()["rows"][0]["descriptor"]["answer"] == "served"
+        })
+        .await;
+    exits(&run, 0);
+    let served = &run.json()["rows"][0]["descriptor"]["descriptor"];
+    assert_eq!(served["service"], "lab/compact", "{run}");
+    assert_eq!(served["run"], compact_owner::RUN);
+    assert_eq!(served["catalog"], catalog.id().hex());
+    assert_eq!(served["capabilities"], json!(["imu"]));
+    let entries: Vec<(&str, &str, bool)> = served["interfaces"]
+        .as_array()
+        .expect("interfaces")
+        .iter()
+        .map(|e| {
+            (
+                e["iface"].as_str().expect("iface"),
+                e["contract"].as_str().expect("contract"),
+                e["token"].as_bool().expect("token"),
+            )
+        })
+        .collect();
+    let fp = |c: &Contract| zenkey::model::canonical::Fingerprint::of(c).to_string();
+    assert_eq!(
+        entries,
+        vec![
+            ("nav.v2", fp(&nav).as_str(), false),
+            ("ping.v1", fp(&ping).as_str(), false)
+        ]
+    );
+
+    let run = bus.zenctl(&show).await;
+    exits(&run, 0);
+    let unread = &run.json()["rows"][0]["descriptor"];
+    assert_eq!(unread["answer"], "unread", "{run}");
+    assert!(
+        unread["reason"]
+            .as_str()
+            .is_some_and(|r| r.starts_with("unknown_catalog")),
+        "{run}"
+    );
+    let run = bus
+        .zenctl(&["service", "show", "lab/compact", "--format", "table"])
+        .await;
+    exits(&run, 0);
+    assert!(
+        run.stdout
+            .contains("descriptor: compact, not read — unknown_catalog"),
+        "{run}"
+    );
+}
+
 /// `service show`: the descriptor as served; an address presence does not
 /// show is silence, and silence is exit 2 — never an empty 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -15972,6 +16065,7 @@ async fn watch_waits_its_timeout_for_the_catalog_its_owner_names() {
                 tokio::time::sleep(Duration::from_secs(6)).await;
                 let _ = q
                     .reply("zk2/lab/trio/@zk/instance/000000000000000a", text)
+                    .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
                     .await;
             });
         })

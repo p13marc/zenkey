@@ -883,7 +883,13 @@ impl Follow {
         // The finished ones are let go, so a long window holds none.
         while self.tasks.try_join_next().is_some() {}
         self.tasks.spawn(async move {
-            let reads = crate::bus::presence::describe_each(&session, wanted, t).await;
+            let reads = crate::bus::presence::describe_each(
+                &session,
+                wanted,
+                t,
+                &crate::bus::presence::Describing::default(),
+            )
+            .await;
             for ((a, i), r) in reads {
                 let zid = r
                     .descriptor()

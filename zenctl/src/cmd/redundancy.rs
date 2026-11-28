@@ -50,6 +50,7 @@ pub async fn run(cli: RedundancyArgs) -> Result<()> {
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
     let grace = ASKING.ask(super::positive_secs("--grace", grace));
     let mut spec = RedundancySpec::new(dep.timeout());
+    spec.catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
     spec.grace = grace;
     spec.iface = iface;
     spec.across_face = across_face;

@@ -691,6 +691,11 @@ fn descriptor_lines<'a>(facts: Option<&Described>, sp: Spacing) -> Element<'a, M
         Some(Described::Invalid(why)) => {
             return kit::status_chip(Tone::Caution, format!("descriptor invalid: {why}"));
         }
+        Some(Described::Unread(why)) => {
+            return kit::muted(format!(
+                "descriptor: compact, not read — {why}; never guessed, not a verdict"
+            ));
+        }
         Some(Described::Failed(why)) => {
             return kit::muted(format!("descriptor not read: {why}"));
         }

@@ -351,6 +351,7 @@ async fn a_presence_link_whose_round_trip_does_not_stand_says_so() {
             session,
             monitor: Arc::new(monitor),
             store: zenkey_fleet::BundleStore::new(std::time::Duration::from_secs(1)),
+            catalogs: Default::default(),
             timeout: std::time::Duration::from_secs(1),
         },
     ));

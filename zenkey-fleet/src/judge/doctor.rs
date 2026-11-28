@@ -685,6 +685,9 @@ struct PresencePhase {
 async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) -> PresencePhase {
     let (s, t) = (&bus.session, spec.timeout);
     let scope = Scope::all();
+    // A compact descriptor reads through the catalogs given and the store
+    // (core §3.3); with none given it is not read, never guessed.
+    let describing = crate::bus::presence::Describing::new(&spec.catalogs, store);
     let health = HealthTarget::All;
     let config = ConfigTarget::All.state_selector(false);
     let mut readings = Vec::new();
@@ -727,7 +730,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         let described = async {
             let mut read = read;
             if let (true, Ok(o)) = (spec.asks(CheckId::HostidDuplicate), &mut read) {
-                crate::bus::presence::describe_where(s, o, t, |a, _| {
+                crate::bus::presence::describe_where(s, o, t, &describing, |a, _| {
                     zenkey_model::hostid::is_minted_shape(a.system.as_str())
                 })
                 .await;
@@ -746,7 +749,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
     } else {
         None
     };
-    let after = crate::bus::presence::observe(s, &scope, t)
+    let after = crate::bus::presence::observe_through(s, &scope, t, &describing)
         .await
         .map_err(|e| crate::one_line(&e));
     let Ok(observed) = &after else {
@@ -2334,6 +2337,7 @@ fn undescribed_why(read: &DescriptorRead) -> String {
     match read {
         DescriptorRead::Served(_) => "served".into(),
         DescriptorRead::Invalid(why) => format!("invalid: {why}"),
+        DescriptorRead::Unread(why) => format!("not read: {why}"),
         DescriptorRead::Silent => "no reply within the timeout".into(),
         DescriptorRead::Failed(why) => format!("the GET failed: {why}"),
     }
@@ -2963,8 +2967,12 @@ fn contract_unavailable(p: &Presence<'_>) -> CheckReport {
 /// The presence read already checked each reply without contracts, which
 /// is every code but D004–D007: a reply that failed is `Invalid`, with its
 /// codes. A served one is checked again here against the revisions it
-/// names, as the runtime checks its own before serving it — re-encoded
-/// from the parsed record, which the first check proved the reply's shape.
+/// names, as the runtime checks its own before serving it, on the record
+/// read ([`zenkey_model::descriptor::check_descriptor`]): a JSON one's
+/// parse, which the first check proved the reply's shape, or a compact
+/// one's decoding (§3.3, "The checks on a decoded descriptor"). A compact
+/// one not read, its catalog not given or a revision it names not had, is
+/// undecided: never guessed (§8.6).
 fn descriptor_invalid(p: &Presence<'_>) -> CheckReport {
     const C: CheckId = CheckId::DescriptorInvalid;
     let mut findings = Vec::new();
@@ -2979,6 +2987,16 @@ fn descriptor_invalid(p: &Presence<'_>) -> CheckReport {
             DescriptorRead::Served(d) => d,
             DescriptorRead::Invalid(why) => {
                 findings.push(finding(C, DoctorSeverity::Error, subject, why.clone()));
+                continue;
+            }
+            DescriptorRead::Unread(why) => {
+                undecided.push(unjudged(
+                    subject,
+                    format!(
+                        "its compact descriptor was not read ({why}): never guessed, and no \
+                         verdict (core §3.3, §8.6)"
+                    ),
+                ));
                 continue;
             }
             other => {
@@ -2998,8 +3016,7 @@ fn descriptor_invalid(p: &Presence<'_>) -> CheckReport {
                 Err(why) => syntax_only.push(why),
             }
         }
-        let text = serde_json::to_string(&**d).expect("a descriptor serializes");
-        let (_, report) = zenkey_model::descriptor::check(&text, &contracts);
+        let report = zenkey_model::descriptor::check_descriptor(d, &contracts);
         let codes: Vec<String> = report
             .errors()
             .chain(report.warnings())

@@ -106,7 +106,9 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         None
     } else {
         let ns_session = dep.session().await?;
-        let (feed, error) = LensFeed::open(&ns_session, &store, dep.timeout()).await;
+        // An owner's compact descriptor reads through --catalog (core §3.3).
+        let (feed, error) =
+            LensFeed::open_through(&ns_session, &store, &catalogs, dep.timeout()).await;
         if let Some(e) = error {
             eprintln!(
                 "{}",

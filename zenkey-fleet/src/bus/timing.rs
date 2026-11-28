@@ -113,6 +113,12 @@ pub struct TimingSpec {
     /// Across a face, how long after the subscriptions the window starts:
     /// a margin for them to cross, never proof.
     pub settle: Duration,
+    /// The deployment catalogs given (`--catalog`, core §8.6): what an
+    /// owner's compact descriptor (§3.3) is read through, its revisions
+    /// from the store. A compact one not read, or read with no `meta.zid`,
+    /// names no zid, so the owner's lifespans are unattributed
+    /// (unobservable), never a guess.
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 impl TimingSpec {
@@ -126,6 +132,7 @@ impl TimingSpec {
             across_face: false,
             owner_zids: Vec::new(),
             settle: crate::bus::telemetry::DEFAULT_SETTLE,
+            catalogs: crate::model::deployment::Catalogs::default(),
         }
     }
 
@@ -321,6 +328,7 @@ pub async fn observe(
 ) -> TimingObservation {
     let t = spec.timeout;
     let presence_scope = scope.presence_scope();
+    let describing = crate::bus::presence::Describing::new(&spec.catalogs, store);
     let t0 = Instant::now();
     let mut obs = TimingObservation {
         namespace: namespace.to_owned(),
@@ -347,7 +355,8 @@ pub async fn observe(
         None
     } else {
         obs.asked.push(presence_scope.selector());
-        match crate::bus::presence::observe(session, &presence_scope, t).await {
+        match crate::bus::presence::observe_through(session, &presence_scope, t, &describing).await
+        {
             Ok(o) => {
                 let c = Catalog::new(&o);
                 let _ = store.fetch_all(session, &c.wanted()).await;
@@ -500,6 +509,7 @@ pub async fn observe(
         session: session.clone(),
         presence_scope: presence_scope.clone(),
         timeout: t,
+        describing: describing.clone(),
         barrier: barrier.clone(),
         moves_seen: barrier.as_ref().map_or(0, zenkey::presence::Barrier::moves),
         refused,
@@ -544,7 +554,9 @@ pub async fn observe(
                 }
             }
             let settled = reader.establish().await;
-            let read = crate::bus::presence::observe(session, &presence_scope, t).await;
+            let read =
+                crate::bus::presence::observe_through(session, &presence_scope, t, &describing)
+                    .await;
             let at = Instant::now();
             reader.drain(&mut obs.book, &mut rx);
             let o = match read {
@@ -612,7 +624,12 @@ fn opening_of(o: &Observed, settled: bool, addresses: &BTreeSet<Addr>) -> Timing
             .as_ref()
             .and_then(|d| d.get(&(a.clone(), i.clone())))
         {
-            Some(DescriptorRead::Served(_) | DescriptorRead::Invalid(_)) => answered += 1,
+            // A compact one not read answered too: what it would say is
+            // unknown, so its zid is none held, and its lifespans
+            // unattributed (core §3.3).
+            Some(
+                DescriptorRead::Served(_) | DescriptorRead::Invalid(_) | DescriptorRead::Unread(_),
+            ) => answered += 1,
             Some(DescriptorRead::Silent) => unanswered.push(format!("{a} {i}: silent")),
             Some(DescriptorRead::Failed(why)) => unanswered.push(format!("{a} {i}: {why}")),
             None => unanswered.push(format!("{a} {i}: its descriptor was not read")),
@@ -634,6 +651,8 @@ struct Reader {
     session: Session,
     presence_scope: crate::bus::presence::Scope,
     timeout: Duration,
+    /// What a descriptor is read through, a compact one included.
+    describing: crate::bus::presence::Describing,
     barrier: Option<zenkey::presence::Barrier>,
     moves_seen: u64,
     refused: Arc<AtomicU64>,
@@ -741,8 +760,10 @@ impl Reader {
             return;
         }
         let (session, t, tx) = (self.session.clone(), self.timeout, self.answers.0.clone());
+        let describing = self.describing.clone();
         tokio::spawn(async move {
-            let reads = crate::bus::presence::describe_each(&session, wanted.clone(), t).await;
+            let reads =
+                crate::bus::presence::describe_each(&session, wanted.clone(), t, &describing).await;
             let mut o = Observed::default();
             for (a, i) in wanted {
                 o.tokens.push(ZkKey::Instance {
@@ -803,12 +824,13 @@ impl Reader {
             self.answers.0.clone(),
             self.barrier.clone(),
         );
+        let describing = self.describing.clone();
         tokio::spawn(async move {
             let settled = match &barrier {
                 Some(b) => b.establish().await,
                 None => true,
             };
-            let read = crate::bus::presence::observe(&session, &scope, t)
+            let read = crate::bus::presence::observe_through(&session, &scope, t, &describing)
                 .await
                 .map_err(|e| crate::one_line(&e));
             let _ = tx.send(Answered::Reseed {

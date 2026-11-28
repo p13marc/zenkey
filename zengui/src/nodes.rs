@@ -71,6 +71,10 @@ pub enum Described {
     Served(DescriptorFacts),
     /// A reply that fails the descriptor check, with its findings.
     Invalid(String),
+    /// A compact descriptor (core §3.3) not read, its catalog not given
+    /// (`--catalog`, Settings) or a revision it names not had, and why:
+    /// never guessed (§8.6), not a verdict.
+    Unread(String),
     /// No reply within the timeout: not a verdict.
     Silent,
     /// The GET could not be put on the bus.
@@ -507,6 +511,7 @@ fn described(answer: &Asked<DescriptorAnswer>) -> Described {
             })
         }
         Some(DescriptorAnswer::Invalid { findings }) => Described::Invalid(findings.clone()),
+        Some(DescriptorAnswer::Unread { reason }) => Described::Unread(reason.clone()),
         Some(DescriptorAnswer::Silent) => Described::Silent,
         Some(DescriptorAnswer::Failed { reason }) => Described::Failed(reason.clone()),
     }
@@ -642,6 +647,86 @@ mod tests {
         assert!(facts.lists_hostid());
         nodes.describe(None);
         assert!(nodes.instances(&addr("robot1/nav")).is_none());
+    }
+
+    /// A compact descriptor (core §3.3, #980 C5b) shows as its decoding, the
+    /// JSON form's members: its zid, what it implements and its standby
+    /// marks. One not read, its catalog not held, shows why, never a guess.
+    #[test]
+    fn a_compact_descriptor_shows_as_its_decoding() {
+        use zenkey_model::canonical::Fingerprint;
+        use zenkey_model::descriptor::{Form, InterfaceEntry, compact};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/ledger.v1.toml");
+        let ledger = zenkey_model::contract::load_path(&path)
+            .contract
+            .expect("ledger.v1");
+        let mut catalog = zenkey_model::catalog::Catalog::new(0).unwrap();
+        catalog
+            .push(ledger.iface.clone(), Fingerprint::of(&ledger))
+            .unwrap();
+        let fp = Fingerprint::of(&ledger).to_string();
+        let d = Descriptor {
+            format: "zk2-descriptor/0.1".into(),
+            service: "robot1/nav".into(),
+            instance: "0000000000000001".into(),
+            run: Some("0007".into()),
+            catalog: Some(catalog.id().hex()),
+            interfaces: vec![InterfaceEntry {
+                iface: "ledger.v1".into(),
+                contract: fp.clone(),
+                minor: None,
+                standby: true,
+                token: true,
+                unavailable: Vec::new(),
+                cardinality: BTreeMap::new(),
+            }],
+            capabilities: Vec::new(),
+            requires: Vec::new(),
+            profiles: Vec::new(),
+            meta: BTreeMap::from([("zid".to_owned(), serde_json::json!("a1b2"))]),
+        };
+        let bytes = compact::encode(
+            &compact::Compact {
+                descriptor: d,
+                seq: zenkey_model::wire::Seq::new(0).unwrap(),
+                minted: false,
+            },
+            std::slice::from_ref(&catalog),
+            &[&ledger],
+        )
+        .unwrap();
+        let served = zenkey::presence::Served {
+            form: Form::Compact,
+            bytes,
+        };
+        let (a, id): (Addr, zenkey_model::grammar::InstanceId) =
+            (addr("robot1/nav"), "0000000000000001".parse().unwrap());
+        let index = |read: DescriptorRead| {
+            let mut observed = Observed::from_keys("zk2/*/*/@zk/**", &[NAV.to_string()], true);
+            observed.descriptors = Some(BTreeMap::from([((a.clone(), id.clone()), read)]));
+            let mut nodes = NodesState::default();
+            nodes.describe(Some(&Arc::new(Catalog::new(&observed))));
+            nodes.instances(&a).expect("indexed")[0].described.clone()
+        };
+        let decoded = served
+            .clone()
+            .read(&a, &id, std::slice::from_ref(&catalog), &[&ledger]);
+        let Described::Served(facts) = index(DescriptorRead::from(decoded)) else {
+            panic!("served");
+        };
+        assert_eq!(facts.zid.as_deref(), Some("a1b2"));
+        assert_eq!(facts.host, None, "the compact form carries no other meta");
+        assert_eq!(
+            facts.interfaces,
+            vec![("ledger.v1".to_owned(), fp[7..19].to_owned())]
+        );
+        assert_eq!(facts.standby, vec!["ledger.v1".to_owned()]);
+        let unread = served.read(&a, &id, &[], &[&ledger]);
+        let Described::Unread(why) = index(DescriptorRead::from(unread)) else {
+            panic!("not read");
+        };
+        assert!(why.starts_with("unknown_catalog"), "{why}");
     }
 
     /// #862's review: a reading is owed per selection, and only the

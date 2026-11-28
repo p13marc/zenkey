@@ -458,6 +458,7 @@ pub(crate) fn descriptor_words(read: &DescriptorRead) -> String {
     match read {
         DescriptorRead::Served(_) => "served".into(),
         DescriptorRead::Invalid(why) => format!("invalid: {why}"),
+        DescriptorRead::Unread(why) => format!("not read: {why}"),
         DescriptorRead::Silent => "no reply within the timeout".into(),
         DescriptorRead::Failed(why) => format!("the GET failed: {why}"),
     }

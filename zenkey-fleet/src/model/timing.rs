@@ -1267,6 +1267,101 @@ mod tests {
         }
     }
 
+    /// §2.6's attribution through a compact descriptor (core §3.3, #980
+    /// C5b): its decoding's `meta.zid` attributes the owner's stamps, as a
+    /// JSON one's does; one written with no zid names none, so a stamped
+    /// sample's lifespan is unattributed, unobservable, never a guess.
+    #[test]
+    fn a_compact_descriptor_attributes_a_stamp_by_its_zid_alone() {
+        use crate::model::catalog::DescriptorRead;
+        use zenkey_model::canonical::Fingerprint;
+        use zenkey_model::descriptor::{Descriptor, FORMAT, Form, InterfaceEntry, compact};
+        use zenoh::time::{NTP64, TimestampId};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/pace.v1.toml");
+        let pace = zenkey_model::contract::load_path(&path)
+            .contract
+            .expect("pace.v1");
+        let mut catalog = zenkey_model::catalog::Catalog::new(0).unwrap();
+        catalog
+            .push(pace.iface.clone(), Fingerprint::of(&pace))
+            .unwrap();
+        let (addr, id): (Addr, InstanceId) =
+            (ADDR.parse().unwrap(), "00000000000000a1".parse().unwrap());
+        for (zid, owners) in [(Some("a1"), vec![0xa1_u128]), (None, vec![])] {
+            let d = Descriptor {
+                format: FORMAT.to_owned(),
+                service: ADDR.to_owned(),
+                instance: id.to_string(),
+                run: Some("0007".to_owned()),
+                catalog: Some(catalog.id().hex()),
+                interfaces: vec![InterfaceEntry {
+                    iface: "pace.v1".to_owned(),
+                    contract: Fingerprint::of(&pace).to_string(),
+                    minor: None,
+                    standby: false,
+                    token: true,
+                    unavailable: Vec::new(),
+                    cardinality: BTreeMap::new(),
+                }],
+                capabilities: Vec::new(),
+                requires: Vec::new(),
+                profiles: Vec::new(),
+                meta: zid
+                    .map(|z| ("zid".to_owned(), serde_json::Value::String(z.to_owned())))
+                    .into_iter()
+                    .collect(),
+            };
+            let bytes = compact::encode(
+                &compact::Compact {
+                    descriptor: d,
+                    seq: zenkey_model::wire::Seq::new(0).unwrap(),
+                    minted: false,
+                },
+                std::slice::from_ref(&catalog),
+                &[&pace],
+            )
+            .unwrap();
+            let served = zenkey::presence::Served {
+                form: Form::Compact,
+                bytes,
+            };
+            let read = DescriptorRead::from(served.read(
+                &addr,
+                &id,
+                std::slice::from_ref(&catalog),
+                &[&pace],
+            ));
+            assert!(matches!(read, DescriptorRead::Served(_)), "{read:?}");
+            let t0 = Instant::now();
+            let mut o = Observed::from_keys("zk2/lab/pace/@zk/**", &[alive(id.as_str())], true);
+            o.descriptors = Some(BTreeMap::from([((addr.clone(), id.clone()), read)]));
+            let mut book = TimingBook::new(vec![pace_cmd()], Some(ms(50)), false, t0);
+            book.seed(&o, true, t0);
+            assert_eq!(
+                book.owner_zids(&addr),
+                owners.iter().copied().collect::<BTreeSet<_>>()
+            );
+            book.start(t0);
+            let wall = SystemTime::now();
+            let mut sample = put(CMD, t0 + ms(10));
+            sample.wall = wall;
+            sample.stamp = Some(Timestamp::new(
+                NTP64::from(wall.duration_since(SystemTime::UNIX_EPOCH).unwrap()),
+                "a1".parse::<TimestampId>().unwrap(),
+            ));
+            book.sample(&sample);
+            let m = book.members().next().unwrap().1.clone();
+            let reason = m.samples[0].reason;
+            if owners.is_empty() {
+                assert_eq!(reason, zenkey_model::timing::Reason::Unattributed);
+            } else {
+                assert_ne!(reason, zenkey_model::timing::Reason::Unattributed);
+                assert_ne!(reason, zenkey_model::timing::Reason::ForeignStamp);
+            }
+        }
+    }
+
     /// §6 step 1 in values: a known member published at its period, its
     /// owner present throughout: met, kept; the lifespan unobservable with
     /// no ε stated (`no_bound`).

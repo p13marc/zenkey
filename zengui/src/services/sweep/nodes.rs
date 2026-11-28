@@ -69,21 +69,26 @@ pub fn health(
 /// namespace — which holds no liveliness subscriber, the presence link's
 /// monitor being on a watch session of its own — two presence reads a
 /// grace apart, each with its descriptors, and the revisions they name
-/// from the window's own store. Every role is the fleet's judge's.
+/// from the window's own store. A compact descriptor (core §3.3) is read
+/// through `catalogs`, the window's `--catalog`. Every role is the fleet's
+/// judge's.
 pub fn redundancy(
     session: zenoh::Session,
     namespace: String,
     addr: Addr,
     store: zenkey_fleet::BundleStore,
+    catalogs: zenkey_fleet::Catalogs,
     timeout: Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
+            let mut spec = zenkey_fleet::RedundancySpec::new(timeout);
+            spec.catalogs = catalogs;
             let report = zenkey_fleet::run_redundancy(
                 &session,
                 &namespace,
                 Some(addr.clone()),
-                zenkey_fleet::RedundancySpec::new(timeout),
+                spec,
                 // The window's, seeded with the contracts held offline.
                 &store,
             )

@@ -219,8 +219,16 @@ pub enum DescriptorAnswer {
     /// (`zk2-descriptor/0.1`). Exposure is not checked here: that needs the
     /// contracts (§3.3).
     Served { descriptor: Box<Descriptor> },
-    /// A reply that fails the descriptor check, with its findings.
+    /// A reply that fails the descriptor check, with its findings: a JSON
+    /// one, or a compact one refused for its bytes (§3.3, "Reading").
     Invalid { findings: String },
+    /// A compact descriptor (§3.3) the reader could not read: the catalog
+    /// it names is not given (`--catalog`), nor one that succeeds it
+    /// (`unknown_catalog`), an index is past the one read through
+    /// (`unknown_index`), or a revision it lists cannot be had
+    /// (`unknown_revision`); why, its refusal's token first. Never guessed
+    /// (§8.6), and not a verdict.
+    Unread { reason: String },
     /// No reply within the timeout: the instance may be gone, or the reply
     /// may not have crossed. Not a verdict.
     Silent,
@@ -617,6 +625,13 @@ mod tests {
             })
             .expect("serialize"),
             json!({"answer": "failed", "reason": "session closed"})
+        );
+        assert_eq!(
+            serde_json::to_value(DescriptorAnswer::Unread {
+                reason: "unknown_catalog: no catalog held".into()
+            })
+            .expect("serialize"),
+            json!({"answer": "unread", "reason": "unknown_catalog: no catalog held"})
         );
     }
 

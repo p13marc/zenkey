@@ -1222,6 +1222,7 @@ async fn presence_stream(
         session: session.clone(),
         monitor: std::sync::Arc::new(monitor),
         store: zenkey_fleet::BundleStore::new(Duration::from_secs(2)),
+        catalogs: Default::default(),
         timeout: Duration::from_secs(2),
     })
 }

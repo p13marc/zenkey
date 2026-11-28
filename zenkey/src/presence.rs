@@ -82,6 +82,16 @@
 //! ([`PresenceRead::at_interests_timeout`]), and a barrier that ends there is
 //! not established.
 //!
+//! **A descriptor is read by its form** (core §3.3, #980 C5b), told by its
+//! reply's `Encoding` alone ([`Served`], [`descriptor::Form::of`]): the
+//! JSON form as ever, and the compact form under `zenoh/bytes`, decoded
+//! through the deployment catalogs and the revisions a reader holds
+//! ([`Held`]), each revision it names and the reader lacks retrieved first
+//! where the reader retrieves (§8.4). A reader holding no catalog that is
+//! or succeeds the one it names reads none of it ([`Found::Unread`],
+//! `unknown_catalog`): never a guess (§8.6), so a provider's presence read
+//! leaves its address undescribed, the read not complete.
+//!
 //! **Every liveliness GET of the runtime, the fleet and the tools goes
 //! through this module** (`scripts/check-liveliness-seam.sh`), and each is
 //! counted per session ([`liveliness_gets`]): what a scenario observes when
@@ -89,10 +99,13 @@
 //! (`spec/scenarios/presence.md` §9, 0.38).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use zenkey_model::descriptor::{self, Descriptor};
+use zenkey_model::canonical::Fingerprint;
+use zenkey_model::catalog::Catalog;
+use zenkey_model::contract::Contract;
+use zenkey_model::descriptor::{self, Descriptor, Form, compact};
 use zenkey_model::grammar::{Addr, IfaceId, InstanceId, ZkKey, instance_key, parse};
 use zenoh::query::{ConsolidationMode, Reply};
 
@@ -898,22 +911,232 @@ pub async fn tokens(
 #[derive(Debug, Clone)]
 pub enum Found {
     /// A descriptor that passes the syntax checks (the contracts are not
-    /// at hand, so exposure is not checked: §3.3).
+    /// at hand, so exposure is not checked: §3.3), with the reply's bytes.
+    /// A compact one (§3.3, "The compact form") is its decoding, checked so
+    /// too.
     Descriptor(Box<Descriptor>, Vec<u8>),
-    /// A reply that fails the descriptor check, with its findings.
+    /// A reply that fails the descriptor check, with its findings: a JSON
+    /// one, or a compact one refused for its bytes (§3.3, "Reading"), its
+    /// refusal's token first.
     Invalid(String),
+    /// A compact descriptor not read for what the reader does not hold
+    /// (§3.3, "Never a guess"): the catalog it names, none held nor one
+    /// whose lineage holds it (`unknown_catalog`), an index past the
+    /// catalog read through (`unknown_index`), or a revision it lists
+    /// (`unknown_revision`); why, its refusal's token first. Never read
+    /// through another catalog or revision: what it says is unknown, not a
+    /// verdict on the owner (§8.6).
+    Unread(String),
     /// No reply. Silence is not a verdict: the instance may be gone, or the
     /// reply may not have crossed.
     Nothing,
 }
 
-/// GETs the descriptor of one instance (§3.3).
+/// What a reader holds to read a compact descriptor (core §3.3,
+/// "Reading"): the deployment catalogs it was given (§8.6) and the
+/// revisions in hand. A compact descriptor's head and catalog name every
+/// revision the rest needs, so a reader [`Held::retrieving`] retrieves one
+/// it lacks by its fingerprint (§8.4) before it reads the rest. Without a
+/// catalog a compact descriptor is [`Found::Unread`] (`unknown_catalog`),
+/// never guessed. [`Held::default`] holds nothing: what [`descriptor()`]
+/// reads with. The JSON form needs none of it.
+#[derive(Debug, Clone, Default)]
+pub struct Held {
+    catalogs: Arc<Vec<Catalog>>,
+    revisions: Vec<Arc<Contract>>,
+    retrieve: bool,
+}
+
+impl Held {
+    /// The catalogs and the revisions a reader holds, retrieving nothing.
+    #[must_use]
+    pub fn new(catalogs: Arc<Vec<Catalog>>, revisions: Vec<Arc<Contract>>) -> Held {
+        Held {
+            catalogs,
+            revisions,
+            retrieve: false,
+        }
+    }
+
+    /// A revision a compact descriptor names and this does not hold is
+    /// retrieved from its holders (§8.4), each GET bounded by the read's
+    /// timeout; one that cannot be had leaves the descriptor unread
+    /// (`unknown_revision`).
+    #[must_use]
+    pub fn retrieving(mut self) -> Held {
+        self.retrieve = true;
+        self
+    }
+
+    /// The deployment catalogs held.
+    #[must_use]
+    pub fn catalogs(&self) -> &[Catalog] {
+        &self.catalogs
+    }
+
+    /// The revisions held.
+    #[must_use]
+    pub fn revisions(&self) -> &[Arc<Contract>] {
+        &self.revisions
+    }
+}
+
+/// A descriptor's reply as it came (core §3.3, "What carries it"): its
+/// form, told by its `Encoding` alone ([`Form::of`]), and its bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Served {
+    pub form: Form,
+    pub bytes: Vec<u8>,
+}
+
+impl Served {
+    /// The reply `sample` carries.
+    #[must_use]
+    pub fn of(sample: &zenoh::sample::Sample) -> Served {
+        Served {
+            form: Form::of(&sample.encoding().to_string()),
+            bytes: sample.payload().to_bytes().into_owned(),
+        }
+    }
+
+    /// The revisions a compact descriptor's head names through `catalogs`
+    /// (§3.3, "Reading", steps 1 and 2), each entry's once: what a reader
+    /// that lacks one retrieves (§8.4) before it reads the rest. None for
+    /// the JSON form, and none where the head or the catalog refuses:
+    /// [`Served::read`] then says why.
+    #[must_use]
+    pub fn names(&self, catalogs: &[Catalog]) -> Vec<(IfaceId, Fingerprint)> {
+        if self.form != Form::Compact {
+            return Vec::new();
+        }
+        let Ok(pairs) = compact::Head::parse(&self.bytes).and_then(|h| h.pairs(catalogs)) else {
+            return Vec::new();
+        };
+        let mut named: Vec<(IfaceId, Fingerprint)> = Vec::new();
+        for e in pairs {
+            let pair = (e.iface.clone(), e.contract.clone());
+            if !named.contains(&pair) {
+                named.push(pair);
+            }
+        }
+        named
+    }
+
+    /// Reads it (§3.3): the JSON form checked with no contract, the compact
+    /// form decoded with the key it came on, through `catalogs` and
+    /// `revisions` ([`compact::decode`]), then checked so too
+    /// ([`descriptor::check_descriptor`]). A compact one refused for what
+    /// the reader lacks is [`Found::Unread`]; refused for its bytes, or
+    /// failing a check, [`Found::Invalid`].
+    #[must_use]
+    pub fn read(
+        self,
+        addr: &Addr,
+        instance: &InstanceId,
+        catalogs: &[Catalog],
+        revisions: &[&Contract],
+    ) -> Found {
+        match self.decode(addr, instance, catalogs, revisions) {
+            Ok((d, report)) if !report.has_errors() => Found::Descriptor(Box::new(d), self.bytes),
+            Ok((_, report)) => Found::Invalid(findings(&report)),
+            Err(not) => not,
+        }
+    }
+
+    /// The descriptor it reads as, with the checks' report (no contract):
+    /// a JSON one that parses (D000 aside, whatever else it draws), a
+    /// compact one decoded. `Err` is [`Served::read`]'s answer where none
+    /// reads: D000, or a compact one refused.
+    ///
+    /// # Errors
+    /// [`Found::Invalid`] or [`Found::Unread`].
+    pub fn decode(
+        &self,
+        addr: &Addr,
+        instance: &InstanceId,
+        catalogs: &[Catalog],
+        revisions: &[&Contract],
+    ) -> std::result::Result<(Descriptor, zenkey_model::diag::Report), Found> {
+        match self.form {
+            Form::Json => {
+                let text = std::str::from_utf8(&self.bytes)
+                    .map_err(|_| Found::Invalid("not UTF-8".to_owned()))?;
+                match descriptor::check(text, &[]) {
+                    (Some(d), report) => Ok((d, report)),
+                    (None, report) => Err(Found::Invalid(findings(&report))),
+                }
+            }
+            Form::Compact => compact::decode(&self.bytes, addr, instance, catalogs, revisions)
+                .map(|c| {
+                    let report = descriptor::check_descriptor(&c.descriptor, &[]);
+                    (c.descriptor, report)
+                })
+                .map_err(|r| refused(r, &self.bytes, catalogs)),
+        }
+    }
+}
+
+/// A report's errors, each `<code> <message>`, joined.
+fn findings(report: &zenkey_model::diag::Report) -> String {
+    report
+        .errors()
+        .map(|e| format!("{} {}", e.code, e.message))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// A compact descriptor's refusal (§3.3, "Reading"), as a [`Found`]: the
+/// reader's lack is [`Found::Unread`], anything else in the bytes
+/// [`Found::Invalid`]; each names its token first.
+fn refused(r: compact::Refusal, bytes: &[u8], catalogs: &[Catalog]) -> Found {
+    use compact::Refusal as R;
+    match r {
+        R::UnknownCatalog => {
+            let named =
+                compact::Head::parse(bytes).map_or_else(|_| "?".to_owned(), |h| h.catalog.hex());
+            Found::Unread(if catalogs.is_empty() {
+                format!(
+                    "unknown_catalog: the compact descriptor names catalog {named}, and no \
+                     catalog is held (core §8.6)"
+                )
+            } else {
+                format!(
+                    "unknown_catalog: the compact descriptor names catalog {named}, which no \
+                     catalog held is or succeeds (core §8.6)"
+                )
+            })
+        }
+        R::UnknownIndex | R::UnknownRevision => {
+            Found::Unread(format!("{}: {r} (core §3.3)", r.token()))
+        }
+        _ => Found::Invalid(format!(
+            "{}: the compact descriptor is refused, {r} (core §3.3)",
+            r.token()
+        )),
+    }
+}
+
+/// GETs the descriptor of one instance (§3.3), holding nothing: a compact
+/// one is [`Found::Unread`] (`unknown_catalog`), or [`Found::Invalid`]
+/// where its head is refused. [`descriptor_held`] reads one through what
+/// a reader holds.
 pub async fn descriptor(
     session: &zenoh::Session,
     addr: &Addr,
     instance: &InstanceId,
     timeout: Duration,
 ) -> Result<Found> {
+    descriptor_held(session, addr, instance, &Held::default(), timeout).await
+}
+
+/// The first reply of one instance's descriptor GET (§3.3), as it came;
+/// `None` when none came.
+pub async fn descriptor_reply(
+    session: &zenoh::Session,
+    addr: &Addr,
+    instance: &InstanceId,
+    timeout: Duration,
+) -> Result<Option<Served>> {
     let key = instance_key(addr, instance)?;
     let rx = session
         .get(key.into_keyexpr())
@@ -924,23 +1147,74 @@ pub async fn descriptor(
         .map_err(zenoh)?;
     while let Ok(reply) = rx.recv_async().await {
         let Ok(sample) = reply.result() else { continue };
-        let bytes = sample.payload().to_bytes().into_owned();
-        let Ok(text) = std::str::from_utf8(&bytes) else {
-            return Ok(Found::Invalid("not UTF-8".to_owned()));
-        };
-        let (d, report) = descriptor::check(text, &[]);
-        return Ok(match d {
-            Some(d) if !report.has_errors() => Found::Descriptor(Box::new(d), bytes),
-            _ => Found::Invalid(
-                report
-                    .errors()
-                    .map(|e| format!("{} {}", e.code, e.message))
-                    .collect::<Vec<_>>()
-                    .join("; "),
-            ),
-        });
+        return Ok(Some(Served::of(sample)));
     }
-    Ok(Found::Nothing)
+    Ok(None)
+}
+
+/// GETs the descriptor of one instance (§3.3) and reads it by its form
+/// through what `held` holds ([`read_held`]).
+pub async fn descriptor_held(
+    session: &zenoh::Session,
+    addr: &Addr,
+    instance: &InstanceId,
+    held: &Held,
+    timeout: Duration,
+) -> Result<Found> {
+    Ok(
+        match descriptor_reply(session, addr, instance, timeout).await? {
+            Some(served) => read_held(session, served, addr, instance, held, timeout).await,
+            None => Found::Nothing,
+        },
+    )
+}
+
+/// Reads a descriptor reply that came on `addr`'s instance key (§3.3)
+/// through what `held` holds: a compact one's revisions named and not held
+/// retrieved first where it retrieves ([`crate::retrieval::revisions`]),
+/// each GET waiting at most `timeout`.
+pub async fn read_held(
+    session: &zenoh::Session,
+    served: Served,
+    addr: &Addr,
+    instance: &InstanceId,
+    held: &Held,
+    timeout: Duration,
+) -> Found {
+    let revisions = held_for(session, &served, held, timeout).await;
+    let revisions: Vec<&Contract> = revisions.iter().map(|c| &**c).collect();
+    served.read(addr, instance, &held.catalogs, &revisions)
+}
+
+/// [`Served::decode`] through what `held` holds, as [`read_held`] reads.
+pub(crate) async fn decode_held(
+    session: &zenoh::Session,
+    served: &Served,
+    addr: &Addr,
+    instance: &InstanceId,
+    held: &Held,
+    timeout: Duration,
+) -> std::result::Result<(Descriptor, zenkey_model::diag::Report), Found> {
+    let revisions = held_for(session, served, held, timeout).await;
+    let revisions: Vec<&Contract> = revisions.iter().map(|c| &**c).collect();
+    served.decode(addr, instance, &held.catalogs, &revisions)
+}
+
+/// The revisions `held` holds, and those a compact `served` names that it
+/// lacks, retrieved where it retrieves.
+async fn held_for(
+    session: &zenoh::Session,
+    served: &Served,
+    held: &Held,
+    timeout: Duration,
+) -> Vec<Arc<Contract>> {
+    let mut revisions = held.revisions.clone();
+    if held.retrieve && served.form == Form::Compact {
+        let named = served.names(&held.catalogs);
+        revisions
+            .extend(crate::retrieval::revisions(session, &named, &held.revisions, timeout).await);
+    }
+    revisions
 }
 
 impl Found {
@@ -948,7 +1222,7 @@ impl Found {
     pub fn into_descriptor(self) -> Result<Descriptor> {
         match self {
             Self::Descriptor(d, _) => Ok(*d),
-            Self::Invalid(why) => Err(Error::Descriptor(why)),
+            Self::Invalid(why) | Self::Unread(why) => Err(Error::Descriptor(why)),
             Self::Nothing => Err(Error::Zenoh("no descriptor reply".to_owned())),
         }
     }
@@ -984,15 +1258,22 @@ const DESCRIBE_CONCURRENCY: usize = 64;
 ///   complete, the tokens already seen kept.
 /// - **A descriptor not read** leaves its address in `undescribed`, the
 ///   result not complete, and why in `errors`: a GET that failed (an
-///   error, never a panic: [`descriptor`] returns every failure, and a
+///   error, never a panic: [`descriptor()`] returns every failure, and a
 ///   task that panicked is read the same), one with no reply (a session
 ///   cut off by then answers it at once, with nothing, as it answers a
-///   liveliness read), one whose reply fails its checks, or one the
-///   deadline left unasked.
+///   liveliness read), one whose reply fails its checks, a compact one
+///   (§3.3) read through no catalog `held` holds (`unknown_catalog`) or
+///   with a revision it names that cannot be had, never guessed (§8.6),
+///   or one the deadline left unasked.
+///
+/// Each descriptor is read by its form ([`read_held`]): a compact one
+/// through the catalogs and the revisions `held` holds, each it lacks
+/// retrieved where `held` retrieves.
 pub(crate) async fn serving(
     session: &zenoh::Session,
     providers: &[crate::consumer::Provider],
     iface: &IfaceId,
+    held: &Held,
     timeout: Duration,
     deadline: Option<tokio::time::Instant>,
 ) -> Result<crate::client::Present> {
@@ -1062,9 +1343,10 @@ pub(crate) async fn serving(
                 not_read(addr, &instance, "not asked: the deadline came".to_owned());
                 continue;
             };
-            let session = session.clone();
+            let (session, held) = (session.clone(), held.clone());
             let (a, i) = (addr.clone(), instance.clone());
-            let task = tasks.spawn(async move { descriptor(&session, &a, &i, wait).await });
+            let task =
+                tasks.spawn(async move { descriptor_held(&session, &a, &i, &held, wait).await });
             asked.insert(task.id(), (addr, instance));
         }
         let Some(joined) = tasks.join_next_with_id().await else {
@@ -1084,6 +1366,7 @@ pub(crate) async fn serving(
                 }
             }
             Ok(Found::Invalid(why)) => not_read(addr, &instance, format!("invalid: {why}")),
+            Ok(Found::Unread(why)) => not_read(addr, &instance, format!("not read: {why}")),
             Ok(Found::Nothing) => not_read(addr, &instance, "no reply".to_owned()),
             Err(e) => not_read(addr, &instance, e.to_string()),
         }
