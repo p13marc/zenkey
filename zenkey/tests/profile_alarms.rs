@@ -56,6 +56,10 @@ const JITTER: Duration = Duration::from_millis(200);
 /// The owner of `scenarios.md`'s conventions.
 const SVC: &str = "lab/svc";
 
+/// §3's tombstone window, which the scenario configures (core S3): any
+/// window checks the rule, the default's 60 s as well.
+const WINDOW: Duration = Duration::from_secs(5);
+
 /// A's alert key (§2.2).
 const A_KEY: &str = "a659f813308ad1da";
 
@@ -661,7 +665,8 @@ async fn s2_escalate_refresh_and_confirm_at_900_s() {
 }
 
 /// §3: a resolve is a resolved put, then a delete within 1 s; G reads the
-/// delete as a `reply_del` within the window, and nothing after it.
+/// delete as a `reply_del` within the window, and nothing after it. The
+/// owner's tombstone window is the scenario's 5 s (core S3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s3_resolve_then_delete() {
     let (_r1, ep) = router(None).await;
@@ -670,13 +675,9 @@ async fn s3_resolve_then_delete() {
     let owner_zid = os.zid().to_string();
     let s = record(&rs).await;
     let g = reader(&rs);
-    let (b, a) = owner(
-        &os,
-        config(SVC),
-        alarms::implementation(),
-        Startup::default(),
-    )
-    .await;
+    let mut cfg = config(SVC);
+    cfg.tombstone_window_s = Some(WINDOW.as_secs());
+    let (b, a) = owner(&os, cfg, alarms::implementation(), Startup::default()).await;
     let svc = b.start().await.unwrap();
     let (presence, owner_said) = presence_of(&rs, None).await;
     seen_by(&os).await;
@@ -732,8 +733,8 @@ async fn s3_resolve_then_delete() {
     let (firing, _) = judge_g(&answer, A_KEY, presence, &owner_said);
     assert_eq!(pair(firing), (Answer::No, Reason::Deleted));
 
-    // 3. 65 s after it, with the 60 s window: nothing for the key.
-    tokio::time::sleep_until((recs[2].at + Duration::from_secs(65)).into()).await;
+    // 3. 10 s after it, past the 5 s window: nothing for the key.
+    tokio::time::sleep_until((recs[2].at + WINDOW + Duration::from_secs(5)).into()).await;
     let answer = get(&g).await;
     assert!(answer.complete);
     assert!(reply(&answer, A_KEY).is_none(), "{:?}", answer.current);

@@ -57,7 +57,7 @@ use zenkey::model::grammar::{InstanceId, ZkKey};
 use zenkey::model::wire::{Envelope, Form, Run, Seq, Stamp, Tag};
 use zenkey::run::FileRunStore;
 use zenkey::state::Current;
-use zenkey::{Implementation, ServiceBuilder, presence};
+use zenkey::{Implementation, ServiceBuilder, ServiceConfig, presence};
 use zenoh::query::{ConsolidationMode, QueryTarget, Reply};
 use zenoh::sample::{Sample, SampleKind};
 
@@ -164,7 +164,19 @@ async fn owner(
     runs: &Path,
     table: Option<Implementation>,
 ) -> (ServiceBuilder, Alarms) {
-    let mut b = ServiceBuilder::new(s, config(address));
+    owner_cfg(s, config(address), imp, startup, runs, table).await
+}
+
+/// [`owner`] at `cfg`, a configuration of the test's own.
+async fn owner_cfg(
+    s: &zenoh::Session,
+    cfg: ServiceConfig,
+    imp: Implementation,
+    startup: Startup,
+    runs: &Path,
+    table: Option<Implementation>,
+) -> (ServiceBuilder, Alarms) {
+    let mut b = ServiceBuilder::new(s, cfg);
     b.run_store(Arc::new(FileRunStore::new(runs))).unwrap();
     if let Some(t) = table {
         let iface = t.iface().clone();
@@ -1057,7 +1069,8 @@ async fn s2_escalate_refresh_and_confirm_at_900_s() {
 }
 
 /// §3 on `imp`: a resolve is one put, kept as the slot's value with no
-/// delete; G reads it resolved within 1 s and 65 s later; the next
+/// delete; G reads it resolved within 1 s and 10 s later, past the owner's
+/// 5 s tombstone window, which the scenario configures (core S3); the next
 /// heartbeat counts it live with its bit clear.
 async fn resolve_one_put(imp: Implementation, bound: Duration) {
     let dir = tempfile::tempdir().unwrap();
@@ -1069,9 +1082,11 @@ async fn resolve_one_put(imp: Implementation, bound: Duration) {
     let g = reader(&rs, &imp);
     let sub = g.subscribe(av2::ALARMS, |_| {}).await.unwrap();
     let hz = horizon(&imp);
-    let (b, a) = owner(
+    let mut cfg = config(SVC);
+    cfg.tombstone_window_s = Some(5);
+    let (b, a) = owner_cfg(
         &os,
-        SVC,
+        cfg,
         imp,
         Startup::default(),
         &run_file(dir.path(), "svc"),
@@ -1132,8 +1147,8 @@ async fn resolve_one_put(imp: Implementation, bound: Duration) {
     let (firing, _) = judge_get(&seed, 0, presence, &stated(&d), &hz);
     assert_eq!(pair(firing), (Answer::No, Reason::Resolved));
 
-    // 3. 65 s later: the same, still the slot's value.
-    tokio::time::sleep_until((resolved_at + Duration::from_secs(65)).into()).await;
+    // 3. 10 s later, past the window: the same, still the slot's value.
+    tokio::time::sleep_until((resolved_at + Duration::from_secs(10)).into()).await;
     let got = get_alarms(&rs, SVC).await;
     let seed = got.seed(SVC);
     assert_eq!(record_at(&seed, 0), resolved);
@@ -1141,7 +1156,7 @@ async fn resolve_one_put(imp: Implementation, bound: Duration) {
     assert_eq!(pair(firing), (Answer::No, Reason::Resolved));
     assert!(
         snapshot(&s.log).iter().all(|r| !r.delete),
-        "no delete, within 60 s or after it"
+        "no delete, within the window or after it"
     );
 
     // 4. The owner's next heartbeat: a live count of 1, slot 0's bit

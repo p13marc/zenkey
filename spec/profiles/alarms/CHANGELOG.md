@@ -7,6 +7,28 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `alarms.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## Scenarios — 2026-11-28: editorial: §3 under a 5 s tombstone window, no keyword changed (#1151)
+
+Neither text's version moves: `v1.md` and `v2.md` are unchanged. This
+entry is the scenario files' alone.
+
+**What changed, in `scenarios.md` and `scenarios-v2.md`.**
+- **§3's window.** The deployment configures the owner's tombstone
+  window to 5 s (core S3), where §3 kept the 60 s default. G's last GET
+  comes 10 s after the delete, or the resolve under `alarms.v2`, where
+  it came 65 s after.
+- **What the window is.** `alarms.v1`'s delete comes within it, and its
+  tombstone lasts until it ends. `alarms.v2` deletes nothing within it or
+  after it. Each holds at any window, and §3 now says so.
+- **Why.** The two tests waited 65 s each, 133 s of the reference's
+  suite.
+
+**Deliberately not changed.**
+- **No rule.** v1 §2.5's delete within the window, and v2 §2.5's one put
+  and no delete, are the same at 5 s and at 60 s. No fixture changes.
+- **The horizon.** §2's and §6's 900 s already run on a copy in the
+  reference's default run, as the conventions say.
+
 ## alarms.v2 0.2 — 2026-11-28: zk2py's round 124: an alarm ages at the horizon of the revision its owner names, and a reader with no run stated answers each entry by its slot, no keyword changed (#984)
 
 zk2py's round 124 filed four findings against 0.1. #1170 resolved F-612

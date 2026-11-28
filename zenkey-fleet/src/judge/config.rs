@@ -640,8 +640,12 @@ pub fn reading(obs: &ConfigObservation) -> ConfigReading {
         listened: w.listened,
         complete: true,
     };
+    // At the horizon of the revision read: the standard's, or across a
+    // face the deployment's word (#1151).
+    let horizon = obs.spec.v1_horizon();
     let view = (!obs.spec.status_only).then(|| {
-        doc_read(
+        doc_read_within(
+            &horizon,
             view_got,
             window.map(|w| {
                 (
@@ -655,7 +659,8 @@ pub fn reading(obs: &ConfigObservation) -> ConfigReading {
             &trust,
         )
     });
-    let status = doc_read(
+    let status = doc_read_within(
+        &horizon,
         status_got,
         window.map(|w| {
             (

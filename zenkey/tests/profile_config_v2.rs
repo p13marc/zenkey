@@ -247,9 +247,26 @@ async fn rf_owner(
     startup: Startup,
     device: Arc<SimDevice>,
 ) -> Rf {
+    rf_owner_on(
+        session,
+        address,
+        startup,
+        device,
+        Implementation::new((*contract()).clone()),
+    )
+    .await
+}
+
+/// [`rf_owner`] on `imp`, a revision of `rfcfg.v1`.
+async fn rf_owner_on(
+    session: &zenoh::Session,
+    address: &str,
+    startup: Startup,
+    device: Arc<SimDevice>,
+    imp: Implementation,
+) -> Rf {
     let mut b = ServiceBuilder::new(session, config(address));
-    b.implement(Implementation::new((*contract()).clone()))
-        .unwrap();
+    b.implement(imp).unwrap();
     let cfg = b
         .config_v2(
             startup.clone(),
@@ -586,11 +603,32 @@ async fn bus() -> Bus {
 // --- the sections ---------------------------------------------------------------
 
 /// §1 A hot set, read back, and a dry run (§2.3, §2.9, §2.17).
+///
+/// On a test's copy of `rfcfg.v1` whose `freshness.ttl_s` is 6, made in
+/// memory and never published, as the scenarios' conventions allow
+/// (#1151): step 5 waits 11 s, its heartbeat every 2.85 s, and S's consumer
+/// holds the copy.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_a_hot_set_read_back_and_a_dry_run() {
+    hot_set_and_dry_run(
+        common::short_horizon("config/conformance/contracts/rfcfg.v1.toml", 60, 6),
+        6,
+    )
+    .await;
+}
+
+/// §1 at `rfcfg.v1` itself: 65 s of nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "slow tier: §1 waits 65 s at the contract's 60 s horizon"]
+async fn s1_a_hot_set_read_back_and_a_dry_run_at_60_s() {
+    hot_set_and_dry_run(Implementation::new((*contract()).clone()), 60).await;
+}
+
+/// §1 on `imp`, a revision of `rfcfg.v1` whose horizon is `horizon` s.
+async fn hot_set_and_dry_run(imp: Implementation, horizon: u64) {
     let bus = bus().await;
     let s = recorder(&bus.s, RF0).await;
-    let layout = zenkey::model::heartbeat::Layout::of(&contract());
+    let layout = zenkey::model::heartbeat::Layout::of(imp.contract());
     let tag = layout.tag;
     let (_h, beats) = common::heartbeats(
         &bus.s,
@@ -598,7 +636,8 @@ async fn s1_a_hot_set_read_back_and_a_dry_run() {
         layout,
     )
     .await;
-    let tool = Consumer::for_tool(&bus.s, contract(), &[RF0], &Default::default()).unwrap();
+    let tool =
+        Consumer::for_tool(&bus.s, imp.shared_contract(), &[RF0], &Default::default()).unwrap();
     let sub = tool.subscribe(config_v2::RECORD, |_| {}).await.unwrap();
     let tokens = bus
         .c
@@ -611,7 +650,11 @@ async fn s1_a_hot_set_read_back_and_a_dry_run() {
 
     // 1. The owner starts; T GETs the record the moment it sees the token.
     let owner = bus.owner.clone();
-    let starting = tokio::spawn(async move { rf_fresh(&owner, RF0, true).await });
+    let starting = tokio::spawn(async move {
+        let startup = rf(true);
+        let device = Arc::new(SimDevice::new_v2(&startup));
+        rf_owner_on(&owner, RF0, startup, device, imp).await
+    });
     let r0 = loop {
         let t = tokio::time::timeout(SETTLE, tokens.recv_async())
             .await
@@ -716,16 +759,24 @@ async fn s1_a_hot_set_read_back_and_a_dry_run() {
     assert_eq!(s.records().len(), puts, "a dry run puts nothing");
     assert_eq!(get_record(&bus.c, RF0).await.unwrap().1, bytes);
 
-    // 5. Nothing put for 65 s: the heartbeat vouches for the record at
-    // least every 30 s, and S judges it fresh past the horizon.
-    let end = put.at + Duration::from_secs(65);
+    // 5. Nothing put for 65 s, the horizon and 5 s: the heartbeat vouches
+    // for the record at least every half horizon, and S judges it fresh
+    // past the horizon.
+    let end = put.at + Duration::from_secs(horizon + 5);
     tokio::time::sleep_until(end.into()).await;
     assert_eq!(
         s.records().iter().filter(|p| p.at > put.at).count(),
         0,
         "never re-put"
     );
-    let seen = common::assert_cadence(&beats, put.at, end, Duration::from_secs(30), JITTER, tag);
+    let seen = common::assert_cadence(
+        &beats,
+        put.at,
+        end,
+        Duration::from_secs(horizon) / 2,
+        JITTER,
+        tag,
+    );
     assert!(
         seen.iter().all(|b| b.hb.sections.iter().all(|s| matches!(
             s,
@@ -740,7 +791,7 @@ async fn s1_a_hot_set_read_back_and_a_dry_run() {
     let j = tool
         .freshness(config_v2::RECORD, &[sub.freshness(&key)])
         .unwrap();
-    assert_eq!(j.verdict, Verdict::Fresh, "65 s after its put");
+    assert_eq!(j.verdict, Verdict::Fresh, "past the horizon after its put");
     assert_eq!(s.record_deletes(), 0);
     rf0.svc.close().await.unwrap();
 }
@@ -1090,45 +1141,45 @@ async fn s6_an_extend() {
     let rf0 = rf_fresh(&bus.owner, RF0, true).await;
     present(&bus.c, RF0).await;
 
-    // 1. A hot change under a 30 s window. Its deadline and the extend's
-    // are rounded up to the second (§2.8), so the call is made 850 ms into
-    // a second: rounded up, they fall 30.15 s and 81.15 s after it, within
-    // the scenarios' jitter of their 30 s and 81 s.
+    // 1. A hot change under a 10 s window, the floor. Its deadline and the
+    // extend's are rounded up to the second (§2.8), so the call is made
+    // 850 ms into a second: rounded up, they fall 10.15 s and 16.15 s after
+    // it, within the scenarios' jitter of their 10 s and 16 s.
     into_a_second(850).await;
     let step1 = (SystemTime::now(), Instant::now());
     let r = set(
         &bus.c,
         RF0,
         "duty",
-        json!({"fraction_ppm": 20000, "confirm_s": 30}),
+        json!({"fraction_ppm": 20000, "confirm_s": 10}),
         "r1",
     )
     .await;
     let p = record(&r).pending.expect("pending");
     assert!(p.applied, "a hot group, applied");
-    assert!(apart(at_ms(p.deadline), step1.0 + Duration::from_secs(30)) <= JITTER);
+    assert!(apart(at_ms(p.deadline), step1.0 + Duration::from_secs(10)) <= JITTER);
 
-    // 2. 20.4 s later: the extend's receipt plus 60 s, rounded up, 81 s
+    // 2. 5.4 s later: the extend's receipt plus 10 s, rounded up, 16 s
     // after step 1's call.
-    tokio::time::sleep(Duration::from_millis(20_400).saturating_sub(step1.1.elapsed())).await;
-    let r = control(&bus.c, RF0, config_v2::EXTEND, p.token, Some(60), "r2").await;
+    tokio::time::sleep(Duration::from_millis(5_400).saturating_sub(step1.1.elapsed())).await;
+    let r = control(&bus.c, RF0, config_v2::EXTEND, p.token, Some(10), "r2").await;
     let extended = record(&r).pending.expect("still pending");
     assert!(
-        apart(at_ms(extended.deadline), step1.0 + Duration::from_secs(81)) <= JITTER,
+        apart(at_ms(extended.deadline), step1.0 + Duration::from_secs(16)) <= JITTER,
         "{:?}",
         at_ms(extended.deadline).duration_since(step1.0)
     );
     assert!(s.events().is_empty(), "no event");
 
-    // 3. The undo at the new deadline, not the first: 81 s after step 1.
-    tokio::time::sleep(Duration::from_secs(79).saturating_sub(step1.1.elapsed())).await;
+    // 3. The undo at the new deadline, not the first: 16 s after step 1.
+    tokio::time::sleep(Duration::from_secs(14).saturating_sub(step1.1.elapsed())).await;
     assert!(s.events().is_empty(), "not at the first deadline");
     s.until("the rolled-back event", |s| !s.events().is_empty())
         .await;
     let (at, _, e) = s.events()[0].clone();
     let after = at.duration_since(step1.1);
     assert!(
-        after >= Duration::from_secs(81) - JITTER && after <= Duration::from_secs(81) + JITTER,
+        after >= Duration::from_secs(16) - JITTER && after <= Duration::from_secs(16) + JITTER,
         "{after:?}"
     );
     assert_eq!(e.outcome, Ending::RolledBack);

@@ -566,6 +566,7 @@ impl Configuration {
     /// status put, the operations served, the timer spawned.
     pub(crate) async fn declare(
         b: &mut ServiceBuilder,
+        imp: Implementation,
         startup: Startup,
         device: Arc<dyn Device>,
     ) -> Result<Self> {
@@ -574,7 +575,6 @@ impl Configuration {
         let addr = b.address()?.clone();
         let instance = b.instance().to_string();
         let owner = startup.start(addr.to_string(), instance.clone())?;
-        let imp = implementation();
         let iface = imp.iface().clone();
         b.implement(imp)?;
         let none = Bindings::new();

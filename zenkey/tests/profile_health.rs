@@ -21,10 +21,15 @@
 //! the runtime stamps every fault from its offset clock, so a fault reaches
 //! R1 dated 2 s ahead, as from a clock that is.
 //!
-//! The horizon is the contract's 60 s: §1, §2 and §4 wait it out (about
-//! 70 s, 135 s and 100 s), and the status is never re-put: its owner's
-//! heartbeat confirms it every 28.5 s (`freshness.v2` §2.4, text 0.8), a
-//! clock ahead included (text 0.9, #978's F6).
+//! **The horizon.** The status is never re-put: its owner's heartbeat
+//! confirms it within the contract's horizon (`freshness.v2` §2.4, text
+//! 0.8), a clock ahead included (text 0.9, #978's F6). §1, §2 and §4 wait
+//! the horizon out, so they run on a test's copy of the standard contract
+//! whose `freshness.ttl_s` is 6, made in memory and never published, as the
+//! scenarios' conventions allow (#1151): its heartbeat every 2.85 s, and
+//! every reader here, S's subscription, H and G's verdict, holds it. At the
+//! standard's 60 s they wait about 70 s, 135 s and 100 s, in the slow tier,
+//! `#[ignore]`d (`…_at_60_s`).
 
 mod common;
 
@@ -35,7 +40,7 @@ use std::time::{Duration, Instant, SystemTime};
 use common::{Beats, T, addr, client, config, eventually, imp, router, router_with};
 use zenkey::consumer::{Consumer, Subscription};
 use zenkey::health::{self, Health, Level, Read, v1};
-use zenkey::model::freshness::{ClockTrust, DEFAULT_DELTA, Observation, StampAge};
+use zenkey::model::freshness::{self, ClockTrust, DEFAULT_DELTA, Horizon, Observation, StampAge};
 use zenkey::model::grammar::{IfaceId, ZkKey, parse};
 use zenkey::model::health::{self as hm, Judged, Listing, Presence, Reading, Reason, Verdict};
 use zenkey::model::heartbeat::Time;
@@ -55,18 +60,63 @@ const TRUSTED: ClockTrust = ClockTrust::Trusted {
     delta: DEFAULT_DELTA,
 };
 
-/// The heartbeat confirms the status at least every 30 s (§2.3).
-const BEAT: Duration = Duration::from_secs(30);
-
-/// `health.v1`'s revision 1.1, as a heartbeat covering it is read.
-fn layout() -> zenkey::model::heartbeat::Layout {
-    zenkey::model::heartbeat::Layout::of(health::implementation().contract())
+/// The revision a section runs on, and its horizon (the conventions' "The
+/// horizon"): the standard contract's 60 s, or a test's copy's 6 s, which
+/// every reader of the section holds.
+#[derive(Clone)]
+struct On {
+    imp: zenkey::Implementation,
+    horizon: Duration,
 }
 
-/// H: `address`'s heartbeats covering `health.v1`, read raw.
-async fn heartbeats(s: &zenoh::Session, address: &str) -> (zenoh::pubsub::Subscriber<()>, Beats) {
+impl On {
+    /// The standard contract, revision 1.1: the slow tier.
+    fn standard() -> On {
+        On {
+            imp: health::implementation(),
+            horizon: Duration::from_secs(60),
+        }
+    }
+
+    /// The copy whose `freshness.ttl_s` is 6: a heartbeat every 2.85 s.
+    fn short() -> On {
+        On {
+            imp: common::short_horizon("health/health.v1.toml", 60, 6),
+            horizon: Duration::from_secs(6),
+        }
+    }
+
+    /// The scenarios' "65 s": past the horizon by 5 s.
+    fn past(&self) -> Duration {
+        self.horizon + Duration::from_secs(5)
+    }
+
+    /// The heartbeat confirms the status at least every half horizon, the
+    /// standard's 30 s (§2.3).
+    fn beat(&self) -> Duration {
+        self.horizon / 2
+    }
+
+    /// The revision, as a heartbeat covering it is read.
+    fn layout(&self) -> zenkey::model::heartbeat::Layout {
+        zenkey::model::heartbeat::Layout::of(self.imp.contract())
+    }
+
+    /// The status's horizon, as `freshness.v1` reads it.
+    fn within(&self) -> Horizon {
+        Horizon::Within(self.horizon)
+    }
+}
+
+/// H: `address`'s heartbeats covering `health.v1`, read raw with `on`'s
+/// revision.
+async fn heartbeats(
+    s: &zenoh::Session,
+    address: &str,
+    on: &On,
+) -> (zenoh::pubsub::Subscriber<()>, Beats) {
     let key = format!("zk2/{address}/freshness.v2/stream/heartbeat/health.v1");
-    common::heartbeats(s, &key, layout()).await
+    common::heartbeats(s, &key, on.layout()).await
 }
 
 /// Whether `b` vouches for the status: `health.v1`'s one collection.
@@ -171,13 +221,12 @@ async fn at_least(log: &Log, n: usize) -> Vec<Rec> {
 
 /// A tool's consumer of `address`'s `health.v1`, on the standard contract.
 fn reader(s: &zenoh::Session, address: &str) -> Consumer {
-    Consumer::for_tool(
-        s,
-        health::implementation().shared_contract(),
-        &[address],
-        &Default::default(),
-    )
-    .unwrap()
+    reader_on(s, address, &On::standard())
+}
+
+/// [`reader`] on `on`'s revision.
+fn reader_on(s: &zenoh::Session, address: &str, on: &On) -> Consumer {
+    Consumer::for_tool(s, on.imp.shared_contract(), &[address], &Default::default()).unwrap()
 }
 
 /// S's subscription on the status: its freshness and its clock (`freshness.v1`
@@ -198,6 +247,13 @@ async fn matched(w: &zenkey::writer::Writer) {
 async fn owner(s: &zenoh::Session, cfg: ServiceConfig) -> (ServiceBuilder, Health) {
     let mut b = ServiceBuilder::new(s, cfg);
     let h = b.health().await.unwrap();
+    (b, h)
+}
+
+/// [`owner`] on `on`'s revision.
+async fn owner_on(s: &zenoh::Session, cfg: ServiceConfig, on: &On) -> (ServiceBuilder, Health) {
+    let mut b = ServiceBuilder::new(s, cfg);
+    let h = b.health_with(on.imp.clone()).await.unwrap();
     (b, h)
 }
 
@@ -329,11 +385,25 @@ impl Got {
             checks: Some(&checks),
         })
     }
+
+    /// [`Got::judge`] at `on`'s horizon, the one G holds.
+    fn judge_on(&self, presence: Presence, trust: ClockTrust, on: &On) -> Judged {
+        let (current, status) = self.status.as_ref().expect("a status in the reply");
+        let obs = [current.freshness(trust)];
+        let checks = self.check_levels();
+        hm::judge_status(
+            presence,
+            freshness::judge_all(&on.within(), &obs),
+            Some(status.read()),
+            Some(&checks),
+        )
+    }
 }
 
-/// S judges from its deliveries: the status's freshness on its
-/// subscription, the latest status's level, and the latest of each check.
-fn judge_s(sub: &Subscription, log: &[Rec], presence: Presence) -> Judged {
+/// S judges from its deliveries at `on`'s horizon: the status's freshness
+/// on its subscription, the latest status's level, and the latest of each
+/// check.
+fn judge_s(sub: &Subscription, log: &[Rec], presence: Presence, on: &On) -> Judged {
     let status: Vec<&Rec> = log.iter().filter(|r| r.is_status()).collect();
     let key = &status.last().expect("a status delivery").key;
     let obs: [Observation; 1] = [sub.freshness(key)];
@@ -344,12 +414,12 @@ fn judge_s(sub: &Subscription, log: &[Rec], presence: Presence) -> Judged {
         }
     }
     let checks: Vec<Read> = checks.into_values().flatten().collect();
-    hm::judge(&Reading {
+    hm::judge_status(
         presence,
-        status: &obs,
-        level: status.last().map(|r| r.status().read()),
-        checks: Some(&checks),
-    })
+        freshness::judge_all(&on.within(), &obs),
+        status.last().map(|r| r.status().read()),
+        Some(&checks),
+    )
 }
 
 fn verdict(j: Judged) -> (Verdict, Reason, Option<Level>) {
@@ -445,17 +515,30 @@ fn clock_ahead(log: &[Rec], beats: &Beats) -> bool {
 /// §1: the status answers a GET made at the instance token and at the
 /// interface token, or at the instance token for a tokenless `health.v1`;
 /// its heartbeat confirms it every 30 s, it is never re-put, S judges it
-/// fresh past the horizon, and it is never deleted.
+/// fresh past the horizon, and it is never deleted. On the copy's 6 s
+/// horizon (the module doc).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_bring_up() {
+    bring_up(On::short()).await;
+}
+
+/// §1 at the standard contract: 65 s of nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "slow tier: §1 waits 65 s at the contract's 60 s horizon"]
+async fn s1_bring_up_at_60_s() {
+    bring_up(On::standard()).await;
+}
+
+/// §1 on `on`'s revision.
+async fn bring_up(on: On) {
     let (_r1, ep) = router(None).await;
     let os = client(&ep).await;
     let qs = client(&ep).await;
     let ts = client(&ep).await;
     let owner_zid = os.zid().to_string();
     let (_s, log) = record(&ts, "zk2/lab/svc/health.v1/**").await;
-    let (_h, beats) = heartbeats(&ts, SVC).await;
-    let c = reader(&ts, SVC);
+    let (_h, beats) = heartbeats(&ts, SVC, &on).await;
+    let c = reader_on(&ts, SVC, &on);
     let sub = watch_status(&c).await;
     let tokens = ts
         .liveliness()
@@ -472,7 +555,7 @@ async fn s1_bring_up() {
     };
 
     // 1. The owner starts with nothing set: UNSPECIFIED, "starting".
-    let (b, h) = owner(&os, config(SVC)).await;
+    let (b, h) = owner_on(&os, config(SVC), &on).await;
     matched(h.status_writer().writer()).await;
     let svc = b.start().await.unwrap();
     let mut at = Vec::new();
@@ -533,7 +616,7 @@ async fn s1_bring_up() {
     let quiet_cfg = config("lab/quiet")
         .tokenless(health::iface())
         .tokenless(zenkey::heartbeat::iface());
-    let (qb, qh) = owner(&qs, quiet_cfg).await;
+    let (qb, qh) = owner_on(&qs, quiet_cfg, &on).await;
     qh.set_status(Level::Ok, "serving").await.unwrap();
     let quiet = qb.start().await.unwrap();
     let instance = loop {
@@ -561,12 +644,18 @@ async fn s1_bring_up() {
     assert!(!e.token, "\"token\": false");
     assert_eq!(got.status.unwrap().1.read(), Read::Level(Level::Ok));
     // The instance token reaches the tool's read a little after its
-    // subscriber heard it, so the read is asked until it holds one.
-    eventually("the instance token read", || async {
-        !tokens_of(&ts, "lab/quiet").await.is_empty()
-    })
-    .await;
-    let quiet_tokens = tokens_of(&ts, "lab/quiet").await;
+    // subscriber heard it, so the read is asked until it holds one, and
+    // that read is the one checked: a second read beside a loaded suite
+    // could end at its timeout with nothing (#1151, the flake check).
+    let deadline = Instant::now() + common::SETTLE;
+    let quiet_tokens = loop {
+        let read = tokens_of(&ts, "lab/quiet").await;
+        if !read.is_empty() {
+            break read;
+        }
+        assert!(Instant::now() < deadline, "never: the instance token read");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
     assert_eq!(
         quiet_tokens.len(),
         1,
@@ -598,23 +687,23 @@ async fn s1_bring_up() {
     .await;
     let ok_at = Instant::now();
 
-    // 4. Nothing for 65 s: the heartbeat confirms the status, which is
-    // never re-put (`freshness.v2` §2.4), and S judges it fresh past the
-    // horizon.
-    let end = ok_at + Duration::from_secs(65);
+    // 4. Nothing for 65 s, the horizon and 5 s: the heartbeat confirms the
+    // status, which is never re-put (`freshness.v2` §2.4), and S judges it
+    // fresh past the horizon.
+    let end = ok_at + on.past();
     tokio::time::sleep_until(end.into()).await;
     let serving: Vec<Rec> = snapshot(&log)
         .into_iter()
         .filter(|r| r.is_status() && !r.delete && r.status().reason == "serving")
         .collect();
     assert_eq!(serving.len(), 1, "the put, never re-put: {serving:#?}");
-    let seen = common::assert_cadence(&beats, ok_at, end, BEAT, JITTER, layout().tag);
+    let seen = common::assert_cadence(&beats, ok_at, end, on.beat(), JITTER, on.layout().tag);
     assert!(seen.iter().all(vouches), "each vouches for the status");
     let present = Presence::Present(Listing::Listed { token: true });
     assert_eq!(
-        verdict(judge_s(&sub, &snapshot(&log), present)),
+        verdict(judge_s(&sub, &snapshot(&log), present, &on)),
         (Verdict::Healthy, Reason::Ok, Some(Level::Ok)),
-        "S, 65 s after the put: the heartbeats confirmed it"
+        "S, past the horizon after the put: the heartbeats confirmed it"
     );
 
     // 5. The owner closes; S listens 3 s more.
@@ -629,21 +718,33 @@ async fn s1_bring_up() {
 
 /// §2: a status its heartbeat confirms reads fresh past the horizon, for S
 /// and for G, with no re-put; no longer vouched for, its owner up, it reads
-/// stale at 60 s for both, never unhealthy and never its last level as
-/// current.
+/// stale past the horizon for both, never unhealthy and never its last
+/// level as current. On the copy's 6 s horizon (the module doc).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s2_a_stale_status() {
+    stale_status(On::short()).await;
+}
+
+/// §2 at the standard contract: 65 s confirmed, then 65 s more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "slow tier: §2 waits 135 s at the contract's 60 s horizon"]
+async fn s2_a_stale_status_at_60_s() {
+    stale_status(On::standard()).await;
+}
+
+/// §2 on `on`'s revision.
+async fn stale_status(on: On) {
     let (_r1, ep) = router(None).await;
     let os = client(&ep).await;
     let rs = client(&ep).await;
-    let c = reader(&rs, SVC);
+    let c = reader_on(&rs, SVC, &on);
     let sub = watch_status(&c).await;
     let (_s, log) = record(&rs, "zk2/lab/svc/health.v1/**").await;
-    let (_h, beats) = heartbeats(&rs, SVC).await;
+    let (_h, beats) = heartbeats(&rs, SVC, &on).await;
     let trust = TRUSTED;
 
-    // 1. OK, confirmed for 65 s by the heartbeat; S and G judge.
-    let (b, h) = owner(&os, config(SVC)).await;
+    // 1. OK, confirmed past the horizon by the heartbeat; S and G judge.
+    let (b, h) = owner_on(&os, config(SVC), &on).await;
     matched(h.status_writer().writer()).await;
     h.set_status(Level::Ok, "serving").await.unwrap();
     let svc = b.start().await.unwrap();
@@ -657,17 +758,17 @@ async fn s2_a_stale_status() {
     })
     .await;
     let put_at = snapshot(&log)[0].at;
-    tokio::time::sleep_until((put_at + Duration::from_secs(65)).into()).await;
+    tokio::time::sleep_until((put_at + on.past()).into()).await;
     assert_eq!(snapshot(&log).len(), 1, "never re-put");
     let present = presence_of(&rs, SVC).await;
     assert_eq!(present, Presence::Present(Listing::Listed { token: true }));
     assert_eq!(
-        verdict(judge_s(&sub, &snapshot(&log), present)),
+        verdict(judge_s(&sub, &snapshot(&log), present, &on)),
         (Verdict::Healthy, Reason::Ok, Some(Level::Ok)),
         "S"
     );
     assert_eq!(
-        verdict(split(get_state(&rs, SVC).await).judge(present, trust)),
+        verdict(split(get_state(&rs, SVC).await).judge_on(present, trust, &on)),
         (Verdict::Healthy, Reason::Ok, Some(Level::Ok)),
         "G"
     );
@@ -677,14 +778,14 @@ async fn s2_a_stale_status() {
     assert!(!h.is_confirming());
     let cleared = Instant::now();
 
-    // 3. 65 s after the last heartbeat that vouched for it, which came
-    // before the bit was cleared.
+    // 3. Past the horizon (65 s at the standard's) after the last heartbeat
+    // that vouched for it, which came before the bit was cleared.
     let last = vouched_at(&beats)
         .into_iter()
         .filter(|at| *at <= cleared)
         .max()
         .expect("a heartbeat vouched for it");
-    tokio::time::sleep_until((last + Duration::from_secs(65)).into()).await;
+    tokio::time::sleep_until((last + on.past()).into()).await;
     let after: Vec<common::Beat> = beats
         .lock()
         .unwrap()
@@ -709,7 +810,7 @@ async fn s2_a_stale_status() {
         "the instance and interface tokens are present: {tokens:?}"
     );
     let present = presence_of(&rs, SVC).await;
-    let s = judge_s(&sub, &snapshot(&log), present);
+    let s = judge_s(&sub, &snapshot(&log), present, &on);
     assert_eq!(
         verdict(s),
         (
@@ -725,8 +826,11 @@ async fn s2_a_stale_status() {
         current.timestamp().unwrap().get_time().to_system_time(),
         SystemTime::now(),
     );
-    assert!(age.as_secs_f64() > 60.5, "the reply's stamp is {age:?} old");
-    let g = got.judge(present, trust);
+    assert!(
+        age.as_secs_f64() > on.horizon.as_secs_f64() + 0.5,
+        "the reply's stamp is {age:?} old, past the horizon"
+    );
+    let g = got.judge_on(present, trust, &on);
     assert_eq!(
         verdict(g),
         (
@@ -930,23 +1034,36 @@ async fn s3_the_checks_bound() {
 /// re-stamped by R1 ([moved clock], the module doc), again within a
 /// heartbeat period; the status not held (#978's F6): put while the guard
 /// holds, vouched for by every heartbeat, their time the ahead time (core
-/// 0.113 §7.5), and healthy at 65 s; after the correction, a heartbeat
-/// whose time is an instant and no more faults.
+/// 0.113 §7.5), and healthy past the horizon; after the correction, a
+/// heartbeat whose time is an instant and no more faults. On the copy's
+/// 6 s horizon (the module doc), so the fault comes again within 2.85 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s4_clock_ahead() {
+    clock_ahead_steps(On::short()).await;
+}
+
+/// §4, steps 1 to 3, at the standard contract: 65 s, then 35 s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "slow tier: §4 waits 100 s at the contract's 60 s horizon"]
+async fn s4_clock_ahead_at_60_s() {
+    clock_ahead_steps(On::standard()).await;
+}
+
+/// §4, steps 1 to 3, on `on`'s revision.
+async fn clock_ahead_steps(on: On) {
     let (r1, ep) = router(None).await;
     let os = client(&ep).await;
     let rs = client(&ep).await;
     let hb = client(&ep).await;
     let owner_zid = os.zid().to_string();
-    let c = reader(&rs, "lab/ahead");
+    let c = reader_on(&rs, "lab/ahead", &on);
     let sub = watch_status(&c).await;
     let (_s, log) = record(&rs, "zk2/lab/ahead/health.v1/**").await;
-    let (_h, beats) = heartbeats(&rs, "lab/ahead").await;
+    let (_h, beats) = heartbeats(&rs, "lab/ahead", &on).await;
 
     let mut cfg = config("lab/ahead");
     cfg.clock_reference = Some("clock/heartbeat".to_owned());
-    let (b, h) = owner(&os, cfg).await;
+    let (b, h) = owner_on(&os, cfg, &on).await;
     b.minter().simulate_offset(2000);
     matched(h.status_writer().writer()).await;
     matched(h.faults_writer()).await;
@@ -995,14 +1112,14 @@ async fn s4_clock_ahead() {
             .any(|r| r.is_status() && r.at > detected && r.status().reason == "ahead")
     })
     .await;
-    tokio::time::sleep_until((detected + Duration::from_secs(65)).into()).await;
+    tokio::time::sleep_until((detected + on.past()).into()).await;
     let held = snapshot(&log);
     let faults: Vec<&Rec> = held.iter().filter(|r| r.is_fault()).collect();
     assert!(faults.len() >= 2, "repeated while held: {faults:#?}");
     for w in faults.windows(2) {
         assert!(
-            w[1].at - w[0].at <= Duration::from_secs(31),
-            "again within 31 s: {:?}",
+            w[1].at - w[0].at <= on.beat() + Duration::from_secs(1),
+            "again within a heartbeat period, 31 s at the standard's: {:?}",
             w[1].at - w[0].at
         );
         assert_eq!(w[1].fault().code, health::CLOCK_AHEAD);
@@ -1015,9 +1132,9 @@ async fn s4_clock_ahead() {
     );
     let present = presence_of(&rs, "lab/ahead").await;
     assert_eq!(
-        verdict(judge_s(&sub, &held, present)),
+        verdict(judge_s(&sub, &held, present, &on)),
         (Verdict::Healthy, Reason::Ok, Some(Level::Ok)),
-        "the status confirmed at 65 s, never stale"
+        "the status confirmed past the horizon, never stale"
     );
     let during: Vec<common::Beat> = beats
         .lock()
@@ -1045,9 +1162,9 @@ async fn s4_clock_ahead() {
     })
     .await;
     let released = Instant::now();
-    // A heartbeat period, 28.5 s, may pass before the next: longer than an
-    // `eventually`'s net.
-    tokio::time::sleep_until((released + BEAT + JITTER).into()).await;
+    // A heartbeat period, 28.5 s at the standard's, may pass before the
+    // next: longer than an `eventually`'s net.
+    tokio::time::sleep_until((released + on.beat() + JITTER).into()).await;
     let again = beats
         .lock()
         .unwrap()
@@ -1056,10 +1173,10 @@ async fn s4_clock_ahead() {
         .map(|b| b.at)
         .expect("a heartbeat with its time known again");
     assert!(
-        again <= released + BEAT + JITTER,
-        "within 30 s of the correction"
+        again <= released + on.beat() + JITTER,
+        "within half a horizon, 30 s at the standard's, of the correction"
     );
-    tokio::time::sleep_until((released + Duration::from_secs(35)).into()).await;
+    tokio::time::sleep_until((released + on.beat() + Duration::from_secs(5)).into()).await;
     let after = snapshot(&log);
     let last_put = after
         .iter()
@@ -1075,7 +1192,7 @@ async fn s4_clock_ahead() {
         "no clock_ahead after the heartbeat with its time known"
     );
     assert_eq!(
-        verdict(judge_s(&sub, &after, present)),
+        verdict(judge_s(&sub, &after, present, &on)),
         (Verdict::Healthy, Reason::Ok, Some(Level::Ok))
     );
     assert!(!clock_ahead(&after, &beats), "is its clock ahead? no");

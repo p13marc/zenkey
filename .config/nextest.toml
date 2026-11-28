@@ -22,8 +22,10 @@
 # Every failure in one run, not the first.
 fail-fast = false
 # A hang fails the run at ten minutes, not at the job's three-hour timeout
-# (run 1162's `test` sat until 19:40). The slowest test, live_zk2's health
-# §8 across a constrained face, takes 200 s.
+# (run 1162's `test` sat until 19:40). The slowest test that runs,
+# `presence_scale`'s s4 beside a crowd, takes 64 s; the slowest of all,
+# live_zk2's health.v2 §8 across a face on the standard contract, 236 s,
+# in the slow tier (`#[ignore]`d, `…_at_60_s`).
 slow-timeout = { period = "60s", terminate-after = 10 }
 # A failed test runs once more before it fails the run (2026-11-01). Most of
 # the suite waits on real clocks under a shared runner, and four of eight CI
@@ -89,6 +91,33 @@ retries = 1
 # shorter than it. A gate from a wiped target, its builds from sccache,
 # took 12 min 49 s, 317 s of it the tests.
 #
+# Then the scenario texts' own figures, where the rule does not depend on
+# them (#1151, its third part; the profiles' CHANGELOGs, "Scenarios",
+# 2026-11-28). By then health.v2's scenarios had landed, and a lane's tests
+# took 415 s, their sum 4,927 s, the longest health.v2's §8 at 236 s.
+#   - health, both majors: §1, §2, §4 and §8 run on a copy of the standard
+#     contract whose horizon is 6 s, every reader holding it, across §8's
+#     face given by `--contracts`. Nine tests' 1,091 s became 211 s.
+#   - config, both majors: §1 and §14 on such a copy (288 s → 77 s), and
+#     §6's windows at the 10 s floor (162 s → 33 s).
+#   - alarms, both majors: §3 under a 5 s tombstone window (133 s → 23 s).
+# The copies' sections also run on the standard contract in the slow
+# tier, `#[ignore]`d: ten tests, 236 s at the longest. Left as they were: redundancy's §10, whose
+# waits are windows a wrong election must show itself in, several of its
+# 2 s graces long; desired.v2's §13, whose figures are the relation it
+# checks (an answer at 4 s, past the 1 s default timeout, within the face's
+# 6 s, under an 8 s period); and desired.v2's §14, already on a 4 s copy,
+# each wait the heartbeats its step counts. Five runs of the 17 shortened
+# tests in a row: 47 s each, none retried. A gate from a wiped target then
+# took 11 min 15 s: its tests 308 s, their sum 3,642 s over 12 threads,
+# none retried. On main's next head one test needed its retry, health's
+# §1 at 1 s: it read `lab/quiet`'s tokens until a read held one, then
+# checked a second read, which came back empty. It now checks the read
+# that held them. Five more runs retried none, and the gate there ran
+# 2,899 tests in 311 s, none retried. The longest test is
+# `presence_scale`'s s4, 64 s to 66 s, so the threads, not one test, bound
+# the run now.
+#
 # Until then this was nextest's default, one test per CPU. On vm-dev (6
 # CPUs, as vm-runner-01) the suite took 5 min at 6 and 3.5 min at 12
 # (2026-10-20). The first run at 12 failed link_face's s10, 7 downsampled
@@ -136,7 +165,7 @@ test-threads = 12
 # Both groups start first (`priority`): a group two wide lasts as long as
 # its tests summed over two (`timing`, 480 s, so 240 s), whenever it starts.
 # The binaries whose scenarios wait a minute or more start next, so that the
-# longest test (201 s) runs beside the rest and not after it.
+# longest ones run beside the rest and not after them.
 #
 # No `threads-required` on a test in a group. With `threads-required = 2` on
 # the five largest crowd tests, in one group of two with the `timing` tests,

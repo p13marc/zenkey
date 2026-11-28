@@ -167,20 +167,25 @@ pub fn judge(obs: &HealthObservation) -> HealthReport {
                 )
             });
             let tables = obs.tables.get(addr);
+            // At the horizon of the revision read: the standard's, or
+            // across a face the deployment's word (#1151).
+            let horizon = obs.spec.status_horizon(major);
             let r1 = reading(
                 *presence,
                 Got::of_major(first, addr, major),
                 None,
                 &trust,
                 false,
-            );
+            )
+            .within(horizon.clone());
             let r2 = reading(
                 *presence,
                 Got::of_major(second, addr, major),
                 subscribed,
                 &trust,
                 archived.is_some(),
-            );
+            )
+            .within(horizon);
             let last_known = archived.map(|a| {
                 let words = a.value.as_ref().map(|v| status_words(v, tables));
                 LastKnownStatus {

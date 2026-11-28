@@ -7,6 +7,40 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `health.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## Scenarios — 2026-11-28: editorial: a copy of the standard contract with a short horizon, for the waits, no keyword changed (#1151)
+
+Neither text's version moves: `v1.md` and `v2.md` are unchanged. This
+entry is the scenario files' alone.
+
+**What changed, in `scenarios.md` and `scenarios-v2.md`.**
+- **The conventions' horizon.** A runner MAY run §1, §2, §4 and §8 on a
+  copy of the standard contract with `freshness.ttl_s = 6`, made in
+  memory and never published. `alarms.v1`'s conventions allow the same,
+  at 4 s. Every reader holds the copy, and the heartbeat's tag is the
+  copy's. Across §8's face nothing is retrieved, so the tool is given
+  the copy, the deployment's word.
+- **Which figures follow the horizon.** On the copy, 65 s is 11 s, 35 s
+  is 8 s, 30 s is 3 s, 31 s is 4 s and 60.5 s is 6.5 s. The detection's
+  1 s, the 3 s listens, §7's 2 s, the jitter and the sizes are not the
+  horizon's, and stay.
+- **Why.** These sections waited the horizon out: 492 s of the
+  reference's tests under `health.v1`, and 562 s under `health.v2`. §8
+  across a face, 201 s and 236 s, was the longest test of the suite.
+
+**Deliberately not changed.**
+- **No rule and no verdict.** Each rule these sections check holds at
+  any horizon: stale past it (§2.4), confirmed within half of it (§2.3),
+  the fault's period (§2.5), and the face's verdicts (§2.8). No
+  fixture changes.
+- **The steps** still state the standard contract's figures. A runner on
+  the standard contract waits them, in a slow tier if it likes.
+
+**The reference.** `ServiceBuilder::health_with` and `health_v2_with`
+implement a revision other than the standard. Across a face,
+`zenctl health` reads the status by the one revision of the face's major
+in `--contracts`, the deployment's word. The tests run each section on
+the copy, and on the standard contract in the slow tier.
+
 ## health.v2 0.3 — 2026-11-27: zk2py's rounds 120 and 123: which owner heartbeats answer the clock, a record whose time no catalog in hand dates, `not_used` under `health.v1`, and what a linter reports (#986)
 
 zk2py's round 120 read 0.1 cold, and its round 123 ran it against the

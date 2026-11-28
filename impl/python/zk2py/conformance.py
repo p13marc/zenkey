@@ -13128,14 +13128,16 @@ def _config_v2_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 ["12:01:00Z" in binding, "The steps run on 2026-11-02" in " ".join(binding.split()),
                  "12:00:00Z on 2026-11-02" in binding, rt["bytes"]["reply2"].startswith("495a17")],
                 [True, True, True, True]))
-    # F-490: §6's tolerance against §2.8's rounding.
+    # F-490: §6's tolerance against §2.8's rounding. #1151 moved §6 to the
+    # floor's windows (the scenarios' entry of 2026-11-28): the extend
+    # 5.4 s after the call, with confirm_s 10, so 15.4 to 16.4 s.
     out.append(("F-490 answered (config.v2 0.2): scenarios-v2 §6 reads the event at the record's deadline, ± 0.5 s, "
-                "80.4 to 81.4 s after step 1 by its phase, as §2.8's rounding puts it",
-                missing(scen, "That is 80.4 s to 81.4 s after step 1, by its phase.",
+                "15.4 to 16.4 s after step 1 by its phase, as §2.8's rounding puts it (#1151: the floor's windows)",
+                missing(scen, "That is 15.4 s to 16.4 s after step 1, by its phase.",
                         "S receives the `rolled-back` event at that deadline, ± 0.5 s.")
-                + [sorted({c2.deadline_ms(t1 + 20_400, 60, 10) - t1 for t1 in range(0, 1000, 50)})[:1],
-                   sorted({c2.deadline_ms(t1 + 20_400, 60, 10) - t1 for t1 in range(0, 1000, 50)})[-1:]],
-                [[80_400], [81_350]]))
+                + [sorted({c2.deadline_ms(t1 + 5_400, 10, 10) - t1 for t1 in range(0, 1000, 50)})[:1],
+                   sorted({c2.deadline_ms(t1 + 5_400, 10, 10) - t1 for t1 in range(0, 1000, 50)})[-1:]],
+                [[15_400], [16_350]]))
     # F-491: the scenarios' intro changed after the draft entry.
     out.append(("F-491 answered (config.v2 0.2): the entry records scenarios-v2's intro, which names zenctl's tests "
                 "and changes no rule",

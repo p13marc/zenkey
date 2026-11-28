@@ -638,7 +638,12 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `--across-face`, default health.v1). Its words are read by the tables of
   the revisions an owner's descriptor names: `--contracts` first (an
   authoring file, a directory, a `.history` root), else retrieved by
-  fingerprint; across a face, `--contracts` alone. A row names its
+  fingerprint; across a face, `--contracts` alone, whose one revision of
+  the face's major is also the owner's, its horizon the status's (#1151;
+  `config get --across-face` reads a held `config.v1` so). `live_zk2.rs`'s
+  `short_copy` writes a test's copy (`freshness.ttl_s = 6`) with its
+  schemas under the bus's home: health's §8 (`HealthOn`) and config's
+  §14 run on it, the standard's §8 in the slow tier. A row names its
   `profile`; a v2 status, check and fault carry `word` (`{number, read,
   name}`), `since_s`/`at_s` and a fault's `argument`, and the table shows
   a word as `name (n)`, `(#n)`, `(no word)` or `(a word no table names)`

@@ -46,6 +46,12 @@ and run as tests of the tool that reads `config.v2`. They are `zenctl`'s
   the value form or the error form, and GETs as core S4 says.
 - **"The fixture's step"** names a step of `lifecycle.json` whose puts,
   replies and events the scenario observes on the bus.
+- **The horizon** is `rfcfg.v1`'s, 60 s. §1 and §14 wait it out. A
+  runner MAY run them on a copy of `rfcfg.v1` with `freshness.ttl_s = 6`,
+  made in memory and never published, as `config.v1`'s scenarios say.
+  The reference does, and gives T the copy across §14's face. The waits
+  follow the horizon there too: §1's 65 s is 11 s, and §14's 60 s and
+  70 s are 6 s and 16 s.
 
 ## §1 A hot set, read back, and a dry run (§2.3, §2.9, §2.17)
 
@@ -155,18 +161,21 @@ and run as tests of the tool that reads `config.v2`. They are `zenctl`'s
 ## §6 An extend (§2.10)
 
 **Steps.**
-1. C calls `Op(set/duty)` with `fraction_ppm` 20000 and `confirm_s` 30.
-2. 20.4 s later, C calls `Op(extend)` with `confirm_s` 60.
+1. C calls `Op(set/duty)` with `fraction_ppm` 20000 and `confirm_s` 10,
+   the floor.
+2. 5.4 s later, C calls `Op(extend)` with `confirm_s` 10.
 3. C does nothing more.
 
 **Expected.**
-1. The record, the change applied and pending, deadline 30 s after the
+1. The record, the change applied and pending, deadline 10 s after the
    call.
-2. The record. Its deadline is the extend's receipt plus 60 s, rounded
-   up (§2.8). That is 80.4 s to 81.4 s after step 1, by its phase. No
+2. The record. Its deadline is the extend's receipt plus 10 s, rounded
+   up (§2.8). That is 15.4 s to 16.4 s after step 1, by its phase. No
    event.
 3. The undo runs at the new deadline, not the first. S receives the
    `rolled-back` event at that deadline, ± 0.5 s.
+
+The windows are the floor's, as `config.v1`'s scenario §6 says.
 
 ## §7 Tokens, and a restart during a pending change (§2.6, §2.12)
 

@@ -34,7 +34,12 @@
 //! 4. the tables of each `health.v2` owner's words (v2 §2.10): from the
 //!    revisions its descriptor names, held offline ([`HealthSpec::contracts`])
 //!    or retrieved by fingerprint (core §8.4), never another revision's;
-//!    across a face, from the revisions held, the deployment's word;
+//!    across a face, from the revisions held, the deployment's word. Across
+//!    a face the one revision of the major's own interface held is the one
+//!    the owner implements, the deployment's word too: the window reads its
+//!    heartbeats and confirms its status within its horizon
+//!    ([`HealthSpec::status_contract`]), as a test's copy with a short
+//!    horizon needs (the scenarios' conventions, #1151);
 //! 5. for one service named and absent, an archive's form of its status
 //!    (core §4.4), of either major: last-known, never current (S6).
 //!
@@ -59,7 +64,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use zenkey::health::v1;
 use zenkey::prost::Message as _;
-use zenkey_model::freshness::{ClockMeasure, Observation};
+use zenkey_model::contract::Contract;
+use zenkey_model::freshness::{ClockMeasure, Horizon, Observation};
 use zenkey_model::grammar::{Addr, GRAMMAR, IfaceId, KindToken, ZkKey};
 use zenkey_model::health::v2::{self as hv2, ClockHeard, Packed as _};
 use zenkey_model::health::{self as hm, Heard, Major, Read};
@@ -174,8 +180,44 @@ pub struct HealthSpec {
     /// The revisions held offline (`--contracts`): a `health.v2` owner's
     /// words are read by the tables of the revisions its descriptor names,
     /// these first, one not held retrieved by fingerprint (core §8.4); across
-    /// a face, these alone, the deployment's word (v2 §2.10).
+    /// a face, these alone, the deployment's word (v2 §2.10), and the one
+    /// revision of the face's major among them the owner's
+    /// ([`HealthSpec::status_contract`]).
     pub contracts: crate::model::catalog::ContractSet,
+}
+
+impl HealthSpec {
+    /// The revision of `major` a status is read by: across a face, where no
+    /// descriptor crosses, the one revision of that interface held offline,
+    /// the deployment's word for the one its owner implements (a later
+    /// minor, or a test's copy with a short horizon); otherwise, or with
+    /// none or two held, the standard contract.
+    pub fn status_contract(&self, major: Major) -> Arc<Contract> {
+        let standard = match major {
+            Major::V1 => zenkey::health::implementation(),
+            Major::V2 => zenkey::health::v2::implementation(),
+        };
+        if self.face.is_none_or(|f| f.major != major) {
+            return standard.shared_contract();
+        }
+        let mut held = self
+            .contracts
+            .iter()
+            .filter(|r| r.iface() == standard.iface());
+        match (held.next(), held.next()) {
+            (Some(r), None) => r.shared_contract(),
+            _ => standard.shared_contract(),
+        }
+    }
+
+    /// The horizon of `major`'s status, as `freshness.v1` reads it: that
+    /// of [`HealthSpec::status_contract`]'s, the standard's 60 s unless
+    /// the deployment's word across a face names another.
+    pub fn status_horizon(&self, major: Major) -> Horizon {
+        self.status_contract(major)
+            .resource(KindToken::State, "status")
+            .map_or_else(hm::status_horizon, zenkey_model::freshness::horizon_of)
+    }
 }
 
 /// A stamp's time, and the id of the clock that issued it (core §4.1).
@@ -771,9 +813,20 @@ pub async fn observe(
     let describing =
         crate::bus::presence::Describing::retrieving(&spec.catalogs, &spec.contracts, t);
     let window = match spec.window {
-        Some(_) => {
-            Some(Window::open(session, &target, t, spec.face.is_some(), &spec.catalogs).await)
-        }
+        Some(_) => Some(
+            Window::open(
+                session,
+                &target,
+                t,
+                spec.face.is_some(),
+                &spec.catalogs,
+                [
+                    spec.status_contract(Major::V1),
+                    spec.status_contract(Major::V2),
+                ],
+            )
+            .await,
+        ),
         None => None,
     };
     let presence = match (spec.face, presence) {
@@ -1181,20 +1234,21 @@ impl Window {
         timeout: Duration,
         across: bool,
         catalogs: &crate::model::deployment::Catalogs,
+        [v1, v2]: [Arc<Contract>; 2],
     ) -> Result<Window, String> {
         let provider = target.provider();
-        let consumer_of = |imp: zenkey::Implementation| {
+        let consumer_of = |contract: Arc<Contract>| {
             zenkey::consumer::Consumer::for_tool(
                 session,
-                imp.shared_contract(),
+                contract,
                 &[provider.as_str()],
                 &BTreeMap::new(),
             )
             .map(|c| crate::bus::consume::tool_consumer(c, Some(timeout), across, catalogs))
             .map_err(|e| e.to_string())
         };
-        let consumer = consumer_of(zenkey::health::implementation())?;
-        let consumer_v2 = consumer_of(zenkey::health::v2::implementation())?;
+        let consumer = consumer_of(v1)?;
+        let consumer_v2 = consumer_of(v2)?;
         let mut selectors = Vec::new();
         for c in [&consumer_v2, &consumer] {
             for r in [zenkey::health::STATUS, zenkey::health::FAULTS] {

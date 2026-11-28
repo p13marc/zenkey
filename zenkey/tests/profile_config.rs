@@ -57,7 +57,7 @@ use zenkey::model::envelope::Detail;
 use zenkey::model::freshness::Verdict;
 use zenkey::model::grammar::{ZkKey, parse};
 use zenkey::model::template::Bindings;
-use zenkey::{CallMetadata, Client, Outcome, Service, ServiceBuilder, presence};
+use zenkey::{CallMetadata, Client, Implementation, Outcome, Service, ServiceBuilder, presence};
 use zenoh::query::{ConsolidationMode, QueryTarget, Reply};
 use zenoh::sample::{Sample, SampleKind};
 
@@ -196,9 +196,28 @@ async fn rf_owner(
     startup: Startup,
     device: Arc<SimDevice>,
 ) -> Rf {
+    rf_owner_on(
+        session,
+        address,
+        startup,
+        device,
+        config_v1::implementation(),
+    )
+    .await
+}
+
+/// [`rf_owner`] on `imp`, a revision of `config.v1`.
+async fn rf_owner_on(
+    session: &zenoh::Session,
+    address: &str,
+    startup: Startup,
+    device: Arc<SimDevice>,
+    imp: Implementation,
+) -> Rf {
     let mut b = ServiceBuilder::new(session, config(address));
     let cfg = b
-        .config_v1(
+        .config_v1_with(
+            imp,
             startup.clone(),
             Arc::clone(&device) as Arc<dyn config_v1::Device>,
         )
@@ -444,12 +463,27 @@ async fn bus() -> Bus {
 
 // --- the sections ---------------------------------------------------------------
 
-/// §1 A hot set, read back (§2.3, §2.9, §2.17).
+/// §1 A hot set, read back (§2.3, §2.9, §2.17), on a test's copy of the
+/// standard contract whose `freshness.ttl_s` is 6, made in memory and never
+/// published, as the scenarios' conventions allow (#1151): step 4 waits
+/// 11 s, its heartbeat every 2.85 s, and S's consumer holds the copy.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s1_a_hot_set_read_back() {
+    hot_set_read_back(common::short_horizon("config/config.v1.toml", 60, 6), 6).await;
+}
+
+/// §1 at the standard contract: 65 s of nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "slow tier: §1 waits 65 s at the contract's 60 s horizon"]
+async fn s1_a_hot_set_read_back_at_60_s() {
+    hot_set_read_back(config_v1::implementation(), 60).await;
+}
+
+/// §1 on `imp`, a revision of `config.v1` whose horizon is `horizon` s.
+async fn hot_set_read_back(imp: Implementation, horizon: u64) {
     let bus = bus().await;
     let s = recorder(&bus.s, RF0).await;
-    let layout = zenkey::model::heartbeat::Layout::of(config_v1::implementation().contract());
+    let layout = zenkey::model::heartbeat::Layout::of(imp.contract());
     let tag = layout.tag;
     let (_h, beats) = common::heartbeats(
         &bus.s,
@@ -457,13 +491,8 @@ async fn s1_a_hot_set_read_back() {
         layout,
     )
     .await;
-    let tool = Consumer::for_tool(
-        &bus.s,
-        config_v1::implementation().shared_contract(),
-        &[RF0],
-        &Default::default(),
-    )
-    .unwrap();
+    let tool =
+        Consumer::for_tool(&bus.s, imp.shared_contract(), &[RF0], &Default::default()).unwrap();
     let sub_view = tool.subscribe(config_v1::VIEW, |_| {}).await.unwrap();
     let sub_status = tool.subscribe(config_v1::STATUS, |_| {}).await.unwrap();
     let tokens = bus
@@ -477,7 +506,11 @@ async fn s1_a_hot_set_read_back() {
 
     // 1. The owner starts; T GETs V and St the moment it sees the token.
     let owner = bus.owner.clone();
-    let starting = tokio::spawn(async move { rf_fresh(&owner, RF0, true).await });
+    let starting = tokio::spawn(async move {
+        let startup = rf(true);
+        let device = Arc::new(SimDevice::new(&startup));
+        rf_owner_on(&owner, RF0, startup, device, imp).await
+    });
     let (v0, st0) = loop {
         let t = tokio::time::timeout(SETTLE, tokens.recv_async())
             .await
@@ -568,9 +601,9 @@ async fn s1_a_hot_set_read_back() {
     assert_eq!((v1.revision, st1.revision), (1, 1));
     assert_eq!(st1, ConfigStatus::of(&v1));
 
-    // 4. Nothing put for 65 s: neither is re-put, the heartbeat vouches for
-    // both (freshness.v2 §2.4), S judges both fresh past the horizon, and
-    // neither is deleted.
+    // 4. Nothing put for 65 s, the horizon and 5 s: neither is re-put, the
+    // heartbeat vouches for both (freshness.v2 §2.4), S judges both fresh
+    // past the horizon, and neither is deleted.
     let at = s
         .views()
         .iter()
@@ -583,7 +616,7 @@ async fn s1_a_hot_set_read_back() {
         .find(|(_, v)| v.revision == 1)
         .map(|(t, _)| *t)
         .unwrap();
-    let end = at.max(status_at) + Duration::from_secs(65);
+    let end = at.max(status_at) + Duration::from_secs(horizon + 5);
     tokio::time::sleep_until(end.into()).await;
     let after =
         |xs: Vec<(Instant, Json)>, from: Instant| xs.iter().filter(|(t, _)| *t > from).count();
@@ -597,7 +630,14 @@ async fn s1_a_hot_set_read_back() {
         0,
         "the status never re-put"
     );
-    let seen = common::assert_cadence(&beats, at, end, Duration::from_secs(30), JITTER, tag);
+    let seen = common::assert_cadence(
+        &beats,
+        at,
+        end,
+        Duration::from_secs(horizon) / 2,
+        JITTER,
+        tag,
+    );
     for b in &seen {
         assert!(
             b.hb.sections.iter().all(|s| matches!(
@@ -625,7 +665,11 @@ async fn s1_a_hot_set_read_back() {
         let j = tool
             .freshness(&key_resource(&key), &[sub.freshness(&key)])
             .unwrap();
-        assert_eq!(j.verdict, Verdict::Fresh, "{what}, 65 s after its put");
+        assert_eq!(
+            j.verdict,
+            Verdict::Fresh,
+            "{what}, past the horizon after its put"
+        );
     }
     assert_eq!(s.state_deletes(), 0);
     rf0.svc.close().await.unwrap();
@@ -987,13 +1031,13 @@ async fn s6_an_extend() {
     let rf0 = rf_fresh(&bus.owner, RF0, true).await;
     present(&bus.c, RF0).await;
 
-    // 1. A hot change under a 30 s window.
+    // 1. A hot change under a 10 s window, the floor.
     let step1 = (SystemTime::now(), Instant::now());
     let r = set(
         &bus.c,
         RF0,
         "duty",
-        json!({"values": {"fraction_ppm": 20000}, "confirm_s": 30}),
+        json!({"values": {"fraction_ppm": 20000}, "confirm_s": 10}),
         "r1",
     )
     .await;
@@ -1003,28 +1047,29 @@ async fn s6_an_extend() {
     assert!(
         apart(
             instant(&pending.deadline),
-            step1.0 + Duration::from_secs(30)
+            step1.0 + Duration::from_secs(10)
         ) <= JITTER
     );
 
-    // 2. 20 s later: extended to 60 s from now, answered with the status.
-    tokio::time::sleep(Duration::from_secs(20).saturating_sub(step1.1.elapsed())).await;
+    // 2. 5 s later: extended to 10 s from now, answered with the status.
+    tokio::time::sleep(Duration::from_secs(5).saturating_sub(step1.1.elapsed())).await;
     let extended_at = SystemTime::now();
     let r = control(
         &bus.c,
         RF0,
         config_v1::EXTEND,
-        json!({"token": token, "confirm_s": 60, "answer": "status"}),
+        json!({"token": token, "confirm_s": 10, "answer": "status"}),
         "r2",
     )
     .await;
     let st: ConfigStatus = serde_json::from_value(value(&r)["status"].clone()).unwrap();
     let deadline = instant(&st.pending.expect("still pending").deadline);
-    assert!(apart(deadline, extended_at + Duration::from_secs(60)) <= JITTER);
+    assert!(apart(deadline, extended_at + Duration::from_secs(10)) <= JITTER);
     assert!(s.events().is_empty(), "no event");
 
-    // 3. The undo at the new deadline: 80 s after step 1, ± 0.5 s.
-    tokio::time::sleep(Duration::from_secs(78).saturating_sub(step1.1.elapsed())).await;
+    // 3. The undo at the new deadline: 15 s after step 1, ± 0.5 s, and
+    // nothing at the first, 10 s after it.
+    tokio::time::sleep(Duration::from_secs(13).saturating_sub(step1.1.elapsed())).await;
     assert!(s.events().is_empty(), "not at the first deadline");
     s.until("the rolled-back event", |s| !s.events().is_empty())
         .await;
@@ -1036,7 +1081,7 @@ async fn s6_an_extend() {
         .at;
     let after = at.duration_since(step1.1);
     assert!(
-        after >= Duration::from_secs(80) - JITTER && after <= Duration::from_secs(80) + JITTER,
+        after >= Duration::from_secs(15) - JITTER && after <= Duration::from_secs(15) + JITTER,
         "{after:?}"
     );
     assert_eq!(s.events()[0].outcome, Ending::RolledBack);
