@@ -49,8 +49,8 @@ The v1 surface, re-counted from
 | host services | v1's producer names: `sysinfo`, `netlink`, `netring`, `systemd`, `logs`, `hostspec`, `parallax`, `probe`, `pve`, `historian`, plus the process identities `correlator`, `policy-compiler`, `exporter-prometheus`, `exporter-otel`. A second instance is just another service (`netring-2`) implementing the same interface. |
 | device services | one per polled device: `snmp.<device>`, `modbus.<device>`, `gnmi.<device>`, `netflow.<exporter>`, `bmc.<chassis>`, `container.<name>`. Each poller keeps its own service (`snmp`, …) for what belongs to the process. The instance id is the device's continuity epoch. |
 | fleet singletons | `zk2/fleet/catalog` (`zs.catalog.v1`) and `zk2/fleet/desired` (`zs.desired.v1`), single-writer under `redundancy.v1` with ZenSight's claim protocol as the reference. They replace v1's verbatim service origins `@catalog` and `@desired` ([`../shapes.md`](../shapes.md) row 4). |
-| framework set | interfaces every service implements: `health.v1` ([`spec/profiles/health/health.v1.toml`](../../../spec/profiles/health/health.v1.toml), the profile [`health.v1`](../../../spec/profiles/health/v1.md)), `alarms.v1` ([`spec/profiles/alarms/alarms.v1.toml`](../../../spec/profiles/alarms/alarms.v1.toml), the profile [`alarms.v1`](../../../spec/profiles/alarms/v1.md)), `zs.evidence.v1`, `zs.thresholds.v1`, `views.v1`; also `zs.errors.v1` and `zs.artifacts.v1` (named, not written in this cut) |
-| schema kind | **jsonschema**: ZenSight's types are serde structs on a CBOR wire. The shared telemetry point is `telemetry.v1.Point`, the standard schema of [`telemetry.v1`](../../../spec/profiles/telemetry/v1.md) (`spec/profiles/telemetry/telemetry.v1.json`, its §3). |
+| framework set | interfaces every service implements: `health.v2` ([`spec/profiles/health/health.v2.toml`](../../../spec/profiles/health/health.v2.toml), the profile [`health.v2`](../../../spec/profiles/health/v2.md)), `alarms.v2` ([`spec/profiles/alarms/alarms.v2.toml`](../../../spec/profiles/alarms/alarms.v2.toml), the profile [`alarms.v2`](../../../spec/profiles/alarms/v2.md)), `zs.evidence.v1`, `zs.thresholds.v1`, `views.v1`; also `zs.errors.v1` and `zs.artifacts.v1` (named, not written in this cut). The v2 majors since #1149 (below, "The framework set on zk2c"); an instance implements one major of each |
+| schema kind | **jsonschema**: ZenSight's types are serde structs on a CBOR wire. The shared telemetry point is the Point of the standard schema that [`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) restates by reference (its §3). The frames' records are **packed** (core §7.6), one file per telemetry contract (below, "Frames"). |
 
 Example keys, for host `h-3fa9c2d41b7e`:
 
@@ -59,7 +59,8 @@ zk2/h-3fa9c2d41b7e/sysinfo/zs.sysinfo.v1/stream/memory/usage_percent
 zk2/h-3fa9c2d41b7e/snmp.router01/zs.snmp.v1/stream/if/3/in_octets.rate
 zk2/h-3fa9c2d41b7e/snmp.router01/zs.snmp.v1/stream/metrics/system/sys_uptime
 zk2/h-3fa9c2d41b7e/snmp.router01/zs.snmp.v1/stream/traps/01jgxqz4yqk8v6txw3m9f2a7cd
-zk2/h-3fa9c2d41b7e/netlink/alarms.v1/state/alarms/a659f813308ad1da
+zk2/h-3fa9c2d41b7e/netlink/alarms.v2/state/alarms/0                  (alert key a659f813308ad1da)
+zk2/h-3fa9c2d41b7e/sysinfo/zs.sysinfo.v1/stream/frames/host
 zk2/h-3fa9c2d41b7e/pve/zs.evidence.v1/state/relation/r-f5f9a2edb9601155
 zk2/h-3fa9c2d41b7e/parallax/zs.parallax.v1/@stream/streams/cam0/video/h264/high
 zk2/fleet/catalog/zs.catalog.v1/state/acks/h-3fa9c2d41b7e/netlink/a659f813308ad1da
@@ -73,28 +74,33 @@ zk2/h-3fa9c2d41b7e/snmp.router01/@zk/alive/zs.snmp.v1/<instance>/<fp16>
 | Contract | What | Resources |
 |---|---|---|
 | [`zs.evidence.v1.toml`](zs.evidence.v1.toml) | Identity evidence: `self`, `device/{device}`, `names/{ip}`, `relation/{relation_id}` | 4 |
-| [`zs.thresholds.v1.toml`](zs.thresholds.v1.toml) | Threshold rules: state, `set`, `applied/{topic}`, the desired requirement | 3 |
+| [`zs.thresholds.v1.toml`](zs.thresholds.v1.toml) | Threshold rules: state, `set`, `applied/{topic}`, the desired requirement and its `desired.v2` report | 4 |
 | [`views.v1.toml`](views.v1.toml) | The ViewSet presentation document | 1 |
-| [`zs.sysinfo.v1.toml`](zs.sysinfo.v1.toml) | Literal telemetry: all 136 v1 telemetry subjects, plus state and two operations | 140 |
-| [`zs.snmp.v1.toml`](zs.snmp.v1.toml) | One polled device: rest-parameter metric tree, 126 typed columns, interface table, traps, gated outlet control | 133 |
+| [`zs.sysinfo.v1.toml`](zs.sysinfo.v1.toml) | Literal telemetry: all 136 v1 telemetry subjects, plus state and two operations; two frames (#1149) | 142 |
+| [`zs.snmp.v1.toml`](zs.snmp.v1.toml) | One polled device: rest-parameter metric tree, 126 typed columns, interface table, traps, gated outlet control; one frame (#1149) | 134 |
 | [`zs.snmp_poller.v1.toml`](zs.snmp_poller.v1.toml) | The poller: targets, discovery, traps from unconfigured senders | 4 |
-| [`zs.netring.v1.toml`](zs.netring.v1.toml) | 75 telemetry streams, config topics, many-reply listings, captures via artifacts | 86 |
+| [`zs.netring.v1.toml`](zs.netring.v1.toml) | 75 telemetry streams, config topics, many-reply listings, captures via artifacts; two frames (#1149) | 88 |
 | [`zs.catalog.v1.toml`](zs.catalog.v1.toml) | Fusion outputs and operator intent, single writer, actor from O7 | 15 |
 | [`zs.historian.v1.toml`](zs.historian.v1.toml) | `range`, `series`, `timeline` as fan-out, many-reply operations; `stats` | 4 |
 | [`zs.parallax.v1.toml`](zs.parallax.v1.toml) | `@stream` video + `FrameMeta` attachment, `media.v1`, stream control | 24 |
-| [`zs.desired.v1.toml`](zs.desired.v1.toml) | The desired author, keyed by target host and service | 8 |
+| [`zs.desired.v1.toml`](zs.desired.v1.toml) | The desired author, keyed by target host and service, on `desired.v2` since 1.2 | 8 |
 
 The schemas are in [`schemas/`](schemas/): one file per contract, plus
-`zs.common.json`, which several contracts list unchanged so that a shared
-type keeps one identity (G12). The telemetry point is `telemetry.v1`'s
-standard schema, which sysinfo, snmp, netring and parallax list from
-`spec/profiles/telemetry/` since their minor 1 (`telemetry.v1` §3,
-Appendix B). The large telemetry families of sysinfo, snmp, netring and
-parallax were transcribed from the v1 TOMLs by a throwaway script: one
-resource per subject, with the v1 description as `doc`, `when` mapped to
-`optional` + `gate`, and v1's `cardinality` carried over. Of v1's
-`unit`, `kind` and `buckets`, only netring's two units are declared: every
-resource is a Point, whose tag says its kind (`telemetry.v1` §2.5).
+`zs.common.json`, which several contracts list unchanged so that a
+shared type keeps one identity (G12). The telemetry point is
+`telemetry.v1`'s standard schema, which sysinfo, snmp, netring and
+parallax list from `spec/profiles/telemetry/` since their minor 1
+(`telemetry.v1` §3, Appendix B), and which `telemetry.v2` restates since
+their minor 3. The frames' packed records are
+`schemas/zs.sysinfo.v1-frames.json`, `zs.snmp.v1-frames.json` and
+`zs.netring.v1-frames.json`, written with their ranges by #1149's design
+(below, "Frames"). The large telemetry families of sysinfo, snmp,
+netring and parallax were transcribed from the v1 TOMLs by a throwaway
+script: one resource per subject, with the v1 description as `doc`,
+`when` mapped to `optional` + `gate`, and v1's `cardinality` carried
+over. Of v1's `unit`, `kind` and `buckets`, only netring's two units are
+declared: every resource is a Point, whose tag says its kind
+(`telemetry.v1` §2.5).
 
 **Self-check** (a throwaway script, not `zenkey-model`):
 
@@ -112,12 +118,12 @@ resource is a Point, whose tag says its kind (`telemetry.v1` §2.5).
 
 | v1 family | Registries | zk2 |
 |---|---|---|
-| state `health` | 20 | `health.v1` (`status`, `checks/{check}`, `faults`). ZenSight's HealthSnapshot fields (devices_total/responding, self_stats) stay in ZenSight's own interfaces, or become checks: `Status` carries no application field ([`health.v1`](../../../spec/profiles/health/v1.md) Appendix A). |
+| state `health` | 20 | `health.v2` (`status`, `checks/{check}`, `faults`), since #1149; `health.v1` before. ZenSight's HealthSnapshot fields (devices_total/responding, self_stats) stay in ZenSight's own interfaces, or become checks: `Status` carries no application field ([`health.v1`](../../../spec/profiles/health/v1.md) Appendix A). A reason, a detail or a code outside the profile's tables stays in the owner's log ([`health.v2`](../../../spec/profiles/health/v2.md) §2.10). |
 | state `errors` (ZenSight's profile token) | 20 | `zs.errors.v1` state `errors`: the rolling error window (not written; one resource) |
 | state `sensor` (registration document) | 20 | **deleted**: the instance descriptor (host, build, capabilities, profiles, r3.2 §3.10) |
 | state `evidence/self` | 20 | `zs.evidence.v1` `self` |
 | state `evidence/device/{device}`, `evidence/names/{ip_slug}`, `evidence/relation/{relation_id}` | 8, 1, 4 | `zs.evidence.v1` `device/{device}`, `names/{ip}`, `relation/{relation_id}` |
-| state `alert/{alert_key}` | 20 | `alarms.v1` `alarms/{alert_key}`, the profile's standard contract ([`alarms.v1`](../../../spec/profiles/alarms/v1.md) §3), with ZenSight's alert-key recipe byte for byte (§2.2, test vector `a659f813308ad1da`) |
+| state `alert/{alert_key}` | 20 | `alarms.v2` `alarms/{slot}`, the profile's standard contract ([`alarms.v2`](../../../spec/profiles/alarms/v2.md) §3), since #1149; `alarms.v1`'s `alarms/{alert_key}` before. The identity is ZenSight's alert-key recipe byte for byte (alarms.v1 §2.2, test vector `a659f813308ad1da`), and the slot, 0 to 255, its alias. Its rules are configured at run time, so each alarm is by words, `words/{slot}` beside its record (alarms.v2 §2.4) |
 | state `applied/{topic}` | 15 | `zs.thresholds.v1` `applied/{topic}` |
 | state `artifact/{kind}`, procedures `artifact/{request,cancel,status}`, `[[blob]]` artifact/tree/store | 10, 30, 30 | `zs.artifacts.v1`: a `jobs.v1` job whose Ready state carries a `blob.v1` reference (holder system, holder service, hash). Not written. |
 | procedures `thresholds`, `thresholds/set` | 15 × 2 | `zs.thresholds.v1` state `thresholds`, `@op set` |
@@ -175,7 +181,7 @@ Counts are v1's: telemetry / state / events · procedures · errors · `when`.
 
 | v1 | zk2 |
 |---|---|
-| class `telemetry` | `stream` typed `json:telemetry.v1.Point` |
+| class `telemetry` | `stream` typed `json:telemetry.v1.Point`; since #1149 also, for the untemplated readings and the closed families, a frame resource of packed records (below, "Frames") |
 | class `events` (1: snmp traps) | occurrence-keyed `stream` `traps/{occurrence}`, reliable, `retention` |
 | `qos` profiles | explicit fields: `alert` → reliable, block, interactive_high, express; `transition` → reliable, block; `frame` → best_effort, drop, interactive_high; `sampled` → the zk2 stream defaults (priority `data`, not v1's `data_low`; G11) |
 | `ttl_s` (every state subject) | `freshness.ttl_s`, with 0 meaning never (G18) |
@@ -200,15 +206,15 @@ interfaces from presence and contracts, then subscribes per interface.
 
 | v1 selector (consumers) | zk2 |
 |---|---|
-| `v1/*/telemetry/**`: Prometheus exporter `subscriber.rs:178`, OTel exporter `subscriber.rs:122`, historian `ingest.rs:97`, GUI fallback `subscription.rs:519-563`, rerun | **Introspection-driven.** Liveliness `zk2/*/*/@zk/alive/**` → fetch each new interface's contract (`zk2/@zk/contract/<iface>/<sha256>`) → keep those whose contract `uses = ["telemetry.v1"]` → subscribe `zk2/*/*/<iface>/stream/**` per such interface, keeping the resources typed `telemetry.v1.Point` (which drops traps). `zk2/*/*/*/stream/**` is exact for "every ambient stream", but it mixes occurrence streams in (G6). Exporter metric names become `<interface>_<template literals>`. |
+| `v1/*/telemetry/**`: Prometheus exporter `subscriber.rs:178`, OTel exporter `subscriber.rs:122`, historian `ingest.rs:97`, GUI fallback `subscription.rs:519-563`, rerun | **Introspection-driven.** Liveliness `zk2/*/*/@zk/alive/**` → fetch each new interface's contract (`zk2/@zk/contract/<iface>/<sha256>`) → keep those whose contract lists `telemetry.v1` or `telemetry.v2` in `uses` → subscribe `zk2/*/*/<iface>/stream/**` per such interface, keeping the resources typed `telemetry.v1.Point` (which drops traps), and the frame resources, each field a series (`telemetry.v2` §2.17). `zk2/*/*/*/stream/**` is exact for "every ambient stream", but it mixes occurrence streams in (G6). Exporter metric names become `<interface>_<template literals>`. |
 | GUI derived plan `v1/*/telemetry/<producer>/<path>` (`view/plan.rs:86-206`) | `zk2/*/*/<iface>/stream/<template with *>`. The interface chunk also fixes v1's miss of `netring-2`: the plan spells the producer's base name. |
 | `v1/*/state/**` (GUI `subscription.rs:146`) | `zk2/*/*/*/state/**`, exact, but it now also carries the fleet catalog and desired populations (G7) |
 | `v1/*/events/**` (GUI `subscription.rs:160`, OTel `subscriber.rs:180`, historian `timeline.rs:53`, storage `configs/router-events-storage.json5:95`) | **No exact selector** (G6). Per interface: `zk2/*/*/zs.snmp.v1/stream/traps/*` and `zk2/*/*/zs.snmp_poller.v1/stream/strays/**`. |
-| `v1/*/state/*/alert/*` (GUI `subscription.rs:359`, Prometheus `subscriber.rs:186`, OTel `subscriber.rs:158`, historian `timeline.rs:123`, correlator `subscriber.rs:84`, zenwatch `rules.rs:244` on branch `v1`) | `zk2/*/*/alarms.v1/state/alarms/*`, exact, one major per subscription |
-| `v1/*/state/*/alive` liveliness (GUI `subscription.rs:281`, Prometheus `:235`, OTel `:204`, correlator `:122`, zenwatch `engine.rs:610`, `rules.rs:245` on branch `v1`) | every instance: `zk2/*/*/@zk/instance/*`. "Is the owner of these alarms present" (S6): `zk2/*/*/@zk/alive/alarms.v1/**`, or, with `alarms.v1` in the tokenless set, the instance tokens and their descriptors ([`alarms.v1`](../../../spec/profiles/alarms/v1.md) §2.13). |
+| `v1/*/state/*/alert/*` (GUI `subscription.rs:359`, Prometheus `subscriber.rs:186`, OTel `subscriber.rs:158`, historian `timeline.rs:123`, correlator `subscriber.rs:84`, zenwatch `rules.rs:244` on branch `v1`) | `zk2/*/*/alarms.v2/state/alarms/*` and `…/state/words/*`, and `zk2/*/*/alarms.v1/state/alarms/*` while owners move: a reader reads both majors of the owners a scope selects (alarms.v2 §2.17) |
+| `v1/*/state/*/alive` liveliness (GUI `subscription.rs:281`, Prometheus `:235`, OTel `:204`, correlator `:122`, zenwatch `engine.rs:610`, `rules.rs:245` on branch `v1`) | every instance: `zk2/*/*/@zk/instance/*`. "Is the owner of these alarms present" (S6): `zk2/*/*/@zk/alive/alarms.v2/**`, or, with `alarms.v2` in the tokenless set, the instance tokens and their descriptors ([`alarms.v2`](../../../spec/profiles/alarms/v2.md) §2.13). |
 | `v1/*/state/*/device/*/alive` (GUI `subscription.rs:333`; hand-spelled at `zensight-common/src/keyexpr.rs:875`) | `zk2/*/*/@zk/alive/zs.snmp.v1/**`, and the same for zs.modbus.v1, zs.gnmi.v1, zs.netflow.v1, zs.bmc.v1, zs.container.v1. An instance change is the counter discontinuity. |
 | `v1/*/state/*/evidence/**` + `…/evidence/names/*` (correlator `subscriber.rs:45`, `:55`; hand-spelled `keyexpr.rs:373`) | `zk2/*/*/zs.evidence.v1/state/**` and `…/state/names/*`. The correlator's two overlapping subscriptions collapse into one. Storage `router-evidence-storage.json5` → the same selector. |
-| `v1/*/state/*/health` (rerun; `keyexpr.rs:336`) | `zk2/*/*/health.v1/state/**` |
+| `v1/*/state/*/health` (rerun; `keyexpr.rs:336`) | `zk2/*/*/health.v2/state/**`, and `…/health.v1/state/**` while services move: a reader reads a service by the major its descriptor lists (health.v2 §2.12) |
 | `v1/*/@rpc/*/introspect` + `v1/@catalog/@rpc/introspect` (GUI `app.rs:8446`, `:8451`) | liveliness `zk2/*/*/@zk/instance/*`, then a descriptor GET (on `zk2/*/*/@zk/instance/*`), then contracts by sha256. The catalog needs no special case, because `fleet` is a plain system. |
 | `v1/*/@rpc/<p>/describe` (GUI `app.rs:6602`) | deleted: the schemas are in the bundles |
 | `v1/*/@rpc/*/views` (GUI `app.rs:8455`) | GET `zk2/*/*/views.v1/state/views` |
@@ -310,36 +316,157 @@ Tests spell many more keys; bmc's e2e alone spells 61.
 - **The catalog's identity-shaped fields are renamed** (`origins` → `systems`, `MemberClaim.sensor` → `service`, AlertRef structured, `AlertSite` gains `service`). The other schemas keep v1's fields and flag the duplicates as debt.
 - **Occurrence retention is set to 7 days**; v1's events storage had no bound.
 
-## desired.v2 and alarms.v2, before #1149
+## Frames (#1149)
 
-The framework set still implements `alarms.v1`, and `zs.desired.v1` still uses `desired.v1`.
-Moving them is #1149's, with the rest of ZenSight's move onto zk2c, and the profiles index's
-"Used by" column moves with it. What each v2 profile changes here, as #986's and #984's designs
-say, with the bytes #989's W2 path measured for the reference's owners
-([wire baseline](../../../docs/zk2/measurements/wire-baseline/README.md), "W2 with desired.v2 and
-alarms.v2"):
+Since their minor 3, `zs.sysinfo.v1`, `zs.snmp.v1` and `zs.netring.v1` list
+[`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) and
+[`link.v2`](../../../spec/profiles/link/v2.md). Their readings also cross in
+frames (core §7.6, §7.7): packed records with declared ranges, the way
+zenoh-modem's `modem.v3` carries its 73. `zs.parallax.v1` 1.3 moves its `uses`
+alone. Each of the five frame resources:
 
-- **desired** ([`desired.v2`](../../../spec/profiles/desired/v2.md)). `zs.desired.v1`'s author
-  moves by a revision that lists `desired.v2` in `uses` (§2.18), its keys unchanged. Its
-  210,000 documents keep `freshness.ttl_s = 0` and the deployment's 300-s period, each re-read
-  conditional: an unchanged slice is answered by its held stamp alone, a 94-B reply where today's
-  carries the whole document. The watch does not pay at that population: a heartbeat's section
-  holds a bit per live document, 26 KB a heartbeat with 210,000 live (§2.2). Each target's report
-  becomes the packed `Report`, an 18-B payload converged, measured, where a `desired.v1.Report`
-  is 294 B, its role named by `desired.report` and a refusal's place and line indices into the
-  target contract's `desired.pointers` and `desired.details` (§2.10).
-- **alarms** ([`alarms.v2`](../../../spec/profiles/alarms/v2.md)). ZenSight's rules are
-  configured at run time, so its alarms go by words until a contract of its own lists them in
-  `alarms.rules` (§2.4, §4): each raise puts an `alarms.v2.Words` document on `words/{slot}`,
-  then a record that carries the alert key, 175 B in two SDUs on RF by alarms.v2's Appendix B,
-  where a table's rule's transition measured one 45-B SDU. The words never cross a face (§2.11).
-  - The identity is unchanged: the alert key, ZenSight's recipe byte for byte, test vector
-    `a659f813308ad1da` (§2.2). The slot, the key's last chunk, is its alias.
+- is a plain `stream`, `priority = "data"`, holding one record a frame, its time
+  measured;
+- is optional, gated `config:frames.<name>`. The owner puts it where its
+  configuration enables it, which is a face, at the face's cadence of one a minute;
+- carries a full record at least every 15 (`keyframe_every`), so a horizon of
+  300 s, with deadbands on the readings that wander;
+- declares each field an inline series of `telemetry.series`, its kind and unit
+  stated there.
+  - A mirror would need a `telemetry.kind` on the Point stream. None declares one,
+    and declaring one would make a Point that disagrees non-conforming
+    (`telemetry.v1` §2.5, §2.6). snmp's Points also carry the MIB's units.
+  - The field is the reading's template, with `/` and `.` as `_`.
+  - The series is the frame key and the field, never the Point's key
+    (`telemetry.v2` §2.17), and its epoch is the frame's run (§2.19);
+- is exposed `link`, the contract's only `link` resource (`link.v2` §2.17).
+
+The Point streams stay on the host bus, as before: a minor removes nothing, and
+the historian, the exporters and the GUI read them.
+
+| Contract | Frame resource | Record | Readings | Full / delta payload | Largest frame | RF, a day | The same readings today |
+|---|---|---|---:|---:|---:|---:|---:|
+| `zs.sysinfo.v1` | `frames/host` | `Host` | 57: system, cpu, memory, network; `cpu/times/*` | 178 / 111 B | 187 B | 199.5 KB | |
+| `zs.sysinfo.v1` | `frames/pressure` | `Pressure` | 49: `tcp/*`, the host's PSI, the cgroup's readings and PSI | 142 / 43 B | 150 B | 104.6 KB | |
+| | | | **106** | | | **304.1 KB** | 364.5 MB at 5 s |
+| `zs.snmp.v1` | `frames/device` | `Device` | 18: the uptime, a NAS's 5 system numbers, a UPS's 12 | 37 / 23 B | 41 B | 57.6 KB (a switch) to 66.0 KB (a UPS) | 7.1 MB at 30 s (a UPS) |
+| `zs.netring.v1` | `frames/flows` | `Flows` | 35: flows, `flow/by_l4/*`, `flow/red/*`, TCP closes, capture | 140 / 90 B | 147 B | 167.6 KB | |
+| `zs.netring.v1` | `frames/protocols` | `Protocols` | 31: DNS (its 5 rcode classes), HTTP, ICMP, TLS, QUIC, SSH, assets | 117 / 59 B | 123 B | 123.6 KB | |
+| | | | **66** | | | **291.3 KB** | 241.4 MB at 5 s |
+
+How the columns are reckoned:
+- **The figures** are #1149's design memo's, computed through #989's model
+  ([wire baseline](../../../docs/zk2/measurements/wire-baseline/README.md)): RF,
+  the lean stack, the face's 3-byte frame and a 16-bit run.
+  - A day is a frame a minute, a full record every 15.
+  - A delta holds the readings that move in a minute on a busy host, an
+    assumption.
+- **Today** is the same readings as `telemetry.v1` Points at the owner's cadence:
+  sysinfo and netring poll every 5 s, the snmp poller every 30 s. Each Point
+  carries its key's text and an HLC stamp, as #989's W2 "today" counts them.
+- **The largest frame** is a delta that includes every field (`link.v1` §2.8),
+  after a 32-bit run's envelope. Each fits one RF SDU under the lean stack.
+  - That is why sysinfo and netring each take two frames: one record would be
+    324 B and 256 B.
+  - A keyframe in two fragments crosses only when both do, and zenoh resends
+    no fragment.
+- **A far site:** a host's sysinfo and netring, a switch and a UPS make 719 KB a
+  day, 2.8 % of RF.
+
+**Ranges.** Each field's range and resolution is the quantity's own bound where it
+has one: a percentage, a kernel limit, a MIB's enumeration. Memory sizes are
+fixed-point to 16 TiB at 1 MiB, and dirty pages to 64 GiB at 4 KiB.
+- A counter's width holds its worst rate over 900 s, two keyframes apart. The
+  worst rates are stated guesses: 10⁷ context switches a second, 100 Gbit/s on a
+  capture (`telemetry.v2` §2.20).
+- Every field is optional. A reading an owner lacks is one bit: cgroup limits,
+  PSI on an old kernel, a UPS's readings on a switch.
+- Each file's description says where a value is a guess.
+
+**What does not cross.** A frame resource has no parameter (core §7.7), and
+`telemetry.v2` frames no templated series yet (its Appendix A). So every reading of
+an open family stays a Point stream, `host`:
+- sysinfo's per core, CPU, mount, disk, interface and sensor: 230 of a reference
+  host's 336 Points a tick;
+- snmp's tables and `metrics/{metric...}`: 870 Points a tick on a 24-port switch;
+- netring's per source, method, ICMP kind, app, detector and parser.
+
+Families with a closed vocabulary are flattened, one field per member:
+`cpu/times/{component}`, `tcp/{state}`, `pressure/{resource}/{stat}`,
+`cgroup/{resource}/pressure/{stat}`, `flow/by_l4/{proto}`, `flow/red/{quantile}`,
+`dns/responses_by_rcode/{rcode}`. Free text has no carrier: snmp's `system/descr`
+and its siblings, and netring's `capture/events`.
+- v1's `flow/red/{quantile}` declares `telemetry.unit = "ms"` for all five
+  members. The frame gives `rate` and `error_ratio` their own units, `1/s` and `1`.
+- probe and systemd have no contract here. The memo prices them on paper.
+
+## The framework set on zk2c (#1149)
+
+Every ZenSight service implements `health.v2` and `alarms.v2` (the Shape table),
+and `zs.desired.v1` 1.2 uses `desired.v2`. An instance implements one major of
+each, and a deployment moves them in this order.
+- Readers move before owners.
+  - A reader built before `alarms.v2` counts a moved owner as having no alarms,
+    which is quiet, not stale (alarms.v2 §2.17).
+  - One built before `health.v2` answers `not_listed` (health.v2 §2.12).
+  - zenwatch reads both majors. The correlator, the GUI, both exporters and the
+    historian move first.
+- Targets move before the desired author (desired.v2 §2.18).
+
+The bytes are #989's W2 path ([wire baseline](../../../docs/zk2/measurements/wire-baseline/README.md),
+"W2 with desired.v2 and alarms.v2") and each profile's Appendix B, on RF.
+
+- **health** ([`health.v2`](../../../spec/profiles/health/v2.md)).
+  - A status or a check is a 6-B record: its SDU is 37 B, where `health.v1`'s is
+    58 B and 68 B. A fault's is 39 B, where it was 81.
+  - The periodic cost is freshness.v2's heartbeat in both majors.
+  - A reason, a detail or a code outside the profile's tables stays in the
+    owner's log, until a contract of ZenSight's own names its words (§2.10).
+- **alarms** ([`alarms.v2`](../../../spec/profiles/alarms/v2.md)). ZenSight's rules
+  are configured at run time, so its alarms go by words until a contract of its
+  own lists them in `alarms.rules` (§2.4, §4).
+  - Each raise puts an `alarms.v2.Words` document on `words/{slot}`, then a record
+    that carries the alert key: 175 B in two SDUs on RF by alarms.v2's Appendix B.
+    A table's rule's transition measured one 45-B SDU.
+  - A resolve is one 45-B SDU, where `alarms.v1` put and deleted in 259 B.
+  - A late joiner's snapshot of three firing is 163 B in one SDU, where it was
+    672 B in four.
+  - The words never cross a face (§2.11). A far reader shows a ZenSight alarm by
+    its alert key, severity and state.
+  - The identity is unchanged: the alert key, ZenSight's recipe byte for byte, test
+    vector `a659f813308ad1da` (§2.2). The slot, the key's last chunk, is its alias,
+    from 0 to 255, so a service's 32 to 256 alarms fit.
   - Its `kind` rides the words' `category`, or a rule's once a table holds it.
-  - Its acknowledgements keep their references and compare `at`, whole seconds (§2.5).
-  - The consumers' `zk2/*/*/alarms.v1/state/alarms/*` becomes `…/alarms.v2/state/alarms/*`,
-    with `…/state/words/*` beside it; a reader reads both majors of the owners a scope selects
-    (§2.17), so a rule does not go quiet while services move one by one.
+  - Its acknowledgements keep their references and compare `at`, whole seconds
+    (§2.5). The catalog's `acks/{system}/{service}/{alert_key}` still names an
+    alarm by key.
+  - The consumers' `zk2/*/*/alarms.v1/state/alarms/*` becomes
+    `…/alarms.v2/state/alarms/*`, with `…/state/words/*` beside it. A reader
+    reads both majors of the owners a scope selects (§2.17), so a rule does not
+    go quiet while services move one by one.
+- **desired** ([`desired.v2`](../../../spec/profiles/desired/v2.md)).
+  `zs.desired.v1` 1.2 lists `desired.v2` in place of `desired.v1` (§2.18), its
+  keys unchanged.
+  - Its version is the put's in-band stamp, never the author's clock (§2.4, §2.6).
+  - Its 210,000 documents keep `freshness.ttl_s = 0` and the deployment's 300-s
+    period. The watch does not pay at that population: a heartbeat's section holds
+    a bit per live document, 26 KB a heartbeat with 210,000 live (§2.2).
+  - **While it uses `redundancy.v1`** each desired resource stays per key, a reply
+    per key with a Zenoh timestamp beside the stamp, and a conditional read is
+    answered whole (§2.4). When #987 moves it to `redundancy.v2`, an unchanged
+    slice is answered by its held stamp alone: a 94-B reply where today's carries
+    the whole document.
+  - Each target's report is the packed `Report`, an 18-B payload converged,
+    measured.
+    - Its role is named by `desired.report`. A refusal's place and line index the
+      target contract's `desired.pointers` and `desired.details` (§2.10).
+    - `zs.thresholds.v1` 1.2 declares it, `desired/report`, for its role
+      `desired`, beside `applied/{topic}`, which stays.
+    - The report is optional, since a required resource added would be breaking
+      (§2.18).
+    - The other targets add theirs when their contracts are written.
+- **redundancy.** `zs.catalog.v1` and `zs.desired.v1` keep `redundancy.v1` until
+  #987's `redundancy.v2` lands.
 
 ## Gaps found
 
