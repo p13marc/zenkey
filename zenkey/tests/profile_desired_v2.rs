@@ -765,6 +765,25 @@ async fn put_as(x: &zenoh::Session, stamp: Stamp, doc: &Value) {
         .unwrap();
 }
 
+/// The author's descriptor, as a played author answers it (§13, §16):
+/// read from the scenarios' author on `tasking.v2`, started alone on `ep`
+/// and gone again before this returns.
+async fn author_descriptor(ep: &str) -> zenkey::model::descriptor::Descriptor {
+    let rec = records();
+    let a = author_of(ep, tasking(0), &rec).await;
+    author_seen(ep, true).await;
+    let g = client(ep).await;
+    let desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap();
+    a.kill().await;
+    author_seen(ep, false).await;
+    g.close().await.unwrap();
+    desc
+}
+
 /// X as a new instance of the author's (§2, §16): the author's descriptor
 /// `desc`, its instance `instance` and its run `run`, answered on its
 /// instance key by X's queryable. Returns the queryable and the key, where
@@ -1772,6 +1791,9 @@ struct PlayedState {
     delay: Duration,
 }
 
+/// The instance §13's played author holds its token at.
+const PLAYED: &str = "00000000000000aa";
+
 /// §13's played author: a session of the test's own holding an instance
 /// token at `lab/author` and a queryable on D. It puts nothing, and answers
 /// each GET as the step says.
@@ -1871,7 +1893,7 @@ impl Played {
             .unwrap();
         let token = s
             .liveliness()
-            .declare_token("zk2/lab/author/@zk/instance/00000000000000aa")
+            .declare_token(format!("zk2/lab/author/@zk/instance/{PLAYED}"))
             .await
             .unwrap();
         Self {
@@ -1924,8 +1946,11 @@ async fn s13_a_conditional_re_read_and_what_a_read_waits() {
     let bus = one_router().await;
     let s = record(&bus.ep1).await;
     let ps = client(&bus.ep1).await;
-    // Setup: P plays the author; the seed draws v1's snapshot, its entry
-    // at (R, 7); the target's period is 2 s.
+    // Setup: P plays the author: it answers a descriptor stating R and
+    // declares its instance token (§2.18); the seed draws v1's snapshot,
+    // its entry at (R, 7); the target's period is 2 s.
+    let (_descriptor, _) =
+        answer_descriptor(&ps, author_descriptor(&bus.ep1).await, PLAYED, R).await;
     let p = Played::new(&ps, page_of(at(7), &v(1))).await;
     author_seen(&bus.ep2, true).await;
     let w = worker_up(&bus.ep2, true, Follow::Poll, period(2), false).await;
@@ -3267,20 +3292,10 @@ async fn s16_a_version_put_before_its_descriptor_waits_for_its_token() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s16_a_target_before_its_author_holds_a_version_put_before_its_descriptor() {
     let bus = one_router().await;
-    let rec = records();
     let s = record(&bus.ep1).await;
     // The author's descriptor as X answers it, read from an author that
     // runs alone, before the target starts, and is gone again.
-    let a = author_of(&bus.ep1, tasking(0), &rec).await;
-    author_seen(&bus.ep1, true).await;
-    let g = client(&bus.ep1).await;
-    let desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
-        .await
-        .unwrap()
-        .into_descriptor()
-        .unwrap();
-    a.kill().await;
-    author_seen(&bus.ep1, false).await;
+    let desc = author_descriptor(&bus.ep1).await;
 
     // The target starts: no author yet, nor any descriptor.
     let (session, b, target, d) = target_of(

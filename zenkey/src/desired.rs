@@ -2282,7 +2282,9 @@ impl TargetInner {
     /// run, no descriptor at all among them, holds that run's versions,
     /// `held` with them, until [`TargetInner::read_revisions`] releases
     /// them. A run first seen while its instance's token stood is read so
-    /// at once, and waits for the next appearance.
+    /// at once, and waits for the next appearance. A version read from an
+    /// archive is never held, and takes the deployment's word where the
+    /// run is not known.
     async fn admits(&self, run: Option<zenkey_model::wire::Run>, held: Option<&Incoming>) -> bool {
         if self.startup.word_alone {
             return true;
@@ -2291,13 +2293,22 @@ impl TargetInner {
             return true;
         };
         let at = run.to_string();
+        // Last-known from an archive is never held (§2.18, §2.9): with its
+        // author absent no descriptor will state its run, so the
+        // deployment's word judges it. Its author's return is an
+        // appearance, and its next run is read first.
+        let archived = held.is_some_and(|i| i.via == Via::Archive);
         let mut rv = self.revisions.lock().await;
         if let Some(p) = rv.pending.get_mut(&at) {
+            if archived {
+                return true;
+            }
             p.held.extend(held.cloned());
             return false;
         }
         let named = match rv.runs.get(&at) {
             Some(n) => n.clone(),
+            None if archived => Named::Word,
             None => {
                 let since = self.appearances.load(Ordering::Acquire);
                 let read = crate::answer::run_revision(

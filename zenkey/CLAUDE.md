@@ -618,7 +618,10 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   states it not, which leaves the word (`by_word`, kept); that read is
   made again up to `SEED_RETRIES_AT_TOKEN` (4) times, 100 ms more apart
   each, while a held run stays unstated. The held versions are then sent
-  again as samples. `Seeded::revision`
+  again as samples. An archive's version (`Via::Archive`, §2.9) is never
+  held: an unknown run's takes the word, in every role, a desired.v1
+  role's included (e19d78b1). §13's P answers a descriptor stating R
+  (`author_descriptor`, `answer_descriptor`) before its token. `Seeded::revision`
   (`AuthorRevision::{NotRead, Word, Given, Another, Stopped, Unread}`)
   says what it read, and the owner example's `desired seeds` writes it
   `revision=…`. `TargetStartup::word_alone` (`by_word_alone`, the owner
