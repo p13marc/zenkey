@@ -605,7 +605,15 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   revision is of the other major is never judged (`TargetInner::admits`,
   logged once a run): the role is stopped while the descriptor names it,
   its report as it was. No descriptor, a read that failed or a revision
-  not retrieved take the deployment's word. `Seeded::revision`
+  not retrieved take the deployment's word. **None states the run yet**
+  (text 0.3, F-621): where descriptors reach the target (`Revisions::
+  reached`, sticky once any named a revision), a read that answers and
+  states not the run (`answer::run_revision`'s `NotStated`), or answers
+  nothing, holds the run (`Revisions::pending`, its samples and read
+  entries kept) until `read_revisions` states it, or reads after the
+  author's instance token appeared (`TargetInner::appearances`, counted
+  by the watch and the poll) and states it not, which leaves the word
+  (`by_word`, kept); the held versions are then sent again as samples. `Seeded::revision`
   (`AuthorRevision::{NotRead, Word, Given, Another, Stopped, Unread}`)
   says what it read, and the owner example's `desired seeds` writes it
   `revision=…`. `TargetStartup::word_alone` (`by_word_alone`, the owner
@@ -620,6 +628,9 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   stop, E the new run read first: an author killed and restarted on run
   C's revision under a new run, its two puts never judged, the stop's
   warning read from the binary's `zenkey::desired` log, `desired_log`),
+  `s16_a_version_put_before_its_descriptor_waits_for_its_token` (X plays
+  the next instance: a put, then the descriptor, then the token, and the
+  held put acted on only after the token),
   with `config_v2_as_a_target`; the owner example's `--desired-v2`,
   `--desired-ttl <s>` and `--desired-timeout-ms <ms>` drive it (`desired
   gets` listing `<held>=<unchanged|whole>`, `desired delete-unheld`,

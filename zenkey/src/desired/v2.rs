@@ -672,7 +672,7 @@ impl TargetInner {
             Event::Sample(i) => {
                 // §2.18: never a version under a run whose revision the
                 // role's report cannot report.
-                if self.admits(i.inband.map(|s| s.run)).await {
+                if self.admits(i.inband.map(|s| s.run), Some(&i)).await {
                     self.judge_v2(v2, i).await;
                 }
             }
@@ -681,12 +681,15 @@ impl TargetInner {
                 for item in read.got.items {
                     // §2.18: nothing under a run whose revision the role's
                     // report cannot report is judged, nor confirmed.
-                    let run = match &item {
-                        Item::Entry(i) => i.inband.map(|s| s.run),
-                        Item::NoEntry { run, .. } => Some(*run),
-                        Item::Unchanged(s) | Item::NotSent(s) => Some(s.run),
+                    // An entry under a run no descriptor states yet waits
+                    // with that run's versions; the seed that follows its
+                    // release reads the slice again for the rest.
+                    let (run, held) = match &item {
+                        Item::Entry(i) => (i.inband.map(|s| s.run), Some(i)),
+                        Item::NoEntry { run, .. } => (Some(*run), None),
+                        Item::Unchanged(s) | Item::NotSent(s) => (Some(s.run), None),
                     };
-                    if !matches!(item, Item::NotSent(_)) && !self.admits(run).await {
+                    if !matches!(item, Item::NotSent(_)) && !self.admits(run, held).await {
                         continue;
                     }
                     match item {

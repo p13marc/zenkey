@@ -1694,6 +1694,10 @@ struct TargetInner {
     given: String,
     /// What the author's descriptors named of its revision (§2.18).
     revisions: tokio::sync::Mutex<Revisions>,
+    /// How many times an instance token of the author's appeared, as its
+    /// watch or its poll heard it (§2.18: a token follows its descriptor,
+    /// core §8.2).
+    appearances: Arc<AtomicU64>,
     /// `desired.v2`'s half, for a role bound to an author of it.
     v2: Option<v2::V2>,
     /// The slice's key; `None` for the kill switch.
@@ -1743,6 +1747,26 @@ struct Revisions {
     majors: BTreeMap<String, Option<Major>>,
     /// The runs whose stop was logged.
     said: std::collections::BTreeSet<String>,
+    /// The runs none of whose author's descriptors stated them when a
+    /// version under them was read, where descriptors reach the target:
+    /// their versions held until a read after the author's instance token
+    /// appears (§2.18, "None states the run yet", text 0.3, F-621).
+    pending: BTreeMap<String, Pending>,
+    /// The runs a read after that token found stated by none: the
+    /// deployment's word, kept across reads.
+    by_word: std::collections::BTreeSet<String>,
+    /// A descriptor of the author's has named a revision to this target:
+    /// descriptors reach it, as they never do across a face.
+    reached: bool,
+}
+
+/// A run's versions held while no descriptor states it (§2.18).
+struct Pending {
+    /// [`TargetInner::appearances`] when the read that found none was
+    /// asked: a token appearing after it is one the next read follows.
+    since: u64,
+    /// Its versions, in the order they arrived, judged once it is read.
+    held: Vec<Incoming>,
 }
 
 /// What a descriptor read named of the author's revision.
@@ -1940,6 +1964,7 @@ impl Target {
                 author_iface: contract.iface.clone(),
                 given: Fingerprint::of(contract).to_string(),
                 revisions: tokio::sync::Mutex::new(Revisions::default()),
+                appearances: Arc::default(),
                 v2,
                 key,
                 author: author_addr,
@@ -2142,11 +2167,18 @@ impl TargetInner {
     /// start's seed, and at each seed after its instance token appears or
     /// is withdrawn. What each names under the run it states replaces what
     /// was held, so a stop lasts while a descriptor names it.
+    ///
+    /// A run held because no descriptor stated it (§2.18, "None states
+    /// the run yet") is released once this read states it, or once it is
+    /// a read after the author's instance token appeared that states it
+    /// not, which leaves the deployment's word: its versions are judged
+    /// again, in the order they arrived.
     async fn read_revisions(&self) {
         if self.startup.word_alone {
             return;
         }
         let Some(author) = &self.author else { return };
+        let seen = self.appearances.load(Ordering::Acquire);
         let read = crate::answer::owner_revisions(
             &self.session,
             author,
@@ -2171,17 +2203,42 @@ impl TargetInner {
             crate::answer::OwnerRevisions::Unreached => sweep.push(Named::Word),
             crate::answer::OwnerRevisions::Unread => sweep.push(Named::Unread),
         }
+        rv.reached |= sweep.iter().any(|n| matches!(n, Named::Revision { .. }));
+        let mut release = Vec::new();
+        for (run, p) in std::mem::take(&mut rv.pending) {
+            if runs.contains_key(&run) {
+                release.extend(p.held);
+            } else if seen > p.since {
+                tracing::debug!(role = %self.role, %run, "desired: no descriptor of the author's states the run after its instance token appeared: the deployment's word stands for it (desired.v2 §2.18)");
+                rv.by_word.insert(run);
+                release.extend(p.held);
+            } else {
+                rv.pending.insert(run, p);
+            }
+        }
+        for run in &rv.by_word {
+            runs.entry(run.clone()).or_insert(Named::Unread);
+        }
         rv.runs = runs;
         rv.sweep = sweep;
+        drop(rv);
+        for i in release {
+            let _ = self.tx.send(Event::Sample(i));
+        }
     }
 
     /// Whether a version under `run` may be judged (§2.18): not while the
     /// author's descriptor stating that run names a revision of the other
     /// major, which the role cannot report. A run the last read did not
-    /// hold is read once ([`crate::answer::owner_revision`]); a version
+    /// hold is read once ([`crate::answer::run_revision`]); a version
     /// with no run, no descriptor reaching the target, and a read that
     /// failed take the deployment's word.
-    async fn admits(&self, run: Option<zenkey_model::wire::Run>) -> bool {
+    ///
+    /// **None states the run yet** (text 0.3, F-621): where descriptors
+    /// reach the target, a read that finds none stating the run, no
+    /// descriptor at all among them, holds that run's versions, `held`
+    /// with them, until [`TargetInner::read_revisions`] releases them.
+    async fn admits(&self, run: Option<zenkey_model::wire::Run>, held: Option<&Incoming>) -> bool {
         if self.startup.word_alone {
             return true;
         }
@@ -2190,24 +2247,52 @@ impl TargetInner {
         };
         let at = run.to_string();
         let mut rv = self.revisions.lock().await;
+        if let Some(p) = rv.pending.get_mut(&at) {
+            p.held.extend(held.cloned());
+            return false;
+        }
         let named = match rv.runs.get(&at) {
             Some(n) => n.clone(),
             None => {
-                let n = match crate::answer::owner_revision(
+                let since = self.appearances.load(Ordering::Acquire);
+                let read = crate::answer::run_revision(
                     &self.session,
                     key,
                     run,
                     &self.author_iface,
                     self.startup.timeout,
                 )
-                .await
-                {
-                    crate::answer::OwnerRevision::Named(fingerprint) => {
+                .await;
+                use crate::answer::{OwnerRevision, RunRevision};
+                // Descriptors answered and none states the run; or none
+                // answered where descriptors reach the target, as between
+                // an author's instances.
+                let hold = match &read {
+                    RunRevision::NotStated => true,
+                    RunRevision::Read(OwnerRevision::Unreached) => rv.reached,
+                    RunRevision::Read(_) => false,
+                };
+                if hold {
+                    tracing::debug!(role = %self.role, run = %at, "desired: no descriptor of the author's states the run yet: its versions are held until a read after its instance token appears (desired.v2 §2.18)");
+                    rv.pending.insert(
+                        at,
+                        Pending {
+                            since,
+                            held: held.into_iter().cloned().collect(),
+                        },
+                    );
+                    return false;
+                }
+                let n = match read {
+                    RunRevision::Read(OwnerRevision::Named(fingerprint)) => {
+                        rv.reached = true;
                         let major = self.major_named(&mut rv, &fingerprint).await;
                         Named::Revision { fingerprint, major }
                     }
-                    crate::answer::OwnerRevision::Unreached => Named::Word,
-                    crate::answer::OwnerRevision::Unread => Named::Unread,
+                    RunRevision::Read(OwnerRevision::Unreached) => Named::Word,
+                    RunRevision::Read(OwnerRevision::Unread) | RunRevision::NotStated => {
+                        Named::Unread
+                    }
                 };
                 rv.runs.insert(at.clone(), n.clone());
                 n
@@ -2303,6 +2388,7 @@ impl TargetInner {
         match (&self.startup.watch, &selector) {
             (Some(w), Some(sel)) => {
                 let tx = self.tx.clone();
+                let appearances = Arc::clone(&self.appearances);
                 // Without history unless the watch session is in a
                 // namespace (core §8.1, 0.41; #851): the seed below reads
                 // what is held, and the round trip after a history would
@@ -2313,6 +2399,7 @@ impl TargetInner {
                     .history(crate::presence::subscriber_needs_history(w))
                     .callback(move |s: Sample| {
                         let why = if s.kind() == SampleKind::Put {
+                            appearances.fetch_add(1, Ordering::AcqRel);
                             Why::Appeared
                         } else {
                             Why::Withdrawn
@@ -2421,6 +2508,13 @@ impl TargetInner {
                 && (read.complete || !read.keys.is_empty())
             {
                 if shown.as_ref().is_some_and(|s| *s != read.keys) {
+                    // A token the last read did not hold appeared (§2.18).
+                    if shown
+                        .as_ref()
+                        .is_some_and(|s| read.keys.iter().any(|k| !s.contains(k)))
+                    {
+                        self.appearances.fetch_add(1, Ordering::AcqRel);
+                    }
                     self.seed_soon(Why::Appeared);
                 }
                 shown = Some(read.keys);
@@ -2692,7 +2786,7 @@ impl TargetInner {
             Event::Sample(i) => {
                 // §2.18: never a version under a run whose revision the
                 // role's report cannot report.
-                if !self.admits(i.inband.map(|s| s.run)).await {
+                if !self.admits(i.inband.map(|s| s.run), Some(&i)).await {
                     return;
                 }
                 let sample = self.sample_of(&i);

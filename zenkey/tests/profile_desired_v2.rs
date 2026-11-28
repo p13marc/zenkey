@@ -3125,6 +3125,101 @@ async fn s16_run_e() {
     a.kill().await;
 }
 
+/// §16, the new run's hold (§2.18, "None states the run yet", text 0.3,
+/// zk2py's round 127, F-621): an author MAY put a version before its
+/// descriptor (core §8.2). The target is converged on v1; its author's
+/// process ends without closing, and X, a session of the test's, plays its
+/// next instance, putting v2 under a new run before anything else. The
+/// target's read of the author's descriptors finds none stating the run,
+/// where descriptors reach it, and holds v2: it acts on nothing, and `Rp`
+/// and `Run` receive nothing. X serves the descriptor stating the run and
+/// naming the revision the target was given, and still nothing moves, since
+/// the target reads again when the author's instance token appears. X
+/// declares it: the target reads, and acts on the v2 it held, its report
+/// converged on it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_a_version_put_before_its_descriptor_waits_for_its_token() {
+    use zenoh::Wait as _;
+    let bus = one_router().await;
+    let rec = records();
+    let s = record(&bus.ep1).await;
+    let a = author_of(&bus.ep1, tasking(0), &rec).await;
+    author_seen(&bus.ep1, true).await;
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup::default(),
+    )
+    .await;
+    let target = target.expect("its word names a revision it can report");
+    let svc = b.start().await.expect("the target starts");
+    eventually("the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    let s1 = version(a.author.put(WORKER, bytes(&v(1))).await.unwrap());
+    s.until("converged on v1", |r| converged_on(r, s1, 1)).await;
+    let acts = target.acts();
+    // The author's descriptor, which X serves for its next instance.
+    let g = client(&bus.ep1).await;
+    let mut desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap();
+    a.kill().await;
+    author_seen(&bus.ep1, false).await;
+
+    // X puts v2 under a new run, before any descriptor.
+    let run = Run::U16(0x0bad);
+    assert_ne!(run, s1.run, "a new run");
+    let s2 = Stamp {
+        run,
+        seq: Seq::new(1).unwrap(),
+    };
+    let x = client(&bus.ep1).await;
+    let mark = s.mark();
+    put_as(&x, s2, &v(2)).await;
+    eventually("X's put at S", || async { !s.on(D, mark).is_empty() }).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(target.acts(), acts, "held: no descriptor states its run");
+    assert!(s.on(RP, mark).is_empty(), "Rp receives nothing");
+    assert!(s.on(RUN, mark).is_empty(), "Run receives nothing");
+
+    // Its descriptor, stating the run: no read before the token.
+    let instance = "00000000000000bb";
+    desc.instance = instance.to_owned();
+    desc.run = Some(run.hex());
+    let served = serde_json::to_vec(&desc).unwrap();
+    let key = format!("zk2/lab/author/@zk/instance/{instance}");
+    let reply_key = key.clone();
+    let _descriptor = x
+        .declare_queryable(key.clone())
+        .complete(true)
+        .callback(move |q| {
+            let _ = q
+                .reply(reply_key.clone(), served.clone())
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                .wait();
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(target.acts(), acts, "held until the token");
+    assert!(s.on(RUN, mark).is_empty(), "Run receives nothing yet");
+
+    // Its instance token: the target reads, and acts on the v2 it held.
+    let _token = x.liveliness().declare_token(key).await.unwrap();
+    s.until("converged on v2, held", |r| converged_on(r, s2, 2))
+        .await;
+    assert_eq!(d.with(|x| x.running.clone()), v(2), "v2 runs");
+    assert_eq!(target.acts(), acts + 1, "acted on v2 once");
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
 /// §16 Both majors side by side (§2.18): runs A to E, each on a router of
 /// its own, at once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
