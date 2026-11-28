@@ -57,6 +57,8 @@ pub async fn run(cli: ArbitrationArgs) -> Result<()> {
         )));
     }
     let mut spec = ArbitrationSpec::new(dep.timeout());
+    // A compact descriptor reads through --catalog (core §3.3).
+    spec.catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
     spec.listen = std::time::Duration::from_secs_f64(for_secs);
     spec.role = role;
     // The routers' lease, keep-alives and wait_before_close: the flags,

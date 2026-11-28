@@ -183,6 +183,10 @@ pub(crate) fn arbitration(
         cx.dep.namespace().to_string(),
         addr,
         cx.dep.store.clone(),
+        cx.dep
+            .contracts
+            .as_ref()
+            .map_or_else(Default::default, |c| (*c.catalogs).clone()),
         cx.dep.timeout(),
         cx.dep.settings.routers(),
     )

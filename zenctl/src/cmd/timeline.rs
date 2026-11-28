@@ -48,7 +48,7 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
     // so this is the one read. It is made on both paths so that a
     // `--catalog` that does not read is refused, exit 2, with `--from` as
     // without it (`tests/cmd/owner-heartbeat.trycmd`), never passed over.
-    let catalog = !zk2::load_catalogs(&cli.contracts)?.is_empty();
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
     let crate::cli::TimelineArgs {
         selectors,
         explicit: crate::cli::ExplicitArgs { explicit },
@@ -70,7 +70,7 @@ pub async fn run(cli: crate::cli::TimelineArgs) -> Result<()> {
             // positivity check is the one every window shares (#307).
             let secs = for_secs.expect("clap requires --for without --from");
             live(
-                &selectors, explicit, &across, secs, &dep, &contracts, catalog,
+                &selectors, explicit, &across, secs, &dep, &contracts, &catalogs,
             )
             .await?
         }
@@ -91,7 +91,7 @@ async fn live(
     for_secs: f64,
     dep: &Deployment,
     contracts: &zenkey_fleet::ContractSet,
-    catalog: bool,
+    catalogs: &zenkey_fleet::Catalogs,
 ) -> Result<Window> {
     let duration = super::positive_secs("--for", for_secs)?;
     let face = zk2::FaceScope::of_given(
@@ -99,7 +99,7 @@ async fn live(
         contracts,
         dep.namespace(),
         zk2::Reads::Samples,
-        catalog,
+        !catalogs.is_empty(),
     )?;
     let dep = &match &face {
         Some(f) => f.deployment(dep.clone()),
@@ -125,7 +125,7 @@ async fn live(
         }
         None => {
             let ns_session = dep.session().await?;
-            zk2::read_lens(dep, &ns_session, &store).await
+            zk2::read_lens(dep, &ns_session, &store, catalogs).await
         }
     };
     let held = store.held().len();

@@ -4479,6 +4479,10 @@ pub(crate) struct AdminGraphArgs {
     /// deployment's grants deny `@/**` queryables to every principal (§11.1).
     #[arg(long)]
     pub(crate) trust_admin_space: bool,
+    /// An instance's compact descriptor (core §3.3) is read through
+    /// --catalog, so its `meta.zid` joins it onto its router.
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }

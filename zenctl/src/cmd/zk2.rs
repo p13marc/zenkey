@@ -348,8 +348,10 @@ pub async fn read_lens(
     dep: &Deployment,
     session: &zenoh::Session,
     store: &BundleStore,
+    catalogs: &zenkey_fleet::Catalogs,
 ) -> Option<Catalog> {
-    match zenkey_fleet::read_lens(session, store, dep.timeout()).await {
+    // An owner's compact descriptor reads through --catalog (core §3.3).
+    match zenkey_fleet::read_lens_through(session, store, catalogs, dep.timeout()).await {
         Ok(catalog) => Some(catalog),
         Err(e) => {
             eprintln!(

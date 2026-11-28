@@ -245,7 +245,8 @@ async fn served(
         None => {
             let ns_session = dep.session().await?;
             let store = zk2::store(dep, served.contracts);
-            let lens = zk2::read_lens(dep, &ns_session, &store).await;
+            let catalogs = zenkey_fleet::Catalogs::new(served.catalog.iter().cloned().collect());
+            let lens = zk2::read_lens(dep, &ns_session, &store, &catalogs).await;
             if lens.is_none() {
                 eprintln!(
                     "  presence did not read: the header names no revision, so this capture \

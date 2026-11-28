@@ -280,6 +280,7 @@ pub async fn set(cli: ConfigSetArgs) -> Result<()> {
             &dep,
             &session,
             target,
+            &spec.catalogs,
         )
         .await;
     }
@@ -438,6 +439,7 @@ async fn set_v2(
     dep: &Deployment,
     session: &zenoh::Session,
     target: zenkey_fleet::model::config::V2Target,
+    catalogs: &zenkey_fleet::Catalogs,
 ) -> Result<()> {
     let t = dep.timeout();
     let address = a.address;
@@ -445,10 +447,14 @@ async fn set_v2(
     let view: Option<ConfigView> = if a.no_precheck {
         None
     } else {
-        let got =
-            zenkey_fleet::get_config_records(session, &[(address.clone(), target.clone())], t)
-                .await
-                .map_err(|e| anyhow::anyhow!("config set: reading the record: {e}"))?;
+        let got = zenkey_fleet::get_config_records(
+            session,
+            &[(address.clone(), target.clone())],
+            t,
+            catalogs,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("config set: reading the record: {e}"))?;
         let record = got
             .services
             .get(&address)

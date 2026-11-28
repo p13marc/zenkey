@@ -85,7 +85,19 @@ pub const REFRESH_MIN: Duration = Duration::from_secs(5);
 /// failed is the store's to say (unavailable, or not held): the catalog is
 /// returned either way.
 pub async fn read(session: &Session, store: &BundleStore, timeout: Duration) -> Result<Catalog> {
-    read_observed(session, store, &Describing::default(), timeout)
+    read_through(session, store, &crate::Catalogs::default(), timeout).await
+}
+
+/// [`read`], an owner's compact descriptor (core §3.3) read through
+/// `catalogs`, the deployment's (`--catalog`, §8.6), and the revisions its
+/// entries name from `store`.
+pub async fn read_through(
+    session: &Session,
+    store: &BundleStore,
+    catalogs: &crate::Catalogs,
+    timeout: Duration,
+) -> Result<Catalog> {
+    read_observed(session, store, &Describing::new(catalogs, store), timeout)
         .await
         .map(|o| Catalog::new(&o))
 }

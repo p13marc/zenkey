@@ -35,6 +35,7 @@ pub fn admin(
     deployment: Option<zenoh::Session>,
     namespace: String,
     timeout: Duration,
+    describing: zenkey_fleet::Describing,
 ) -> Task<Message> {
     Task::perform(
         async move {
@@ -48,8 +49,15 @@ pub fn admin(
                 .map_err(ServiceError::of)?;
             let topology = match &deployment {
                 Some(session) => {
-                    zenkey_fleet::topology_with_instances(&raw, session, &namespace, timeout, false)
-                        .await
+                    zenkey_fleet::topology_with_instances_through(
+                        &raw,
+                        session,
+                        &namespace,
+                        timeout,
+                        false,
+                        &describing,
+                    )
+                    .await
                 }
                 None => zenkey_fleet::topology(&raw, timeout).await,
             }

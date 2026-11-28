@@ -129,18 +129,22 @@ fn arbitration_spec(
 /// role's deadline, its watch on the presence monitor's watch session (in
 /// no namespace on the wire keys). Without one, the deadline alone, as the
 /// report says. Every answer is the fleet's judge's.
+#[allow(clippy::too_many_arguments)]
 pub fn arbitration(
     session: zenoh::Session,
     watch: Option<zenkey_fleet::WatchSession>,
     namespace: String,
     addr: Addr,
     store: zenkey_fleet::BundleStore,
+    catalogs: zenkey_fleet::Catalogs,
     timeout: Duration,
     routers: zenkey_model::budget::Routers,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = arbitration_spec(timeout, routers);
+            let mut spec = arbitration_spec(timeout, routers);
+            // A compact descriptor reads through the window's catalogs.
+            spec.catalogs = catalogs;
             let offline = zenkey_fleet::ContractSet::new();
             let report = zenkey_fleet::run_arbitration(
                 &session,

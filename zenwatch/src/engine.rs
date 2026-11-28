@@ -599,7 +599,12 @@ pub async fn run_on(e: Engine<'_>, stop: impl Future<Output = ()>) -> Result<Run
     let named = presence_rules.named_interfaces();
     if !named.is_empty() {
         let scope = zenkey_fleet::covering_scope(named.iter().map(|(_, t, _)| *t));
-        let read = zenkey_fleet::observe_presence(&e.bus.session, &scope, e.timeout).await;
+        // A compact descriptor (core §3.3) reads through `catalog` and the
+        // store, so a tokenless interface it lists is known as any other.
+        let describing = zenkey_fleet::Describing::new(e.catalogs, e.store);
+        let read =
+            zenkey_fleet::observe_presence_through(&e.bus.session, &scope, e.timeout, &describing)
+                .await;
         if let Some(why) = tokenless_refusal(&presence_rules, read) {
             return Err(unaskable!("{why}"));
         }

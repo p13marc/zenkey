@@ -273,6 +273,7 @@ async fn state_get(
     timeout: Duration,
     max_replies: usize,
     contracts: &ContractSet,
+    catalogs: &crate::model::deployment::Catalogs,
 ) -> Result<(Vec<SampleView>, u64)> {
     let held: Vec<&zenkey_model::contract::Contract> =
         contracts.iter().map(|r| r.contract()).collect();
@@ -283,7 +284,8 @@ async fn state_get(
         .timeout(timeout)
         .await
         .map_err(|e| Error::bus("state preamble", selector, e))?;
-    let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+    let mut revisions =
+        crate::bus::query::OwnerRevisions::new(session, timeout, &held, None, catalogs);
     let mut errors = 0u64;
     let mut kept = 0usize;
     let mut pages: Vec<SampleView> = Vec::new();
@@ -432,9 +434,11 @@ where
     // The lens before the first window (FJ8b): a check inside the drain
     // never waits on a presence read or a retrieval.
     let mut catalog: Option<Catalog> = match (reads_presence, deployment) {
-        (true, Some(bus)) => crate::bus::lens::read(&bus.session, &bundles, spec.timeout)
-            .await
-            .ok(),
+        (true, Some(bus)) => {
+            crate::bus::lens::read_through(&bus.session, &bundles, &spec.catalogs, spec.timeout)
+                .await
+                .ok()
+        }
         _ => None,
     };
     // Presence before the first window too (#747): the `instance-gone`
@@ -497,9 +501,14 @@ where
                 None
             };
             let lens = match (reads_presence, deployment) {
-                (true, Some(bus)) => crate::bus::lens::read(&bus.session, &bundles, spec.timeout)
-                    .await
-                    .ok(),
+                (true, Some(bus)) => crate::bus::lens::read_through(
+                    &bus.session,
+                    &bundles,
+                    &spec.catalogs,
+                    spec.timeout,
+                )
+                .await
+                .ok(),
                 _ => None,
             };
             (doctor, lens, refresh_alarms(plans).await)
@@ -693,6 +702,7 @@ where
                     spec.timeout,
                     spec.max_replies,
                     &spec.contracts,
+                    &spec.catalogs,
                 )
                 .await,
             )

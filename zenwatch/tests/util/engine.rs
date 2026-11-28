@@ -69,6 +69,9 @@ pub struct Options {
     /// The operator's word on the clocks (`clocks_synced`): every session
     /// of a test runs on this host.
     pub clocks_synced: bool,
+    /// The top-level `catalog`s: what an owner's compact descriptor (core
+    /// §3.3) is read through.
+    pub catalogs: zenkey_fleet::Catalogs,
 }
 
 impl Default for Options {
@@ -81,6 +84,7 @@ impl Default for Options {
             doctor: None,
             extra_sinks: Vec::new(),
             clocks_synced: false,
+            catalogs: zenkey_fleet::Catalogs::default(),
             // No group window, and a group label no notice carries: a test
             // about a rule sees each notification on its own, whatever
             // system its address names.
@@ -165,7 +169,7 @@ pub async fn run_once_refused(
             }),
             doctor: None,
             clocks_synced: opts.clocks_synced,
-            catalogs: &zenkey_fleet::Catalogs::default(),
+            catalogs: &opts.catalogs,
             routers: Default::default(),
             across: None,
         },

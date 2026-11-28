@@ -84,7 +84,7 @@ pub const QUEUE: usize = 1024;
 const UNSETTLED_RESEED: Duration = crate::bus::presence::RESEED_BACKOFF;
 
 /// What a reading asks.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TelemetrySpec {
     /// Each read's timeout: presence, a descriptor, a retrieval, a GET.
     pub timeout: Duration,
@@ -106,6 +106,11 @@ pub struct TelemetrySpec {
     /// opens: a margin for the declarations to cross, never proof that they
     /// did ([`Opening::Margin`], zk2py round 49's F-159).
     pub settle: Duration,
+    /// The deployment catalogs given (`--catalog`, core §8.6): what an
+    /// owner's compact descriptor (§3.3) is read through, its revisions
+    /// from the store. Without the one it names, it is not read, and its
+    /// metric resources are not in scope: never a guess.
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 /// [`TelemetrySpec::settle`]'s default: five times what a loopback face
@@ -122,6 +127,7 @@ impl TelemetrySpec {
             routers: zenkey_model::budget::Routers::default(),
             across_face: false,
             settle: DEFAULT_SETTLE,
+            catalogs: crate::model::deployment::Catalogs::default(),
         }
     }
 
@@ -340,7 +346,7 @@ pub async fn observe(
     let presence_scope = scope.presence_scope();
     let mut obs = TelemetryObservation {
         namespace: namespace.to_owned(),
-        spec,
+        spec: spec.clone(),
         scope: scope.clone(),
         resources: Vec::new(),
         seed: None,
@@ -369,7 +375,9 @@ pub async fn observe(
         None
     } else {
         obs.asked.push(presence_scope.selector());
-        match crate::bus::presence::observe(session, &presence_scope, t).await {
+        let describing = crate::bus::presence::Describing::new(&obs.spec.catalogs, store);
+        match crate::bus::presence::observe_through(session, &presence_scope, t, &describing).await
+        {
             Ok(o) => {
                 let c = Catalog::new(&o);
                 let _ = store.fetch_all(session, &c.wanted()).await;
@@ -414,7 +422,7 @@ pub async fn observe(
             scope: presence_scope,
             timeout: t,
         },
-        spec,
+        spec: spec.clone(),
         catalog,
         store,
         offline,
