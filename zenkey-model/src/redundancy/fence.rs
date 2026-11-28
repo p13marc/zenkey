@@ -25,6 +25,13 @@
 //! ([`Fence::describe`]), each sample ([`Fence::offer`]), and, when an
 //! [`Outcome`] says `asks_read`, makes one read of the address's
 //! descriptors and hands its end back ([`Fence::read_ended`]).
+//!
+//! **A read never undoes a token heard since it was asked** (observer
+//! §3.6, 0.38). The read and the watch ride two sessions, which no router
+//! orders. So the runtime asks the fence when it asks a presence read
+//! ([`Fence::ask`]), and the read carries that [`Asked`] back
+//! ([`Holding::Read`]): it applies to no instance whose token the watch
+//! heard declared or withdrawn since.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -42,9 +49,70 @@ pub enum Holding {
     Declared(Addr, InstanceId),
     /// The watch heard one withdrawn.
     Withdrawn(Addr, InstanceId),
-    /// A read: whether it is complete, and the instances it shows holding
-    /// the interface's token at the address.
-    Read(Addr, bool, BTreeSet<InstanceId>),
+    /// A read: when it was asked ([`Fence::ask`]), whether it is
+    /// complete, and the instances it shows holding the interface's token
+    /// at the address.
+    Read(Addr, Asked, bool, BTreeSet<InstanceId>),
+}
+
+/// When a presence read was asked, among the token events a reader heard
+/// ([`Fence::ask`], [`crate::arbitration::Arbiter::ask`]). The read
+/// establishes nothing of a token the watch heard since (observer §3.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Asked(pub(crate) u64);
+
+/// How many instances no longer held a reader remembers hearing, per
+/// address, beyond those held: a read asked before the oldest of them
+/// ended long since.
+const HEARD_KEPT: usize = 64;
+
+/// When the watch last heard each instance's token at one address,
+/// declared or withdrawn, numbered among the reader's token events
+/// (observer §3.6). Every instance held is kept, and the last
+/// [`HEARD_KEPT`] others.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Heard(BTreeMap<InstanceId, u64>);
+
+impl Heard {
+    /// The watch heard `instance`'s token declared or withdrawn, the
+    /// reader's event `n`; `held` the instances held now.
+    pub(crate) fn note(&mut self, instance: InstanceId, n: u64, held: &BTreeSet<InstanceId>) {
+        self.0.insert(instance, n);
+        while self.0.len() > HEARD_KEPT + held.len() {
+            let oldest = self
+                .0
+                .iter()
+                .filter(|(i, _)| !held.contains(*i))
+                .min_by_key(|(_, n)| **n)
+                .map(|(i, _)| i.clone());
+            match oldest {
+                Some(i) => self.0.remove(&i),
+                None => break,
+            };
+        }
+    }
+
+    fn since(&self, instance: &InstanceId, asked: Asked) -> bool {
+        self.0.get(instance).is_some_and(|n| *n > asked.0)
+    }
+
+    /// A read asked at `asked` into `known` (observer §3.6): a complete
+    /// read removes each instance it does not show, one not complete none,
+    /// and either adds each it shows. Neither touches an instance whose
+    /// token the watch heard since the read was asked: the read
+    /// establishes nothing of it.
+    pub(crate) fn read_into(
+        &self,
+        known: &mut BTreeSet<InstanceId>,
+        asked: Asked,
+        complete: bool,
+        held: BTreeSet<InstanceId>,
+    ) {
+        if complete {
+            known.retain(|i| held.contains(i) || self.since(i, asked));
+        }
+        known.extend(held.into_iter().filter(|i| !self.since(i, asked)));
+    }
 }
 
 /// What one descriptor of an instance says, as the fence reads it.
@@ -230,6 +298,8 @@ struct Held<T> {
 #[derive(Debug, Clone)]
 struct Followed<T> {
     holders: BTreeSet<InstanceId>,
+    /// When the watch last heard each instance's token.
+    heard: Heard,
     known: BTreeMap<InstanceId, Known>,
     /// In arrival order.
     held: Vec<Held<T>>,
@@ -242,6 +312,7 @@ impl<T> Default for Followed<T> {
     fn default() -> Self {
         Followed {
             holders: BTreeSet::new(),
+            heard: Heard::default(),
             known: BTreeMap::new(),
             held: Vec::new(),
             asked: None,
@@ -323,11 +394,18 @@ impl<T> Followed<T> {
 /// as a descriptor read or heard states its run, and every held one when
 /// the read ends, only those that arrived before that read was asked being
 /// discarded `unattributed`. A presence event decides none.
+///
+/// **A read never undoes a token heard since it was asked** (observer
+/// §3.6). Each token the watch hears is numbered as it is heard, kept
+/// through a move or not, and a read applies to no instance heard since
+/// its [`Asked`].
 #[derive(Debug, Clone)]
 pub struct Fence<T = ()> {
     addrs: BTreeMap<Addr, Followed<T>>,
     kept: Vec<Holding>,
     arrivals: u64,
+    /// The token events heard, counted.
+    heard: u64,
 }
 
 impl<T> Default for Fence<T> {
@@ -336,15 +414,29 @@ impl<T> Default for Fence<T> {
             addrs: BTreeMap::new(),
             kept: Vec::new(),
             arrivals: 0,
+            heard: 0,
         }
     }
 }
 
 impl<T> Fence<T> {
+    /// A presence read is asked now: what it carries back in
+    /// [`Holding::Read`], so it applies to no token heard since.
+    #[must_use]
+    pub fn ask(&self) -> Asked {
+        Asked(self.heard)
+    }
+
     /// A presence event: kept while a move is pending (`moving`, the
     /// arbiter's [`crate::arbitration::Arbiter::moving`] before the event),
-    /// else applied.
+    /// else applied. A token declared or withdrawn counts as heard now,
+    /// kept or not.
     pub fn hear(&mut self, h: Holding, moving: bool) {
+        if let Holding::Declared(a, i) | Holding::Withdrawn(a, i) = &h {
+            self.heard += 1;
+            let f = self.addrs.entry(a.clone()).or_default();
+            f.heard.note(i.clone(), self.heard, &f.holders);
+        }
         if moving {
             self.kept.push(h);
         } else {
@@ -368,13 +460,9 @@ impl<T> Fence<T> {
             Holding::Withdrawn(a, i) => {
                 self.addrs.entry(a).or_default().holders.remove(&i);
             }
-            Holding::Read(a, complete, held) => {
-                let known = &mut self.addrs.entry(a).or_default().holders;
-                if complete {
-                    *known = held;
-                } else {
-                    known.extend(held);
-                }
+            Holding::Read(a, asked, complete, held) => {
+                let f = self.addrs.entry(a).or_default();
+                f.heard.read_into(&mut f.holders, asked, complete, held);
             }
         }
     }
@@ -604,10 +692,107 @@ mod tests {
     fn presence_heard_during_a_move_waits_for_it_to_stand() {
         let mut f: Fence = Fence::default();
         let a = addr();
-        f.hear(Holding::Read(a.clone(), true, [id(1)].into()), true);
+        f.hear(
+            Holding::Read(a.clone(), f.ask(), true, [id(1)].into()),
+            true,
+        );
         assert_eq!(f.incumbent(&a), None);
         f.stood();
         assert_eq!(f.incumbent(&a), Some(&id(1)));
+    }
+
+    /// A read never undoes a token heard since it was asked (observer §3.6,
+    /// 0.38; round 128's F-629). A's withdrawal leaves none, and the read
+    /// asked after it comes back complete without B, whose token the watch
+    /// heard declared meanwhile: B stays the incumbent. A token heard
+    /// withdrawn meanwhile is not brought back either. A read asked after
+    /// both decides each.
+    #[test]
+    fn a_read_never_undoes_a_token_heard_since_it_was_asked() {
+        let mut f: Fence = Fence::default();
+        let a = addr();
+        f.hear(Holding::Declared(a.clone(), id(0xa)), false);
+        f.hear(Holding::Withdrawn(a.clone(), id(0xa)), false);
+        let asked = f.ask();
+        f.hear(Holding::Declared(a.clone(), id(0xb)), false);
+        f.hear(
+            Holding::Read(a.clone(), asked, true, BTreeSet::new()),
+            false,
+        );
+        assert_eq!(
+            f.incumbent(&a),
+            Some(&id(0xb)),
+            "the read says nothing of B"
+        );
+        let asked = f.ask();
+        f.hear(Holding::Withdrawn(a.clone(), id(0xb)), false);
+        f.hear(
+            Holding::Read(a.clone(), asked, true, [id(0xb)].into()),
+            false,
+        );
+        assert_eq!(f.incumbent(&a), None, "nor brings B back");
+        f.hear(Holding::Declared(a.clone(), id(0xc)), false);
+        let asked = f.ask();
+        f.hear(
+            Holding::Read(a.clone(), asked, true, [id(0xd)].into()),
+            false,
+        );
+        assert_eq!(
+            f.incumbent(&a),
+            Some(&id(0xd)),
+            "asked after C: C read gone, D read held"
+        );
+        // Not complete: it adds, and removes nothing.
+        let asked = f.ask();
+        f.hear(
+            Holding::Read(a.clone(), asked, false, [id(0x9)].into()),
+            false,
+        );
+        assert_eq!(f.incumbent(&a), Some(&id(0x9)));
+    }
+
+    /// Through a move (`arbitration.v1` §2.8), in either order kept: a
+    /// token heard declared after the read was asked stands.
+    #[test]
+    fn a_read_kept_through_a_move_never_undoes_a_token_heard_since() {
+        for read_first in [true, false] {
+            let mut f: Fence = Fence::default();
+            let a = addr();
+            f.hear(Holding::Declared(a.clone(), id(0xa)), false);
+            f.hear(Holding::Withdrawn(a.clone(), id(0xa)), true);
+            let asked = f.ask();
+            let read = Holding::Read(a.clone(), asked, true, BTreeSet::new());
+            if read_first {
+                f.hear(read, true);
+                f.hear(Holding::Declared(a.clone(), id(0xb)), true);
+            } else {
+                f.hear(Holding::Declared(a.clone(), id(0xb)), true);
+                f.hear(read, true);
+            }
+            f.stood();
+            assert_eq!(f.incumbent(&a), Some(&id(0xb)), "read first: {read_first}");
+        }
+    }
+
+    /// What the fence remembers hearing is bounded, every holder's kept:
+    /// a holder heard since a read was asked stands however many others
+    /// came and went meanwhile.
+    #[test]
+    fn a_holder_heard_since_stands_past_the_bound() {
+        let mut f: Fence = Fence::default();
+        let a = addr();
+        let asked = f.ask();
+        f.hear(Holding::Declared(a.clone(), id(0xffff)), false);
+        for n in 1..=(3 * HEARD_KEPT as u64) {
+            f.hear(Holding::Declared(a.clone(), id(n)), false);
+            f.hear(Holding::Withdrawn(a.clone(), id(n)), false);
+        }
+        assert!(f.addrs[&a].heard.0.len() <= HEARD_KEPT + 1);
+        f.hear(
+            Holding::Read(a.clone(), asked, true, BTreeSet::new()),
+            false,
+        );
+        assert_eq!(f.incumbent(&a), Some(&id(0xffff)));
     }
 
     /// A follower reads its incumbent's revision (v2 §2.17): a v1 one by
@@ -616,7 +801,10 @@ mod tests {
     fn a_follower_follows_each_incumbent_by_its_own_major() {
         let mut f: Fence<&str> = Fence::default();
         let a = addr();
-        f.hear(Holding::Read(a.clone(), true, [id(1)].into()), false);
+        f.hear(
+            Holding::Read(a.clone(), f.ask(), true, [id(1)].into()),
+            false,
+        );
         let v1 = Described {
             major: Some(Major::V1),
             run: Some(Run::U32(0x11)),
@@ -645,7 +833,10 @@ mod tests {
     fn only_a_held_sample_asks_a_read() {
         let mut f: Fence<u8> = Fence::default();
         let a = addr();
-        f.hear(Holding::Read(a.clone(), true, [id(1)].into()), false);
+        f.hear(
+            Holding::Read(a.clone(), f.ask(), true, [id(1)].into()),
+            false,
+        );
         f.describe(
             &a,
             id(1),

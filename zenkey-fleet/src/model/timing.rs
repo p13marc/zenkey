@@ -803,10 +803,16 @@ impl TimingBook {
     /// complete and shows none, and every member token it shows seen. A
     /// read not complete shows presence, never absence. `settled` is whether
     /// the watch session's round trip stood before it (#851).
-    pub fn seed(&mut self, read: &Observed, settled: bool, at: Instant) {
+    ///
+    /// `since` holds the tokens the watch told after the read was asked,
+    /// base-relative: the read decides none of them (observer §3.6, 0.38).
+    /// One told declared and still held keeps its owner present and its
+    /// member seen; one told withdrawn is not brought back.
+    pub fn seed(&mut self, read: &Observed, settled: bool, at: Instant, since: &BTreeSet<String>) {
         if !self.follows {
             return;
         }
+        let since = held_form(since);
         let at = self.mono(at);
         if read.descriptors.is_some() {
             self.descriptors(&Catalog::new(read));
@@ -827,7 +833,9 @@ impl TimingBook {
         for t in &read.tokens {
             match t {
                 ZkKey::Alive { addr, iface, .. } => {
-                    if let Ok(k) = t.to_key() {
+                    if let Ok(k) = t.to_key()
+                        && !since.contains(k.as_str())
+                    {
                         found
                             .entry((addr.clone(), iface.clone()))
                             .or_default()
@@ -840,7 +848,9 @@ impl TimingBook {
                     member,
                     ..
                 } => {
-                    if let Ok(k) = t.to_key() {
+                    if let Ok(k) = t.to_key()
+                        && !since.contains(k.as_str())
+                    {
                         members.push((
                             addr.clone(),
                             iface.clone(),
@@ -858,10 +868,10 @@ impl TimingBook {
             .map(|(k, o)| (k.clone(), o.tokenless))
             .collect();
         for ((addr, iface), tokenless) in owners {
-            let shown: BTreeSet<String> = if tokenless {
+            let mut shown: BTreeSet<String> = if tokenless {
                 instances
                     .iter()
-                    .filter(|(a, _)| *a == addr)
+                    .filter(|(a, k)| *a == addr && !since.contains(k))
                     .map(|(_, k)| k.clone())
                     .collect()
             } else {
@@ -869,6 +879,10 @@ impl TimingBook {
                     .remove(&(addr.clone(), iface.clone()))
                     .unwrap_or_default()
             };
+            // What the watch told since the read was asked, and still holds.
+            if let Some(o) = self.owners.get(&(addr.clone(), iface.clone())) {
+                shown.extend(o.held.iter().filter(|k| since.contains(*k)).cloned());
+            }
             let present = !shown.is_empty();
             if !present && !whole {
                 continue;
@@ -894,12 +908,14 @@ impl TimingBook {
         }
         if whole {
             // A member token held before and shown by none in a complete
-            // read: gone (core §8.1).
+            // read: gone (core §8.1), unless the watch told one since.
             let gone: Vec<(Addr, IfaceId, String)> = self
                 .member_tokens
-                .keys()
-                .filter(|k| !shown_members.contains(*k))
-                .cloned()
+                .iter()
+                .filter(|(k, held)| {
+                    !shown_members.contains(*k) && !held.iter().any(|t| since.contains(t))
+                })
+                .map(|(k, _)| k.clone())
                 .collect();
             for (a, i, m) in gone {
                 self.member_tokens
@@ -1001,24 +1017,39 @@ impl TimingBook {
     /// The read a withdrawal owed (core §8.1, 0.37), its tokens base-relative:
     /// a token shown is presence, complete and empty (its watch session's
     /// round trip standing) is absence, and anything else is owed again.
+    ///
+    /// It decides no token in `since`, those the watch told after it was
+    /// asked (observer §3.6, 0.38): one held then is the watch's word, and
+    /// nothing is owed; one told withdrawn is not brought back, and is
+    /// read again.
     pub fn owed_read(
         &mut self,
         owed: &Owed,
         keys: &[String],
         complete: bool,
         at: Instant,
+        since: &BTreeSet<String>,
     ) -> Option<Owed> {
         let at = self.mono(at);
+        let since = held_form(since);
+        let shown: BTreeSet<String> = keys
+            .iter()
+            .filter(|k| !since.contains(*k))
+            .cloned()
+            .collect();
+        let stale = shown.len() < keys.len();
         match owed {
             Owed::Owner(addr, iface) => {
                 let o = self.owners.get_mut(&(addr.clone(), iface.clone()))?;
                 if !o.held.is_empty() {
                     return None;
                 }
-                if !keys.is_empty() {
-                    o.held = keys.iter().cloned().collect();
+                if !shown.is_empty() {
+                    o.held = shown;
                     self.set_owner(addr, iface, OwnerState::Present, at);
                     None
+                } else if stale {
+                    Some(owed.clone())
                 } else if complete {
                     self.set_owner(addr, iface, OwnerState::Absent, at);
                     None
@@ -1031,9 +1062,11 @@ impl TimingBook {
                 if self.member_tokens.get(&k).is_some_and(|t| !t.is_empty()) {
                     return None;
                 }
-                if !keys.is_empty() {
-                    self.member_tokens.insert(k, keys.iter().cloned().collect());
+                if !shown.is_empty() {
+                    self.member_tokens.insert(k, shown);
                     None
+                } else if stale {
+                    Some(owed.clone())
                 } else if complete {
                     self.member_tokens.remove(&k);
                     self.member_gone(addr, iface, member, at);
@@ -1217,6 +1250,19 @@ impl TimingBook {
     }
 }
 
+/// Tokens the watch told, base-relative, in the forms an owner's held
+/// set spells them (observer §3.6): each key, and an instance token's
+/// `instance/<id>` too, which a tokenless owner holds.
+fn held_form(since: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut out = since.clone();
+    for k in since {
+        if let Ok(ZkKey::Instance { instance, .. }) = zenkey_model::grammar::parse(k) {
+            out.insert(format!("instance/{instance}"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1254,7 +1300,7 @@ mod tests {
 
     fn present(book: &mut TimingBook, t0: Instant) {
         let read = Observed::from_keys("zk2/lab/pace/@zk/**", &[alive("00000000000000a1")], true);
-        book.seed(&read, true, t0);
+        book.seed(&read, true, t0, &BTreeSet::new());
     }
 
     fn put(key: &str, at: Instant) -> TimedSample {
@@ -1346,12 +1392,24 @@ mod tests {
         assert_eq!(owed, Some(Owed::Owner(addr.clone(), iface.clone())));
         assert_eq!(book.owner(&addr, &iface), OwnerState::Unconfirmed);
         assert_eq!(
-            book.owed_read(owed.as_ref().unwrap(), &[], false, t0 + ms(200)),
+            book.owed_read(
+                owed.as_ref().unwrap(),
+                &[],
+                false,
+                t0 + ms(200),
+                &BTreeSet::new()
+            ),
             owed,
             "a read not complete is owed again"
         );
         assert_eq!(
-            book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(300)),
+            book.owed_read(
+                owed.as_ref().unwrap(),
+                &[],
+                true,
+                t0 + ms(300),
+                &BTreeSet::new()
+            ),
             None
         );
         assert_eq!(book.owner(&addr, &iface), OwnerState::Absent);
@@ -1360,6 +1418,54 @@ mod tests {
             owed.unwrap().selector(),
             "zk2/lab/pace/@zk/alive/pace.v1/**"
         );
+    }
+
+    /// Observer §3.6 (0.38; round 128's F-629): a read decides no token
+    /// the watch told after it was asked. A reseed asked while a1 holds
+    /// comes back complete and empty after a2 was told declared: the owner
+    /// stays present on a2. A withdrawal's read that shows a token told
+    /// declared and withdrawn while it ran brings it not back, and is owed
+    /// again.
+    #[test]
+    fn a_read_decides_no_token_told_since_it_was_asked() {
+        let t0 = Instant::now();
+        let mut book = TimingBook::new(vec![pace_cmd()], None, false, t0);
+        present(&mut book, t0);
+        book.start(t0);
+        let addr: Addr = ADDR.parse().unwrap();
+        let iface: IfaceId = "pace.v1".parse().unwrap();
+        let (a2, a3) = (alive("00000000000000a2"), alive("00000000000000a3"));
+        book.token(&a2, true, t0 + ms(100));
+        let none = Observed::from_keys("zk2/lab/pace/@zk/**", &[], true);
+        book.seed(&none, true, t0 + ms(200), &[a2.clone()].into());
+        assert_eq!(book.owner(&addr, &iface), OwnerState::Present, "a2 stands");
+        let owed = book.token(&a2, false, t0 + ms(300));
+        assert_eq!(owed, Some(Owed::Owner(addr.clone(), iface.clone())));
+        book.token(&a3, true, t0 + ms(350));
+        book.token(&a3, false, t0 + ms(360));
+        assert_eq!(
+            book.owed_read(
+                owed.as_ref().unwrap(),
+                std::slice::from_ref(&a3),
+                true,
+                t0 + ms(400),
+                &[a3.clone()].into()
+            ),
+            owed,
+            "a3, told withdrawn since, is read again"
+        );
+        assert_eq!(book.owner(&addr, &iface), OwnerState::Unconfirmed);
+        assert_eq!(
+            book.owed_read(
+                owed.as_ref().unwrap(),
+                &[],
+                true,
+                t0 + ms(500),
+                &BTreeSet::new()
+            ),
+            None
+        );
+        assert_eq!(book.owner(&addr, &iface), OwnerState::Absent);
     }
 
     /// Text 0.5, F-278 (scenarios.md §6 step 5 in values): `cmd` never
@@ -1374,7 +1480,13 @@ mod tests {
         book.start(t0);
         let owed = book.token(&alive("00000000000000a1"), false, t0 + ms(150));
         assert_eq!(
-            book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(330)),
+            book.owed_read(
+                owed.as_ref().unwrap(),
+                &[],
+                true,
+                t0 + ms(330),
+                &BTreeSet::new()
+            ),
             None
         );
         book.tick(t0 + ms(600));
@@ -1403,13 +1515,25 @@ mod tests {
         present(&mut book, t0);
         book.start(t0);
         let owed = book.token(&alive("00000000000000a1"), false, t0 + ms(150));
-        book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(330));
+        book.owed_read(
+            owed.as_ref().unwrap(),
+            &[],
+            true,
+            t0 + ms(330),
+            &BTreeSet::new(),
+        );
         assert_eq!(
             book.token(&alive("00000000000000a2"), true, t0 + ms(1000)),
             None
         );
         let owed = book.token(&alive("00000000000000a2"), false, t0 + ms(1200));
-        book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(1300));
+        book.owed_read(
+            owed.as_ref().unwrap(),
+            &[],
+            true,
+            t0 + ms(1300),
+            &BTreeSet::new(),
+        );
         book.tick(t0 + ms(1600));
         book.finish(t0 + ms(5000));
         let m = book.members().next().unwrap().1.clone();
@@ -1453,14 +1577,20 @@ mod tests {
             &[alive("00000000000000a1"), token("00000000000000e1")],
             true,
         );
-        book.seed(&read, true, t0);
+        book.seed(&read, true, t0, &BTreeSet::new());
         book.start(t0);
         for n in 0..11 {
             book.sample(&put(X, t0 + ms(50 + n * 100)));
         }
         let owed = book.token(&token("00000000000000e1"), false, t0 + ms(1060));
         assert!(owed.is_some(), "a withdrawal leaving none owes a read");
-        book.owed_read(owed.as_ref().unwrap(), &[], true, t0 + ms(1160));
+        book.owed_read(
+            owed.as_ref().unwrap(),
+            &[],
+            true,
+            t0 + ms(1160),
+            &BTreeSet::new(),
+        );
         book.token(&token("00000000000000e2"), true, t0 + ms(2000));
         for n in 0..30 {
             book.sample(&put(X, t0 + ms(2050 + n * 100)));

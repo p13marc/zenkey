@@ -17,6 +17,7 @@
 //! | §2.5 samples and who sent them | [`Arbiter::identify`], [`Sample`], [`Outcome`] |
 //! | §2.5's outcome 6, a governed interface's incumbents (`redundancy.v1` §2.10), [`crate::redundancy::Fence`] since #987's N1 | [`Incumbents`], [`Holding`] |
 //! | §2.6 to §2.8 eligibility, withdrawals, a move | [`Arbiter`], [`Event`] |
+//! | §2.7 a read again, and observer §3.6 (0.38): a read never undoes a token heard since it was asked | [`Arbiter::ask`], [`Asked`], carried by [`Event::Read`] |
 //! | §2.9 to §2.11 selection, switches, the dead-man | [`Arbiter::observe`], [`Step`], [`Switch`], [`Cause`] |
 //! | §2.14, §5 what a tool concludes | [`judge_declaration`], [`judge_selection`], [`judge_binding`], [`held_over`] |
 //!
@@ -37,7 +38,9 @@
 //! move of the watch session's transport and the round trip after it
 //! ([`Event::Moved`], [`Event::Stood`]), and its timer ([`Event::Tick`]),
 //! armed for [`Arbiter::due`]; it reads again each address a [`Step`]
-//! names in `reread` and hands the read back ([`Event::Read`]); it
+//! names in `reread` and hands the read back ([`Event::Read`]), with the
+//! [`Asked`] [`Arbiter::ask`] gave when it asked it, so the read applies
+//! to no token heard since (observer §3.6, 0.38); it
 //! delivers a sample whose [`Outcome`] is [`Outcome::Delivered`], and
 //! tells its application of each [`Switch`].
 //!
@@ -56,6 +59,7 @@ use serde_json::Value;
 use crate::authoring::{Kind, RequireCardinality};
 use crate::contract::{Contract, Requirement};
 use crate::grammar::{Addr, IfaceId, InstanceId, KeyError, KindToken, Name, ZkKey, parse};
+use crate::redundancy::Heard;
 use crate::template::Template;
 use crate::timing::{self, MemberState, Mono, Tracker};
 
@@ -762,11 +766,14 @@ pub enum Event<'a> {
     Declared(&'a str),
     /// The watch heard an interface token withdrawn: its key (§2.7).
     Withdrawn(&'a str),
-    /// A read of an address's presence: whether it is complete (core §8.1),
-    /// and the instances it shows holding the required interface's token
-    /// there (§2.7).
+    /// A read of an address's presence: when it was asked
+    /// ([`Arbiter::ask`]), whether it is complete (core §8.1), and the
+    /// instances it shows holding the required interface's token there
+    /// (§2.7). It applies to no instance whose token the watch heard since
+    /// it was asked (observer §3.6).
     Read {
         address: Addr,
+        asked: Asked,
         complete: bool,
         held: BTreeSet<InstanceId>,
     },
@@ -834,6 +841,8 @@ struct Provider {
     withdrawn: bool,
     /// The instances known holding the required interface's token (§2.7).
     held: BTreeSet<InstanceId>,
+    /// When the watch last heard each instance's token (observer §3.6).
+    heard: Heard,
     counts: Counts,
     /// Its last arrival its tracker took, kept across a withdrawal: a
     /// switch's `last` (never a decision's input).
@@ -847,6 +856,7 @@ impl Provider {
             tracker: tracker(deadline, start),
             withdrawn: false,
             held: BTreeSet::new(),
+            heard: Heard::default(),
             counts: Counts::default(),
             arrived: None,
         }
@@ -872,7 +882,7 @@ impl Provider {
 enum Kept {
     Declared(Rank, InstanceId),
     Withdrawn(Rank, InstanceId),
-    Read(Rank, bool, BTreeSet<InstanceId>),
+    Read(Rank, Asked, bool, BTreeSet<InstanceId>),
 }
 
 /// One consumer's arbitration of one role (§2.5 to §2.11): a pure state
@@ -898,6 +908,8 @@ pub struct Arbiter {
     discards: Discards,
     /// The instant of the last event, which no later one may precede.
     last: Option<Mono>,
+    /// The interface tokens heard, counted (observer §3.6).
+    heard: u64,
 }
 
 impl Arbiter {
@@ -927,7 +939,16 @@ impl Arbiter {
             kept: Vec::new(),
             discards: Discards::default(),
             last: None,
+            heard: 0,
         }
+    }
+
+    /// A presence read is asked now: what it carries back in
+    /// [`Event::Read`], so it applies to no token heard since (observer
+    /// §3.6).
+    #[must_use]
+    pub fn ask(&self) -> Asked {
+        Asked(self.heard)
     }
 
     /// The deadline it judges by (§2.3).
@@ -1126,6 +1147,7 @@ impl Arbiter {
             },
             Event::Declared(key) => {
                 if let Some((r, i)) = self.token(key, at) {
+                    self.note(&r, &i);
                     if self.moving {
                         self.kept.push(Kept::Declared(r, i));
                     } else if let Some(p) = self.providers.get_mut(&r) {
@@ -1136,6 +1158,7 @@ impl Arbiter {
             }
             Event::Withdrawn(key) => {
                 if let Some((r, i)) = self.token(key, at) {
+                    self.note(&r, &i);
                     if self.moving {
                         self.kept.push(Kept::Withdrawn(r, i));
                     } else if let Some(p) = self.providers.get_mut(&r) {
@@ -1149,14 +1172,15 @@ impl Arbiter {
             }
             Event::Read {
                 address,
+                asked,
                 complete,
                 held,
             } => {
                 if let Some(r) = self.provider(address, at) {
                     if self.moving {
-                        self.kept.push(Kept::Read(r, complete, held));
+                        self.kept.push(Kept::Read(r, asked, complete, held));
                     } else if let Some(p) = self.providers.get_mut(&r) {
-                        read_into(&mut p.held, complete, held);
+                        p.heard.read_into(&mut p.held, asked, complete, held);
                         if !p.held.is_empty() {
                             p.withdrawn = false;
                         }
@@ -1281,6 +1305,15 @@ impl Arbiter {
         Some((self.provider(addr, at)?, instance))
     }
 
+    /// The watch heard `i`'s token at `r`'s address, declared or withdrawn:
+    /// numbered now, kept through a move or not (observer §3.6).
+    fn note(&mut self, r: &Rank, i: &InstanceId) {
+        self.heard += 1;
+        if let Some(p) = self.providers.get_mut(r) {
+            p.heard.note(i.clone(), self.heard, &p.held);
+        }
+    }
+
     /// The round trip after the last move stands: what was kept, applied in
     /// order as one change (§2.8).
     fn stand(&mut self, at: Mono, reread: &mut Vec<Rank>) {
@@ -1289,7 +1322,7 @@ impl Arbiter {
         let mut touched: BTreeMap<Rank, (bool, bool)> = BTreeMap::new();
         for k in std::mem::take(&mut self.kept) {
             let r = match &k {
-                Kept::Declared(r, _) | Kept::Withdrawn(r, _) | Kept::Read(r, _, _) => r.clone(),
+                Kept::Declared(r, _) | Kept::Withdrawn(r, _) | Kept::Read(r, ..) => r.clone(),
             };
             let Some(p) = self.providers.get_mut(&r) else {
                 continue;
@@ -1303,7 +1336,9 @@ impl Arbiter {
                     p.held.remove(&i);
                     t.1 = true;
                 }
-                Kept::Read(_, complete, held) => read_into(&mut p.held, complete, held),
+                Kept::Read(_, asked, complete, held) => {
+                    p.heard.read_into(&mut p.held, asked, complete, held);
+                }
             }
         }
         for (r, (before, withdrawal)) in touched {
@@ -1320,22 +1355,12 @@ impl Arbiter {
     }
 }
 
-/// A read's instances into those known held (§2.7): a complete read
-/// replaces them, one not complete adds to them.
-fn read_into(known: &mut BTreeSet<InstanceId>, complete: bool, held: BTreeSet<InstanceId>) {
-    if complete {
-        *known = held;
-    } else {
-        known.extend(held);
-    }
-}
-
 // --- §2.5's outcome 6: a governed interface's incumbents ------------------------------
 
 /// The holders of a governed required interface's token, as the watch and
 /// the reads show them (§2.5, outcome 6): `redundancy`'s presence event,
 /// moved there with [`Incumbents`] (#987's N1).
-pub use crate::redundancy::Holding;
+pub use crate::redundancy::{Asked, Holding};
 
 impl Holding {
     /// An interface token of `iface` at an address `binding` ranks,
@@ -1713,6 +1738,52 @@ mod tests {
             Some(ms(410)),
             "kept across the withdrawal"
         );
+    }
+
+    /// A read never undoes a token heard since it was asked (observer §3.6,
+    /// 0.38; round 128's F-629): through a move, A's withdrawal and B's
+    /// declaration kept, the read asked between them comes back complete
+    /// without B. When the move stands, B holds and the provider stays
+    /// eligible: no switch. A read asked after B decides it.
+    #[test]
+    fn a_read_never_undoes_a_token_heard_since_it_was_asked() {
+        let mut a = arbiter();
+        let ms = |n| Mono::after(Duration::from_millis(n));
+        let safety: Addr = "lab/safety".parse().unwrap();
+        let alive = |i: u64| format!("zk2/lab/safety/@zk/alive/steer.v1/{i:016x}/0123456789abcdef");
+        let (ka, kb) = (alive(0xa), alive(0xb));
+        a.start(ms(0));
+        a.observe(ms(10), Event::Declared(&ka));
+        a.observe(ms(20), Event::Sample(Sample::new(SAFETY)));
+        assert_eq!(a.active(), Some(&safety));
+        a.observe(ms(30), Event::Moved);
+        a.observe(ms(40), Event::Withdrawn(&ka));
+        let asked = a.ask();
+        a.observe(ms(50), Event::Declared(&kb));
+        let read = |asked| Event::Read {
+            address: safety.clone(),
+            asked,
+            complete: true,
+            held: BTreeSet::new(),
+        };
+        a.observe(ms(60), read(asked));
+        let s = a.observe(ms(70), Event::Stood);
+        assert!(s.switches.is_empty(), "{:?}", s.switches);
+        assert!(
+            !a.withdrawn(&safety),
+            "B holds: the read says nothing of it"
+        );
+        assert_eq!(a.active(), Some(&safety));
+        // Asked after B, the read decides it: gone, though no withdrawal
+        // makes it ineligible (§2.7).
+        let asked = a.ask();
+        a.observe(ms(80), read(asked));
+        let s = a.observe(ms(90), Event::Withdrawn(&ka));
+        assert!(
+            a.withdrawn(&safety),
+            "none held once A's stale withdrawal is heard"
+        );
+        assert_eq!(s.reread, [safety]);
     }
 
     /// An event before the last one's instant is the runtime's fault: a

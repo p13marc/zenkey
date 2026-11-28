@@ -160,7 +160,7 @@ fn follower(
         .iter()
         .map(id)
         .collect();
-    f.hear(Holding::Read(addr(), true, holders), false);
+    f.hear(Holding::Read(addr(), f.ask(), true, holders), false);
     for (i, d) in instances {
         let out = f.describe(&addr(), i, d);
         assert_eq!(out, Outcome::default(), "nothing is held yet");

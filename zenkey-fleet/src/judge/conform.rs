@@ -6662,7 +6662,7 @@ mod tests {
         o.presence = Ok(p.clone());
         let t0 = Instant::now();
         let mut book = TimingBook::new(timed_resources(&addr, &rev), None, false, t0);
-        book.seed(&p, true, t0);
+        book.seed(&p, true, t0, &BTreeSet::new());
         book.start(t0);
         let ms = Duration::from_millis;
         for n in 1..50u64 {

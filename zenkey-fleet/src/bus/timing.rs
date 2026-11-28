@@ -50,7 +50,10 @@
 //!    the trackers' earliest due judges at it, so a miss is reported within
 //!    the detection bound (§2.5). The queue is drained before a tick or a
 //!    read's answer is folded, so nothing it holds is folded after an
-//!    instant later than its own.
+//!    instant later than its own. A read's answer decides no token folded
+//!    since it was asked (observer §3.6, 0.38): each read carries the count
+//!    of tokens folded when it was asked, and the book is handed the keys
+//!    folded after.
 //!
 //! Nothing is judged here: the book's model decides, and
 //! [`crate::judge::timing`] answers §5.
@@ -288,17 +291,20 @@ impl Queue {
 
 /// What a read made beside the window answered.
 enum Answered {
-    /// The read a withdrawal owed.
+    /// The read a withdrawal owed, asked after `asked` tokens were folded.
     Owed {
         owed: Owed,
+        asked: u64,
         keys: Vec<String>,
         complete: bool,
         at: Instant,
     },
     /// Descriptors, of the instances named.
     Described(Observed),
-    /// Presence read again after a loss, with its descriptors.
+    /// Presence read again after a loss, with its descriptors, asked after
+    /// `asked` tokens were folded.
     Reseed {
+        asked: u64,
         read: Result<Observed, String>,
         settled: bool,
         at: Instant,
@@ -510,6 +516,8 @@ pub async fn observe(
         asked_ids: BTreeMap::new(),
         pending: BTreeSet::new(),
         reseeding: false,
+        folded: 0,
+        folded_at: BTreeMap::new(),
         answers: tokio::sync::mpsc::unbounded_channel(),
     };
     // 3. The window's start: presence read after the round trip, with every
@@ -544,13 +552,16 @@ pub async fn observe(
                 }
             }
             let settled = reader.establish().await;
+            reader.drain(&mut obs.book, &mut rx);
+            let asked = reader.folded;
             let read = crate::bus::presence::observe(session, &presence_scope, t).await;
             let at = Instant::now();
             reader.drain(&mut obs.book, &mut rx);
+            let since = reader.since(asked);
             let o = match read {
                 Ok(o) => {
                     reader.note_instances(&o);
-                    obs.book.seed(&o, settled, at);
+                    obs.book.seed(&o, settled, at, &since);
                     opening_of(&o, settled, &addresses)
                 }
                 Err(e) => TimingOpening {
@@ -571,6 +582,7 @@ pub async fn observe(
         opening.expect("one attempt at least")
     };
     reader.drain(&mut obs.book, &mut rx);
+    reader.forget_folded();
     obs.opening = Some(opening.clone());
     // The window starts.
     let opened = Instant::now();
@@ -648,6 +660,10 @@ struct Reader {
     /// The withdrawals' reads in flight.
     pending: BTreeSet<Owed>,
     reseeding: bool,
+    /// The tokens folded, counted, and the count at each key's last, while
+    /// a read is in flight (observer §3.6).
+    folded: u64,
+    folded_at: BTreeMap<String, u64>,
     answers: (
         tokio::sync::mpsc::UnboundedSender<Answered>,
         tokio::sync::mpsc::UnboundedReceiver<Answered>,
@@ -664,6 +680,22 @@ impl Reader {
                 b.establish().await
             }
             None => true,
+        }
+    }
+
+    /// The keys of the tokens folded since `asked` were (observer §3.6).
+    fn since(&self, asked: u64) -> BTreeSet<String> {
+        self.folded_at
+            .iter()
+            .filter(|(_, n)| **n > asked)
+            .map(|(k, _)| k.clone())
+            .collect()
+    }
+
+    /// With no read in flight, no fold is any read's since: forgotten.
+    fn forget_folded(&mut self) {
+        if self.pending.is_empty() && !self.reseeding {
+            self.folded_at.clear();
         }
     }
 
@@ -718,6 +750,8 @@ impl Reader {
             }
             Delivery::Token { key, held } => {
                 let at = Instant::now();
+                self.folded += 1;
+                self.folded_at.insert(key.clone(), self.folded);
                 if held
                     && let Ok(ZkKey::Instance { addr, instance }) =
                         zenkey_model::grammar::parse(&key)
@@ -768,6 +802,10 @@ impl Reader {
             self.answers.0.clone(),
             self.barrier.clone(),
         );
+        // Counted now: what is folded during the burst's wait is heard
+        // before the read is asked, and decided by the watch alone, which
+        // errs toward the token heard (observer §3.6).
+        let asked = self.folded;
         tokio::spawn(async move {
             tokio::time::sleep(REREAD).await;
             let settled = match &barrier {
@@ -782,6 +820,7 @@ impl Reader {
             };
             let _ = tx.send(Answered::Owed {
                 owed,
+                asked,
                 keys,
                 complete,
                 at,
@@ -803,6 +842,7 @@ impl Reader {
             self.answers.0.clone(),
             self.barrier.clone(),
         );
+        let asked = self.folded;
         tokio::spawn(async move {
             let settled = match &barrier {
                 Some(b) => b.establish().await,
@@ -812,6 +852,7 @@ impl Reader {
                 .await
                 .map_err(|e| crate::one_line(&e));
             let _ = tx.send(Answered::Reseed {
+                asked,
                 read,
                 settled,
                 at: Instant::now(),
@@ -823,24 +864,32 @@ impl Reader {
         match a {
             Answered::Owed {
                 owed,
+                asked,
                 keys,
                 complete,
                 at,
             } => {
                 self.pending.remove(&owed);
-                if let Some(again) = book.owed_read(&owed, &keys, complete, at) {
+                let since = self.since(asked);
+                if let Some(again) = book.owed_read(&owed, &keys, complete, at, &since) {
                     self.owe(again);
                 }
             }
             Answered::Described(o) => {
                 book.descriptors(&Catalog::new(&o));
             }
-            Answered::Reseed { read, settled, at } => {
+            Answered::Reseed {
+                asked,
+                read,
+                settled,
+                at,
+            } => {
                 self.reseeding = false;
+                let since = self.since(asked);
                 match read {
                     Ok(o) => {
                         self.note_instances(&o);
-                        book.seed(&o, settled, at);
+                        book.seed(&o, settled, at, &since);
                         if !(o.complete && settled) {
                             self.reseed();
                         }
@@ -849,6 +898,7 @@ impl Reader {
                 }
             }
         }
+        self.forget_folded();
     }
 
     /// The deliveries the queue refused, and a stall of the receive path,

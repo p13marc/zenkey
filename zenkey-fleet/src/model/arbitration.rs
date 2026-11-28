@@ -27,7 +27,9 @@
 //!   uses, by its `meta.zid` under `redundancy.v1` and by its runs under
 //!   `redundancy.v2`, an unattributed sample counted `not_incumbent` while
 //!   one read of the address's descriptors runs), and what the tool knows
-//!   it lost (§2.14's `lost`).
+//!   it lost (§2.14's `lost`). A read again carries when it was asked
+//!   ([`ViewBook::ask`]), so it applies to no token the watch heard since
+//!   (observer §3.6, 0.38).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
@@ -418,6 +420,14 @@ pub struct ViewSwitch {
     pub last: Option<Instant>,
 }
 
+/// When a presence read of a [`ViewBook`]'s was asked, to its arbiter
+/// and to its incumbents ([`ViewBook::ask`]; observer §3.6).
+#[derive(Debug, Clone, Copy)]
+pub struct ReadAsked {
+    arbiter: zenkey_model::arbitration::Asked,
+    incumbents: zenkey_model::arbitration::Asked,
+}
+
 /// The tool's own view of one role (§2.14): the model's [`Arbiter`] over
 /// the tool's own arrivals, watch and clock, every event at an instant
 /// never before the last one's (§2.9), and a governed interface's
@@ -588,20 +598,38 @@ impl ViewBook {
         self.presence(at, ev, h)
     }
 
-    /// A read of `address`'s presence: whether it is complete, and the
-    /// instances it shows holding the interface's token (§2.7).
+    /// A presence read is asked now: what [`ViewBook::read`] is handed
+    /// back with its answer (observer §3.6).
+    #[must_use]
+    pub fn ask(&self) -> ReadAsked {
+        ReadAsked {
+            arbiter: self.arbiter.ask(),
+            incumbents: self
+                .incumbents
+                .as_ref()
+                .map(Incumbents::ask)
+                .unwrap_or_default(),
+        }
+    }
+
+    /// A read of `address`'s presence, asked at `asked`: whether it is
+    /// complete, and the instances it shows holding the interface's token
+    /// (§2.7). It applies to no token the watch heard since it was asked
+    /// (observer §3.6).
     pub fn read(
         &mut self,
         at: Instant,
         address: Addr,
+        asked: ReadAsked,
         complete: bool,
         held: BTreeSet<InstanceId>,
     ) -> Vec<Addr> {
-        let h = Holding::Read(address.clone(), complete, held.clone());
+        let h = Holding::Read(address.clone(), asked.incumbents, complete, held.clone());
         self.presence(
             at,
             Event::Read {
                 address,
+                asked: asked.arbiter,
                 complete,
                 held,
             },
@@ -839,7 +867,7 @@ mod tests {
         );
         let lab_safety: Addr = "lab/safety".parse().unwrap();
         let i: InstanceId = "000000000000000a".parse().unwrap();
-        v.read(ms(2), lab_safety.clone(), true, [i.clone()].into());
+        v.read(ms(2), lab_safety.clone(), v.ask(), true, [i.clone()].into());
         assert_eq!(v.undescribed(), [(lab_safety.clone(), i.clone())]);
         v.describe(
             &lab_safety,
@@ -857,6 +885,50 @@ mod tests {
         assert_eq!(
             v.sample(ms(4), SAFETY, false, Some(0xa1), None),
             Some(Outcome::Delivered)
+        );
+    }
+
+    /// A read again never undoes a token heard since it was asked
+    /// (observer §3.6, 0.38; round 128's F-629): A serves, its token is
+    /// heard withdrawn and the read again asked, B's token is heard
+    /// declared, and the read comes back complete without it. B stays the
+    /// incumbent, so its sample is delivered, never `not_incumbent`.
+    #[test]
+    fn a_read_again_never_undoes_a_token_heard_since_it_was_asked() {
+        use zenkey_model::redundancy::{Described, Major};
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let binding = Binding::parse(&["lab/safety"]).unwrap();
+        let mut v = ViewBook::new(&declared(), binding, BTreeMap::new(), true, t0);
+        let lab_safety: Addr = "lab/safety".parse().unwrap();
+        let alive = |i: &str| format!("zk2/lab/safety/@zk/alive/steer.v1/{i}/0123456789abcdef");
+        let (a, b) = ("000000000000000a", "000000000000000b");
+        let of = |run: u32| Described {
+            major: Some(Major::V2),
+            run: Some(Run::U32(run)),
+            zid: None,
+        };
+        v.token(ms(1), &alive(a), true);
+        v.describe(&lab_safety, a.parse().unwrap(), of(0xaaaa_0001));
+        v.describe(&lab_safety, b.parse().unwrap(), of(0xbbbb_0002));
+        let again = v.token(ms(2), &alive(a), false);
+        assert_eq!(
+            again,
+            std::slice::from_ref(&lab_safety),
+            "a read again owed"
+        );
+        let asked = v.ask();
+        v.token(ms(3), &alive(b), true);
+        v.read(ms(4), lab_safety.clone(), asked, true, BTreeSet::new());
+        let stamp = Some(Stamp {
+            run: Run::U32(0xbbbb_0002),
+            seq: Seq::new(0).unwrap(),
+        });
+        assert_eq!(
+            v.sample(ms(5), SAFETY, false, None, stamp),
+            Some(Outcome::Delivered),
+            "B is still the incumbent"
         );
     }
 
@@ -887,6 +959,7 @@ mod tests {
         v.read(
             ms(1),
             lab_safety.clone(),
+            v.ask(),
             true,
             [a.clone(), b.clone()].into(),
         );

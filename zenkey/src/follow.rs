@@ -17,6 +17,7 @@
 //! | Rule | Here |
 //! |---|---|
 //! | v2 §2.10 the incumbent: the watch, a complete read, the holder's descriptor | a liveliness subscriber on each provider's `@zk/alive/<iface>/**` on the consumer's watch session ([`Consumer::with_watch`], refused without one), its round trip, then a read of each provider's tokens on the consumer's own session; a read again [`BURST`] after a withdrawal; each holder's descriptor read when none is held |
+//! | observer §3.6 (0.38): a read never undoes a token heard since it was asked | each presence read asks the fence first ([`Fence::ask`]) and carries its [`zenkey_model::redundancy::Asked`] back, so its answer applies to no instance the watch heard declared or withdrawn while it ran: B's token heard at a takeover stands over a read again asked after A's withdrawal that came back without it (round 128's F-629) |
 //! | v2 §2.10 each instance's runs, as its descriptors state them | every descriptor put heard on the providers' `@zk/instance/*`, and every one read, through [`zenkey_model::redundancy::read_descriptor`]: its run kept beside those before. Its major is the revision's its entry names: the consumer's own where the fingerprints agree, else the one major of `redundancy` its `profiles` lists (core §3.3: the `uses` of what it implements), else unknown and read by run |
 //! | v2 §2.10 the rule, by run; v1 §2.10 by `meta.zid` under a `redundancy.v1` incumbent | each sample's in-band stamp and Zenoh timestamp's id to [`Fence::offer`], a state's by its key ([`Member::Key`]), any other alone |
 //! | v2 §2.10 an unattributed sample held for one read of the descriptors asked after it, one read at a time | each read the fence asks: a GET of the address's `@zk/instance/*` on the consumer's session, its end handed back ([`Fence::read_ended`]) |
@@ -70,6 +71,11 @@ pub struct FollowStartup {
     /// handled this long after it arrived. Reads are not delayed.
     #[doc(hidden)]
     pub descriptor_delay: Duration,
+    /// A test's hook (`scenarios-v2.md` §13, observer §3.6): each read
+    /// again after a withdrawal is applied this long after its answer came
+    /// back, as an answer that the watch's news overtook.
+    #[doc(hidden)]
+    pub reread_hold: Duration,
 }
 
 impl Default for FollowStartup {
@@ -78,6 +84,7 @@ impl Default for FollowStartup {
             timeout: READ_TIMEOUT,
             seed_timeout: SEED_TIMEOUT,
             descriptor_delay: Duration::ZERO,
+            reread_hold: Duration::ZERO,
         }
     }
 }
@@ -655,18 +662,25 @@ fn holders_by_addr(keys: &[String], iface: &IfaceId) -> BTreeMap<Addr, BTreeSet<
 }
 
 /// A read of `selector`'s interface tokens on `session`, which holds no
-/// liveliness subscriber (core §8.1), handed to the fence: each address it
-/// shows, and `exact`'s with none held too.
+/// liveliness subscriber (core §8.1), handed to the fence `hold` after its
+/// answer (a test's hook): each address it shows, and `exact`'s with none
+/// held too. The fence is asked first, so the read applies to no token the
+/// watch hears while it runs (observer §3.6).
 async fn read_holders(
     session: &zenoh::Session,
     core: &Mutex<Core>,
     selector: &str,
     exact: Option<&Addr>,
     timeout: Duration,
+    hold: Duration,
 ) {
+    let asked = lock(core).fence.ask();
     let Ok(read) = crate::presence::liveliness_read(session, selector, timeout).await else {
         return;
     };
+    if !hold.is_zero() {
+        tokio::time::sleep(hold).await;
+    }
     let iface = lock(core).iface.clone();
     let mut by = holders_by_addr(&read.keys, &iface);
     if let Some(a) = exact {
@@ -674,7 +688,7 @@ async fn read_holders(
     }
     let mut c = lock(core);
     for (a, held) in by {
-        c.presence(Holding::Read(a, read.complete, held));
+        c.presence(Holding::Read(a, asked, read.complete, held));
     }
 }
 
@@ -1060,7 +1074,12 @@ impl Consumer {
             }
         }));
         // A read again after a withdrawal.
-        let (c, session, iface_c) = (Arc::clone(&core), self.session().clone(), iface.clone());
+        let (c, session, iface_c, hold) = (
+            Arc::clone(&core),
+            self.session().clone(),
+            iface.clone(),
+            st.reread_hold,
+        );
         tasks.0.push(tokio::spawn(async move {
             while let Some(addr) = rereads_rx.recv().await {
                 tokio::time::sleep(BURST).await;
@@ -1068,7 +1087,7 @@ impl Consumer {
                     "zk2/{}/{}/@zk/alive/{iface_c}/**",
                     addr.system, addr.service
                 );
-                read_holders(&session, &c, &sel, Some(&addr), timeout).await;
+                read_holders(&session, &c, &sel, Some(&addr), timeout, hold).await;
             }
         }));
         // The seeds, one at a time per address.
@@ -1113,7 +1132,15 @@ impl Consumer {
             let exact = (sys != "*" && svc != "*")
                 .then(|| format!("{sys}/{svc}").parse::<Addr>().ok())
                 .flatten();
-            read_holders(self.session(), &core, &sel, exact.as_ref(), st.timeout).await;
+            read_holders(
+                self.session(),
+                &core,
+                &sel,
+                exact.as_ref(),
+                st.timeout,
+                Duration::ZERO,
+            )
+            .await;
         }
         Ok(Following {
             core,

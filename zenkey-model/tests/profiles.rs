@@ -5266,10 +5266,13 @@ fn arbitration_arbitrations() {
                     at,
                     arbitration::Event::Withdrawn(e["token"].as_str().expect("token")),
                 ),
+                // A fixture's read is asked as it is told: no token is
+                // heard between the two (observer §3.6).
                 "read" => a.observe(
                     at,
                     arbitration::Event::Read {
                         address: ab_addr(&e["address"]),
+                        asked: a.ask(),
                         complete: e["complete"].as_bool().expect("complete"),
                         held: e["held"]
                             .as_array()

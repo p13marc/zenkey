@@ -1032,6 +1032,7 @@ pub fn timing_report() -> TimingReport {
         &Observed::from_keys("zk2/lab/pace/@zk/**", &[alive], true),
         true,
         t0,
+        &std::collections::BTreeSet::new(),
     );
     book.start(t0);
     let put = |key: &str, at: u64| TimedSample {

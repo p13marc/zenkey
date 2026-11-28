@@ -44,7 +44,10 @@
 //!      a loss, and a watch of this reader's own receive path
 //!      ([`crate::bus::stall`], core §2.7) a loss too (§2.14's `lost`);
 //!    - a withdrawal leaving an address none known held owes one read
-//!      [`REREAD`] later, one per burst, on the deployment's session (§2.7);
+//!      [`REREAD`] later, one per burst, on the deployment's session (§2.7),
+//!      asked after the queue is folded and carrying when it was asked
+//!      ([`ViewBook::ask`]), so its answer applies to no token folded
+//!      meanwhile (observer §3.6, 0.38);
 //!      a move of the watch session's transport, or a withdrawal heard
 //!      while it holds no link (F-268), keeps what the watch hears until
 //!      the round trip asked after it stands (§2.8), asked again until one
@@ -72,7 +75,7 @@ use crate::bus::contracts::BundleStore;
 use crate::bus::presence::Scope;
 use crate::bus::stall::{StallSeen, StallWatch};
 use crate::model::arbitration::{
-    Declaring, RoleRead, RoleSubject, ViewBook, described, held_by_address, in_scope,
+    Declaring, ReadAsked, RoleRead, RoleSubject, ViewBook, described, held_by_address, in_scope,
     offline_subject, read_role, served, subjects,
 };
 use crate::model::catalog::{Catalog, ContractSet, ContractState, Contracts};
@@ -441,9 +444,11 @@ impl Queue {
 /// What a read made beside the view answered.
 enum Answered {
     /// A read again of one address (§2.7), or a governed interface's read
-    /// at start: its address, completeness and holders.
+    /// at start: its address, when it was asked (observer §3.6),
+    /// completeness and holders.
     Read {
         address: Addr,
+        asked: ReadAsked,
         complete: bool,
         held: BTreeSet<InstanceId>,
         at: Instant,
@@ -633,11 +638,12 @@ async fn listen(
     if governed {
         for e in &entries {
             let Ok(sc) = Scope::entry(e) else { continue };
+            let asked = book.ask();
             match crate::bus::presence::observe(session, &sc, t).await {
                 Ok(o) => {
                     let now = Instant::now();
                     for (address, ids) in held_by_address(o.tokens.iter(), &v.iface, None) {
-                        book.read(now, address, o.complete, ids);
+                        book.read(now, address, asked, o.complete, ids);
                     }
                     for (a, i, d) in served(&o) {
                         let said = described(d, &v.iface, majors);
@@ -721,15 +727,19 @@ async fn listen(
             }
             () = read_due => {
                 burst_due = None;
+                // What the watch heard before the reads are asked precedes
+                // them (observer §3.6).
+                v.drain(&mut book, &mut rx, &mut burst_due).await;
+                let asked = book.ask();
                 for a in std::mem::take(&mut v.burst) {
-                    v.read_again(a);
+                    v.read_again(a, asked);
                 }
             }
             a = answers.recv() => {
                 v.drain(&mut book, &mut rx, &mut burst_due).await;
                 match a {
-                    Some(Answered::Read { address, complete, held: ids, at }) => {
-                        let again = book.read(at, address, complete, ids);
+                    Some(Answered::Read { address, asked, complete, held: ids, at }) => {
+                        let again = book.read(at, address, asked, complete, ids);
                         v.owe(again, &mut burst_due);
                         v.describe(&book);
                     }
@@ -859,8 +869,10 @@ impl Follow {
         }
     }
 
-    /// One read again of `a`, on the deployment's session, beside the view.
-    fn read_again(&mut self, a: Addr) {
+    /// One read again of `a`, on the deployment's session, beside the view,
+    /// asked at `asked`: what the view folds meanwhile, its answer applies
+    /// to none of (observer §3.6).
+    fn read_again(&mut self, a: Addr, asked: ReadAsked) {
         let (session, t, tx, iface) = (
             self.session.clone(),
             self.timeout,
@@ -883,6 +895,7 @@ impl Follow {
                     for (address, held) in held_by_address(tokens.iter(), &iface, Some(&a)) {
                         let _ = tx.send(Answered::Read {
                             address,
+                            asked,
                             complete: r.complete,
                             held,
                             at,

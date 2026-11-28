@@ -25,6 +25,7 @@
 //! | v2 §2.2, §2.15 an address's governance from its revisions | [`governance`], [`Revision`] |
 //! | v2 §2.10, §2.14 a follower's read of a descriptor: its run and the mark | [`read_descriptor`], [`DescriptorRead`] |
 //! | v2 §2.10 the fence by run, v1 §2.10's by zid, the hold for one read | [`Fence`], [`Holding`], [`Sample`], [`Fenced`], [`Discard`], [`Outcome`] |
+//! | observer §3.6 (0.38): a read never undoes a token heard since it was asked | [`Fence::ask`], [`Asked`], carried by [`Holding::Read`] |
 //! | v2 §2.10 a run no other states: the draw | [`draw_again`] |
 //! | §2.3 the claim set, the incumbent, ids compared | [`Read`], [`Seen`], [`Listing`], [`Read::holders`], [`lower`] |
 //! | §2.4, §2.14 the standby mark and its checks | [`Mark`], [`mark`], [`read_mark`], [`MarkFinding`] |
@@ -72,7 +73,8 @@ use crate::wire::Run;
 mod fence;
 pub mod v2;
 
-pub use fence::{Described, Discard, Fence, Fenced, Holding, Member, Outcome, Sample};
+pub(crate) use fence::Heard;
+pub use fence::{Asked, Described, Discard, Fence, Fenced, Holding, Member, Outcome, Sample};
 
 /// `redundancy.v1`'s id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "redundancy.v1";

@@ -14,6 +14,7 @@
 //! | §2.5 per provider and key, the monotonic clock | a [`Tracker`] per provider address, member = the key; each arrival's [`Instant`] taken in the subscriber's callback |
 //! | §2.5 the detection bound | a one-shot timer at [`Tracker::next_due`], re-armed at every change, never an idle tick |
 //! | §2.5 the owner present, unconfirmed, absent (core §8.1, 0.37) | interface tokens on the watch session handed in ([`crate::consumer::Consumer::with_watch`]); a withdrawal leaving none read again 100 ms later, on the consumer's session, which holds no liveliness subscriber; absent only by a complete read |
+//! | observer §3.6 (0.38): a read never undoes a token heard since it was asked | what the watch heard is applied before each read is asked, and what it hears while the read runs before the read's answer, which applies to none of those tokens: a token heard declared meanwhile keeps its owner present, one heard withdrawn is not brought back |
 //! | §2.5 ended | a member token gone by a complete read (the same re-read), or forgotten |
 //! | §2.6 ε | the binding's `clock_bound_ms` ([`crate::config::Binding`]), or [`crate::consumer::Consumer::with_clock_bound`] for a tool; none: nothing discarded |
 //! | §2.6 `meta.zid` | the providers' descriptors: a GET at the subscription's start, their puts after it (core §3.3), and a GET again at a stamp of an id not held |
@@ -859,8 +860,14 @@ impl Prepared {
             };
             // Seeded before the subscription is handed back: the owner's
             // presence as a read after the round trip shows it.
-            let seeded = follower.seed().await;
-            tasks.push(tokio::spawn(follower.run(heard_rx, seeded)));
+            let (owe_tx, owe_rx) = tokio::sync::mpsc::unbounded_channel::<Owed>();
+            let mut heard_rx = heard_rx;
+            let seeded = follower.seed(&mut heard_rx, &owe_tx).await;
+            tasks.push(tokio::spawn(follower.run(
+                heard_rx,
+                (owe_tx, owe_rx),
+                seeded,
+            )));
         }
         // §2.5: the timer, a one-shot at the earliest due, re-armed whenever
         // a due may have moved earlier.
@@ -957,9 +964,19 @@ enum Owed {
     Member(Addr, String),
 }
 
+/// The tokens the watch heard, as the follower receives them.
+type HeardRx = tokio::sync::mpsc::UnboundedReceiver<Heard>;
+
+/// The reads withdrawals owe.
+type OweTx = tokio::sync::mpsc::UnboundedSender<Owed>;
+
 impl Follower {
-    async fn run(mut self, mut heard: tokio::sync::mpsc::UnboundedReceiver<Heard>, seeded: bool) {
-        let (owe_tx, mut owe_rx) = tokio::sync::mpsc::unbounded_channel::<Owed>();
+    async fn run(
+        mut self,
+        mut heard: HeardRx,
+        (owe_tx, mut owe_rx): (OweTx, tokio::sync::mpsc::UnboundedReceiver<Owed>),
+        seeded: bool,
+    ) {
         // A seed that did not stand is made again a timeout later, never
         // left to the next move: the owner's state would stand stale.
         let again = || Box::pin(tokio::time::sleep(READ_TIMEOUT));
@@ -988,16 +1005,16 @@ impl Follower {
                     None => break,
                 },
                 o = owe_rx.recv() => if let Some(o) = o {
-                    self.read_owed(o, &owe_tx).await;
+                    self.read_owed(o, &owe_tx, &mut heard).await;
                 },
                 // The watch session's transport moved (core §8.1, 0.41): what
                 // it told may be behind, so presence is read again.
                 () = moved => {
                     moves_seen = barrier.as_ref().map_or(moves_seen, crate::presence::Barrier::moves);
-                    retry = (!self.seed().await).then(again);
+                    retry = (!self.seed(&mut heard, &owe_tx).await).then(again);
                 }
                 () = retried => {
-                    retry = (!self.seed().await).then(again);
+                    retry = (!self.seed(&mut heard, &owe_tx).await).then(again);
                 }
             }
         }
@@ -1007,14 +1024,36 @@ impl Follower {
         lock(&self.engine)
     }
 
+    /// Applies every token the watch has heard so far, each key into
+    /// `since` when given (observer §3.6: heard since a read was asked).
+    fn drain(
+        &mut self,
+        heard: &mut HeardRx,
+        owe: &OweTx,
+        mut since: Option<&mut BTreeSet<String>>,
+    ) {
+        while let Ok(h) = heard.try_recv() {
+            if let Some(s) = since.as_deref_mut() {
+                s.insert(h.key.clone());
+            }
+            self.heard(h, owe);
+        }
+    }
+
     /// Reads every provider's interface tokens: the owner present where it
     /// holds one, absent where a complete read shows none. Whether every
     /// read stood, after a round trip that stood.
-    async fn seed(&mut self) -> bool {
+    ///
+    /// A read never undoes a token heard since it was asked (observer
+    /// §3.6): what the watch heard is applied before the reads are asked,
+    /// and what it hears while they run before their answers, which decide
+    /// none of those tokens.
+    async fn seed(&mut self, heard: &mut HeardRx, owe: &OweTx) -> bool {
         let settled = match &self.barrier {
             Some(b) => b.establish().await,
             None => true,
         };
+        self.drain(heard, owe, None);
         // Every provider's reads at once, so a cut-off session costs one
         // timeout, not one per provider; applied in the providers' order.
         let mut set = tokio::task::JoinSet::new();
@@ -1048,6 +1087,8 @@ impl Follower {
                 reads[i] = Some((alive, members));
             }
         }
+        let mut since = BTreeSet::new();
+        self.drain(heard, owe, Some(&mut since));
         let mut stood = settled;
         for (p, got) in self.providers.clone().into_iter().zip(reads) {
             let Some((alive, members)) = got else {
@@ -1064,14 +1105,18 @@ impl Follower {
                     continue;
                 }
             };
+            // A token heard since the read was asked is the watch's word:
+            // the read shows nothing of it.
             let mut found: BTreeMap<Addr, BTreeSet<String>> = BTreeMap::new();
-            for k in &read.keys {
+            for k in read.keys.iter().filter(|k| !since.contains(*k)) {
                 if let Ok(ZkKey::Alive { addr, .. }) = parse(k) {
                     found.entry(addr).or_default().insert(k.clone());
                 }
             }
+            let whole = read.complete && settled;
             // An address held before and shown by none in a complete read is
-            // absent; one the read shows is present.
+            // absent, unless a token of it was heard declared since; one the
+            // read shows is present.
             let before: Vec<Addr> = self
                 .alive
                 .keys()
@@ -1079,21 +1124,30 @@ impl Follower {
                 .cloned()
                 .collect();
             for a in before {
-                if !found.contains_key(&a) && read.complete && settled {
-                    self.alive.remove(&a);
-                    self.engine().owner(&a, OwnerState::Absent, now);
+                if !found.contains_key(&a) && whole {
+                    let held = self.alive.entry(a.clone()).or_default();
+                    held.retain(|k| since.contains(k));
+                    if held.is_empty() {
+                        self.alive.remove(&a);
+                        self.engine().owner(&a, OwnerState::Absent, now);
+                    }
                 }
             }
-            if read.complete && settled {
+            if whole {
                 let known: Vec<Addr> = self.engine().plan.known.keys().cloned().collect();
                 for a in known {
-                    if p.matches(&a) && !found.contains_key(&a) {
+                    let held = self.alive.get(&a).is_some_and(|h| !h.is_empty());
+                    if p.matches(&a) && !found.contains_key(&a) && !held {
                         self.engine().owner(&a, OwnerState::Absent, now);
                     }
                 }
             }
             for (a, keys) in found {
-                self.alive.insert(a.clone(), keys);
+                let held = self.alive.entry(a.clone()).or_default();
+                if whole {
+                    held.retain(|k| since.contains(k));
+                }
+                held.extend(keys);
                 self.engine().owner(&a, OwnerState::Present, now);
             }
             // F-261: the member tokens held, each a member seen.
@@ -1101,7 +1155,7 @@ impl Follower {
                 stood = false;
             }
             if let Some(Ok((read, now))) = members {
-                for k in &read.keys {
+                for k in read.keys.iter().filter(|k| !since.contains(*k)) {
                     if let Ok(ZkKey::Member { addr, member, .. }) = parse(k) {
                         self.members
                             .entry((addr.clone(), member.clone()))
@@ -1158,11 +1212,18 @@ impl Follower {
 
     /// The read a withdrawal owed (core §8.1, 0.37): complete and empty is
     /// absence; a token shown is presence; anything else owes it again.
-    async fn read_owed(&mut self, o: Owed, owe: &tokio::sync::mpsc::UnboundedSender<Owed>) {
+    ///
+    /// A read never undoes a token heard since it was asked (observer
+    /// §3.6): what the watch heard is applied before the read is asked,
+    /// and what it hears while the read runs before its answer. A token
+    /// heard declared meanwhile stands, and nothing is owed; one heard
+    /// withdrawn meanwhile is not brought back, and owes its own read.
+    async fn read_owed(&mut self, o: Owed, owe: &OweTx, heard: &mut HeardRx) {
         let settled = match &self.barrier {
             Some(b) => b.establish().await,
             None => true,
         };
+        self.drain(heard, owe, None);
         let sel = match &o {
             Owed::Owner(a) => format!("zk2/{}/{}/@zk/alive/{}/**", a.system, a.service, self.iface),
             Owed::Member(a, m) => {
@@ -1174,30 +1235,43 @@ impl Follower {
         };
         // A withdrawal's re-read may find the token back already: then the
         // held set says so, and nothing is owed.
-        let still_none = match &o {
-            Owed::Owner(a) => self.alive.get(a).is_none_or(BTreeSet::is_empty),
-            Owed::Member(a, m) => self
+        let still_none = |f: &Self| match &o {
+            Owed::Owner(a) => f.alive.get(a).is_none_or(BTreeSet::is_empty),
+            Owed::Member(a, m) => f
                 .members
                 .get(&(a.clone(), m.clone()))
                 .is_none_or(BTreeSet::is_empty),
         };
-        if !still_none {
+        if !still_none(self) {
             return;
         }
         let read = crate::presence::liveliness_read(&self.session, &sel, READ_TIMEOUT).await;
         let now = Instant::now();
+        let mut since = BTreeSet::new();
+        self.drain(heard, owe, Some(&mut since));
+        if !still_none(self) {
+            return;
+        }
+        let read = read.map(|r| {
+            let stale = r.keys.iter().any(|k| since.contains(k));
+            let shown: BTreeSet<String> =
+                r.keys.into_iter().filter(|k| !since.contains(k)).collect();
+            (shown, r.complete, stale)
+        });
         match (read, o) {
-            (Ok(r), Owed::Owner(a)) if !r.keys.is_empty() => {
-                self.alive.insert(a.clone(), r.keys.into_iter().collect());
+            (Ok((shown, ..)), Owed::Owner(a)) if !shown.is_empty() => {
+                self.alive.insert(a.clone(), shown);
                 self.engine().owner(&a, OwnerState::Present, now);
             }
-            (Ok(r), Owed::Owner(a)) if r.complete && settled => {
+            (Ok((shown, ..)), Owed::Member(a, m)) if !shown.is_empty() => {
+                self.members.insert((a, m), shown);
+            }
+            // Only tokens heard withdrawn since: their own reads decide.
+            (Ok((_, _, true)), _) => {}
+            (Ok((_, complete, _)), Owed::Owner(a)) if complete && settled => {
                 self.engine().owner(&a, OwnerState::Absent, now);
             }
-            (Ok(r), Owed::Member(a, m)) if !r.keys.is_empty() => {
-                self.members.insert((a, m), r.keys.into_iter().collect());
-            }
-            (Ok(r), Owed::Member(a, m)) if r.complete && settled => {
+            (Ok((_, complete, _)), Owed::Member(a, m)) if complete && settled => {
                 self.engine().member_gone(&a, &m, now);
             }
             (_, o) => owe_later(owe, o),
