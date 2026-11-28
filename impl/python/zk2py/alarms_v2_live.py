@@ -569,13 +569,22 @@ def ttl_of(canonical: dict[str, Any] | None) -> int | None:
 
 
 def horizon_of(tool: Any, named: list[str] | None, held: dict[str, Any], *, retrieve: bool = True,
-               timeout: float = 1.0) -> tuple[int | None, str, str | None]:
+               timeout: float = 1.0, across: bool = False) -> tuple[int | None, str, str | None]:
     """§2.7 (0.2), "The horizon is the revision's": the alarms' horizon in
     the ``alarms.v2`` revision ``named`` holds (the descriptor's, or across a
     face the deployment's word), as (seconds or None, how it was had, its
     fingerprint): ``held``, ``retrieved`` (core §8.4, never across a face),
-    ``not_in_hand`` or ``not_named``. A fingerprint whose canonical form is
-    held but is another interface's names no alarms revision."""
+    ``given``, ``standard``, ``not_in_hand`` or ``not_named``. A fingerprint
+    whose canonical form is held but is another interface's names no alarms
+    revision.
+
+    ``across`` (0.2's mend, F-622): "Across a face, the deployment's word
+    names the revision (§2.11): the alarms.v2 revision a reader is given,
+    else the standard one, which every reader holds." A word that names an
+    alarms.v2 revision names it, held or not in hand. One that names none
+    is the revision the reader was given beside the standard (``given``),
+    else the standard one (``standard``). Two given and none named is no
+    word zk2py can read: ``not_named``."""
     from . import live
 
     fps = [x for x in named or [] if isinstance(x, str)]
@@ -584,6 +593,14 @@ def horizon_of(tool: Any, named: list[str] | None, held: dict[str, Any], *, retr
         if c is not None and c.get("interface") == IFACE:
             return ttl_of(c), "held", fp
     unknown = [fp for fp in fps if fp not in held]
+    if not unknown and across:
+        std = a2.standard()
+        given = [(fp, c) for fp, c in held.items() if c.get("interface") == IFACE and fp != std.fingerprint]
+        if len(given) == 1:
+            return ttl_of(given[0][1]), "given", given[0][0]
+        if not given:
+            return ttl_of(std.canonical), "standard", std.fingerprint
+        return None, "not_named", None
     if not unknown:
         return None, "not_named", None
     if retrieve and tool is not None:
@@ -637,7 +654,7 @@ def read_owner(tool: Any, address: str, held: dict[str, Any] | None = None, *, l
         mine = [fp for fp in [live_fp(desc)] if fp is not None]
         r.horizon_s, r.revision, r.revision_fp = horizon_of(tool, mine, held, timeout=timeout)
     elif across is not None:
-        r.horizon_s, r.revision, r.revision_fp = horizon_of(tool, r.named, held, retrieve=False)
+        r.horizon_s, r.revision, r.revision_fp = horizon_of(tool, r.named, held, retrieve=False, across=True)
     face = None if across is None else {"reachable": across == "granted"}
     col = None
     if (presence == "present" and lists is not None and lists["lists"]) or (across == "granted"):

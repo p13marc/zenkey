@@ -1124,11 +1124,15 @@ def section15(rep: Report) -> None:
 
 def section17(rep: Report) -> None:
     """§6's state on the copy, read as across a face (granted), where "the
-    deployment's word names the revision (§2.11)" (§2.7, 0.2; round 127):
-    zk2py's reader given a word that names the copy, one that names no
-    alarms.v2 revision, and one that names the copy it does not hold; and
-    ``zenctl alarms --across-face granted``, given the copy by
-    ``--contracts`` and not given it."""
+    deployment's word names the revision (§2.11): the alarms.v2 revision a
+    reader is given, else the standard one, which every reader holds"
+    (§2.7, 0.2's mend, F-622): zk2py's reader given a word that names the
+    copy, one that names no alarms.v2 revision with the copy given and not
+    given, and one that names the copy it does not hold; and ``zenctl
+    alarms --across-face granted``, given the copy by ``--contracts`` and
+    not given it. Not given, each reads the standard revision's 900 s, and
+    calls the copy's stale A firing: "A deployment that runs another
+    revision gives it"."""
     sec = "§6 across a face"
     bus = Bus(rep, sec)
     try:
@@ -1147,7 +1151,8 @@ def section17(rep: Report) -> None:
         tc = load_contract(TC).fingerprint
         out: dict[str, Any] = {}
         for name, named, files in (("the word names the copy, held", [tc, sc.fingerprint], [TC, short]),
-                                   ("the word names no alarms.v2 revision", [tc], [TC]),
+                                   ("the word names no alarms.v2 revision, the copy given", [tc], [TC, short]),
+                                   ("the word names no alarms.v2 revision, none given", [tc], [TC]),
                                    ("the word names the copy, not held", [tc, sc.fingerprint], [TC])):
             r = al.read_owner(bus.g, "lab/svc", held_revisions(*files), across="granted", named=named)
             out[f"zk2py: {name}"] = {"revision": r.revision, "horizon": r.horizon_s, "verdict": r.verdict.expect(),
@@ -1160,14 +1165,22 @@ def section17(rep: Report) -> None:
                                       "any_firing": (doc or {}).get("any_firing", {}).get("answer")
                                       if isinstance(doc, dict) else None}
         nh = {"answer": "unobservable", "reason": "not_a_horizon"}
-        rep.check(sec, "zk2py's far reader: a word that names the copy it holds ages A at 4 s, unobservable, stale; "
-                  "one that names no alarms.v2 revision, or the copy unheld, gives no horizon: A unobservable, "
-                  "not_a_horizon; B no, resolved in each",
-                  [x["slots"] for k, x in out.items() if k.startswith("zk2py")]
-                  == [{0: UNOBS_STALE, 1: NO_RESOLVED}, {0: nh, 1: NO_RESOLVED}, {0: nh, 1: NO_RESOLVED}], out)
+        rep.check(sec, "zk2py's far reader (0.2's mend, F-622): a word that names the copy it holds, or names no "
+                  "alarms.v2 revision with the copy given, ages A at 4 s, unobservable, stale; one that names none "
+                  "with none given reads the standard revision, 900 s, and A yes, firing; the copy named and "
+                  "unheld gives no horizon, A unobservable, not_a_horizon; B no, resolved in each",
+                  [(x["revision"], x["horizon"], x["slots"]) for k, x in out.items() if k.startswith("zk2py")]
+                  == [("held", 4, {0: UNOBS_STALE, 1: NO_RESOLVED}), ("given", 4, {0: UNOBS_STALE, 1: NO_RESOLVED}),
+                      ("standard", 900, {0: YES_FIRING, 1: NO_RESOLVED}),
+                      ("not_in_hand", None, {0: nh, 1: NO_RESOLVED})], out)
         rep.check(sec, "zenctl alarms --across-face granted, given the copy: A unobservable, stale, at its 4 s; "
                   "B no, resolved", out["zenctl: given the copy"]["slots"] == {0: UNOBS_STALE, 1: NO_RESOLVED}, out)
-        rep.note(sec, f"zenctl --across-face granted, not given the copy: {out['zenctl: not given it']}")
+        rep.check(sec, "zenctl alarms --across-face granted, not given the copy: the standard revision, A yes, "
+                  "firing, B no, resolved, anything firing yes; zk2py's reader with none given agrees",
+                  out["zenctl: not given it"]["slots"] == {0: YES_FIRING, 1: NO_RESOLVED}
+                  and out["zenctl: not given it"]["any_firing"] == "yes"
+                  and out["zenctl: not given it"]["slots"]
+                  == out["zk2py: the word names no alarms.v2 revision, none given"]["slots"], out)
     finally:
         bus.close()
 

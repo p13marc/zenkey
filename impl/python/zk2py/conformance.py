@@ -5783,7 +5783,8 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("F-613, resolved by alarms.v2 0.2 (round 127): §2.7's \"The horizon is the revision's\", §2.14's "
                 "step 6 and the Conventions' items; zk2py's reader ages by the revision its owner names: the "
                 "standard's 900 s and the copy's 4 s where held; the copy neither held nor retrievable (across a "
-                "face, never retrieved), or a word that names no alarms.v2 revision, gives none, and a firing "
+                "face, never retrieved), or a descriptor that names no alarms.v2 revision, gives none (across a "
+                "face, a word that names none is the standard revision since the mend, F-622), and a firing "
                 "alarm then reads unobservable, freshness.v1's not_a_horizon, which the text did not name "
                 "(F-623; named since the mend), a resolved one no, resolved; the quotes re-keyed to the mend's "
                 "words, its \"else the standard one\" is F-622's answer, read apart",
@@ -5884,9 +5885,10 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
 def _round127b_readings(root: Path) -> list[tuple[str, Any, Any]]:
     """Round 127's mend (#609; #984, #986): desired.v2 0.3's "None states
-    the run yet" (F-621) and §14's Expected 5 (F-625), each read cold, and
-    zk2py's target's hold run over descriptor reads that zk2py stands in
-    for. No session is opened."""
+    the run yet" (F-621) and §14's Expected 5 (F-625), alarms.v2 0.2's
+    revision across a face (F-622) and its not_a_horizon (F-623), each read
+    cold; zk2py's target's hold run over descriptor reads that zk2py stands
+    in for, and its far reader's horizon. No session is opened."""
     import threading
     import types
 
@@ -5986,6 +5988,52 @@ def _round127b_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  [("0007/0", stop), ("0007/1", stop)],
                  ["held", "again", "again", "again", "again", "word", "released"],
                  [("0007/0", "word")], [], [("0007/0", "word")]]))
+
+    # -- F-622 and F-623: alarms.v2 0.2's mend, §2.7 ---------------------------------------
+    from . import alarms_v2 as a2, alarms_v2_live as al
+
+    a2t, alog = flat("profiles/alarms/v2.md"), flat("profiles/alarms/CHANGELOG.md")
+    std, cp, cp5 = a2.standard(), al.standard(4), al.standard(5)
+    other = {"sha256:" + "1" * 64: {"interface": "tc.v1", "resources": []}}
+    base = {std.fingerprint: std.canonical, **other}
+    out.append(("F-622, resolved by alarms.v2 0.2's mend (round 127's mend): §2.7, across a face the word names "
+                "\"the alarms.v2 revision a reader is given, else the standard one\"; zk2py's far reader takes the "
+                "alarms.v2 revision its word names (held: its horizon; not held: none, never retrieved), else the "
+                "one it was given beside the standard (the copy: 4 s), else the standard's 900 s, a word that "
+                "names tc.v1 alone among them; two given and none named it cannot read; at home a descriptor "
+                "that names none still gives none",
+                [al.horizon_of(None, [], base, retrieve=False, across=True)[:2],
+                 al.horizon_of(None, list(other), base, retrieve=False, across=True)[:2],
+                 al.horizon_of(None, list(other), {**base, cp.fingerprint: cp.canonical}, retrieve=False,
+                               across=True)[:2],
+                 al.horizon_of(None, [cp.fingerprint], base, retrieve=False, across=True)[:2],
+                 al.horizon_of(None, [cp.fingerprint], {**base, cp.fingerprint: cp.canonical}, retrieve=False,
+                               across=True)[:2],
+                 al.horizon_of(None, [], {**base, cp.fingerprint: cp.canonical, cp5.fingerprint: cp5.canonical},
+                               retrieve=False, across=True)[:2],
+                 al.horizon_of(None, [], base)[:2]]
+                + missing(a2t, "Across a face, the deployment's word names the revision (§2.11): the `alarms.v2` "
+                               "revision a reader is given, else the standard one, which every reader holds. A "
+                               "deployment that runs another revision gives it. `[Sc: §2, §6]`")
+                + missing(alog, "- **Across a face** (zk2py's round 127, F-622), the deployment's word names the "
+                                "`alarms.v2` revision a reader is given, else the standard one, which every reader "
+                                "holds. A deployment that runs another revision gives it."),
+                [(900, "standard"), (900, "standard"), (4, "given"), (None, "not_in_hand"), (4, "held"),
+                 (None, "not_named"), (None, "not_named")]))
+    readings43 = _load_json(spec / "profiles" / "alarms" / "conformance" / "v2" / "conclusions.json")["readings"]
+    r43 = readings43[42]
+    out.append(("F-623, resolved by alarms.v2 0.2's mend (round 127's mend): §2.7 names freshness.v1's "
+                "not_a_horizon for a revision not in hand, in v1 §2.16's second list, and v2/conclusions.json "
+                "gains reading 43, which zk2py's alarms family runs as written: firing and stale_firing "
+                "unobservable, not_a_horizon, as zk2py read it since round 127",
+                [len(readings43), r43["freshness"], r43["expect"]]
+                + missing(a2t, "Its reason is `freshness.v1`'s `not_a_horizon`, no horizon in hand (v1 §2.16's "
+                               "second list). `[F: v2/conclusions.json]`")
+                + missing(alog, "- **A revision not in hand** is reported with `freshness.v1`'s reason "
+                                "`not_a_horizon` (F-623). `v2/conclusions.json` gains reading 43."),
+                [43, {"verdict": "unobservable", "reason": "not_a_horizon"},
+                 {"major": 2, "firing": {"answer": "unobservable", "reason": "not_a_horizon"},
+                  "stale_firing": {"answer": "unobservable", "reason": "not_a_horizon"}}]))
 
     # -- F-625: §14's Expected 5, the read once more --------------------------------------
     out.append(("F-625, resolved by desired.v2 0.3's mend (round 127's mend): §14's Expected 5 says the second "
