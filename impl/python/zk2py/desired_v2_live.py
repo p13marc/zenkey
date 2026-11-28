@@ -303,7 +303,7 @@ class Target:
                  timeout: float = 1.0, across: bool = False, reply_timeout_ms: int | None = None, watch: bool = False,
                  moves: bool = True, worker: Any = None, tasking: Any = None, watched: bool = False,
                  run_record: str | None = None, catalog: str | None = None, archive: str | None = None,
-                 word_alone: bool = False) -> None:
+                 word_alone: bool = False, hold_s: float = 10.0) -> None:
         self.address, self.endpoint, self.author = address, endpoint, author
         #: §2.18 (0.2, F-590): "A target reads its author's revision as core
         #: §4.2 reads which resources are per key. It is the one the author's
@@ -346,6 +346,20 @@ class Target:
         self._appeared_ids: set[str] = set()
         self._answered_by: dict[str | None, set[str]] = {}
         self.hold_log: list[tuple[str | None, str, Any]] = []
+        #: §2.18 (review-bot on #1176): "The hold is bounded. A run that no
+        #: read has stated within hold_s of its first version leaves the
+        #: deployment's word, as across a face. hold_s is 10 s unless the
+        #: deployment says otherwise." The deployment's ``hold_s``; when each
+        #: run's first version was seen (monotonic); each unstated run's
+        #: timer, due at that bound; and, by run, how many times the bound
+        #: has left the word, so that a read out at that moment keeps no
+        #: hold when it ends
+        if not hold_s > 0:
+            raise ValueError(f"a hold_s of {hold_s} s is no bound (desired.v2 §2.18)")
+        self.hold_s = float(hold_s)
+        self._first_t: dict[str, float] = {}
+        self._bounds: dict[str, threading.Timer] = {}
+        self._bound_gen: dict[str, int] = {}
         #: v1 §2.9, which §2.9 keeps: "With its author absent, by a complete
         #: read without its instance token (core §8.1), ... a target MAY read
         #: its slice's last-known from an archive, through the key's archive
@@ -639,6 +653,9 @@ class Target:
                 at = why in ("appearance", "again")
                 said = self._read_revision(run, afresh=True, since=self._appeared - 1 if at else None,
                                            awaiting=set(self._appeared_ids) if at else ())
+                if said == "late":
+                    # the bound left the run's word while this read was out
+                    said = self._revision_of_run(run) or "word"
             with self.lock:
                 self.revision_said = said
             self.seeds += 1
@@ -711,41 +728,72 @@ class Target:
         appearance this read follows: while none of them has answered, it
         is made again, up to four times, 100 ms more apart each time, as v1
         §2.5 makes a seed again ("a token can reach the target's router
-        before the route to its author's queryable does")."""
+        before the route to its author's queryable does").
+
+        §2.18 (review-bot on #1176), "The hold is bounded": a read that
+        finds none stating ``run`` once ``hold_s`` has passed since its
+        first version leaves the deployment's word, never the hold. A read
+        out when the bound left the word (:meth:`_bound`) keeps no hold when
+        it ends: ``late``."""
         if self.word_alone:
             return "not-read"
         n0 = self._appeared
-        if run is not None and since is not None:
-            with self.lock:
-                self._first_n.setdefault(run, since)
+        with self.lock:
+            if run is not None:
+                if since is not None:
+                    self._first_n.setdefault(run, since)
+                self._first_t.setdefault(run, time.monotonic())
+            g0 = self._bound_gen.get(run, 0) if run is not None else 0
         for again in range(5):
             if again:
                 time.sleep(0.1 * again)
                 with self.lock:
+                    if run is not None and self._bound_gen.get(run, 0) != g0:
+                        break
                     self.hold_log.append((run, "again", again))
             state, stated = self._descriptor_says(run)
             with self.lock:
                 answered = self._answered_by.get(run, set())
-            if state != "none" or not awaiting or answered & set(awaiting) or self._stop.is_set():
+                bounded = run is not None and self._bound_gen.get(run, 0) != g0
+            if state != "none" or not awaiting or answered & set(awaiting) or self._stop.is_set() or bounded:
                 break
         with self.lock:
             if afresh:
                 self.revisions = {r: w for r, w in self.revisions.items() if r in self._asking}
-            return self._decide(run, state, stated, n0)
+            return self._decide(run, state, stated, n0, g0)
 
-    def _decide(self, run: str | None, state: str, stated: str | None, n0: int) -> str:
+    def _decide(self, run: str | None, state: str, stated: str | None, n0: int, g0: int = 0) -> str:
         """What one read of ``run``'s descriptors leaves, under the lock:
-        ``held`` for a run none states yet, else the word it names, which
-        stands for ``run`` from then on."""
+        ``held`` for a run none states yet, ``late`` for a read the bound
+        overtook, else the word it names, which stands for ``run`` from then
+        on."""
+        if run is not None and self._bound_gen.get(run, 0) != g0:
+            # §2.18, "The hold is bounded": the run left the deployment's
+            # word at hold_s while this read was out. What waited was judged
+            # by the word. A revision the read states is still the run's
+            # from then on ("the one the author's descriptor names for the
+            # version's run"), and one of the other major stops the role
+            # (F-589): its later versions are judged by it
+            self.hold_log.append((run, "late", state))
+            if state not in ("none", "word", "unread"):
+                self.revisions[run] = state
+            return "late"
         if state == "none" and run is not None:
+            due = self._first_t.setdefault(run, time.monotonic()) + self.hold_s
             if n0 > self._first_n.setdefault(run, n0):
                 # "Only a read after that token that names none leaves the
                 # deployment's word."
                 state = "word"
                 self.hold_log.append((run, "word", n0))
+            elif time.monotonic() >= due:
+                # "A run that no read has stated within hold_s of its first
+                # version leaves the deployment's word, as across a face."
+                state = "word"
+                self.hold_log.append((run, "bound", self.hold_s))
             else:
                 self._held_runs[run] = n0
                 self.hold_log.append((run, "held", n0))
+                self._bound_at(run)
                 if self._appeared > n0:
                     # a token appeared while this read was out: its read is due
                     threading.Thread(target=self._reread_held, args=(run,), daemon=True).start()
@@ -755,10 +803,46 @@ class Target:
         if run is not None and run in self._held_runs:
             del self._held_runs[run]
             self.hold_log.append((run, "released", state))
+        if run is not None:
+            t = self._bounds.pop(run, None)
+            if t is not None:
+                t.cancel()
         self.revisions[stated if stated is not None else run] = state
         if run is not None:
             self.revisions.setdefault(run, state)
         return state
+
+    def _bound_at(self, run: str) -> None:
+        """Under the lock: the timer that ends ``run``'s hold at ``hold_s``
+        from its first version (§2.18, "The hold is bounded"), set once."""
+        if run in self._bounds or self._stop.is_set():
+            return
+        due = self._first_t.setdefault(run, time.monotonic()) + self.hold_s
+        t = threading.Timer(max(0.0, due - time.monotonic()), self._bound, args=(run,))
+        t.daemon = True
+        self._bounds[run] = t
+        t.start()
+
+    def _bound(self, run: str) -> None:
+        """§2.18 (review-bot on #1176): "The hold is bounded. A run that no
+        read has stated within hold_s of its first version leaves the
+        deployment's word, as across a face." At ``hold_s``, a run held, or
+        whose first read is still out, leaves the word, and what waited for
+        it is judged by that word in its order of arrival. A read out then
+        keeps no hold when it ends (``late``): a revision it states is the
+        run's for its later versions."""
+        with self.lock:
+            self._bounds.pop(run, None)
+            unstated = run in self._held_runs or (run in self._asking and run not in self.revisions)
+            if not unstated or self._stop.is_set():
+                return
+            self._held_runs.pop(run, None)
+            self._bound_gen[run] = self._bound_gen.get(run, 0) + 1
+            self.hold_log.append((run, "bound", self.hold_s))
+            self.hold_log.append((run, "released", "word"))
+            self.revisions[run] = "word"
+            self._asking.add(run)
+        self._settled(run, "word")
 
     def _token_appeared(self, ids: Any) -> None:
         """An instance token of the author's appeared (v1 §2.5): §2.18 (0.3's
@@ -779,7 +863,9 @@ class Target:
                 return
             self._asking.add(run)
             ids = set(self._appeared_ids)
-        self._settled(run, self._read_revision(run, awaiting=ids))
+        said = self._read_revision(run, awaiting=ids)
+        if said != "late":
+            self._settled(run, said)
 
     def _descriptor_says(self, run: str | None) -> tuple[str, str | None]:
         """What the author's descriptors name, and the run the one read
@@ -929,6 +1015,11 @@ class Target:
                                                                 or run in self._held_runs)
             if wait:
                 self._first_n.setdefault(run, self._appeared)
+                if run not in self._first_t:
+                    # its first version: the hold's bound runs from here
+                    # (§2.18, "The hold is bounded")
+                    self._first_t[run] = time.monotonic()
+                    self._bound_at(run)
                 self._waiting.setdefault(run, []).append(item)
                 # a held run is read again at its author's token, never here
                 ask = run not in self._asking and run not in self._held_runs
@@ -956,7 +1047,9 @@ class Target:
         instance has not answered."""
         with self.lock:
             ids = set(self._appeared_ids) if self._appeared > self._first_n.get(run, self._appeared) else set()
-        self._settled(run, self._read_revision(run, awaiting=ids))
+        said = self._read_revision(run, awaiting=ids)
+        if said != "late":
+            self._settled(run, said)
 
     def _settled(self, run: str, said: str) -> None:
         """After a read of ``run``'s descriptors: a run held waits for its
@@ -1226,6 +1319,10 @@ class Target:
     def close(self) -> None:
         self._stop.set()
         self._release.set()
+        with self.lock:
+            for t in self._bounds.values():
+                t.cancel()
+            self._bounds.clear()
         for e in self._entities:
             try:
                 e.undeclare()

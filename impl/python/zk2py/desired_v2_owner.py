@@ -10,7 +10,7 @@ zk2py processes against each other (#609, round 118)::
         [--desired-across] [--desired-reply-timeout-ms <ms>] [--desired-watch] [--desired-no-move]
         [--desired-catalog <file>] [--desired-owner-heartbeat] [--desired-contract <file>]
         [--desired-archive <system>/<service>] [--desired-worker <file>] [--desired-word-alone]
-        [--desired-after-descriptor] [--desired-descriptor-late-ms <ms>]
+        [--desired-after-descriptor] [--desired-descriptor-late-ms <ms>] [--desired-hold-s <s>]
         <system>/<service>
 
 Standard output: ``connected <endpoint>``, then ``ready
@@ -119,7 +119,9 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
     if cmd == "holds":
         # zk2py's own word (round 127's mend): what each read of a new run's
         # descriptors left under §2.18's "None states the run yet", in order:
-        # [run, held|again|word|released, the appearances counted or the word]
+        # [run, held|again|word|released, the appearances counted or the word];
+        # "The hold is bounded" (review-bot on #1176): [run, bound, hold_s] where
+        # the bound left the word, [run, late, what it drew] for a read it overtook
         with target.lock:
             return "desired holds " + _dump([list(x) for x in target.hold_log])
     return f"refused {line}: unknown command"
@@ -163,6 +165,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="the author's new instance waits this long after its puts again before its descriptor "
                          "(core §8.2 step 3), so a target's first read finds none stating its run (desired.v2 "
                          "§2.18, 0.3's mend, \"None states the run yet\"; round 127's mend)")
+    ap.add_argument("--desired-hold-s", type=float, default=10.0,
+                    help="the deployment's hold_s: a run that no read has stated within it of its first version "
+                         "leaves the deployment's word, as across a face (desired.v2 §2.18, \"The hold is "
+                         "bounded\"; review-bot on #1176); 10 s by default")
     ap.add_argument("address")
     args = ap.parse_args(argv)
     print(f"connected {args.connect}", flush=True)
@@ -189,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                             moves=not args.desired_no_move, watched=args.desired_watched,
                             run_record=args.desired_run_record, catalog=args.desired_catalog, tasking=tasking,
                             archive=args.desired_archive, word_alone=args.desired_word_alone,
+                            hold_s=args.desired_hold_s,
                             worker=contract_file(args.desired_worker) if args.desired_worker else None)
             instance = target.start()
     except OwnerRefused as e:
