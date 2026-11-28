@@ -33400,3 +33400,109 @@ on at X's token.
 - **Open:** F-437 to F-441; F-626 to F-628.
 
   F-365 stays open as #965's.
+
+## After review-bot on #1176
+
+Round 127's second mend read this tree at 1fe83745, one spec commit on
+the mend's: review-bot's two answers on #1176, each a changelog line
+and an item. Each line was read first, then its item. No live run: the
+reference's half lands after this.
+
+### The answers, read cold
+
+| Item | Holds | The answer, quoted |
+|---|---|---|
+| `desired.v2` 0.3 §2.18, "The hold is bounded" | yes | "A run that no read has stated within `hold_s` of its first version leaves the deployment's word, as across a face. `hold_s` is 10 s unless the deployment says otherwise." **It holds.** A hold now ends, at the token or at hold_s, and the race it guards (F-621) takes milliseconds. zk2py's target moved (7e4f844c). The item's parent still says "Only" (F-633). |
+| `alarms.v2` 0.2 §2.7, "No descriptor read" | yes | "On the near side, an owner whose descriptor the reader could not read is read as a revision not in hand: unobservable, never 900 s. Only across a face does the deployment's word stand for it." **It holds.** zk2py read it so since round 127, and nothing moved: no revision named, no horizon, and §2.14's step 2 answers `no_descriptor` first. One fixture gives such a reading a freshness the item rules out (F-634). |
+
+### What moved in zk2py
+
+- **The target's bound** (7e4f844c), `desired_v2_live.Target`:
+  - `hold_s` is the deployment's: `Target(hold_s=…)`, and
+    `--desired-hold-s` in `desired_v2_owner`, 10 s by default. A
+    hold_s of 0 or less is refused.
+  - **"Its first version"** is read as the first version the target
+    saw: its first arrival, or the reply of the seed that drew it. A
+    target cannot see when its author put it.
+  - **At hold_s,** a run held, or one whose first read is still out,
+    leaves the word. What waited is judged by it, in its order of
+    arrival. "No read has stated" is read strictly: a read still out
+    then has not stated it.
+  - **A read out at the bound** keeps no hold when it ends. A revision
+    it states is the run's for its later versions, by §2.18's first
+    item ("the one the author's descriptor names for the version's
+    run"). A `desired.v1` revision stops the role (F-589). zk2py reads
+    that from the text, so it is a note, not a finding.
+  - `desired holds` adds `bound` and `late`.
+- **The near reader** (`alarms_v2_live`): nothing moved.
+
+### The walk
+
+`_round127c_readings` (e1bc05c2) adds two readings:
+- **The bound**, run with hold_s 0.3 s over stood-in descriptor reads,
+  in four cases:
+  - a run never stated, with no token, leaves the word at hold_s;
+  - a read at a token still out then leaves the word at the bound,
+    before that read ends;
+  - that read, stating a `desired.v1` revision late, stops the run's
+    next version;
+  - a first read still out at hold_s leaves the word at the bound.
+- **The near reader** with no descriptor read, holding the standard
+  alone or the copy too: no horizon, `no_descriptor`.
+- Each pins its item and its changelog line.
+
+**`just py-conformance`: 8694 of 8694**, up from 8692.
+
+### F-633 · minor · `desired.v2` §2.18: "Only a read after such a token" still says it alone leaves the word
+
+> "**None states the run yet.** ... Only a read after such a token
+> that names none leaves the deployment's word."
+> "**A run first seen while its instance's token stood** is read at
+> once. Unstated, it waits for the next appearance."
+> "**The hold is bounded.** A run that no read has stated within
+> `hold_s` of its first version leaves the deployment's word".
+
+- **Two ways out, one "Only".** The bound is a second way to leave the
+  word, written as a sub-item of the sentence that says there is one.
+  A run first seen while its token stood "waits for the next
+  appearance", which may never come. The bound ends that wait too.
+- **zk2py reads the sub-item as the exception,** and nothing turns on
+  the wording.
+- **Fix:** "Only a read after such a token that names none, or the
+  bound below, leaves the deployment's word"; "Unstated, it waits for
+  the next appearance, or the bound".
+- **Changes:** nothing zk2py does. A reader who stops at "Only" builds
+  the unbounded hold.
+
+### F-634 · minor · `alarms` `v2/conclusions.json`: reading 27 gives a descriptor not read a fresh alarm, and the description's reasons lack `not_a_horizon`
+
+> Reading 27: "the descriptor not read", `presence` "present",
+> `descriptor` null, `freshness` {"verdict": "fresh", "reason":
+> "within_horizon"}; expect `no_descriptor` for both questions.
+> The description: "`freshness` is freshness.v2's verdict over the
+> slot's observations at 900 s ... unobservable: listened_too_short,
+> silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon or
+> no_observation".
+> §2.7: "an owner whose descriptor the reader could not read is read as
+> a revision not in hand: unobservable, never 900 s."
+
+- **Reading 27's input is one a near reader no longer has.** With no
+  descriptor read there is no horizon, so the freshness is
+  unobservable, `not_a_horizon`, never fresh at 900 s. Its expected
+  answers stand: §2.14's step 2 comes before the freshness.
+- **The description's list** of unobservable reasons lacks
+  `not_a_horizon`, which reading 43 gives (F-623).
+- **Fix:** reading 27's `freshness` {"verdict": "unobservable",
+  "reason": "not_a_horizon"}, and `not_a_horizon` in the list.
+- **Changes:** nothing any reader concludes. zk2py's alarms family
+  runs both readings as written.
+
+### Counts after review-bot on #1176
+
+630 entries on this branch. F-629 to F-632 are round 128's, on another
+branch.
+- **New: F-633 and F-634,** two minor errors. Neither is a blocker.
+- **Both answers hold.**
+- **Open:** F-437 to F-441; F-633 and F-634.
+
+  F-365 stays open as #965's.
