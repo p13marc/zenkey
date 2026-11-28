@@ -1,0 +1,1031 @@
+{
+ "description": "core §3.3, the checks on a decoded descriptor. Written by an independent reading of the text (Python, standard library), checked by a second, never blessed. Each case is a payload read as `vectors.json`'s `reads` are, with its revisions and catalogs, then checked against `contracts`, the revisions the checker is given, by their names in `vectors.json`'s `revisions` → the decoded descriptor and its codes, sorted. A `twin` names the JSON case of `descriptors/` it is the twin of: that case less the members the compact form leaves out (`minor`, `requires`, `profiles`, `meta` but its `zid`, each `reason`, and the capabilities no listed revision gates on), with the run 0003, the catalog `second`, the seq 0 and `minted` 1 where its `profiles` lists `hostid.v1` and no revision's `uses` does. It draws that case's codes in `descriptors/expect.json`. A JSON case's fingerprint that no revision has stands for a revision of its interface: `aaaa…` nav.v2's other, `1111…` archive.v1's, `0000…` geo.v1's.",
+ "cases": [
+  {
+   "twin": "d003-duplicate",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe24002c00b005402a01828030500000000000000000048d159e26af37bc",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": [
+     "D003"
+    ]
+   }
+  },
+  {
+   "twin": "d004-revision",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe14012c02a01a28000000000000000002468acf13579bde",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:10051e570744d5fd1194bed052370b129d4749acc62a119474f56649283d8a3c",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": [
+     "D004"
+    ]
+   }
+  },
+  {
+   "twin": "d005-required",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe14002c04a700c1400000000000000000123456789abcdef0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        },
+        {
+         "resource": "state/position",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": [
+     "D005"
+    ]
+   }
+  },
+  {
+   "twin": "d006-implied",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe14002c047500c1400000000000000000123456789abcdef0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/covariance",
+         "cause": "capability"
+        },
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": [
+     "D006"
+    ]
+   }
+  },
+  {
+   "twin": "d007-not-templated",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe14002c02a026030500000000000000000048d159e26af37bc0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/position": 1,
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": [
+     "D007"
+    ]
+   }
+  },
+  {
+   "twin": "d007-raise",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe14002c02a01866000000000000000002468acf13579bde",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 51
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": [
+     "D007"
+    ]
+   }
+  },
+  {
+   "twin": "d007-zero",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe14002c02a01800000000000000000002468acf13579bde",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 0
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": [
+     "D007"
+    ]
+   }
+  },
+  {
+   "twin": "d011-tokenless-archive",
+   "key": "zk2/vehicle-01/archive/@zk/instance/3fa9c2d41b7e0013",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe100040",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/archive",
+     "instance": "3fa9c2d41b7e0013",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": false
+      }
+     ]
+    },
+    "codes": [
+     "D011"
+    ]
+   }
+  },
+  {
+   "twin": "d012-standby-tokenless",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0017",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe100012",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0017",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": false,
+       "standby": true
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ]
+    },
+    "codes": [
+     "D012"
+    ]
+   }
+  },
+  {
+   "twin": "ok-archive",
+   "key": "zk2/vehicle-01/archive/@zk/instance/3fa9c2d41b7e0013",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe100060",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/archive",
+     "instance": "3fa9c2d41b7e0013",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true
+      }
+     ]
+    },
+    "codes": []
+   }
+  },
+  {
+   "twin": "ok-derivation-profile",
+   "key": "zk2/h-bbd1aa1db10b/navigation/@zk/instance/3fa9c2d41b7e0014",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe180020",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "h-bbd1aa1db10b/navigation",
+     "instance": "3fa9c2d41b7e0014",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ],
+     "profiles": [
+      "hostid.v1"
+     ]
+    },
+    "codes": []
+   }
+  },
+  {
+   "twin": "ok-held-capability-unavailable",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe14002e046500c1400000000000000000123456789abcdef0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/covariance",
+         "cause": "config"
+        },
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": []
+   }
+  },
+  {
+   "twin": "ok-no-minor",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe100020",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "codes": []
+   }
+  },
+  {
+   "twin": "ok-standby",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0015",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe10003c02a01828",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0015",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "standby": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ]
+    },
+    "codes": []
+   }
+  },
+  {
+   "twin": "ok-standby-false",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0016",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe100002",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0016",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": false
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ]
+    },
+    "codes": []
+   }
+  },
+  {
+   "twin": "ok-tokenless",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe10000c02a01828",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": false,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ]
+    },
+    "codes": []
+   }
+  },
+  {
+   "twin": "ok-unchecked",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe14002c02b01828000000000000000002468acf13579bde",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "capability"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": []
+   }
+  },
+  {
+   "twin": "ok-unknown-interface",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe1400ac048061400000000000000000123456789abcdef0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "geo.v1",
+       "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "codes": []
+   }
+  },
+  {
+   "note": "two revisions of nav.v2, indices 0 and 4: listed twice (D003), and the second not at the given fingerprint (D004)",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe2000200480",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:10051e570744d5fd1194bed052370b129d4749acc62a119474f56649283d8a3c",
+       "token": true
+      }
+     ]
+    },
+    "codes": [
+     "D003",
+     "D004"
+    ]
+   }
+  },
+  {
+   "note": "archive.v1 standing by and tokenless: D011 and D012",
+   "key": "zk2/vehicle-01/archive/@zk/instance/3fa9c2d41b7e0013",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000003000000bc0004fe100050",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/archive",
+     "instance": "3fa9c2d41b7e0013",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": false,
+       "standby": true
+      }
+     ]
+    },
+    "codes": [
+     "D011",
+     "D012"
+    ]
+   }
+  },
+  {
+   "note": "imu held through cap.v1's bits and nav.v2's alike: state/covariance listed for config is no D006",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2",
+    "cap.v1"
+   ],
+   "hex": "000001000000bc0004fe2000280388400260",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/covariance",
+         "cause": "config"
+        }
+       ]
+      },
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "codes": []
+   }
+  },
+  {
+   "note": "imu not held: state/covariance listed is implied (D006), and cap.v1's @op/calibrate too",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2",
+    "cap.v1"
+   ],
+   "hex": "000001000000bc0004fe20002803a000027010c0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/covariance",
+         "cause": "capability"
+        }
+       ]
+      },
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "@op/calibrate",
+         "cause": "capability"
+        }
+       ]
+      }
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "codes": [
+     "D006",
+     "D006"
+    ]
+   }
+  },
+  {
+   "note": "cap.v1's state/zones/{zone} at 301, above its 300, and state/odom, not templated: two D007",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "cap.v1"
+   ],
+   "hex": "000001000000bc0004fe1000e40002801bad02",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "cardinality": {
+        "state/odom": 1,
+        "state/zones/{zone}": 301
+       }
+      }
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "codes": [
+     "D007",
+     "D007"
+    ]
+   }
+  },
+  {
+   "note": "cap.v1's state/samples/{sample} at 4294967295, its unbounded ceiling: no D007",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "cap.v1"
+   ],
+   "hex": "000001000000bc0004fe1000e40001affffffff0f0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "cardinality": {
+        "state/samples/{sample}": 4294967295
+       }
+      }
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "codes": []
+   }
+  },
+  {
+   "note": "a required resource listed (D005) and a gated one implied (D006), on cap.v1",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "cap.v1"
+   ],
+   "hex": "000001000000bc0004fe1000ea00024610",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/fix",
+         "cause": "build"
+        },
+        {
+         "resource": "state/odom",
+         "cause": "build"
+        }
+       ]
+      }
+     ],
+     "capabilities": [
+      "baro"
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "codes": [
+     "D005",
+     "D006"
+    ]
+   }
+  },
+  {
+   "note": "cap.v1 decoded, the checker given nav.v2 alone: syntax only, no code",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "contracts": [
+    "nav.v2"
+   ],
+   "hex": "000001000000bc0004fe1000ec000184060000",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/odom",
+         "cause": "build"
+        }
+       ],
+       "cardinality": {
+        "state/odom": 0
+       }
+      }
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "codes": []
+   }
+  }
+ ]
+}
