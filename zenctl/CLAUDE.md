@@ -446,6 +446,16 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `gen` and `serve` of a governed contract are candidates on a reader and
   a watch session of their own (`cmd/serve.rs`'s `elect`), with the
   address guard unchanged. §12 runs as `live_zk2.rs`'s `redundancy_s12_…`.
+  #987's N3: every one of them reads either major (`redundancy.v2`),
+  `redundancy` shows each instance's run (`(run r, zid z)`, the row's
+  `majors`), and `cmd/serve.rs`'s `Governed` elects a candidate of either
+  major and stamps (`owner_session(governed.stamps())`) for a
+  `redundancy.v1` one alone. Each §12 test is a `s12_*(Ledger)` run twice,
+  `redundancy_s12_…` on `ledger.v1` and `redundancy_v2_s12_…` on
+  `ledger-run.v1` (`scenarios-v2.md` §12, step 10 in
+  `s12_one_serves_one_stands_by`; `ledger-run-appendall.v1` for steps 8
+  and 9); `redundancy_v2_s12_a_standby_of_the_other_major_on_a_minted_system`
+  is `hostid.v1` scenarios §6 step 7 (text 0.10).
   #908's MC added `timing [SELECTOR] [--for SECS] [--clock-bound MS]
   [--across-face] [--owner-zid ZID]… [--settle] [--lease]
   [--wait-before-close] [--contracts]`, a root judgement beside

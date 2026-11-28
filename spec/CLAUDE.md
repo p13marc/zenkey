@@ -1099,7 +1099,16 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   written against core 0.118, the index's row following; scenarios §11
   runs again under `redundancy.v2` on `steer.v1` minor 2;
   `arbitrations.json` is unchanged (`incumbent: false` is the fence's
-  word, either major's).
+  word, either major's). N3 (the tools, #987): `hostid.v1` 0.10 (§2.12's
+  recognised standby lists interfaces whose contracts use a major of
+  `redundancy`, each read by §2.15 of either, governance from both
+  majors; "Undecided" and §5's last row name `redundancy`'s standby
+  question; the header reads the mark through either major, still
+  written against core 0.40; scenarios §6 step 7: B on `ledger-run.v1`
+  beside A on `ledger.v1`, then both, no finding; the index's row);
+  `scenarios-v2.md`'s "Who runs them" names `zenctl/tests/live_zk2.rs`'s
+  `redundancy_v2_s12_…` for §12, and §12's hostid note says it is met.
+  No keyword sentence moved (298 rules).
 
 **zk2py rounds 116 to 123, answered (#609, #986, #1165).** Core 0.116
 (298 rules: §4.3's new deployment MUST NOT, a run's record that was lost
