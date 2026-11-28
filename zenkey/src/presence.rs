@@ -992,12 +992,21 @@ impl Held {
     fn with_standard(&self, served: &Served) -> (Vec<Arc<Contract>>, Vec<(IfaceId, Fingerprint)>) {
         let mut revisions = self.revisions.clone();
         let mut lacked = Vec::new();
-        if served.form == Form::Compact {
-            for (iface, fp) in served.names(&self.catalogs) {
-                match crate::standard::contract(&iface, &fp) {
-                    Some(c) => revisions.push(c),
-                    None => lacked.push((iface, fp)),
-                }
+        if served.form != Form::Compact {
+            return (revisions, lacked);
+        }
+        let held: Vec<(&IfaceId, Fingerprint)> = self
+            .revisions
+            .iter()
+            .map(|c| (&c.iface, Fingerprint::of(c)))
+            .collect();
+        for (iface, fp) in served.names(&self.catalogs) {
+            if held.iter().any(|(i, f)| **i == iface && *f == fp) {
+                continue;
+            }
+            match crate::standard::contract(&iface, &fp) {
+                Some(c) => revisions.push(c),
+                None => lacked.push((iface, fp)),
             }
         }
         (revisions, lacked)

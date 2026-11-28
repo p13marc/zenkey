@@ -1201,10 +1201,12 @@ fn standard_revision(iface: &IfaceId) -> Option<Arc<Revision>> {
     if iface.to_string() != zenkey_model::heartbeat::PROFILE {
         return None;
     }
-    crate::model::standard::revisions()
-        .of_iface(iface)
-        .next()
-        .cloned()
+    let fp = zenkey_model::canonical::Fingerprint::parse(&format!(
+        "sha256:{}",
+        zenkey::heartbeat::FINGERPRINT
+    ))
+    .expect("the published freshness.v2 fingerprint parses");
+    crate::model::standard::revision(iface, &fp).cloned()
 }
 
 /// A control key's address and form.
