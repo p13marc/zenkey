@@ -149,7 +149,9 @@ envelope it writes.
 2. X puts v3's content on `D` under R at seq n, `s2` exactly.
 3. The target re-reads on its deployment's period, which the test sets
    to 2 s for this step.
-4. X puts v3's content on `D` under a 32-bit run of its own, at seq 0.
+4. X, as a new instance of the author, puts v3's content on `D` under a
+   32-bit run of its own, at seq 0. It then answers a descriptor stating
+   that run, and declares its instance token.
 5. X puts v1's content on `D` under R at seq n − 1 again.
 
 **Expected.**
@@ -158,8 +160,10 @@ envelope it writes.
 2. Nothing: an equal seq is the same version.
 3. The re-read carries the held stamp `s2`, and the author answers with
    that stamp alone. Nothing is acted on, and nothing is put on `Rp`.
-4. Another run is admitted, and its document differs: the target acts on
-   it. Its report is converged on v3, under X's version.
+4. The put waits: no descriptor states X's run yet (§2.18). At X's
+   instance token the target reads again, and the descriptor states the
+   run. Another run is admitted, and its document differs: the target
+   acts on it. Its report is converged on v3, under X's version.
 5. Nothing: R is a run the target remembers, and seq n − 1 is below the
    highest it acted on under R, whichever run it holds.
 
