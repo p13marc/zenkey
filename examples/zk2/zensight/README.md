@@ -48,7 +48,7 @@ The v1 surface, re-counted from
 | `system` | the host id, `h-<12hex>`, minted by [`hostid.v1`](../../../spec/profiles/hostid/v1.md): v1's construction with zk2's one salt (D26), so the value is not v1's origin. Its Appendix B maps ZenSight's v1 origins. |
 | host services | v1's producer names: `sysinfo`, `netlink`, `netring`, `systemd`, `logs`, `hostspec`, `parallax`, `probe`, `pve`, `historian`, plus the process identities `correlator`, `policy-compiler`, `exporter-prometheus`, `exporter-otel`. A second instance is just another service (`netring-2`) implementing the same interface. |
 | device services | one per polled device: `snmp.<device>`, `modbus.<device>`, `gnmi.<device>`, `netflow.<exporter>`, `bmc.<chassis>`, `container.<name>`. Each poller keeps its own service (`snmp`, …) for what belongs to the process. The instance id is the device's continuity epoch. |
-| fleet singletons | `zk2/fleet/catalog` (`zs.catalog.v1`) and `zk2/fleet/desired` (`zs.desired.v1`), single-writer under `redundancy.v1` with ZenSight's claim protocol as the reference. They replace v1's verbatim service origins `@catalog` and `@desired` ([`../shapes.md`](../shapes.md) row 4). |
+| fleet singletons | `zk2/fleet/catalog` (`zs.catalog.v1`) and `zk2/fleet/desired` (`zs.desired.v1`), single-writer under `redundancy.v2` (since #1149) with ZenSight's claim protocol as the reference. They replace v1's verbatim service origins `@catalog` and `@desired` ([`../shapes.md`](../shapes.md) row 4). |
 | framework set | interfaces every service implements: `health.v2` ([`spec/profiles/health/health.v2.toml`](../../../spec/profiles/health/health.v2.toml), the profile [`health.v2`](../../../spec/profiles/health/v2.md)), `alarms.v2` ([`spec/profiles/alarms/alarms.v2.toml`](../../../spec/profiles/alarms/alarms.v2.toml), the profile [`alarms.v2`](../../../spec/profiles/alarms/v2.md)), `zs.evidence.v1`, `zs.thresholds.v1`, `views.v1`; also `zs.errors.v1` and `zs.artifacts.v1` (named, not written in this cut). The v2 majors since #1149 (below, "The framework set on zk2c"); an instance implements one major of each |
 | schema kind | **jsonschema**: ZenSight's types are serde structs on a CBOR wire. The shared telemetry point is the Point of the standard schema that [`telemetry.v2`](../../../spec/profiles/telemetry/v2.md) restates by reference (its §3). The frames' records are **packed** (core §7.6), one file per telemetry contract (below, "Frames"). |
 
@@ -451,11 +451,11 @@ The bytes are #989's W2 path ([wire baseline](../../../docs/zk2/measurements/wir
   - Its 210,000 documents keep `freshness.ttl_s = 0` and the deployment's 300-s
     period. The watch does not pay at that population: a heartbeat's section holds
     a bit per live document, 26 KB a heartbeat with 210,000 live (§2.2).
-  - **While it uses `redundancy.v1`** each desired resource stays per key, a reply
-    per key with a Zenoh timestamp beside the stamp, and a conditional read is
-    answered whole (§2.4). When #987 moves it to `redundancy.v2`, an unchanged
-    slice is answered by its held stamp alone: a 94-B reply where today's carries
-    the whole document.
+  - **Under `redundancy.v2`** (1.3) each desired resource is answered by snapshot,
+    with no Zenoh timestamp (§2.4). So an unchanged slice is answered by its held
+    stamp alone: a 94-B reply where today's carries the whole document. Under
+    `redundancy.v1`, as 1.2 was, it stayed per key, a reply per key with a Zenoh
+    timestamp, and a conditional read was answered whole.
   - Each target's report is the packed `Report`, an 18-B payload converged,
     measured.
     - Its role is named by `desired.report`. A refusal's place and line index the
@@ -465,8 +465,18 @@ The bytes are #989's W2 path ([wire baseline](../../../docs/zk2/measurements/wir
     - The report is optional, since a required resource added would be breaking
       (§2.18).
     - The other targets add theirs when their contracts are written.
-- **redundancy.** `zs.catalog.v1` and `zs.desired.v1` keep `redundancy.v1` until
-  #987's `redundancy.v2` lands.
+- **redundancy** ([`redundancy.v2`](../../../spec/profiles/redundancy/v2.md), #987's
+  N4). `zs.catalog.v1` 1.2 and `zs.desired.v1` 1.3 list `redundancy.v2` in place of
+  `redundancy.v1`, a review (§2.17). The election is v1's, word for word.
+  - A candidate's session stamps nothing, so each put is 26 B shorter: 17 B where it
+    was 43 for a 5-byte record (Appendix B).
+  - A follower accepts a sample only under one of the incumbent's runs, which its
+    descriptors state (§2.10).
+  - The singletons' state is answered by snapshot, no longer per key (core §4.2). A
+    follower's seed of 10,000 members of 200 B is 2.25 MB in pages, where the per-key
+    answer was 2.83 MB in 10,000 replies. The catalog's pdns holds 100,000.
+  - Followers move first, then the standbys, then the incumbent (§2.17).
+  - The takeover is not measured again here: that is #987's, later.
 
 ## Gaps found
 

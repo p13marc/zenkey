@@ -22,7 +22,7 @@
 # walkthrough's mission_plan.v1 uses a single string, and R2's `self` has to say which identity each
 # one binds to (Gap G5).
 #
-# Single writer under redundancy.v1 with the claim protocol, exactly as zs.catalog.v1 (a
+# Single writer under redundancy.v2 (since 1.3) with the claim protocol, exactly as zs.catalog.v1 (a
 # policy-compiler standby holds its instance token only, its descriptor marking the interface
 # standby). A takeover's first put of each document is another id, which targets adopt without an
 # act (desired.v1 §2.7; redundancy.v1 Appendix B). The compiler's process identity is the
@@ -34,19 +34,23 @@
 #
 # Revision 1.2 (#1149 Z2): desired.v2 in place of desired.v1 (desired.v2 §2.18), its keys
 # unchanged. A version is the put's in-band stamp, a run and a seq, never the author's clock
-# (§2.4, §2.6). Under redundancy.v1 every desired resource stays per key: a reply per key with a
-# Zenoh timestamp beside the stamp, and a conditional read answered whole (§2.4), until #987 moves
-# this contract to redundancy.v2. The documents keep freshness.ttl_s = 0: 210,000 of them take no
-# heartbeat bit each, and their targets re-read on the deployment's period (§2.2, §2.13). Each
-# target reports in desired.v2's packed Report (zs.thresholds.v1's `desired/report`), and targets
-# move before this author (§2.18).
+# (§2.4, §2.6). Under redundancy.v1 every desired resource stayed per key: a reply per key with a
+# Zenoh timestamp beside the stamp, and a conditional read answered whole (§2.4). The documents
+# keep freshness.ttl_s = 0: 210,000 of them take no heartbeat bit each, and their targets re-read
+# on the deployment's period (§2.2, §2.13). Each target reports in desired.v2's packed Report
+# (zs.thresholds.v1's `desired/report`), and targets move before this author (§2.18).
+#
+# Revision 1.3 (#1149 Z2, #987 N4): redundancy.v2 in place of redundancy.v1 (redundancy.v2 §2.17),
+# the election unchanged. Its puts carry no Zenoh timestamp, a follower fences by the incumbent's
+# runs (§2.10), and each desired resource is answered by snapshot (desired.v2 §2.4): a target's
+# conditional re-read of an unchanged slice is answered by its held stamp alone.
 
 [interface]
 name    = "zs.desired"
 major   = 1
-minor   = 2
+minor   = 3
 summary = "Fleet runtime policy for every host's services, as documents keyed by target"
-uses    = ["desired.v2", "redundancy.v1", "freshness.v2"]
+uses    = ["desired.v2", "redundancy.v2", "freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.common.json", "schemas/zs.snmp.v1.json", "schemas/zs.desired.v1.json"]

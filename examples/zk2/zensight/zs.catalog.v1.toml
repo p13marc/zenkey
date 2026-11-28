@@ -5,7 +5,7 @@
 # Example:  zk2/fleet/catalog/zs.catalog.v1/state/edges/e-2879d4667f9d946d
 #           zk2/fleet/catalog/zs.catalog.v1/state/acks/h-3fa9c2d41b7e/netlink/a659f813308ad1da
 # `fleet` is a logical system (shapes.md row 4). Every correlator process also runs its own host
-# service `correlator` (health.v1, alarms.v1, zs.evidence.v1 self): v1's correlator.toml.
+# service `correlator` (health.v2, alarms.v2, zs.evidence.v1 self): v1's correlator.toml.
 #
 # SINGLE WRITER UNDER redundancy.v1 (spec/profiles/redundancy/v1.md, text 0.1, Appendix B). The
 # interface is governed through `uses`, and writes no `redundancy.election`, so its election is
@@ -25,8 +25,15 @@
 #     campaigns again when a complete read confirms the incumbent gone.
 #   - after a partition heals, the higher instance id steps down (redundancy.v1 §2.9). There is no
 #     fencing epoch in a payload (v1 had none); consumers follow the incumbent's stamps (§2.10).
-# The correlator's own health.v1 and alarms.v1 run on its host service `correlator`, so this
+# The correlator's own health.v2 and alarms.v2 run on its host service `correlator`, so this
 # singleton's address implements a governed interface only (redundancy.v1 §2.4).
+#
+# Revision 1.2 (#1149 Z2, #987 N4): redundancy.v2 in place of redundancy.v1 (redundancy.v2 §2.17).
+# The election above is the same, word for word. A candidate's session stamps nothing, so each put
+# is 26 B shorter; a follower accepts a sample only under one of the incumbent's runs, which its
+# descriptors state (§2.10); and the catalog's state is answered by snapshot, no longer per key
+# (core §4.2), so a follower's seed of pdns' 100k members is one snapshot in pages, not 100k
+# replies. Followers move first, then standbys, then the incumbent (§2.17).
 #
 # Population budgets (cardinality) are v1's. pdns (100k) and edges (50k) now sit on a plain system,
 # so `zk2/*/*/*/state/**` reaches them; v1's verbatim @catalog origin kept them off `v1/*/state/**`
@@ -37,9 +44,9 @@
 [interface]
 name    = "zs.catalog"
 major   = 1
-minor   = 1
+minor   = 2
 summary = "Fused host identity, topology, incidents and operator intent for the whole fleet"
-uses    = ["redundancy.v1", "freshness.v2"]
+uses    = ["redundancy.v2", "freshness.v2"]
 
 [schemas]
 jsonschema = ["schemas/zs.catalog.v1.json"]
