@@ -851,3 +851,36 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   handed `Some(Time::Ahead)`; `tests/profile_health.rs`'s
   `s4_clock_ahead` (health.v1 §4) reads the heartbeats through
   `health::Heard::heartbeat`, and its answers are as before.
+
+  The compact descriptor read (#980 C5b, core 0.120 §3.3; no writer
+  change, C5c's): every descriptor reader tells the two forms apart by the
+  reply's `Encoding` alone (`zenkey_model::descriptor::Form::of`:
+  `zenoh/bytes` exactly the compact form, any other JSON). In `presence`:
+  `Served { form, bytes }` (`of(sample)`, `names(catalogs)` the pairs a
+  compact head names through the catalogs, `read(addr, instance, catalogs,
+  revisions)` → `Found`, `decode` the descriptor and its no-contract
+  report), `Held` (catalogs, revisions, `retrieving()`), `descriptor_reply`,
+  `descriptor_held`, `read_held` (each revision named and not held
+  retrieved first where `Held` retrieves); `descriptor` holds nothing, so
+  a compact one is `Found::Unread` (new: `unknown_catalog`,
+  `unknown_index`, `unknown_revision`, the token first) and one refused
+  for its bytes `Found::Invalid`. `serving` takes a `Held`: a consumer's
+  is its catalogs and contract, retrieving (`Consumer::held`), a client's
+  its contract alone; an `Unread` leaves the address undescribed, `not
+  read: unknown_catalog …` in `errors`. `answer::owner_revision_held` and
+  `owner_catalog_held` read either form by a reply's instance key (the run
+  a compact one's envelope's), `owner_revision`/`owner_catalog` holding
+  nothing (a compact one no word, `Unread`); `runs_revision` and
+  `stray_reply_del` take a `Held` (the consumer's; the archive's holds
+  none). `retrieval::revisions(session, named, held, timeout)` the
+  revisions a compact descriptor names that a reader lacks. Not taught:
+  `timing`'s own descriptor read (JSON-sniffed for `meta.zid`, so a
+  compact one attributes nothing), `redundancy`, `arbitration` and
+  `ownership`, which read through `presence::descriptor` (a compact one
+  not read). `tests/compact_descriptor.rs` over
+  `tests/common/compact_owner.rs` (a raw owner answering either form, its
+  revisions held on their contract keys; the fleet's `zk2_core.rs` and
+  `zk2_doctor.rs` and zenctl's `live_zk2.rs` include it): both forms read
+  alike, `unknown_catalog` and `unknown_revision`, a revision retrieved,
+  `serving` and `owner_revision_held`. Test owners that hand-write a JSON
+  descriptor state `application/json` (`owner_heartbeat.rs`).

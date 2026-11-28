@@ -6,6 +6,24 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the compact descriptor read (#980's C5b)
+
+Core 0.120 §3.3's compact form, which no owner writes before C5c: a
+descriptor under `zenoh/bytes` names each revision by its index in the
+deployment catalog. Every reader below tells the two forms apart by the
+reply's `Encoding` alone, and reads a compact one through `--catalog` and
+each revision it names, held by `--contracts` or retrieved (§8.4). Two
+flags are new on `service list` and `service show`: `--contracts` and
+`--catalog`. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| a descriptor reply read as JSON whatever its `Encoding` | under `zenoh/bytes` exactly, the compact form, decoded to the JSON form's members: `service show --format json` shows it `served`, its `descriptor` as a JSON one's (no `minor`, no `requires`, `meta` its `zid` alone, `profiles` derived); under any other, JSON as before | `service list`, `echo`'s lens, `doctor`, `redundancy` and `timing` read it through their `--catalog` too. A JSON descriptor under `zenoh/bytes`, which no runtime owner writes, now reads as a compact one refused (`invalid`) |
+| — | a compact descriptor read with no catalog that is or succeeds the one it names, or a revision it names that cannot be had: the answer `unread`, its `reason` the refusal's token first (`unknown_catalog`, `unknown_index`, `unknown_revision`), and the table's `descriptor: compact, not read — …` | never guessed (§8.6): its interfaces are not listed, so a tokenless one's provider is not shown; the doctor's `descriptor-invalid` leaves it unjudged, never a finding |
+| a compact descriptor refused for its bytes | `invalid`, its `findings` the refusal's token first (`form`, `short`, `pad`, …) | as a JSON one that is D000 |
+| `doctor`'s `descriptor-invalid`: the JSON re-encoded and checked again | each descriptor read, a compact one's decoding included, checked against the revisions it names (§3.3, "The checks on a decoded descriptor") | same codes on a JSON descriptor |
+| `timing`'s lifespans: attributed by a JSON descriptor's `meta.zid` | a compact one's too, where it carries the zid; one without names none, so its owner's stamps are `unattributed` | `timing --catalog` |
+
 ## Unreleased (`main`, zk2) — `desired --across-face` (#986's J5)
 
 `desired.v1` 0.14 §2.14, §2.17 step 2; `desired.v2` 0.1 §2.5, §2.14;
