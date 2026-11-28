@@ -392,7 +392,8 @@ of the author's. The author holds v1 on `D`.
    - Asked after the adoption, the read is answered unchanged.
    - Asked while the descriptors' read runs, it carries v3's earlier
      stamp and is answered whole. Its entry waits with the put, and is
-     the same version.
+     the same version. The next heartbeat makes it read once more,
+     answered unchanged (§2.5).
    - `Run` receives nothing.
 6. While the author is stopped, no heartbeat crosses, and the document
    passes its horizon. The target keeps v3 in force. `Rp` and `Run`

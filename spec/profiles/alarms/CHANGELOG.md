@@ -76,6 +76,8 @@ worded. The reference's tool has not run on the copy since it moves.
 
 - **A revision not in hand** gives no horizon, so the owner's alarms' freshness is unobservable, never 900 s. Reading a shorter horizon at the standard one would call a stale alarm fresh. The lead's default, from the code half's question.
 
+- **Across a face** (zk2py's round 127, F-622), the deployment's word names the `alarms.v2` revision a reader is given, else the standard one, which every reader holds. A deployment that runs another revision gives it.
+- **A revision not in hand** is reported with `freshness.v1`'s reason `not_a_horizon` (F-623). `v2/conclusions.json` gains reading 43.
 
 ## alarms.v2 0.1 — 2026-11-27: a new major: an alarm in a slot, a transition in one packed record, words by table, a resolve with no delete, and "nothing fires" from one snapshot (#984)
 

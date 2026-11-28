@@ -72,6 +72,9 @@ run E included. zk2py moves.
 **Not verified.** No implementation has run §16's run E, nor §14 step
 5 as now worded.
 
+- **None states the run yet** (zk2py's round 127, F-621, a contradiction in this entry's first draft). Core §8.2 puts an author's documents before its tokens, not after its descriptor, so a target's first read can find no descriptor stating the new run. 0.3's first draft then took the deployment's word, and the target acted, in 31 of 44 runs in every pairing. Where descriptors reach the target, such a read now keeps the hold, and the target reads again when the author's instance token appears, which follows its descriptor (core §8.2, steps 3 and 4). Only a read after that token that names none leaves the word. No author's order is constrained. The reference and zk2py move.
+- **§14's Expected 5** says the second read §2.5 makes after a whole answer (F-625).
+
 ## desired.v2 0.2 — 2026-11-27: zk2py's rounds 118 to 121: a target built before this major binds through no router that timestamps, a failed revert keeps its version, a report resource of any kind, and §9's T holds its author's revision (#986)
 
 zk2py's rounds 118, 119 and 121 read 0.1 cold, then ran it against the

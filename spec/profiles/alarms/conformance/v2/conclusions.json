@@ -1402,6 +1402,40 @@
      "reason": "no_observation"
     }
    }
+  },
+  {
+   "note": "freshness unobservable: the revision the owner names is not in hand, so no horizon (§2.7)",
+   "presence": "present",
+   "descriptor": {
+    "interfaces": [
+     "alarms.v2",
+     "freshness.v2",
+     "health.v1"
+    ],
+    "token": true
+   },
+   "face": null,
+   "freshness": {
+    "verdict": "unobservable",
+    "reason": "not_a_horizon"
+   },
+   "latest": "firing",
+   "named": true,
+   "lost": false,
+   "previous_instance": false,
+   "held_whole": false,
+   "left_out": false,
+   "expect": {
+    "major": 2,
+    "firing": {
+     "answer": "unobservable",
+     "reason": "not_a_horizon"
+    },
+    "stale_firing": {
+     "answer": "unobservable",
+     "reason": "not_a_horizon"
+    }
+   }
   }
  ],
  "owner_sets": [
