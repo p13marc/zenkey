@@ -5712,7 +5712,8 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "link.v2 0.28, alarms.v2 0.2 and desired.v2 0.3, still written against core 0.108, 0.115 and "
                 "0.112; the index's rows; F-624, resolved by the renumbering (round 127's mend): core's entries go "
                 "from 0.117 to 0.118 and link's from link.v2 0.27 to 0.28, and no 0.119 or link.v2 0.29 entry is "
-                "round 127's; v2/plan.json's case 54 and its description still say \"link.v2 0.29\" (F-626)",
+                "round 127's; F-626, resolved by link.v2 0.28's last renumbering: v2/plan.json's case 54 and its "
+                "description say \"link.v2 0.28\", never 0.29",
                 [core_at is not None and _at_least(core_at.group(1), "0.118"),
                  _at_least(at("profiles/link/v2.md"), "0.28"), _at_least(at("profiles/alarms/v2.md"), "0.2"),
                  _at_least(at("profiles/desired/v2.md"), "0.3"),
@@ -5739,7 +5740,7 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 + missing(flat("profiles/link/v2.md"), "| **Written against** | core 0.108 (")
                 + missing(a2t, "| **Written against** | core 0.115 (")
                 + missing(d2t, "| **Written against** | core 0.112 ("),
-                [True] * 9 + [False, False, [True, False, True]]))
+                [True] * 9 + [False, False, [False, False, False]]))
 
     # -- F-573: v2/plan.json's case 54 -------------------------------------------------------
     plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
@@ -5966,12 +5967,19 @@ def _round127b_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "(v1 §2.5's MAY, zk2py's choice) and leaves the word; across a face, the word at once, no hold",
                 [before, a.hold_log, a_order, [x[1] for x in b.hold_log], b_order, c.hold_log, c_order]
                 + missing(d2t, "- **None states the run yet.** Where descriptors reach the target, a read that "
-                               "finds none stating the run holds that run's versions still. The target reads again "
-                               "when the author's instance token appears, which follows its descriptor (core §8.2, "
-                               "steps 3 and 4). Only a read after that token that names none leaves the "
-                               "deployment's word. `[Sc: §16]` An author MAY put a version before its descriptor "
-                               "(core §8.2 orders a value before step 4, not after step 3), so the first read can "
-                               "find nothing.",
+                               "finds none stating the run holds that run's versions still. A read that draws no "
+                               "descriptor at all finds none stating it. The target reads again when an instance "
+                               "token of the author's appears after it first saw the run: the token follows its "
+                               "descriptor (core §8.2, steps 3 and 4). Only a read after such a token that names "
+                               "none leaves the deployment's word. `[Sc: §16]` An author MAY put a version before "
+                               "its descriptor (core §8.2 orders a value before step 4, not after step 3), so the "
+                               "first read can find nothing.",
+                          "- **Where descriptors reach the target** is the deployment's, never what a read drew: "
+                          "wherever the author's instance tokens reach it, which is never across a face (core "
+                          "§8.1). A target whose author has not started yet holds too.",
+                          "- **The read at the token** that draws none MAY be made again, a few times and soon, as "
+                          "v1 §2.5's seed is: a token can reach the target before the route to the author's "
+                          "queryable does.",
                           "- **A read that names none** leaves the deployment's word: no descriptor reached the "
                           "target, as across a face, or the read failed.")
                 + missing(dlog, "Where descriptors reach the target, such a read now keeps the hold, and the target "

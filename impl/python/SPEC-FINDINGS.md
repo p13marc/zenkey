@@ -33313,6 +33313,7 @@ on at X's token.
 - The renumbering moved the policy's comment and the headings, not
   these two. zk2py's walk pins them (c40c31d2).
 - **Fix:** "link.v2 0.28" in both.
+- **Resolved** (the lead, after the mend): case 54's note and the description read "link.v2 0.28" (`7134601a`).
 
 ### F-627 · gap · `desired.v2` §2.18: "Where descriptors reach the target" names nothing a target observes, and a read that draws no descriptor at all reads as both items
 
@@ -33348,6 +33349,7 @@ on at X's token.
   tokens reach the target. Say that a read drawing none there finds
   none stating the run.
 - **Changes:** whether two targets hold or act on the same read.
+- **Resolved** by desired.v2 0.3 (the lead, after the mend): "Where descriptors reach the target" is the deployment's, wherever the author's instance tokens reach it, never across a face, and a read that draws none there finds none stating the run. zk2py's reading.
 
 ### F-628 · minor · `desired.v2` §2.18: the read at the token can miss the descriptor, and which token a run's read follows is not said
 
@@ -33375,6 +33377,7 @@ on at X's token.
   is. Say which token a run's read follows: one that appears after its
   first version, or the token of the instance whose descriptor the read
   misses.
+- **Resolved** by desired.v2 0.3 (the lead, after the mend): the read at the token MAY be made again as v1 §2.5's seed is, and the token is one that appears after the target first saw the run; a run first seen while its instance's token stood is read at once and, unstated, waits for the next appearance. zk2py's reading.
 
 ### Not run
 
