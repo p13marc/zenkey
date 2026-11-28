@@ -4449,7 +4449,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
         + _round123_readings(root) + _round124_readings(root) + _round125_readings(root) \
         + _round126_readings(root) + _round127_readings(root) + _round127b_readings(root) \
-        + _round127c_readings(root)
+        + _round127c_readings(root) \
         + _round128_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
