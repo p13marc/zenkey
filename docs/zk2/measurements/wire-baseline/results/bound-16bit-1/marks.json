@@ -1,0 +1,94 @@
+{
+ "medium": "rf-zk2c",
+ "stack": "bare",
+ "zids": "a1136003a4d,b1136b",
+ "puts_start": 1795851423.962586,
+ "puts_end": 1795851575.096031,
+ "puts": [
+  {
+   "index": 0,
+   "qos": "data/drop/reliable",
+   "payload": 211
+  },
+  {
+   "index": 1,
+   "qos": "data/drop/reliable",
+   "payload": 212
+  },
+  {
+   "index": 2,
+   "qos": "data/drop/reliable",
+   "payload": 213
+  },
+  {
+   "index": 3,
+   "qos": "data/drop/reliable",
+   "payload": 214
+  },
+  {
+   "index": 4,
+   "qos": "data/block/reliable",
+   "payload": 209
+  },
+  {
+   "index": 5,
+   "qos": "data/block/reliable",
+   "payload": 210
+  },
+  {
+   "index": 6,
+   "qos": "data/block/reliable",
+   "payload": 211
+  },
+  {
+   "index": 7,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 8,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 9,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 10,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 11,
+   "qos": "data/drop/reliable",
+   "payload": 213
+  },
+  {
+   "index": 12,
+   "qos": "data/drop/reliable",
+   "payload": 214
+  },
+  {
+   "index": 13,
+   "qos": "data/block/reliable",
+   "payload": 211
+  },
+  {
+   "index": 14,
+   "qos": "data_low/drop/reliable",
+   "payload": 207
+  },
+  {
+   "index": 15,
+   "qos": "data_low/drop/reliable",
+   "payload": 208
+  },
+  {
+   "index": 16,
+   "qos": "data_low/drop/reliable",
+   "payload": 209
+  }
+ ]
+}

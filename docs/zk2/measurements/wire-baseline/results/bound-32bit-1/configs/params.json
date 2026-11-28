@@ -1,0 +1,32 @@
+{
+ "medium": "rf-zk2c-32",
+ "stack": "bare",
+ "inst": "bound",
+ "batch_size": 222,
+ "ports": {
+  "router_a": 17801,
+  "router_b": 17802,
+  "driver_a": 17810,
+  "driver_b": 17811,
+  "relay_a": 17812,
+  "relay_b": 17813
+ },
+ "run": "/srv/dev/scratch/zenkey/1136/work/run/bound",
+ "face": true,
+ "generated": true,
+ "ids": {
+  "a": "a1136011e8d34",
+  "b": "b1136b"
+ },
+ "max_sdu": 220,
+ "rate": 2400,
+ "latency_ms": 150,
+ "jitter_ms": 30,
+ "loss": 0.05,
+ "lease": 240000,
+ "keep_alive": 4,
+ "open": 10000,
+ "interests": 10000,
+ "sequence": "32bit",
+ "timers": "zenohd-rf0.face.toml's [transport], at 32bit (link.v2 \u00a72.16)"
+}
