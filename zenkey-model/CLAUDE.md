@@ -712,7 +712,8 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `Reading::freshness` is judged by the reader at the horizon of the
   revision the owner names (text 0.2, F-613: the fleet's `V2Revision`),
   `TTL` being the standard revision's 900 s, never a constant.
-  `tests/profiles/alarms_v2.rs` runs the ten `v2/` files as written, 477
-  cases, none blessed, all passing, and `alarms_v2_standard_contract`
+  `tests/profiles/alarms_v2.rs` runs the ten `v2/` files as written, 478
+  cases (`conclusions.json`'s reading 43, `not_a_horizon`, text 0.2,
+  F-623, read through `freshness_judged`), none blessed, all passing, and `alarms_v2_standard_contract`
   holds `alarms.v2.toml` to the constants.
   `spec/profiles/.history/alarms.v2/` holds revision 2.0.
