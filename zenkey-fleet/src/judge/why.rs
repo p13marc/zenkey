@@ -1681,6 +1681,7 @@ mod tests {
                     tag: None,
                     identity: json!({}),
                     confirmed: false,
+                    unresolved: None,
                 },
             )),
             failed: vec![],

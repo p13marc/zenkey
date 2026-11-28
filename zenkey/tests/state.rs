@@ -1170,6 +1170,164 @@ async fn s5_alignment_after_reconnect() {
     }
 }
 
+/// §5 step 4 (core §4.4; #980 C3): both archives are given the deployment
+/// catalog, so each reply's attachment is the compact form, 3 bytes, where
+/// a JSON one states the same identity in some hundred. The vehicle's
+/// archive, starting with nothing while the link is cut and the owner gone,
+/// aligns from the owner-side archive and holds v4 confirmed, as that
+/// archive's compact attachment says, its bit read with no catalog. A
+/// consumer holding the catalog reads the identity the JSON form states;
+/// holding none, `confirmed` alone, the identity `unknown_catalog`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s5_the_compact_attachment() {
+    use zenkey::model::canonical::Fingerprint;
+    let revision = contract("mission_plan.v1");
+    let mut catalog = zenkey::model::catalog::Catalog::new(0).unwrap();
+    catalog
+        .push(revision.iface.clone(), Fingerprint::of(&revision))
+        .unwrap();
+    let x = sites().await;
+    let (mgr, w) = fleet_mgr(&x.ground, None, &["vehicle-01"]).await;
+    // The owner-side archives watch a router of their own, which no owner
+    // reaches, so they align only when asked: an alignment of their own at
+    // the owner's token, still retrying when the owner goes, would read
+    // nothing and leave the key unconfirmed (core §4.4, "Retrying").
+    let (_quiet_router, quiet_ep) = router(None).await;
+    let quiet = client(&quiet_ep).await;
+    let on_side = |address: &str| ArchiveConfig {
+        service: config(address),
+        records: vec![recorded(
+            "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*",
+        )],
+        peers: vec![],
+        unconfirmed_horizon: None,
+        watch: Some(quiet.clone()),
+    };
+    let ground_arch = Archive::start_under(&x.ground, on_side("ground/archive"), catalog.clone())
+        .await
+        .unwrap();
+    // The JSON form's twin: an archive given no catalog.
+    let json_arch = Archive::start(&x.ground, on_side("ground/json-archive"))
+        .await
+        .unwrap();
+    eventually("both owner-side archives record v4", || async {
+        w["vehicle-01"].put("v4").await.unwrap();
+        ground_arch.confirmed(ORIGIN) == Some(true) && json_arch.confirmed(ORIGIN) == Some(true)
+    })
+    .await;
+    // Each aligned once on the owner's answer, before the cut.
+    eventually("both aligned on the owner's answer", || async {
+        let (g, j) = (ground_arch.align(T).await, json_arch.align(T).await);
+        g.is_ok_and(|a| a.confirmed == 1)
+            && j.is_ok_and(|a| a.confirmed == 1)
+            && ground_arch.confirmed(ORIGIN) == Some(true)
+            && json_arch.confirmed(ORIGIN) == Some(true)
+    })
+    .await;
+    let attachment = |s: &Sample| s.attachment().map(|a| a.to_bytes().into_owned());
+    let compact = raw_get(
+        &x.ground,
+        &archive::archive_key(&common::addr("ground/archive"), ORIGIN),
+    )
+    .await;
+    let json = raw_get(
+        &x.ground,
+        &archive::archive_key(&common::addr("ground/json-archive"), ORIGIN),
+    )
+    .await;
+    let (compact, json) = (
+        attachment(&compact[0]).unwrap(),
+        attachment(&json[0]).unwrap(),
+    );
+    eprintln!(
+        "state.md §5 step 4: the attachment, compact {} B against JSON {} B",
+        compact.len(),
+        json.len()
+    );
+    assert_eq!(compact.len(), 3, "the compact form");
+    assert!(json.len() > 100, "the JSON form: {} B", json.len());
+
+    // The owner goes while the link is cut; the vehicle's archive starts
+    // with nothing, its peer the owner-side archive.
+    x.link.cut();
+    drop(w);
+    mgr.close().await.unwrap();
+    let arch = Archive::start_under(
+        &x.vehicle,
+        ArchiveConfig {
+            service: config("vehicle-01/archive"),
+            records: vec![recorded(ORIGIN)],
+            peers: vec![common::addr("ground/archive")],
+            unconfirmed_horizon: None,
+            watch: Some(x.vehicle_watch.clone()),
+        },
+        catalog.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(arch.confirmed(ORIGIN), None, "it holds nothing yet");
+    x.link.heal();
+    // Its own alignment at the peer's token can run before the route to the
+    // peer's queryable crossed (core §4.4, "Retrying"): asked again here,
+    // since what is under test is the bit it reads, not when it reads it.
+    eventually(
+        "aligned from the owner-side archive's compact attachment",
+        || async {
+            arch.confirmed(ORIGIN) == Some(true) || {
+                let _ = arch.align(T).await;
+                false
+            }
+        },
+    )
+    .await;
+    let vehicle = common::addr("vehicle-01/archive");
+    let raw = raw_get(&x.vehicle, &archive::archive_key(&vehicle, ORIGIN)).await;
+    assert_eq!(attachment(&raw[0]).map(|a| a.len()), Some(3));
+
+    // Holding the catalog: the identity the JSON form states.
+    let held = zenkey::presence::Held::new(Arc::new(vec![catalog]), vec![Arc::new(revision)]);
+    let lk = archive::last_known_through(&x.vehicle, &vehicle, ORIGIN, &held, T)
+        .await
+        .unwrap()
+        .expect("the archive answers");
+    let twin = archive::last_known(&x.ground, &common::addr("ground/json-archive"), ORIGIN, T)
+        .await
+        .unwrap()
+        .expect("the JSON archive answers");
+    assert_eq!(lk.value.as_deref(), Some(&b"v4"[..]));
+    assert!(lk.confirmed);
+    assert_eq!(lk.unresolved, None);
+    assert_eq!(lk.identity, twin.identity, "the JSON form's identity");
+    assert_eq!(lk.identity["iface"], "mission_plan.v1");
+    // Holding none: `confirmed`, and no identity, never guessed.
+    let blind = archive::last_known(&x.vehicle, &vehicle, ORIGIN, T)
+        .await
+        .unwrap()
+        .expect("the archive answers");
+    assert!(blind.confirmed, "the bit needs no catalog");
+    assert_eq!(blind.identity["iface"], serde_json::Value::Null);
+    assert!(
+        blind
+            .unresolved
+            .as_deref()
+            .is_some_and(|w| w.starts_with("unknown_catalog")),
+        "{:?}",
+        blind.unresolved
+    );
+    // Over a pattern too.
+    let all = archive::last_known_all_through(
+        &x.vehicle,
+        &vehicle,
+        "zk2/ground/fleet-mgr/mission_plan.v1/state/plans/*",
+        &held,
+        T,
+    )
+    .await
+    .unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].identity, twin.identity);
+}
+
 /// §6 step 1 (core 0.100, #977's E3): a delete during an outage reaches the
 /// archive after the heal whatever the window. Within it, the owner's
 /// snapshot answers the plan's key with its tombstone, and the archive holds
