@@ -58,7 +58,7 @@ Options:
           This host's clock and the owner's agree within the HLC delta (500 ms), as the deployment keeps them: a reply's stamp is then aged against this clock (freshness.v1 §2.6)
 
       --across-face
-          The service sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements config.v1, or, with a revision in --contracts that uses config.v2, that config interface (§2.19, R7)
+          The service sits across a constrained face (spec §8.5), where presence and descriptors do not cross: the deployment's word that it implements config.v1, the one revision of it in --contracts if one is, or, with a revision in --contracts that uses config.v2, that config interface (§2.19, R7)
 
       --contracts <PATH>
           Contracts known offline, repeatable: an authoring file (`*.toml`), a directory of them, or a `.history` root.

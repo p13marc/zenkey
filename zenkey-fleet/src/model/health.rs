@@ -32,13 +32,12 @@ use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use zenkey_model::freshness::{
-    ClockMeasure, ClockTrust, DEFAULT_DELTA, Observation, Reply, StampAge,
+    self, ClockMeasure, ClockTrust, DEFAULT_DELTA, Horizon, Observation, Reply, StampAge,
 };
 use zenkey_model::grammar::Addr;
 use zenkey_model::health::v2 as hv2;
 use zenkey_model::health::{
-    self as hm, Agreement, Answer, Judged, Level, Listing, Major, Presence, Read, Reading, Reason,
-    Verdict,
+    self as hm, Agreement, Answer, Judged, Level, Listing, Major, Presence, Read, Reason, Verdict,
 };
 
 use crate::bus::health::{HealthGet, Replied, ServiceGot, StatusValue};
@@ -127,17 +126,30 @@ pub struct ServiceReading {
     /// The levels of the checks the owner answered with a value; `None`
     /// when the checks were not read.
     pub checks: Option<Vec<Read>>,
+    /// The status's horizon: the standard contract's 60 s
+    /// ([`hm::status_horizon`]), or across a face the revision the
+    /// deployment's word names ([`ServiceReading::within`]).
+    pub horizon: Horizon,
 }
 
 impl ServiceReading {
-    /// §2.11's verdict.
+    /// §2.11's verdict, the status's freshness judged at the reading's
+    /// horizon.
     pub fn judged(&self) -> Judged {
-        hm::judge(&Reading {
-            presence: self.presence,
-            status: &self.observations,
-            level: self.level,
-            checks: self.checks.as_deref(),
-        })
+        hm::judge_status(
+            self.presence,
+            freshness::judge_all(&self.horizon, &self.observations),
+            self.level,
+            self.checks.as_deref(),
+        )
+    }
+
+    /// This reading, its status judged at `horizon`, a revision's other
+    /// than the standard's.
+    #[must_use]
+    pub fn within(mut self, horizon: Horizon) -> ServiceReading {
+        self.horizon = horizon;
+        self
     }
 
     /// §5's second question, for this reading alone.
@@ -209,6 +221,7 @@ pub fn reading(
         observations,
         level,
         checks,
+        horizon: hm::status_horizon(),
     }
 }
 

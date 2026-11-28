@@ -64,7 +64,8 @@ use zenkey::config_v1;
 use zenkey_model::config::{
     self as cm, ConfigChangeEvent, ConfigError, ConfigStatus, ConfigView, ControlReply, SetReply,
 };
-use zenkey_model::freshness::{ClockMeasure, Observation};
+use zenkey_model::contract::Contract;
+use zenkey_model::freshness::{ClockMeasure, Horizon, Observation};
 use zenkey_model::grammar::{Addr, GRAMMAR, IfaceId, KindToken, ZkKey};
 use zenkey_model::template::Bindings;
 use zenoh::Session;
@@ -308,7 +309,8 @@ pub struct ConfigSpec {
     pub clocks_synced: bool,
     /// The service sits across a constrained face: no presence and no
     /// descriptor is read, and the deployment's word says it implements
-    /// `config.v1` (§2.19, R7).
+    /// `config.v1` (§2.19, R7), its revision the one in `contracts` if one
+    /// is ([`ConfigSpec::v1_contract`]).
     pub across_face: bool,
     /// Read the status alone: the view is six frames on a radio, the
     /// status two (§2.19).
@@ -372,6 +374,39 @@ impl ConfigSpec {
             store: None,
             v2: None,
         }
+    }
+
+    /// The revision of `config.v1` the view and the status are read by:
+    /// across a face, where no descriptor crosses, the one revision of it
+    /// held offline, the deployment's word for the one its owner
+    /// implements (a later minor, or a test's copy with a short horizon);
+    /// otherwise, or with none or two held, the standard contract.
+    pub fn v1_contract(&self) -> Arc<Contract> {
+        let standard = config_v1::implementation();
+        if !self.across_face {
+            return standard.shared_contract();
+        }
+        let mut held = self
+            .contracts
+            .iter()
+            .filter(|r| r.iface() == standard.iface());
+        match (held.next(), held.next()) {
+            (Some(r), None) => r.shared_contract(),
+            _ => standard.shared_contract(),
+        }
+    }
+
+    /// The view's and the status's horizon under `config.v1`, as
+    /// `freshness.v1` reads it: [`ConfigSpec::v1_contract`]'s, the
+    /// standard's 60 s unless the deployment's word across a face names
+    /// another.
+    pub fn v1_horizon(&self) -> Horizon {
+        self.v1_contract()
+            .resource(KindToken::State, "status")
+            .map_or_else(
+                crate::model::config::horizon,
+                zenkey_model::freshness::horizon_of,
+            )
     }
 }
 
@@ -499,9 +534,17 @@ pub async fn observe(
     };
     let window = match (spec.window, &v2) {
         (None, _) | (Some(_), Some(Err(_))) => None,
-        (Some(_), None) => {
-            Some(Window::open(session, &address, t, spec.across_face, &spec.catalogs).await)
-        }
+        (Some(_), None) => Some(
+            Window::open(
+                session,
+                &address,
+                t,
+                spec.across_face,
+                &spec.catalogs,
+                spec.v1_contract(),
+            )
+            .await,
+        ),
         (Some(_), Some(Ok(target))) => Some(
             Window::open_v2(
                 session,
@@ -873,11 +916,12 @@ impl Window {
         timeout: Duration,
         across: bool,
         catalogs: &Catalogs,
+        contract: Arc<Contract>,
     ) -> Result<Window, String> {
         let provider = address.to_string();
         let consumer = zenkey::consumer::Consumer::for_tool(
             session,
-            config_v1::implementation().shared_contract(),
+            contract,
             &[provider.as_str()],
             &BTreeMap::new(),
         )

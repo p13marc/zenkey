@@ -45,7 +45,7 @@ Options:
           - health.v2: Packed records, their words numbers into tables
 
       --contracts <PATH>
-          Contracts known offline, repeatable: an authoring file, a directory of them, or a `.history` root. A health.v2 owner's words are read by the tables (health.reasons, health.details, health.codes) of the revisions its descriptor names, these first, one not held retrieved from the bus (spec §8.4); never a revision it does not name. Across a face, the tables of these alone, the deployment's word. A path that loads nothing is refused (exit 2)
+          Contracts known offline, repeatable: an authoring file, a directory of them, or a `.history` root. A health.v2 owner's words are read by the tables (health.reasons, health.details, health.codes) of the revisions its descriptor names, these first, one not held retrieved from the bus (spec §8.4); never a revision it does not name. Across a face, the tables of these alone, the deployment's word, and the one revision of the face's major among them is the owner's: the status is confirmed within its horizon. A path that loads nothing is refused (exit 2)
 
       --catalog <PATH>
           The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1` file the deployment provisions. A snapshot's confirmations are dated under the epoch of the catalog an owner's descriptor names, read through these; without one, an owner naming a catalog leaves them undated, so its members read unconfirmed by time. A file that is not a catalog is refused (exit 2)

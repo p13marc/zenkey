@@ -3674,8 +3674,9 @@ pub(crate) struct ConfigGetArgs {
     pub(crate) clocks_synced: bool,
     /// The service sits across a constrained face (spec §8.5), where
     /// presence and descriptors do not cross: the deployment's word that it
-    /// implements config.v1, or, with a revision in --contracts that uses
-    /// config.v2, that config interface (§2.19, R7).
+    /// implements config.v1, the one revision of it in --contracts if one is,
+    /// or, with a revision in --contracts that uses config.v2, that config
+    /// interface (§2.19, R7).
     #[arg(long)]
     pub(crate) across_face: bool,
     #[command(flatten)]
@@ -3868,8 +3869,10 @@ pub(crate) struct HealthArgs {
     /// the tables (health.reasons, health.details, health.codes) of the
     /// revisions its descriptor names, these first, one not held retrieved
     /// from the bus (spec §8.4); never a revision it does not name. Across
-    /// a face, the tables of these alone, the deployment's word. A path
-    /// that loads nothing is refused (exit 2).
+    /// a face, the tables of these alone, the deployment's word, and the
+    /// one revision of the face's major among them is the owner's: the
+    /// status is confirmed within its horizon. A path that loads nothing is
+    /// refused (exit 2).
     #[arg(long = "contracts", value_name = "PATH")]
     pub(crate) contracts: Vec<PathBuf>,
     /// The deployment catalog (core §8.6), repeatable: a `zk2-catalog/1`
