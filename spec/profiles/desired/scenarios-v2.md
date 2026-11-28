@@ -307,8 +307,9 @@ its record.
 
 ## §13 A conditional re-read, and what a read waits (§2.5)
 
-**Setup.** One router, R1. P plays the author. The target starts, and
-its seed draws v1's snapshot from P, its entry at (R, 7). The target
+**Setup.** One router, R1. P plays the author: it answers a descriptor
+stating R, and declares its instance token (§2.18). The target starts,
+and its seed draws v1's snapshot from P, its entry at (R, 7). The target
 converged on v1. Its period is 2 s.
 
 **Steps.**
