@@ -352,10 +352,12 @@ a first hop, re-minting and the caller's timeouts stay in core §8.1.
     and a withdrawn token not yet gone.
   - **A read never undoes a token heard since it was asked.** The read and
     the watch ride two sessions, which no router orders (§3.7). A token
-    the watch hears declared after the read is asked stands, whatever
-    the read shows: the read establishes nothing of it. A reader MUST
-    NOT apply such a read's absence to a token heard since.
-    `[Sc: profiles/redundancy/scenarios-v2.md §13]`
+    the watch hears declared or withdrawn after the read is asked stands
+    as the watch heard it: the read establishes nothing of it. A reader
+    MUST NOT apply such a read's absence to a token heard declared
+    since, nor its showing to one heard withdrawn since.
+    `[Sc: profiles/redundancy/scenarios-v2.md §13]` That one is
+    unconfirmed, and owes a read.
   - A make-before-break re-mint (core §8.1) leaves nothing with nothing
     held, so it owes no read: another instance holds throughout.
   - A read not made (above) leaves the withdrawal unconfirmed until the

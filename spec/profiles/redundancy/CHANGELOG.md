@@ -138,13 +138,15 @@ twice. Each matches the design's figure.
   100 members of 200 B is 25.9 KB of puts, and 23.3 KB. A follower's
   seed of them is 28.3 KB in 100 replies, and one snapshot of 22.5 KB.
 
-**Not verified.**
+**Verified.**
 - **Two implementations ran it, after the text.** The reference runs
   the fixtures and scenarios §1 to §15 as tests (#987's N2 and N3), and
   zk2py's round 128 ran all 153 fixture cases and §1, §9 and §13 to §15
   live in both pairings (F-629 to F-632).
-- **No byte crossed a wire under this major.** The payloads measured
-  are `redundancy.v1`'s.
+- **Bytes crossed a wire under this major** in zk2py's round 128 and
+  its mend, and match Appendix B's column (F-638).
+
+**Not verified.**
 - **The descriptor and sample race** was not reproduced at a run's
   change within an instance. `scenarios-v2.md` §14 forces it with a
   delayed subscriber.
@@ -153,6 +155,7 @@ twice. Each matches the design's figure.
 - **"How often"** (F-631): a follower that holds none of the new holder's runs, started after its claim, learns the run at the takeover from its descriptor. A sample between the token and that read is held. "Never at a takeover" held only for a follower that had read the standby's descriptor. §13's Expected 2 says so.
 - **"Seed again"** (F-630) merges the new incumbent's answers: snapshots, or a `redundancy.v1` incumbent's replies per key. No omission rule applies to the latter.
 - **observer 0.38 §3.6** (F-629): a read never undoes a token heard since it was asked. §13 gains the step, over 39 takeovers.
+- **After round 128's mend:** "Seed again" lists a per-key resource's replies too (F-636). A candidate's per-key state keeps core §4.3's Zenoh timestamp, and the clock guard holds it (F-637, a contradiction; both implementations already stamped it).
 
 **What deliberately did not change.** The election, the heal, a
 vacancy, the standby's mark and what it holds, twin detection, the

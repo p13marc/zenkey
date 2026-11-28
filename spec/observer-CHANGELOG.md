@@ -30,6 +30,10 @@ the token. The follower then discarded every later sample,
   whatever that read shows. A reader MUST NOT apply the read's absence
   to it. `[Sc: profiles/redundancy/scenarios-v2.md §13]` gains the
   step.
+- **And a withdrawal heard since** (round 128's mend, F-635): a read
+  that shows a token the watch heard withdrawn after the read was asked
+  does not bring it back. It is unconfirmed, and owes a read. Both
+  implementations already read it so.
 
 **What deliberately did not change.** The read again after a
 withdrawal, its SHOULD and what it establishes of every token the watch
