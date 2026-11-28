@@ -218,6 +218,8 @@ def main():
     p.add_argument("--auth", help="the directory of users.txt and ground.pw, with --face")
     p.add_argument("--far", help="the far end's generated block (acl gen --far-config), with --face")
     p.add_argument("--ids", help="router A's and router B's zenoh ids, A,B (#1136)")
+    p.add_argument("--far-opens", action="store_true",
+                   help="with no face: the far side opens the lane, as under a face (rc-023's soak)")
     a = p.parse_args()
     ids = dict(zip("ab", a.ids.split(","))) if a.ids else {}
     m = MEDIA[a.medium]
@@ -254,7 +256,9 @@ def main():
     # accepts it, authenticates it as `ground` (zenoh's usrpwd: the acceptor
     # verifies the opener): driver A dials router A and router B dials driver
     # B, the reverse of a run with no face.
-    roles = ("dial", "bind") if a.face else ("bind", "dial")
+    # --far-opens (rc-023's soak) turns the lane alone, with no plan and no credentials.
+    far_opens = bool(a.face) or a.far_opens
+    roles = ("dial", "bind") if far_opens else ("bind", "dial")
     for side, peer, role, mine, relay in (("a", "b", roles[0], "driver_a", "relay_a"),
                                           ("b", "a", roles[1], "driver_b", "relay_b")):
         text = tpl.replace("@LAYERS@", layers)
@@ -276,7 +280,7 @@ def main():
   listen: {{ endpoints: ["tcp/127.0.0.1:{ports['router_b']}", "{lane_b}"] }},
 ''',
     }
-    if a.face:
+    if far_opens:
         endpoints = {
             "a": f'''
   // A listens where driver A dials (its endpoint "b", role "dial"): the far side
@@ -349,6 +353,7 @@ def main():
         open(f"{a.out}/zenohd-{side}.json5", "w").write(text)
     params = {"medium": a.medium, "stack": a.stack, "inst": a.inst, "batch_size": b,
               "ports": ports, "run": run, "face": bool(a.face), "generated": bool(a.far),
+              **({"far_opens": True} if a.far_opens else {}),
               **({"ids": ids} if ids else {}),
               **{k: v for k, v in m.items() if k != "words"}}
     json.dump(params, open(f"{a.out}/params.json", "w"), indent=1)

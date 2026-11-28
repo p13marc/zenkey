@@ -36,6 +36,9 @@
 #   FAR   (default 1) 0 leaves --far out, as the RF and SF7 zk2c runs of
 #         2026-11-08 were rendered: router A's `timestamping` written by
 #         render.py, and no generated user on router B;
+#   FAR_OPENS  (rc-023's soak) 1: with no FACE_POLICY, the far side opens the
+#         lane as under a face (render.py --far-opens), with no plan and no
+#         credentials;
 #   ZIDS  (#1136's bound runs) router A's and router B's zenoh ids, "A,B",
 #         which fix each direction's initial sequence number (render.py --ids).
 #
@@ -109,6 +112,7 @@ render() { # medium, stack
     [[ ${FAR:-1} == 0 ]] || extra+=(--far "$CFG/face-far.json5")
   fi
   [[ -z ${ZIDS:-} ]] || extra+=(--ids "$ZIDS")
+  [[ ${FAR_OPENS:-0} == 0 || -n ${FACE_POLICY:-} ]] || extra+=(--far-opens)
   python3 -I "$HERE/render.py" --medium "$1" --stack "$2" --work "$WORK" --inst "$INST" \
     --base "$BASE" --out "$CFG" "${extra[@]}" >/dev/null
   mkdir -p "$LOGS/configs" && cp "$CFG"/driver-?.toml "$CFG"/zenohd-?.json5 "$CFG/params.json" "$LOGS/configs/"
@@ -145,8 +149,8 @@ up() {
   sleep 0.5
   start driver-a env RUST_LOG="${DRIVER_LOG:-info}" "$BIN/modem-driver" --config "$CFG/driver-a.toml"
   start driver-b env RUST_LOG="${DRIVER_LOG:-info}" "$BIN/modem-driver" --config "$CFG/driver-b.toml"
-  if [[ -n ${FACE_POLICY:-} ]]; then
-    # The far side opens the lane (render.py --face): A listens, B dials.
+  if [[ -n ${FACE_POLICY:-} || ${FAR_OPENS:-0} == 1 ]]; then
+    # The far side opens the lane (render.py --face, --far-opens): A listens, B dials.
     wait_for "$RUN/b/rfb/a/air" 10
     start zenohd-a "$ZENOHD" -c "$CFG/zenohd-a.json5"
     sleep 1
