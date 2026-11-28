@@ -1,5 +1,5 @@
-"""One candidate of a ``redundancy.v1`` governed interface as a process
-(#609, rounds 56 and 58), driven as a black box by
+"""One candidate of a ``redundancy.v1`` or ``redundancy.v2`` governed
+interface as a process (#609, rounds 56, 58 and 128), driven as a black box by
 :mod:`zk2py.redundancy_scenarios`. Since round 58 it takes the owner
 example's command line and answers its ``redundancy`` commands in its JSON,
 so that one runner drives either::
@@ -7,7 +7,8 @@ so that one runner drives either::
     python -m zk2py.redundancy_owner --connect EP --standby [--election claim|external]
         [--instance-id ID] [--name WORD] [--retry-ms MS] [--grace-ms MS] [--poll-ms MS]
         [--lease-ms MS] [--lock-file PATH] [--refuse-without-lock] [--hold-heal] [--peer]
-        [--tokenless IFACE]... [--wait-go] [--user U --password P] SYSTEM/SERVICE CONTRACT.toml
+        [--tokenless IFACE]... [--wait-go] [--first-run HEX] [--takeover-puts-nothing]
+        [--user U --password P] SYSTEM/SERVICE CONTRACT.toml
 
 Standard output, first ``connected <endpoint>``, then ``ready
 zk2/<system>/<service>/@zk/instance/<instance>`` (with ``--wait-go``,
@@ -20,7 +21,8 @@ exit 1, nothing declared. Then one line per command:
   ``not_made``, ``polls``, ``last``) and each session's GETs;
 - ``redundancy lock hold|lose``, ``redundancy calls``, ``redundancy
   hold-heal on|off``, ``redundancy wait <iface> serving|standby <ms>``,
-  ``redundancy new-epoch``, each answered as the owner example does;
+  ``redundancy new-epoch``, ``redundancy run`` and ``redundancy new-run``
+  (round 128), each answered as the owner example does;
 - ``put <iface> <resource>``: one write, ``ok``, of a raw state: ``put
   <key>``, or ``refused …`` while it stands by (§2.4);
 - ``redundancy zid``: the claim's session's, the reader's and the
@@ -87,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--wait-go", action="store_true")
     ap.add_argument("--reader-connect", help="zk2py's own: the reader through this endpoint (a test cuts it apart)")
     ap.add_argument("--hostid-root", help="hostid.v1: the directory standing in for / (the owner example's)")
+    ap.add_argument("--first-run", help="redundancy.v2 scenarios §14: the first instance's run, 8 lowercase hex "
+                    "digits; a redundancy.v2 candidate reading it in a lower id's descriptor draws a new one")
+    ap.add_argument("--takeover-puts-nothing", action="store_true",
+                    help="redundancy.v2 scenarios §13 step 3: a takeover puts no value")
     ap.add_argument("--user")
     ap.add_argument("--password")
     a = ap.parse_args(argv)
@@ -103,12 +109,14 @@ def main(argv: list[str] | None = None) -> int:
                   retry_s=a.retry_ms / 1000, grace_s=a.grace_ms / 1000, lock=a.lock_file,
                   refuse_without_lock=a.refuse_without_lock, tokenless=tuple(a.tokenless), peer=a.peer,
                   hold_heal=a.hold_heal, auth=auth, poll_s=None if a.poll_ms is None else a.poll_ms / 1000,
-                  lease_ms=a.lease_ms, reader_endpoint=a.reader_connect, hostid_root=a.hostid_root)
+                  lease_ms=a.lease_ms, reader_endpoint=a.reader_connect, hostid_root=a.hostid_root,
+                  first_run=a.first_run, takeover_puts_nothing=a.takeover_puts_nothing)
+    text = "redundancy.v2" if c.major == 2 else "redundancy.v1"
     if c.declaration.declaration == "governed" and not a.standby:
-        return refuse(f"{c.iface} is governed by redundancy.v1, and this service takes part in no election "
-                      "(--standby) (redundancy.v1 §2.5)")
+        return refuse(f"{c.iface} is governed by {text}, and this service takes part in no election "
+                      f"(--standby) ({text} §2.5)")
     if a.election is not None and c.declaration.governed and a.election != c.election:
-        return refuse(f"--election {a.election}: {c.iface}'s contract declares {c.election} (redundancy.v1 §2.2)")
+        return refuse(f"--election {a.election}: {c.iface}'s contract declares {c.election} ({text} §2.2)")
 
     def out(line: Any) -> None:
         print(line if isinstance(line, str) else json.dumps(line, separators=(",", ":")), flush=True)
@@ -211,6 +219,19 @@ def command(c: Candidate, words: list[str], line: str, begin: Any) -> Any:
             time.sleep(0.02)
     if cmd == "new-epoch" and not rest:
         return {"redundancy": "new-epoch", "instance": c.new_epoch()}
+    if cmd == "run" and not rest:
+        # the owner example's: "the run it writes under, as its descriptor states it"
+        assert c.owner is not None
+        return {"redundancy": "run", "run": c.owner.run_hex()}
+    if cmd == "new-run" and not rest:
+        # "a new run within the instance, its descriptor put stating it first
+        # (core §4.3; scenarios-v2.md §14)"
+        assert c.owner is not None
+        return {"redundancy": "new-run", "run": c.owner.new_run()}
+    if cmd == "redraws" and not rest:
+        # zk2py's own: each draw again of redundancy.v2 §2.10
+        with c.lock:
+            return {"redundancy": "redraws", "redraws": [list(x) for x in c.redraws]}
     if cmd == "steps":
         with c.lock:
             return {"redundancy": "steps", "steps": [[t, e if isinstance(e, str) else next(iter(e)), s]

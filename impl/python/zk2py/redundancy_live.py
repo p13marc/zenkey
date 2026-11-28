@@ -443,7 +443,8 @@ class Candidate:
                  refuse_without_lock: bool = False, tokenless: tuple[str, ...] = (), peer: bool = False,
                  timeout: float = 1.0, hold_heal: bool = False, auth: tuple[str, str] | None = None,
                  poll_s: float | None = None, lease_ms: int | None = None,
-                 reader_endpoint: str | None = None, hostid_root: str | None = None) -> None:
+                 reader_endpoint: str | None = None, hostid_root: str | None = None,
+                 first_run: str | None = None, takeover_puts_nothing: bool = False) -> None:
         #: hostid.v1 §2.7: an address of a minted system, ``@hostid.v1/<svc>``,
         #: minted from ``hostid_root`` (a directory standing in for /) before
         #: anything opens; its owner mints the same and lists hostid.v1
@@ -459,8 +460,21 @@ class Candidate:
         self.contract = contract_at(contract)
         self.iface = self.contract.interface
         self.tokenless = set(tokenless)
-        decl = rd.declaration_of(self.contract.canonical, tokenless=self.iface in self.tokenless)
+        # redundancy.v2 §2.17: a candidate of either major, its declaration
+        # read by the major its revision lists (§2.2)
+        from . import redundancy_v2 as rv2
+
+        self.major, decl = rv2.either_declaration(self.contract.canonical, tokenless=self.iface in self.tokenless)
         self.declaration = decl
+        #: scenarios-v2.md's hooks: the first instance's run, 8 lowercase hex
+        #: digits (§14), and a takeover that puts no value (§13 step 3)
+        self.first_run = rv2.Run.parse(first_run) if first_run is not None else None
+        if first_run is not None and (self.first_run is None or self.first_run.width != 32):
+            raise ValueError(f"--first-run {first_run!r}: 8 lowercase hex digits (core §4.3's 32-bit run)")
+        self.takeover_puts_nothing = takeover_puts_nothing
+        #: redundancy.v2 §2.10 "A run no other states": each draw again, (the
+        #: run read in a lower id's descriptor, the instance, the new run)
+        self.redraws: list[tuple[str, str, str]] = []
         self.election = decl.election or rd.CLAIM
         self.instance = instance or secrets.token_hex(8)
         self.machine = rd.Machine(self.instance, self.election)
@@ -552,6 +566,8 @@ class Candidate:
                       standby={self.iface}, handlers=handlers, tokenless=self.tokenless, auth=self.auth,
                       lease_ms=self.lease_ms, hostid=self.hostid)
         owner.instance = self.instance
+        if self.first_run is not None:
+            owner.first_run = (self.first_run.width, self.first_run.value)
         try:
             owner._plan()
         except Exception as e:
@@ -797,8 +813,10 @@ class Candidate:
     def _read(self) -> rd.Read:
         assert self.owner is not None and self.reader is not None
         own = (self.instance, rd.STANDBY if self.iface in self.owner.standing_by else rd.SERVING)
-        r, p, _ = read_address(self.reader, self.address, self.iface, below=self.instance, own=own,
-                               timeout=self.timeout)
+        r, p, docs = read_address(self.reader, self.address, self.iface, below=self.instance, own=own,
+                                  timeout=self.timeout)
+        if self.major == 2 and self.owner.run is not None:
+            self._draw_again(docs)
         with self.lock:
             # as the owner example counts them: "made" the reads made, a read
             # not made counted apart
@@ -816,6 +834,26 @@ class Candidate:
         self.reads.append((time.monotonic(), r, p.kind, reason))
         return r
 
+    def _draw_again(self, docs: dict[str, dict[str, Any]]) -> None:
+        """redundancy.v2 §2.10: "A candidate SHOULD draw a new run before it
+        serves, when it reads its own run in the descriptor of another
+        instance of its address. It reads the lower ids' descriptors at each
+        campaign anyway (v1 §2.5 step 3)." "A new run is core §4.3's: the
+        candidate puts its descriptor again before it writes under it." It
+        draws while the new run is still one it read."""
+        from . import redundancy_v2 as rv2
+
+        assert self.owner is not None
+        read = {i: rv2.Run.parse(d.get("run")) for i, d in docs.items() if i != self.instance}
+        for _ in range(8):
+            mine = rv2.Run(self.owner.run[0], self.owner.run[1]) if self.owner.run is not None else None
+            if mine is None or not rv2.draw_again(mine, read.values()):
+                return
+            who = next(i for i, x in read.items() if x == mine)
+            new = self.owner.new_run()
+            with self.lock:
+                self.redraws.append((str(mine), who, new))
+
     # -- the application (scenarios.md, "The instances") ----------------------------
     def _append(self, call: Any) -> None:
         with self.lock:
@@ -825,6 +863,8 @@ class Candidate:
     def _puts(self, owner: Owner) -> None:
         """"puts balance with its own name as the value when it takes over"
         (scenarios.md; a valve's position the same)."""
+        if self.takeover_puts_nothing:
+            return
         rid = "balance" if self.iface.startswith("ledger.") else "position"
         owner.set_state(f"zk2/{self.address}/{self.iface}/state/{rid}", self.name.encode())
 
