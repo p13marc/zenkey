@@ -804,3 +804,13 @@ confirmed: Option, identity: Result<Value, String> }`, the JSON form
 parsed for its members. `tests/conformance.rs`' `archive_attachments` runs
 `spec/conformance/archive/attachments.json` as written (12 writes, 44
 reads, every refusal; every accepted read writes back).
+
+- **`link`'s batch** (#1136, link.v1 0.22, v2 0.30): `allowance(payload,
+  PutQos, Sequence, protocols)` is what zenoh 1.10.1 writes beside a put in
+  its batch, and `fits_batch` the comparison `frame_over_batch`,
+  `block_over_batch` and the owner heartbeat's check read (a link.v1 face at
+  `Sequence::Bit32`); `Sequence::max_bytes`, `UNSTREAMED_PROTOCOLS`; `Res`
+  holds `priority_data` (every revision `data`) and `express` (any), its
+  `qos()`. `a_puts_allowance_is_the_measured_bound` pins the bound measured
+  on rf0's face, and `tests/examples.rs` reads modem.v3's frames against
+  RF's and LoRa's batches with it.
