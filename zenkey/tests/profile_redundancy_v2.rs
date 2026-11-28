@@ -65,6 +65,10 @@ fn valve() -> IfaceId {
     "valve.v1".parse().unwrap()
 }
 
+fn beacon() -> IfaceId {
+    "beacon.v2".parse().unwrap()
+}
+
 fn id(n: u64) -> InstanceId {
     InstanceId::from_u64(n)
 }
@@ -153,6 +157,18 @@ impl Opts {
             address: VALVE,
             imp: common::imp("valve-run.v1"),
             lock: Some(lock),
+            ..Self::ledger(name, id)
+        }
+    }
+
+    /// `beacon-governed-run.v2` at `lab/beacon`: `status` followed by
+    /// heartbeats (§13's step over 39 takeovers), no operation, a takeover
+    /// that puts nothing.
+    fn beacon(name: &'static str, id: u64) -> Self {
+        Self {
+            address: BEACON,
+            imp: common::imp("beacon-governed-run.v2"),
+            takeover: Some(None),
             ..Self::ledger(name, id)
         }
     }
@@ -257,9 +273,11 @@ async fn prepare(ep: &str, o: Opts) -> Result<Prepared, Error> {
     b.implement(o.imp.clone())?;
     let none = Bindings::new();
     let (state_res, op_res) = if iface == ledger() {
-        ("state/balance", "@op/append")
+        ("state/balance", Some("@op/append"))
+    } else if iface == beacon() {
+        ("state/status", None)
     } else {
-        ("state/position", "@op/set")
+        ("state/position", Some("@op/set"))
     };
     let state = Arc::new(b.declare_state_writer(&iface, state_res, &none).await?);
     let stream = if iface == ledger() {
@@ -280,17 +298,21 @@ async fn prepare(ep: &str, o: Opts) -> Result<Prepared, Error> {
     };
     let calls = Arc::new(AtomicU64::new(0));
     let (n, name) = (Arc::clone(&calls), o.name);
-    let server = b
-        .serve(&iface, op_res, Some(&none), move |call| {
-            let n = Arc::clone(&n);
-            async move {
-                n.fetch_add(1, Ordering::SeqCst);
-                call.reply(name)
-                    .await
-                    .map_err(|e| zenkey::OpError::internal(e.to_string()))
-            }
-        })
-        .await?;
+    let mut servers = Vec::new();
+    if let Some(op_res) = op_res {
+        servers.push(
+            b.serve(&iface, op_res, Some(&none), move |call| {
+                let n = Arc::clone(&n);
+                async move {
+                    n.fetch_add(1, Ordering::SeqCst);
+                    call.reply(name)
+                        .await
+                        .map_err(|e| zenkey::OpError::internal(e.to_string()))
+                }
+            })
+            .await?,
+        );
+    }
     let mut startup = RedundancyStartup::new(reader.clone())
         .with_retry(RETRY)
         .with_grace(GRACE)
@@ -315,7 +337,7 @@ async fn prepare(ep: &str, o: Opts) -> Result<Prepared, Error> {
         calls,
         state,
         stream,
-        servers: vec![server],
+        servers,
         sessions: vec![claim, watch, reader],
     })
 }
@@ -3273,5 +3295,220 @@ async fn a_follower_reads_its_incumbents_heartbeats_alone() {
     drop((following, p_sub));
     for s in [a.session.clone(), b.session.clone(), x, ks, kw, ps] {
         let _ = s.close().await;
+    }
+}
+
+// ─── observer §3.6: a read never undoes a token heard since it was asked ─
+
+/// Each incumbent K told, in order.
+fn incumbents(told: &Told) -> Vec<Option<InstanceId>> {
+    told.lock()
+        .unwrap()
+        .iter()
+        .filter_map(|(_, e)| match e {
+            FollowEvent::Incumbent { incumbent, .. } => Some(incumbent.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Observer §3.6 (0.38; round 128's F-629): a read again never undoes a
+/// token heard since it was asked.
+///
+/// A (id 0xa) holds `beacon-governed-run.v2`'s token at `lab/beacon`, and K
+/// follows it. A's tokens go: K reads again a burst later, and that read's
+/// answer is applied `HOLD` after it came back
+/// (`FollowStartup::reread_hold`), as an answer the watch's news overtook.
+/// B (id 0xb) declares its tokens while the read is held: K's watch hears
+/// them, and K follows B. The read, complete and without B, is applied
+/// after: K keeps B, and accepts B's put. Before the rule K read B gone,
+/// and discarded every later sample of B's `no_incumbent`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_read_again_never_undoes_a_token_heard_since_it_was_asked() {
+    use zenkey::consumer::Consumer;
+    const HOLD: Duration = Duration::from_millis(1500);
+    let (_r1, ep) = router(None).await;
+    let (ra, rb) = (Run::U32(0x0a0a_0a0a), Run::U32(0x0b0b_0b0b));
+    let a = holder(&ep, 0xa, ra).await;
+    let beacon: Addr = BEACON.parse().unwrap();
+    let (ks, kw) = (client(&ep).await, client(&ep).await);
+    let contract = Arc::new(common::contract("beacon-governed-run.v2"));
+    let k = Consumer::for_tool(&ks, contract, &[BEACON], &BTreeMap::new())
+        .unwrap()
+        .with_watch(kw.clone());
+    let told: Told = Arc::default();
+    let t = Arc::clone(&told);
+    let following = k
+        .follow_with(
+            "state/status",
+            FollowStartup {
+                reread_hold: HOLD,
+                ..FollowStartup::default()
+            },
+            move |e| t.lock().unwrap().push((Instant::now(), e)),
+        )
+        .await
+        .unwrap();
+    eventually("K follows A", || async {
+        following.incumbent(&beacon) == Some(id(0xa))
+    })
+    .await;
+
+    // A's tokens go. K sees no incumbent, and asks its read again a burst
+    // later: answered without A or B, then held.
+    a.session.close().await.unwrap();
+    eventually("K sees no incumbent", || async {
+        following.incumbent(&beacon).is_none()
+    })
+    .await;
+    let gone = Instant::now();
+    tokio::time::sleep(zenkey::follow::BURST + Duration::from_millis(300)).await;
+    let b = holder(&ep, 0xb, rb).await;
+    eventually("K follows B", || async {
+        following.incumbent(&beacon) == Some(id(0xb))
+    })
+    .await;
+    assert!(
+        gone.elapsed() < zenkey::follow::BURST + HOLD,
+        "the test's premise: K heard B while its read again was held"
+    );
+
+    // The held read is applied: complete, and without B.
+    tokio::time::sleep_until((gone + zenkey::follow::BURST + HOLD + T).into()).await;
+    assert_eq!(
+        following.incumbent(&beacon),
+        Some(id(0xb)),
+        "the read establishes nothing of B: {:?}",
+        incumbents(&told)
+    );
+    assert_eq!(
+        incumbents(&told),
+        [Some(id(0xa)), None, Some(id(0xb))],
+        "never B gone"
+    );
+    let up = b.put(0, "up").await;
+    eventually("K accepts B's put", || async {
+        following
+            .value(STATUS)
+            .is_some_and(|d| d.inband == Some(up))
+    })
+    .await;
+    assert!(
+        following.counts().discarded.is_empty(),
+        "{:?}",
+        following.counts()
+    );
+
+    drop(following);
+    for s in [b.session.clone(), ks, kw] {
+        let _ = s.close().await;
+    }
+}
+
+/// `scenarios-v2.md` §13 step 2's read again (observer §3.6, 0.38; round
+/// 128's F-629), over `beacon-governed-run.v2` as round 128 measured it: A
+/// serves, B stands by, K starts after B's claim, and A crashes, its links
+/// cut. K's read again after A's withdrawal may come back without B's
+/// token, which its watch heard after the read was asked: K keeps B as its
+/// incumbent, never reads B gone, and accepts each later heartbeat of
+/// B's. Over `ZK2_S13_TAKEOVERS` takeovers (the text's 39; 3 in the suite).
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn s13_k_never_reads_b_gone_over_the_takeovers() {
+    use zenkey::consumer::Consumer;
+    let takeovers: u32 = std::env::var("ZK2_S13_TAKEOVERS")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(3);
+    let beacon: Addr = BEACON.parse().unwrap();
+    for run in 0..takeovers {
+        let (_r1, ep) = router(None).await;
+        let lo = rand_id();
+        let (a_id, b_id) = (lo, lo + 1);
+        let link_a = common::link_to(&ep).await;
+        let a = candidate(link_a.endpoint(), Opts::beacon("A", a_id))
+            .await
+            .unwrap();
+        a.until(Role::Serving).await;
+        let b = candidate(&ep, Opts::beacon("B", b_id)).await.unwrap();
+        eventually("B stands by on A", || async {
+            b.why() == Some(Why::Incumbent(a.id.clone()))
+        })
+        .await;
+        // K, started after B's claim.
+        let (ks, kw) = (client(&ep).await, client(&ep).await);
+        let contract = Arc::new(common::contract("beacon-governed-run.v2"));
+        let k = Consumer::for_tool(&ks, contract, &[BEACON], &BTreeMap::new())
+            .unwrap()
+            .with_watch(kw.clone());
+        let told: Told = Arc::default();
+        let t = Arc::clone(&told);
+        let following = k
+            .follow("state/status", move |e| {
+                t.lock().unwrap().push((Instant::now(), e))
+            })
+            .await
+            .unwrap();
+        eventually("K follows A", || async {
+            following.incumbent(&beacon) == Some(a.id.clone())
+        })
+        .await;
+
+        // A crashes; B takes over.
+        link_a.cut();
+        a.crash();
+        b.until(Role::Serving).await;
+        let b_run = b.run();
+        eventually("K follows B", || async {
+            following.incumbent(&beacon) == Some(b.id.clone())
+        })
+        .await;
+        // What K told once it followed B, in decision order: past its read
+        // again, and two of B's heartbeats.
+        let since_b = || -> Vec<FollowEvent> {
+            let told = told.lock().unwrap();
+            let at = told.iter().position(|(_, e)| {
+                matches!(e, FollowEvent::Incumbent { incumbent: Some(i), .. } if *i == b.id)
+            });
+            at.map_or_else(Vec::new, |at| {
+                told[at + 1..].iter().map(|(_, e)| e.clone()).collect()
+            })
+        };
+        let beats = |events: &[FollowEvent]| {
+            events
+                .iter()
+                .filter(|e| matches!(e, FollowEvent::Heartbeat { stamp, .. } if stamp.run == b_run))
+                .count()
+        };
+        eventually("K accepts B's heartbeats", || async {
+            beats(&since_b()) >= 2
+        })
+        .await;
+        assert_eq!(
+            following.incumbent(&beacon),
+            Some(b.id.clone()),
+            "run {run}: K reads B gone: {:?}",
+            incumbents(&told)
+        );
+        let late: Vec<String> = since_b()
+            .iter()
+            .filter_map(|e| match e {
+                FollowEvent::Incumbent { incumbent, .. } => {
+                    Some(format!("incumbent {incumbent:?}"))
+                }
+                FollowEvent::HeartbeatDiscarded { why, .. } => Some(format!("discarded {why}")),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            late.is_empty(),
+            "run {run}: once K follows B, never B gone, and none of B's heartbeats \
+             discarded: {late:?}"
+        );
+
+        drop(following);
+        b.close().await;
+        for s in [ks, kw] {
+            let _ = s.close().await;
+        }
     }
 }
