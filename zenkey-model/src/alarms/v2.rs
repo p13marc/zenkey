@@ -2648,8 +2648,10 @@ pub struct Reading {
     /// ([`super::Major::of`]), `NotListed` for one that holds neither
     /// major. One that holds `alarms.v1` alone is [`super::firing`]'s.
     pub presence: Presence,
-    /// `freshness.v2`'s verdict over the slot's observations at 900 s
-    /// ([`super::TTL`]); `None` where nothing was observed.
+    /// `freshness.v2`'s verdict over the slot's observations, at the
+    /// horizon of the revision its owner names (§2.7, text 0.2): the
+    /// standard revision's is 900 s ([`super::TTL`]). `None` where nothing
+    /// was observed, which judges the same at any horizon.
     pub freshness: Option<freshness::Judged>,
     /// The latest sample; `None` where the reader holds nothing of the
     /// alarm: never read, or its record `replaced` or `dropped`.
@@ -2694,7 +2696,8 @@ impl Reading {
 /// §5's first question, "is this alarm firing?", by v1 §2.14's steps over
 /// this major's records (§2.14): presence, the descriptor, an archive
 /// alone, a loss, the latest sample, `rebound` among them, then its
-/// freshness at 900 s. Yes is the finding.
+/// freshness at its revision's horizon ([`Reading::freshness`]). Yes is the
+/// finding.
 #[must_use]
 pub fn firing(r: &Reading) -> Judged {
     super::firing_asked(&r.asked())

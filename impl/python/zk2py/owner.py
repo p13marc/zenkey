@@ -600,7 +600,7 @@ class Owner:
                  state_zid: bool = True, heartbeat: str | None = None, delta_s: float = 0.5,
                  initial: dict[str, bytes] | None = None, hlc: bool | None = None,
                  cardinality: dict[str, dict[str, int]] | None = None, budget: bool = True,
-                 tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None,
+                 tombstone_s: float = TOMBSTONE_WINDOW_S, before_tokens: Any = None, after_descriptor: Any = None,
                  params: dict[str, dict[str, str]] | None = None, standby: set[str] | None = None,
                  lease_ms: int | None = None, namespace: str | None = None,
                  interface_tokens_after_s: float | None = 0.0, run_record: Any = None,
@@ -682,6 +682,11 @@ class Owner:
           held at start are put, before step 3: a restart's own puts and
           deletes (``alarms.v1`` §2.9: "before it answers a GET with it, and
           SHOULD before its new instance token").
+        - ``after_descriptor``: called with the owner after step 3 (its
+          descriptor put and its bundles' queryables) and before step 4: a
+          restart's puts made "just after its new descriptor" (desired.v2
+          §2.18's why, 0.3), which core §8.2's "before step 4" allows as it
+          allows ``before_tokens`` (round 127).
         - ``lease_ms``: its session's lease, as its router reads it (zenoh's
           ``transport/link/tx/lease``): a crash behind a silent link is seen
           that long after (``redundancy.v1`` scenarios, "A crash").
@@ -847,6 +852,7 @@ class Owner:
         self.held_sent: list[tuple[str, zk2c.InBand]] = []
         self.held_refused: list[tuple[str, str]] = []
         self.before_tokens = before_tokens
+        self.after_descriptor = after_descriptor
         #: §8.2's plan, kept for a re-mint (:meth:`new_epoch`)
         self._plan_made: dict[str, list[tuple[dict[str, Any], str]]] = {}
         #: the current instance's descriptor queryable and tokens
@@ -1469,6 +1475,8 @@ class Owner:
                     self._entities.append(s.declare_queryable(
                         ckey, zenoh.handlers.Callback(lambda q, data=data, ckey=ckey: q.reply(
                             ckey, data, encoding="application/json")), complete=True))
+            if bundles and self.after_descriptor is not None:
+                self.after_descriptor(self)
             # Step 4: the instance token, then the interface tokens.
             lv = s.liveliness()
             mine.append(lv.declare_token(key))

@@ -979,3 +979,27 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `state/alarms/{slot}`). `model::alarms::v2`'s tests are session-free;
   `report-fixtures`' `alarms_v2_report` is zenctl's render snapshot.
   Not done: the doctor's `alarm-key`/`alarm-stale` read v1's keys only.
+  **The horizon is the revision's** (text 0.2, F-613, #984): `V2Revision`
+  (a revision's heartbeat `Layout` and the `freshness.ttl_s` of
+  `state/alarms/{slot}`; `standard()` the embedded one, 900 s) rides in
+  `V2Words` (`revisions`, per owner; `word_revision`, the deployment's
+  word), and `Slots::revision` is what `slot_reading` ages at, never
+  `am::horizon()`. `words_v2` takes it from the `alarms.v2` fingerprint the
+  owner's descriptors name: the standard one is not retrieved, another is
+  held offline or retrieved with the tables' revisions, several give the
+  soonest (`V2Revision::soonest`), and one not in hand makes the owner's
+  entry `None`: no horizon, so `slot_reading` judges its freshness
+  unobservable (`not_a_horizon`), never 900 s (§2.7, "A revision not in
+  hand", the lead's default); the word is the `alarms.v2` revision held
+  offline, and stands only across a face (`Slots::across`, from
+  `BookSpec::face`): on the near side an owner no refresh's words name
+  is a revision not in hand too (text 0.2, "No descriptor read",
+  `no_descriptor_read_on_the_near_side_is_a_revision_not_in_hand`). Each owner's v2 view is made with its revision's layout
+  (`Slots::layout_of`, the standard's where none is in hand;
+  `alarms_views(&self.v2, owner)`, the heartbeat's tag being the
+  revision's, core §7.5), and `v2_words` swaps a view read by another
+  revision for an empty one, which the refresh's complete read then
+  re-reads. `an_alarm_ages_at_the_horizon_of_its_owners_revision` is the
+  session-free test; zenctl's `alarms_v2_s6_*_at_the_copys_horizon` and
+  `alarms_v2_an_owner_naming_a_revision_not_in_hand_reads_unobservable`
+  the live ones.

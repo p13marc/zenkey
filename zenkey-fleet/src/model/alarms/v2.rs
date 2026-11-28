@@ -32,6 +32,7 @@
 //! `not_read`), until its identity takes a slot again or it is forgotten.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use zenkey_model::alarms::v2 as m2;
@@ -51,26 +52,67 @@ use crate::report::{
     AlarmVia, AlarmWords, LastKnownAlarm,
 };
 
-/// alarms.v2's layout for its heartbeat: the embedded standard revision's
-/// collection with a horizon, `state/alarms/{slot}` (§2.7).
-pub(super) fn layout() -> &'static zenkey_model::heartbeat::Layout {
-    static LAYOUT: std::sync::LazyLock<zenkey_model::heartbeat::Layout> =
-        std::sync::LazyLock::new(|| {
-            zenkey_model::heartbeat::Layout::of(zenkey::alarms::v2::implementation().contract())
+/// An `alarms.v2` revision as a reader reads an owner by it (§2.7, text
+/// 0.2, F-613): the layout its heartbeat is read with (core §7.5: the
+/// heartbeat's tag names the revision), and the horizon of
+/// `state/alarms/{slot}`, the `freshness.ttl_s` its alarms age at. The
+/// standard revision's is 900 s; a copy with another horizon is read at its
+/// own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V2Revision {
+    pub layout: Arc<zenkey_model::heartbeat::Layout>,
+    pub horizon: fm::Horizon,
+}
+
+impl V2Revision {
+    /// The revision `c` is.
+    #[must_use]
+    pub fn of(c: &zenkey_model::contract::Contract) -> V2Revision {
+        V2Revision {
+            layout: Arc::new(zenkey_model::heartbeat::Layout::of(c)),
+            horizon: c
+                .resource(zenkey_model::grammar::KindToken::State, m2::ALARMS)
+                .map_or(fm::Horizon::Undeclared, fm::horizon_of),
+        }
+    }
+
+    /// The standard revision's, embedded: what a reader holds of every
+    /// owner it is told nothing else of.
+    #[must_use]
+    pub fn standard() -> &'static V2Revision {
+        static STANDARD: std::sync::LazyLock<V2Revision> = std::sync::LazyLock::new(|| {
+            V2Revision::of(zenkey::alarms::v2::implementation().contract())
         });
-    &LAYOUT
+        &STANDARD
+    }
+
+    /// The one of `revisions` whose alarms age soonest: no reading of it
+    /// holds an alarm firing that another of them reads stale. `None` for
+    /// none.
+    pub(crate) fn soonest(revisions: impl IntoIterator<Item = V2Revision>) -> Option<V2Revision> {
+        revisions
+            .into_iter()
+            .min_by_key(|r| r.horizon.ttl().unwrap_or(std::time::Duration::MAX))
+    }
 }
 
-/// The index of `state/alarms/{slot}` among the layout's collections.
-fn index() -> usize {
-    layout()
-        .index_of(zenkey::alarms::v2::ALARMS)
-        .expect("alarms.v2's records are a collection")
+/// alarms.v2's layout for its heartbeat: the embedded standard revision's
+/// collection with a horizon, `state/alarms/{slot}` (§2.7). Its interface
+/// is every revision's.
+pub(super) fn layout() -> &'static zenkey_model::heartbeat::Layout {
+    &V2Revision::standard().layout
 }
 
-/// An owner's view of its `alarms.v2` records.
-pub(super) fn view() -> View<Instant> {
-    let mut v = View::new(layout().clone());
+/// The index of `state/alarms/{slot}` among a view's collections. `None`
+/// for a revision that gives the records no horizon, whose heartbeat
+/// confirms none of them.
+fn index(view: &View<Instant>) -> Option<usize> {
+    view.layout().index_of(zenkey::alarms::v2::ALARMS)
+}
+
+/// An owner's view of its `alarms.v2` records, read by `revision`.
+pub(super) fn view(revision: &V2Revision) -> View<Instant> {
+    let mut v = View::new((*revision.layout).clone());
     v.follow_resource(zenkey::alarms::v2::ALARMS);
     v
 }
@@ -149,12 +191,22 @@ pub struct SlotRead {
 /// (`None` where they name none that holds one, or two that differ), and
 /// the deployment's word for an owner with no descriptor in hand: the
 /// table of the revisions held offline, and the epoch.
+///
+/// **And each owner's `alarms.v2` revision** (§2.7, text 0.2, F-613): the
+/// one its present descriptors name, which its alarms age at and its
+/// heartbeat is read with, `None` where one they name is neither held nor
+/// retrieved, whose horizon this reader does not have; across a face, or
+/// with no descriptor in hand, the deployment's word, an `alarms.v2`
+/// revision held offline (`word_revision`). With neither, the standard
+/// revision's.
 #[derive(Debug, Clone, Default)]
 pub struct V2Words {
     pub tables: BTreeMap<Addr, Option<Vec<m2::Rule>>>,
     pub epochs: BTreeMap<Addr, Option<i64>>,
     pub word: Option<Vec<m2::Rule>>,
     pub default_epoch: Option<i64>,
+    pub revisions: BTreeMap<Addr, Option<V2Revision>>,
+    pub word_revision: Option<V2Revision>,
 }
 
 // ─── the state ──────────────────────────────────────────────────────────────
@@ -259,6 +311,10 @@ pub(super) struct Slots {
     words: V2Words,
     archived: BTreeMap<(Addr, u8), ArchivedAlarm>,
     refused: u64,
+    /// The reader is across a face from the scope's owner (§2.11): only
+    /// there does the deployment's word name the revision of an owner none
+    /// of whose descriptors it read (§2.7).
+    across_face: bool,
 }
 
 impl Default for Slots {
@@ -273,11 +329,20 @@ impl Default for Slots {
             },
             archived: BTreeMap::new(),
             refused: 0,
+            across_face: false,
         }
     }
 }
 
 impl Slots {
+    /// The book's `alarms.v2` half, across a face from its owner or not.
+    pub(super) fn across(across_face: bool) -> Slots {
+        Slots {
+            across_face,
+            ..Slots::default()
+        }
+    }
+
     /// Whether a read answered for `addr` with a page of its records: what
     /// reads an owner with no descriptor in hand by `alarms.v2`.
     pub(super) fn answered(&self, addr: &Addr) -> bool {
@@ -299,6 +364,33 @@ impl Slots {
             Some(t) => t.as_deref(),
             None => self.words.word.as_deref(),
         }
+    }
+
+    /// The `alarms.v2` revision this reader reads `addr` by (§2.7): the one
+    /// its present, or its last, descriptors name, `None` where one they
+    /// name is not in hand. For an owner none of whose descriptors this
+    /// reader read: across a face, the deployment's word, the revision
+    /// held offline else the standard one; on the near side `None`, a
+    /// revision not in hand (text 0.2, "No descriptor read").
+    pub(super) fn revision(&self, addr: &Addr) -> Option<&V2Revision> {
+        match self.words.revisions.get(addr) {
+            Some(named) => named.as_ref(),
+            None if self.across_face => Some(
+                self.words
+                    .word_revision
+                    .as_ref()
+                    .unwrap_or_else(|| V2Revision::standard()),
+            ),
+            None => None,
+        }
+    }
+
+    /// The revision `addr`'s heartbeat is read with: [`Slots::revision`],
+    /// the standard one's layout where that is not in hand, under which a
+    /// heartbeat of another revision is refused by its tag (core §7.5).
+    pub(super) fn layout_of(&self, addr: &Addr) -> &V2Revision {
+        self.revision(addr)
+            .unwrap_or_else(|| V2Revision::standard())
     }
 
     fn epoch(&self, addr: &Addr) -> Option<i64> {
@@ -438,16 +530,29 @@ impl SlotReading {
 impl AlarmBook {
     // ─── folding ────────────────────────────────────────────────────────
 
-    /// The owners' tables and epochs, as this reading holds them (§4, core
-    /// §8.6): each owner's replaces what was held of it; an owner the read
-    /// does not name keeps its last, so a record of an owner gone is named
-    /// by the table its last descriptor named.
+    /// The owners' tables, epochs and revisions, as this reading holds them
+    /// (§2.7, §4, core §8.6): each owner's replaces what was held of it; an
+    /// owner the read does not name keeps its last, so a record of an owner
+    /// gone is named by the table its last descriptor named.
+    ///
+    /// An owner's view read by another revision than the one it is read by
+    /// now is replaced by an empty one of that revision, whose heartbeat it
+    /// reads (core §7.5): the next complete read re-reads it, as a refresh
+    /// does right after these words.
     pub fn v2_words(&mut self, words: V2Words) {
         let held = &mut self.v2.words;
         held.tables.extend(words.tables);
         held.epochs.extend(words.epochs);
         held.word = words.word;
         held.default_epoch = words.default_epoch;
+        held.revisions.extend(words.revisions);
+        held.word_revision = words.word_revision;
+        for (owner, views) in &mut self.views {
+            let revision = self.v2.layout_of(owner);
+            if view_of(views).layout() != &*revision.layout {
+                views.insert(view(revision));
+            }
+        }
     }
 
     /// One delivery of an `alarms.v2` key to the subscription (§2.6):
@@ -609,7 +714,10 @@ impl AlarmBook {
         });
         let new = entry.track.held;
         if !refused {
-            let views = self.views.entry(owner.clone()).or_insert_with(alarms_views);
+            let views = self
+                .views
+                .entry(owner.clone())
+                .or_insert_with(|| alarms_views(&self.v2, owner));
             let view = view_of_mut(views);
             if matches!(sample, m2::Sample::Delete) {
                 view.delete(&key, inband, at);
@@ -752,13 +860,19 @@ impl AlarmBook {
                     ));
                 }
                 if read.complete && complete {
-                    let views = self.views.entry(owner.clone()).or_insert_with(alarms_views);
-                    view_of_mut(views).reread(
-                        index(),
-                        live_keys.iter().map(|(k, s)| (k.as_str(), *s)),
-                        read.asked_at,
-                        now,
-                    );
+                    let views = self
+                        .views
+                        .entry(owner.clone())
+                        .or_insert_with(|| alarms_views(&self.v2, &owner));
+                    let view = view_of_mut(views);
+                    if let Some(i) = index(view) {
+                        view.reread(
+                            i,
+                            live_keys.iter().map(|(k, s)| (k.as_str(), *s)),
+                            read.asked_at,
+                            now,
+                        );
+                    }
                 }
             }
             if let Some(words) = &seed.words {
@@ -865,7 +979,9 @@ impl AlarmBook {
             let heartbeat = views
                 .and_then(|vs| view_of(vs).confirmed(&key))
                 .map(|c| now.saturating_duration_since(c));
-            let lost = views.is_some_and(|vs| vs.is_lost(&layout().iface, index()));
+            let lost = views.is_some_and(|vs| {
+                index(view_of(vs)).is_some_and(|i| vs.is_lost(&layout().iface, i))
+            });
             observations.push(Observation::Subscribed {
                 last: fm::confirmed_last(
                     e.sub_last.map(|(t, delete)| {
@@ -925,7 +1041,18 @@ impl AlarmBook {
         Some(SlotReading {
             reading: m2::Reading {
                 presence,
-                freshness: Some(fm::judge_all(&am::horizon(), &observations)),
+                // At the horizon of the revision its owner names (§2.7,
+                // §2.14 step 6, text 0.2): the standard's 900 s is one. A
+                // revision not in hand gives no horizon: unobservable,
+                // never 900 s, which would call a stale alarm of a shorter
+                // horizon fresh.
+                freshness: Some(match self.v2.revision(addr) {
+                    Some(r) => fm::judge_all(&r.horizon, &observations),
+                    None => fm::Judged {
+                        verdict: fm::Verdict::Unobservable,
+                        reason: fm::Reason::NotAHorizon,
+                    },
+                }),
                 latest,
                 lost: lossy && !answered,
                 previous_instance,
@@ -1488,10 +1615,16 @@ mod tests {
         }
     }
 
+    /// The words a refresh reads for `owner`, whose descriptor names the
+    /// standard revision beside its table's.
     fn named(owner: &str, table: Option<Vec<m2::Rule>>) -> V2Words {
         V2Words {
             tables: BTreeMap::from([(owner.parse().unwrap(), table)]),
             default_epoch: Some(0),
+            revisions: BTreeMap::from([(
+                owner.parse().unwrap(),
+                Some(V2Revision::standard().clone()),
+            )]),
             ..V2Words::default()
         }
     }
@@ -1813,6 +1946,147 @@ mod tests {
         assert_eq!(
             bk.presence_for(&"lab/svc".parse().unwrap(), Major::V1),
             am::Presence::Present(am::Listing::NotListed)
+        );
+    }
+
+    /// §2.7 (text 0.2, F-613): an alarm ages at the horizon of the
+    /// revision its owner names. On a copy of the standard contract at 4 s,
+    /// an entry its owner vouched for 10 s before reads stale, unobservable,
+    /// where the standard's 900 s read it firing; and the owner's view is
+    /// read by the copy's layout, so its heartbeat, whose tag is the copy's,
+    /// is read, never refused as another revision's.
+    #[test]
+    fn an_alarm_ages_at_the_horizon_of_its_owners_revision() {
+        let mut contract = zenkey::alarms::v2::implementation().contract().clone();
+        contract
+            .resources
+            .iter_mut()
+            .find(|r| r.template.as_str() == m2::ALARMS)
+            .unwrap()
+            .annotations
+            .insert("freshness.ttl_s".to_owned(), serde_json::json!(4));
+        let copy = V2Revision::of(&contract);
+        let standard = V2Revision::standard();
+        assert_eq!(copy.horizon, fm::Horizon::Within(Duration::from_secs(4)));
+        assert_eq!(standard.horizon, am::horizon());
+        assert_ne!(copy.layout.tag, standard.layout.tag, "the copy's own tag");
+
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let t0 = Instant::now();
+        let wall = SystemTime::now();
+        let later = wall + Duration::from_secs(10);
+        let mut bk = book("zk2/lab/*/alarms.v2/state/alarms/*");
+        bk.presence_read(&observed("lab/svc", m2::IFACE), t0);
+        bk.v2_words(named("lab/svc", Some(table())));
+        bk.seed_v2(
+            read(t0, vec![page("lab/svc", 7, &[(0, 3, a(State::Firing))])]),
+            t0,
+            wall,
+        );
+        let tag = |bk: &AlarmBook| view_of(&bk.views[&owner]).layout().tag;
+        let firing = |bk: &AlarmBook| {
+            let j = bk.slot_reading(&owner, 0, t0, later).unwrap().firing();
+            (j.answer, j.reason)
+        };
+        assert_eq!(tag(&bk), standard.layout.tag);
+        assert_eq!(
+            firing(&bk),
+            (Answer::Yes, Reason::Firing),
+            "at the standard's 900 s"
+        );
+
+        let mut words = named("lab/svc", Some(table()));
+        words.revisions.insert(owner.clone(), Some(copy.clone()));
+        bk.v2_words(words);
+        assert_eq!(tag(&bk), copy.layout.tag, "read by the copy's layout");
+        assert_eq!(
+            firing(&bk),
+            (Answer::Unobservable, Reason::Stale),
+            "at the copy's 4 s"
+        );
+        // An owner none of whose descriptors this reader read: on the near
+        // side a revision not in hand (text 0.2, "No descriptor read");
+        // across a face the deployment's word, the revision held offline,
+        // else the standard one.
+        let gone: Addr = "lab/gone".parse().unwrap();
+        assert_eq!(bk.v2.revision(&gone), None, "the near side");
+        bk.v2_words(V2Words {
+            word_revision: Some(copy.clone()),
+            revisions: BTreeMap::new(),
+            ..named("lab/svc", Some(table()))
+        });
+        assert_eq!(bk.v2.revision(&gone), None, "the word is a face's alone");
+        assert_eq!(bk.v2.revision(&owner), Some(&copy), "its own kept");
+        let mut far = Slots::across(true);
+        assert_eq!(far.revision(&gone), Some(standard));
+        far.words.word_revision = Some(copy.clone());
+        assert_eq!(far.revision(&gone), Some(&copy));
+
+        // A revision its owner names that is not in hand gives no horizon:
+        // unobservable, never at the standard's 900 s, at once as 10 s on;
+        // its heartbeat read with the standard's layout, which refuses
+        // another revision's by its tag.
+        let mut words = named("lab/svc", Some(table()));
+        words.revisions.insert(owner.clone(), None);
+        bk.v2_words(words);
+        assert_eq!(bk.v2.revision(&owner), None);
+        assert_eq!(tag(&bk), standard.layout.tag);
+        assert_eq!(
+            firing(&bk),
+            (
+                Answer::Unobservable,
+                Reason::Freshness(fm::Reason::NotAHorizon)
+            ),
+            "no horizon in hand"
+        );
+        let j = bk.slot_reading(&owner, 0, t0, wall).unwrap().firing();
+        assert_eq!(j.answer, Answer::Unobservable, "fresh or not, no verdict");
+    }
+
+    /// §2.7 (text 0.2, "No descriptor read", review-bot on #1176): on the
+    /// near side, an owner whose descriptor names no revision this reader
+    /// read is a revision not in hand, its firing alarm unobservable,
+    /// `not_a_horizon`, never aged at 900 s; across a face, the deployment's
+    /// word, the standard revision, ages it: yes, `firing`.
+    #[test]
+    fn no_descriptor_read_on_the_near_side_is_a_revision_not_in_hand() {
+        let t0 = Instant::now();
+        let wall = SystemTime::now();
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let firing = |face: Option<bool>| {
+            let mut spec = BookSpec::new(Duration::from_secs(1));
+            spec.clocks_synced = true;
+            spec.face = face;
+            let scope = AlarmScope::parse("zk2/lab/svc/alarms.v2/state/alarms/*").unwrap();
+            let mut bk = AlarmBook::new(scope, spec);
+            if face.is_none() {
+                bk.presence_read(&observed("lab/svc", m2::IFACE), t0);
+            }
+            // No refresh's words name a revision of the owner's.
+            bk.v2_words(V2Words {
+                revisions: BTreeMap::new(),
+                ..named("lab/svc", Some(table()))
+            });
+            bk.seed_v2(
+                read(t0, vec![page("lab/svc", 7, &[(0, 3, a(State::Firing))])]),
+                t0,
+                wall,
+            );
+            let j = bk.slot_reading(&owner, 0, t0, wall).unwrap().firing();
+            (j.answer, j.reason)
+        };
+        assert_eq!(
+            firing(None),
+            (
+                Answer::Unobservable,
+                Reason::Freshness(fm::Reason::NotAHorizon)
+            ),
+            "the near side"
+        );
+        assert_eq!(
+            firing(Some(true)),
+            (Answer::Yes, Reason::Firing),
+            "across a face"
         );
     }
 }

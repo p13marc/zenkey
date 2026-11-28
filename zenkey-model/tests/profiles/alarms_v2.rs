@@ -1321,6 +1321,7 @@ fn freshness_judged(v: &Value) -> Option<freshness::Judged> {
         R::WithinHorizon,
         R::BeyondHorizon,
         R::NoDelivery,
+        R::NotAHorizon,
         R::ListenedTooShort,
         R::Silent,
         R::NoStamp,
@@ -1369,7 +1370,7 @@ fn alarms_v2_conclusions() {
     }
 
     let readings = doc["readings"].as_array().expect("readings");
-    assert_eq!(readings.len(), 42, "readings");
+    assert_eq!(readings.len(), 43, "readings");
     let (mut v1, mut reasons) = (0, BTreeSet::new());
     for case in readings {
         let note = &case["note"];

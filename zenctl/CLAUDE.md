@@ -359,7 +359,16 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `render.rs`' `an_alarms_v2_reading_names_each_slot_by_its_words`, and
   `live_zk2.rs`' `alarms_v2_s8_*`, `alarms_v2_s10_*` (step 3 on the
   fleet's live reader, which holds what it read), `alarms_v2_s11_*` (T1
-  the model's v1 judges) and `check_conform_reads_an_alarms_v2_owners_alarm_cases`. #819's TC added
+  the model's v1 judges) and `check_conform_reads_an_alarms_v2_owners_alarm_cases`.
+  alarms.v2 0.2 (F-613): an alarm ages at its owner's revision's horizon,
+  `--contracts` or retrieved; `alarms_v2_s6_a_hung_owner_goes_stale_at_the_copys_horizon`
+  runs §6 on the conventions' 4-s copy (`alarms_v2_copy`, owner by
+  `alarms_v2_owner_on`): A yes while its heartbeat vouches (read with the
+  copy's layout), then unobservable `stale` 7 s after its bit cleared,
+  given or retrieved, and `check conform`'s alarm cases on it;
+  `alarms_v2_an_owner_naming_a_revision_not_in_hand_reads_unobservable`
+  puts owners on a first hop (no bundle served): the copy not given reads
+  A unobservable `not_a_horizon`, the standard revision A firing. #819's TC added
   `telemetry [SELECTOR] [--for SECS] [--across-face] [--settle SECS]`, a root judgement
   over `telemetry.v1` (exit 1 a sample that does not conform or a decrease
   within an established epoch, 0 everything asked answered clean, 2

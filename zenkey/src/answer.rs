@@ -142,8 +142,40 @@ pub async fn owner_revision(
     iface: &zenkey_model::grammar::IfaceId,
     timeout: Duration,
 ) -> OwnerRevision {
+    match run_revision(session, key, run, iface, timeout).await {
+        RunRevision::Read(r) => r,
+        // Descriptors reach the reader and none states the run: no omission
+        // rule applies over that snapshot (core §4.2, 0.102).
+        RunRevision::NotStated => {
+            unread(key, &format!("no descriptor names {iface} under run {run}"));
+            OwnerRevision::Unread
+        }
+    }
+}
+
+/// [`owner_revision`], a read whose descriptors answer and none of which
+/// names the interface under the run told apart from one that failed:
+/// what a `desired.v2` target holds a new run's versions on until its
+/// author's instance token appears (`desired.v2` §2.18, "None states the
+/// run yet").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RunRevision {
+    /// [`OwnerRevision::Named`], [`OwnerRevision::Unreached`], or
+    /// [`OwnerRevision::Unread`] for a read that failed.
+    Read(OwnerRevision),
+    /// Descriptors answered, and none names the interface under the run.
+    NotStated,
+}
+
+pub(crate) async fn run_revision(
+    session: &zenoh::Session,
+    key: &str,
+    run: Run,
+    iface: &zenkey_model::grammar::IfaceId,
+    timeout: Duration,
+) -> RunRevision {
     let Some((prefix, addr)) = owner_of(key) else {
-        return OwnerRevision::Unreached;
+        return RunRevision::Read(OwnerRevision::Unreached);
     };
     let selector = format!(
         "{prefix}zk2/{}/{}/@zk/instance/*",
@@ -153,7 +185,7 @@ pub async fn owner_revision(
         Ok(read) => read,
         Err(why) => {
             unread(key, &why);
-            return OwnerRevision::Unread;
+            return RunRevision::Read(OwnerRevision::Unread);
         }
     };
     let run = run.to_string();
@@ -162,20 +194,15 @@ pub async fn owner_revision(
         .iter()
         .find(|(r, _)| r.as_deref() == Some(run.as_str()))
     {
-        return OwnerRevision::Named(fp.clone());
+        return RunRevision::Read(OwnerRevision::Named(fp.clone()));
     }
-    // Descriptors reach the reader and none states the run: no omission
-    // rule applies over that snapshot (core §4.2, 0.102).
     match (read.named.as_slice(), read.failed) {
         (_, Some(why)) => {
             unread(key, why);
-            OwnerRevision::Unread
+            RunRevision::Read(OwnerRevision::Unread)
         }
-        ([], None) if !read.heard => OwnerRevision::Unreached,
-        _ => {
-            unread(key, &format!("no descriptor names {iface} under run {run}"));
-            OwnerRevision::Unread
-        }
+        ([], None) if !read.heard => RunRevision::Read(OwnerRevision::Unreached),
+        _ => RunRevision::NotStated,
     }
 }
 

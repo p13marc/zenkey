@@ -86,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cardinality", action="append", default=[])
     ap.add_argument("--tokenless", action="append", default=[])
     ap.add_argument("--run-file")
+    # core §8.1, §8.4 "On a first hop": every interface tokenless, the
+    # instance token alone held, and no bundle held (round 127: a revision a
+    # reader cannot retrieve, alarms.v2 §2.7)
+    ap.add_argument("--first-hop", action="store_true")
     ap.add_argument("address")
     ap.add_argument("contracts", nargs="*")
     a = ap.parse_args(argv)
@@ -111,7 +115,8 @@ def main(argv: list[str] | None = None) -> int:
             bound = int(n)
     rules = None if a.alarms_rules is None else set(a.alarms_rules.split(","))
     o = AlarmsV2Owner(system, service, contracts=own, record=a.alarms_record, rules=rules, bound=bound,
-                      ttl_s=ttl, connect=a.connect, tokenless=set(a.tokenless) or None, run_record=a.run_file)
+                      ttl_s=ttl, connect=a.connect, tokenless=set(a.tokenless) or None, run_record=a.run_file,
+                      **({"first_hop": True} if a.first_hop else {}))
     o.start()
     print(f"ready zk2/{system}/{service}/@zk/instance/{o.owner.instance} run {o.owner.run_hex()}", flush=True)
     for line in sys.stdin:

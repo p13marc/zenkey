@@ -1,6 +1,6 @@
 //! `spec/profiles/desired/scenarios-v2.md` §1–§8 and §10–§16 (`desired.v2`,
 //! #986's J3), one test per section, named after it. §9 is a tool's (J4).
-//! §16 runs its four runs at once, each on a router of its own.
+//! §16 runs its five runs at once, each on a router of its own.
 //! `config_v2_as_a_target` runs `desired.v2` §2.16 beside them.
 //!
 //! Common setup, the text's: R1 is a router with timestamping on, a
@@ -765,6 +765,55 @@ async fn put_as(x: &zenoh::Session, stamp: Stamp, doc: &Value) {
         .unwrap();
 }
 
+/// The author's descriptor, as a played author answers it (§13, §16):
+/// read from the scenarios' author on `tasking.v2`, started alone on `ep`
+/// and gone again before this returns.
+async fn author_descriptor(ep: &str) -> zenkey::model::descriptor::Descriptor {
+    let rec = records();
+    let a = author_of(ep, tasking(0), &rec).await;
+    author_seen(ep, true).await;
+    let g = client(ep).await;
+    let desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap();
+    a.kill().await;
+    author_seen(ep, false).await;
+    g.close().await.unwrap();
+    desc
+}
+
+/// X as a new instance of the author's (§2, §16): the author's descriptor
+/// `desc`, its instance `instance` and its run `run`, answered on its
+/// instance key by X's queryable. Returns the queryable and the key, where
+/// X then declares its instance token.
+async fn answer_descriptor(
+    x: &zenoh::Session,
+    mut desc: zenkey::model::descriptor::Descriptor,
+    instance: &str,
+    run: Run,
+) -> (zenoh::query::Queryable<()>, String) {
+    use zenoh::Wait as _;
+    desc.instance = instance.to_owned();
+    desc.run = Some(run.hex());
+    let served = serde_json::to_vec(&desc).unwrap();
+    let key = format!("zk2/lab/author/@zk/instance/{instance}");
+    let reply_key = key.clone();
+    let q = x
+        .declare_queryable(key.clone())
+        .complete(true)
+        .callback(move |q| {
+            let _ = q
+                .reply(reply_key.clone(), served.clone())
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                .wait();
+        })
+        .await
+        .unwrap();
+    (q, key)
+}
+
 /// §2 Never an older version (§2.6, §2.7).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s2_never_an_older_version() {
@@ -839,13 +888,33 @@ async fn s2_never_an_older_version() {
     assert_eq!(w.target.acts(), acts, "acted on nothing");
     assert!(converged_on(&w.target.report_v2().await.unwrap(), sv2, 2));
 
-    // 4. v3's content under a 32-bit run of X's own, at seq 0: another run
-    //    is admitted, and its document differs, so the target acts on it.
+    // 4. X, as a new instance of the author, puts v3's content under a
+    //    32-bit run of its own, at seq 0, then answers a descriptor stating
+    //    that run and declares its instance token. The put waits, since no
+    //    descriptor states X's run yet (§2.18); at X's token the target
+    //    reads again, another run is admitted, and its document differs,
+    //    so the target acts on it.
     let xs = Stamp {
         run: Run::U32(0x0bad_cafe),
         seq: Seq::new(0).unwrap(),
     };
+    let g = client(&bus.ep1).await;
+    let desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap();
+    let mark = s.mark();
     put_as(&x, xs, &v(3)).await;
+    eventually("X's put delivered", || async { !s.on(D, mark).is_empty() }).await;
+    let (_descriptor, key) = answer_descriptor(&x, desc, "00000000000000cc", xs.run).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(
+        s.on(RP, mark).is_empty() && s.on(RUN, mark).is_empty(),
+        "the put waits for X's token"
+    );
+    assert_eq!(w.target.acts(), acts, "acted on nothing before the token");
+    let _token = x.liveliness().declare_token(key).await.unwrap();
     s.until("converged on v3, under X's version", |r| {
         converged_on(r, xs, 3)
     })
@@ -1722,6 +1791,9 @@ struct PlayedState {
     delay: Duration,
 }
 
+/// The instance §13's played author holds its token at.
+const PLAYED: &str = "00000000000000aa";
+
 /// §13's played author: a session of the test's own holding an instance
 /// token at `lab/author` and a queryable on D. It puts nothing, and answers
 /// each GET as the step says.
@@ -1821,7 +1893,7 @@ impl Played {
             .unwrap();
         let token = s
             .liveliness()
-            .declare_token("zk2/lab/author/@zk/instance/00000000000000aa")
+            .declare_token(format!("zk2/lab/author/@zk/instance/{PLAYED}"))
             .await
             .unwrap();
         Self {
@@ -1874,8 +1946,11 @@ async fn s13_a_conditional_re_read_and_what_a_read_waits() {
     let bus = one_router().await;
     let s = record(&bus.ep1).await;
     let ps = client(&bus.ep1).await;
-    // Setup: P plays the author; the seed draws v1's snapshot, its entry
-    // at (R, 7); the target's period is 2 s.
+    // Setup: P plays the author: it answers a descriptor stating R and
+    // declares its instance token (§2.18); the seed draws v1's snapshot,
+    // its entry at (R, 7); the target's period is 2 s.
+    let (_descriptor, _) =
+        answer_descriptor(&ps, author_descriptor(&bus.ep1).await, PLAYED, R).await;
     let p = Played::new(&ps, page_of(at(7), &v(1))).await;
     author_seen(&bus.ep2, true).await;
     let w = worker_up(&bus.ep2, true, Follow::Poll, period(2), false).await;
@@ -2179,15 +2254,13 @@ async fn s14_the_watch() {
     //    it alone. No further GET in the 10 s, though 4 heartbeats or more
     //    crossed.
     let session = client_as(&ep2, WORKER_ZID).await;
-    let w = worker_on(
-        session,
-        None,
-        true,
-        TargetStartup::default(),
-        false,
-        &tasking(4),
-    )
-    .await;
+    // The deployment's word that the target is across a face (§2.18): no
+    // descriptor reaches it, so a read drawing none takes the word.
+    let across = TargetStartup {
+        across_face: true,
+        ..TargetStartup::default()
+    };
+    let w = worker_on(session, None, true, across, false, &tasking(4)).await;
     s.until("converged on v1", |r| converged_on(r, s1, 1)).await;
     tokio::time::sleep(Duration::from_secs(10)).await;
     assert_eq!(
@@ -2995,7 +3068,364 @@ async fn s16_run_d() {
     a.kill().await;
 }
 
-/// §16 Both majors side by side (§2.18): runs A to D, each on a router of
+/// The targets' log: every `zenkey::desired` warning this binary's targets
+/// write, installed as the process's subscriber once, by the first run
+/// that reads it.
+fn desired_log() -> &'static Arc<Mutex<Vec<u8>>> {
+    #[derive(Clone)]
+    struct Buf(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Buf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    static LOG: std::sync::OnceLock<Arc<Mutex<Vec<u8>>>> = std::sync::OnceLock::new();
+    LOG.get_or_init(|| {
+        let buf = Arc::<Mutex<Vec<u8>>>::default();
+        let w = Buf(Arc::clone(&buf));
+        let _ = tracing::subscriber::set_global_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || w.clone())
+                .with_ansi(false)
+                .without_time()
+                .with_env_filter(tracing_subscriber::EnvFilter::new("zenkey::desired=warn"))
+                .finish(),
+        );
+        buf
+    })
+}
+
+/// The target's lines saying its role stopped under `run`, at the
+/// revision `fingerprint` (§2.18).
+fn stops_said(run: Run, fingerprint: &str) -> usize {
+    let text = String::from_utf8(desired_log().lock().unwrap().clone()).unwrap();
+    let at = format!("run={run}");
+    text.lines()
+        .filter(|l| l.contains("the role is stopped") && l.contains(fingerprint))
+        .filter(|l| l.split_whitespace().any(|w| w == at))
+        .count()
+}
+
+/// §16's run E: run D's target, told the scenarios' `tasking.v2`, its
+/// author on that revision, whose descriptor reaches the target. The
+/// author's process ends without closing, and it starts again on run C's
+/// revision, under a new run from its record, putting v1 again and then
+/// v2: the target reads the descriptor stating the new run before it
+/// judges anything of it (§2.18, "A new run is read first"), finds the
+/// other major, says the role is stopped, and acts on neither put.
+async fn s16_run_e() {
+    desired_log();
+    let bus = one_router().await;
+    let rec = records();
+    let s = record(&bus.ep1).await;
+    let a = author_of(&bus.ep1, tasking(0), &rec).await;
+    assert_eq!(a.author.major(), Major::V2, "run E: the author's revision");
+    author_seen(&bus.ep1, true).await;
+
+    // 7. The target starts, and the author puts v1: the target acts on v1,
+    //    and the report is converged on it.
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup::default(),
+    )
+    .await;
+    let target = target.expect("run E: its word names a revision it can report");
+    let svc = b.start().await.expect("run E: the target starts");
+    eventually("run E: the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    assert_eq!(
+        target.last_seed().unwrap().revision,
+        desired::AuthorRevision::Given,
+        "run E: its author's descriptor names the revision it was given"
+    );
+    let s1 = version(a.author.put(WORKER, bytes(&v(1))).await.unwrap());
+    s.until("run E: converged on v1", |r| converged_on(r, s1, 1))
+        .await;
+    assert_eq!(d.with(|x| x.running.clone()), v(1), "run E: v1 runs");
+    let acts = target.acts();
+    assert!(acts >= 1, "run E: acts on v1");
+
+    // 8. The author's process ends without closing, and starts again on run
+    //    C's revision, under a new run, from its record. It puts v1 again,
+    //    and then v2.
+    a.kill().await;
+    let theirs = tasking_v2_on_v1();
+    let fingerprint = zenkey::model::canonical::Fingerprint::of(theirs.contract()).to_string();
+    let mark = s.mark();
+    let a = author_of(&bus.ep1, theirs, &rec).await;
+    assert_eq!(a.author.major(), Major::V1, "run E: run C's revision");
+    for n in [1, 2] {
+        let put = a.author.put(WORKER, bytes(&v(n))).await.unwrap();
+        assert!(matches!(put, Written::Put(_)), "a desired.v1 put: {put:?}");
+    }
+    eventually("run E: both puts at S", || async {
+        s.on(D, mark).iter().filter(|r| !r.delete).count() >= 2
+    })
+    .await;
+    let run = s.on(D, mark)[0]
+        .inband
+        .expect("run E: the put carries an in-band stamp, which the target would order")
+        .run;
+    assert_ne!(run, s1.run, "run E: a new run");
+    // The target judges nothing of the new run before it reads the
+    // descriptor stating it, which names run C's revision: the role stops,
+    // and the target says so, once.
+    eventually("run E: the target says the role stopped", || async {
+        stops_said(run, &fingerprint) > 0
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(stops_said(run, &fingerprint), 1, "run E: said once");
+    assert_eq!(target.acts(), acts, "run E: acts on neither put");
+    assert!(s.on(RP, mark).is_empty(), "run E: Rp receives nothing");
+    assert!(s.on(RUN, mark).is_empty(), "run E: Run receives nothing");
+    assert_eq!(d.with(|x| x.running.clone()), v(1), "run E: v1 still runs");
+    assert!(
+        converged_on(&target.report_v2().await.unwrap(), s1, 1),
+        "run E: the report as it was"
+    );
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+    a.kill().await;
+}
+
+/// §16, the new run's hold (§2.18, "None states the run yet", text 0.3,
+/// zk2py's round 127, F-621): an author MAY put a version before its
+/// descriptor (core §8.2). The target is converged on v1; its author's
+/// process ends without closing, and X, a session of the test's, plays its
+/// next instance, putting v2 under a new run before anything else. The
+/// target's read of the author's descriptors finds none stating the run,
+/// where descriptors reach it, and holds v2: it acts on nothing, and `Rp`
+/// and `Run` receive nothing. X serves the descriptor stating the run and
+/// naming the revision the target was given, and still nothing moves, since
+/// the target reads again when the author's instance token appears. X
+/// declares it: the target reads, and acts on the v2 it held, its report
+/// converged on it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_a_version_put_before_its_descriptor_waits_for_its_token() {
+    let bus = one_router().await;
+    let rec = records();
+    let s = record(&bus.ep1).await;
+    let a = author_of(&bus.ep1, tasking(0), &rec).await;
+    author_seen(&bus.ep1, true).await;
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup::default(),
+    )
+    .await;
+    let target = target.expect("its word names a revision it can report");
+    let svc = b.start().await.expect("the target starts");
+    eventually("the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    let s1 = version(a.author.put(WORKER, bytes(&v(1))).await.unwrap());
+    s.until("converged on v1", |r| converged_on(r, s1, 1)).await;
+    let acts = target.acts();
+    // The author's descriptor, which X serves for its next instance.
+    let g = client(&bus.ep1).await;
+    let desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap();
+    a.kill().await;
+    author_seen(&bus.ep1, false).await;
+
+    // X puts v2 under a new run, before any descriptor.
+    let run = Run::U16(0x0bad);
+    assert_ne!(run, s1.run, "a new run");
+    let s2 = Stamp {
+        run,
+        seq: Seq::new(1).unwrap(),
+    };
+    let x = client(&bus.ep1).await;
+    let mark = s.mark();
+    put_as(&x, s2, &v(2)).await;
+    eventually("X's put at S", || async { !s.on(D, mark).is_empty() }).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(target.acts(), acts, "held: no descriptor states its run");
+    assert!(s.on(RP, mark).is_empty(), "Rp receives nothing");
+    assert!(s.on(RUN, mark).is_empty(), "Run receives nothing");
+
+    // Its descriptor, stating the run: no read before the token.
+    let (_descriptor, key) = answer_descriptor(&x, desc, "00000000000000bb", run).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(target.acts(), acts, "held until the token");
+    assert!(s.on(RUN, mark).is_empty(), "Run receives nothing yet");
+
+    // Its instance token: the target reads, and acts on the v2 it held.
+    let _token = x.liveliness().declare_token(key).await.unwrap();
+    s.until("converged on v2, held", |r| converged_on(r, s2, 2))
+        .await;
+    assert_eq!(d.with(|x| x.running.clone()), v(2), "v2 runs");
+    assert_eq!(target.acts(), acts + 1, "acted on v2 once");
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
+/// §16, the new run's hold where no descriptor has ever arrived (§2.18,
+/// text 0.3, round 127's mend, F-627 and F-628): where descriptors reach a
+/// target is the deployment's, never what a read drew, so a target that
+/// starts before its author, on the near side, holds too. The target
+/// starts, and no author has started. X, a session of the test's, plays
+/// the author, putting v1 under its run before anything else: the target's
+/// read draws no descriptor, and it holds v1, acting on nothing. X answers
+/// a descriptor stating the run: still nothing. X declares its instance
+/// token: the target reads, and acts on v1. Then X puts v2 under a second
+/// run, and declares a second instance token with no descriptor stating
+/// that run: the read at the token, made again a few times and soon,
+/// names none, and only then leaves the deployment's word: the target acts
+/// on v2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_a_target_before_its_author_holds_a_version_put_before_its_descriptor() {
+    let bus = one_router().await;
+    let s = record(&bus.ep1).await;
+    // The author's descriptor as X answers it, read from an author that
+    // runs alone, before the target starts, and is gone again.
+    let desc = author_descriptor(&bus.ep1).await;
+
+    // The target starts: no author yet, nor any descriptor.
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup::default(),
+    )
+    .await;
+    let target = target.expect("its word names a revision it can report");
+    let svc = b.start().await.expect("the target starts");
+    eventually("the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    s.until("the baseline's report", |r| *r == Report::baseline())
+        .await;
+    let acts = target.acts();
+
+    // X puts v1 under its run, before any descriptor: held.
+    let x = client(&bus.ep1).await;
+    let s1 = Stamp {
+        run: Run::U16(0x0a11),
+        seq: Seq::new(1).unwrap(),
+    };
+    let mark = s.mark();
+    put_as(&x, s1, &v(1)).await;
+    eventually("X's put at S", || async { !s.on(D, mark).is_empty() }).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(target.acts(), acts, "held: no descriptor states its run");
+    assert!(s.on(RP, mark).is_empty(), "Rp receives nothing");
+    assert!(s.on(RUN, mark).is_empty(), "Run receives nothing");
+    // Its descriptor, stating the run: no read before the token.
+    let (_descriptor, key) = answer_descriptor(&x, desc.clone(), "00000000000000dd", s1.run).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(target.acts(), acts, "held until the token");
+    // Its instance token: the target reads, and acts on the v1 it held.
+    let _token = x.liveliness().declare_token(key).await.unwrap();
+    s.until("converged on v1, held", |r| converged_on(r, s1, 1))
+        .await;
+    assert_eq!(d.with(|x| x.running.clone()), v(1), "v1 runs");
+    let acts = target.acts();
+
+    // v2 under a second run, then a second instance token, with no
+    // descriptor stating that run: the read at the token names none, and
+    // the deployment's word stands.
+    let s2 = Stamp {
+        run: Run::U16(0x0a12),
+        seq: Seq::new(1).unwrap(),
+    };
+    let mark = s.mark();
+    put_as(&x, s2, &v(2)).await;
+    eventually("X's second put at S", || async {
+        !s.on(D, mark).is_empty()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(target.acts(), acts, "held: no descriptor states the run");
+    let _second = x
+        .liveliness()
+        .declare_token("zk2/lab/author/@zk/instance/00000000000000de")
+        .await
+        .unwrap();
+    s.until("converged on v2, by the deployment's word", |r| {
+        converged_on(r, s2, 2)
+    })
+    .await;
+    assert_eq!(target.acts(), acts + 1, "acted on v2 once");
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
+/// §16, the bounded hold (§2.18, "The hold is bounded", review-bot on
+/// #1176): a run no read has stated within `hold_s` of its first version
+/// leaves the deployment's word, as across a face. The target is not
+/// across a face, its `hold_s` 2 s, and its author's tokens never reach
+/// it: X puts v1 under a run of its own, with no descriptor and no token.
+/// The target holds v1, and acts on nothing for a while; at about 2 s it
+/// acts on v1, its report converged on X's version.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_a_hold_ends_at_hold_s() {
+    const HOLD: Duration = Duration::from_secs(2);
+    let bus = one_router().await;
+    let s = record(&bus.ep1).await;
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup {
+            hold: HOLD,
+            ..TargetStartup::default()
+        },
+    )
+    .await;
+    let target = target.expect("its word names a revision it can report");
+    let svc = b.start().await.expect("the target starts");
+    eventually("the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    s.until("the baseline's report", |r| *r == Report::baseline())
+        .await;
+    let x = client(&bus.ep1).await;
+    let s1 = Stamp {
+        run: Run::U16(0x0b01),
+        seq: Seq::new(1).unwrap(),
+    };
+    let mark = s.mark();
+    put_as(&x, s1, &v(1)).await;
+    let put = Instant::now();
+    eventually("X's put at S", || async { !s.on(D, mark).is_empty() }).await;
+    tokio::time::sleep_until((put + HOLD / 2).into()).await;
+    assert_eq!(target.acts(), 0, "held within hold_s");
+    assert!(s.on(RUN, mark).is_empty(), "Run receives nothing yet");
+    s.until("converged on v1 at hold_s", |r| converged_on(r, s1, 1))
+        .await;
+    let waited = put.elapsed();
+    assert!(
+        waited >= HOLD - Duration::from_millis(100) && waited < HOLD + Duration::from_secs(2),
+        "acted at about hold_s: {waited:?}"
+    );
+    assert_eq!(d.with(|x| x.running.clone()), v(1), "v1 runs");
+    assert_eq!(target.acts(), 1, "acted on v1 once");
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
+/// §16 Both majors side by side (§2.18): runs A to E, each on a router of
 /// its own, at once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s16_both_majors_side_by_side() {
@@ -3004,6 +3434,7 @@ async fn s16_both_majors_side_by_side() {
         s16_a_target_built_before(true),
         s16_run_c(),
         s16_run_d(),
+        s16_run_e(),
     );
 }
 

@@ -149,7 +149,9 @@ envelope it writes.
 2. X puts v3's content on `D` under R at seq n, `s2` exactly.
 3. The target re-reads on its deployment's period, which the test sets
    to 2 s for this step.
-4. X puts v3's content on `D` under a 32-bit run of its own, at seq 0.
+4. X, as a new instance of the author, puts v3's content on `D` under a
+   32-bit run of its own, at seq 0. It then answers a descriptor stating
+   that run, and declares its instance token.
 5. X puts v1's content on `D` under R at seq n − 1 again.
 
 **Expected.**
@@ -158,8 +160,10 @@ envelope it writes.
 2. Nothing: an equal seq is the same version.
 3. The re-read carries the held stamp `s2`, and the author answers with
    that stamp alone. Nothing is acted on, and nothing is put on `Rp`.
-4. Another run is admitted, and its document differs: the target acts on
-   it. Its report is converged on v3, under X's version.
+4. The put waits: no descriptor states X's run yet (§2.18). At X's
+   instance token the target reads again, and the descriptor states the
+   run. Another run is admitted, and its document differs: the target
+   acts on it. Its report is converged on v3, under X's version.
 5. Nothing: R is a run the target remembers, and seq n − 1 is below the
    highest it acted on under R, whichever run it holds.
 
@@ -303,8 +307,9 @@ its record.
 
 ## §13 A conditional re-read, and what a read waits (§2.5)
 
-**Setup.** One router, R1. P plays the author. The target starts, and
-its seed draws v1's snapshot from P, its entry at (R, 7). The target
+**Setup.** One router, R1. P plays the author: it answers a descriptor
+stating R, and declares its instance token (§2.18). The target starts,
+and its seed draws v1's snapshot from P, its entry at (R, 7). The target
 converged on v1. Its period is 2 s.
 
 **Steps.**
@@ -385,9 +390,16 @@ of the author's. The author holds v1 on `D`.
    acts on v3. The next heartbeat makes it read once more, answered
    unchanged. Then it reads nothing more.
 5. S receives a put on `D` holding v3's content under a new run. The
-   target hears it and adopts it. The first heartbeat of the new
-   instance is of another run. The target reads, and is answered
-   unchanged. `Run` receives nothing.
+   target reads its author's descriptors for that run before it judges
+   the put (§2.18). None crosses the face, so the deployment's word
+   stands, and the target adopts the put. The first heartbeat of the
+   new instance is of another run, and the target reads once.
+   - Asked after the adoption, the read is answered unchanged.
+   - Asked while the descriptors' read runs, it carries v3's earlier
+     stamp and is answered whole. Its entry waits with the put, and is
+     the same version. The next heartbeat makes it read once more,
+     answered unchanged (§2.5).
+   - `Run` receives nothing.
 6. While the author is stopped, no heartbeat crosses, and the document
    passes its horizon. The target keeps v3 in force. `Rp` and `Run`
    receive nothing, and the target makes no GET. When the author runs
@@ -437,6 +449,8 @@ timestamp.
 - **Run D** has the same target, told the scenarios' own `tasking.v2`.
   Its author runs run C's revision, and the author's descriptor reaches
   the target.
+- **Run E** has run D's target, told the same. Its author starts on the
+  scenarios' own `tasking.v2`, and its descriptor reaches the target.
 
 **Steps.** In runs A and B:
 1. The author puts v1.
@@ -451,6 +465,13 @@ In run D:
 
 5. The target starts, and reads its author's descriptor.
 6. The author puts v1.
+
+In run E:
+
+7. The target starts. The author puts v1.
+8. The author's process ends without closing. It starts again on run
+   C's revision, under a new run, from its record. It puts v1 again,
+   and then v2.
 
 **Expected.**
 1. **Run A:** the put arrives with no Zenoh timestamp. The target reads
@@ -471,3 +492,8 @@ In run D:
    baseline's report.
 6. **Run D:** the target acts on nothing. `Rp` and `Run` receive
    nothing.
+7. **Run E:** the target acts on v1. The report is converged on it.
+8. **Run E:** the target judges nothing of the new run before it reads
+   the descriptor stating that run (§2.18). It names run C's revision,
+   so the role stops. The target says so, and acts on neither put.
+   `Rp` and `Run` receive nothing.

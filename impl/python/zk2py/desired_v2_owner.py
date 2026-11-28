@@ -10,6 +10,7 @@ zk2py processes against each other (#609, round 118)::
         [--desired-across] [--desired-reply-timeout-ms <ms>] [--desired-watch] [--desired-no-move]
         [--desired-catalog <file>] [--desired-owner-heartbeat] [--desired-contract <file>]
         [--desired-archive <system>/<service>] [--desired-worker <file>] [--desired-word-alone]
+        [--desired-after-descriptor] [--desired-descriptor-late-ms <ms>] [--desired-hold-s <s>]
         <system>/<service>
 
 Standard output: ``connected <endpoint>``, then ``ready
@@ -46,7 +47,8 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
     cmd = words[1] if len(words) > 1 else ""
     rest = words[2] if len(words) > 2 else ""
     a_cmds = {"put", "delete", "delete!", "documents", "adoption", "gets", "run"}
-    t_cmds = {"report", "running", "fail-next", "hold", "release", "reread", "acts", "watch", "reads", "seeds"}
+    t_cmds = {"report", "running", "fail-next", "hold", "release", "reread", "acts", "watch", "reads", "seeds",
+              "holds"}
     if cmd not in a_cmds | t_cmds | {"new-epoch"}:
         # refused before any role is asked for: an author-only process holds
         # no target, and an unknown word is no target's command
@@ -114,6 +116,14 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
                 f"archive={ls['archive']} revision={ls.get('revision', 'not-read')}{why}")
     if cmd in ("watch", "reads"):
         return f"desired {cmd} " + _dump(target.watch_says())
+    if cmd == "holds":
+        # zk2py's own word (round 127's mend): what each read of a new run's
+        # descriptors left under §2.18's "None states the run yet", in order:
+        # [run, held|again|word|released, the appearances counted or the word];
+        # "The hold is bounded" (review-bot on #1176): [run, bound, hold_s] where
+        # the bound left the word, [run, late, what it drew] for a read it overtook
+        with target.lock:
+            return "desired holds " + _dump([list(x) for x in target.hold_log])
     return f"refused {line}: unknown command"
 
 
@@ -147,6 +157,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--desired-catalog", help="core §8.6's catalog: the author states its id; the target reads groups by it")
     ap.add_argument("--desired-owner-heartbeat", action="store_true",
                     help="the author confirms its interface by owner heartbeats (freshness.v2 §2.4); needs a catalog")
+    ap.add_argument("--desired-after-descriptor", action="store_true",
+                    help="the author's new instance puts its documents again after its descriptor (core §8.2 step "
+                         "3) and before its tokens, where by default it puts them before step 3 (desired.v2 §2.18, "
+                         "0.3, its why; round 127)")
+    ap.add_argument("--desired-descriptor-late-ms", type=int, default=0,
+                    help="the author's new instance waits this long after its puts again before its descriptor "
+                         "(core §8.2 step 3), so a target's first read finds none stating its run (desired.v2 "
+                         "§2.18, 0.3's mend, \"None states the run yet\"; round 127's mend)")
+    ap.add_argument("--desired-hold-s", type=float, default=10.0,
+                    help="the deployment's hold_s: a run that no read has stated within it of its first version "
+                         "leaves the deployment's word, as across a face (desired.v2 §2.18, \"The hold is "
+                         "bounded\"; review-bot on #1176); 10 s by default")
     ap.add_argument("address")
     args = ap.parse_args(argv)
     print(f"connected {args.connect}", flush=True)
@@ -162,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
                             run_record=args.desired_run_record, window_s=args.desired_window,
                             watched=args.desired_watched, tokenless=tuple(args.tokenless),
                             catalog=args.desired_catalog, owner_heartbeat=args.desired_owner_heartbeat,
-                            tasking=tasking)
+                            tasking=tasking, after_descriptor=args.desired_after_descriptor,
+                            descriptor_late_s=args.desired_descriptor_late_ms / 1000)
             instance = author.start()
         if args.desired_target or args.desired_unbound:
             target = Target(args.address, args.connect, author=args.desired_target or "lab/author",
@@ -172,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                             moves=not args.desired_no_move, watched=args.desired_watched,
                             run_record=args.desired_run_record, catalog=args.desired_catalog, tasking=tasking,
                             archive=args.desired_archive, word_alone=args.desired_word_alone,
+                            hold_s=args.desired_hold_s,
                             worker=contract_file(args.desired_worker) if args.desired_worker else None)
             instance = target.start()
     except OwnerRefused as e:

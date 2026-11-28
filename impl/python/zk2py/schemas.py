@@ -220,7 +220,9 @@ class SchemaSet:
     def _load_packed(self, listed: str) -> None:
         """§9.4 "Packed": "The artifact is the document, read as strict JSON
         (E029). Its id hashes the document's JCS bytes, and its name is the
-        file's stem." Its declarations are linted E038 to E045 (§7.6)."""
+        file's stem." "Its declarations are linted E038 to E043 and E045,
+        and its placement E044 (§7.1)" (core 0.118): the placement is the
+        contract's (:mod:`zk2py.contract`)."""
         path = self.contract_dir / listed
         try:
             raw = path.read_bytes()
@@ -248,9 +250,10 @@ class SchemaSet:
         for code, where in linted.findings:
             self._err(code, where)
         art = Artifact(PACKED, stem(listed), art_id, doc, listed)
-        # §9.2 E051 (core 0.117), cascade 7: "E051 reads a type with none of
-        # E038 to E045, in a file without E028 ... but a type a profile
-        # derives (§7.6)": a candidate here, judged by the contract's loader.
+        # §9.2 E051 (core 0.117; 0.118's range), cascade 7: "E051 reads a
+        # type whose declaration has none of E038 to E043 and E045, in a file
+        # without E028 ... but a type a profile derives (§7.6)": a candidate
+        # here, judged by the contract's loader.
         if not big:
             names = sorted(n for n, r in linted.types.items() if r.tag == 0)
             self.tag_zero += [(art, n, w) for n, (_, w) in zip(names, packed.tag_zero(linted, listed))]

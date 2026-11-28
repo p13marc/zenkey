@@ -1385,6 +1385,19 @@ pub struct TargetStartup {
     /// "Targets first"), which `scenarios-v2.md` §16's runs A and B play.
     /// Such a target is not `desired.v2`'s. `false` by default.
     pub word_alone: bool,
+    /// The deployment's word that the target is across a constrained face
+    /// from its author (core §8.1): no presence crosses, so no descriptor
+    /// reaches it, and a read that draws none takes the deployment's word
+    /// (`desired.v2` §2.18). Anywhere else descriptors reach the target,
+    /// whatever a read drew, and a read that draws none finds none stating
+    /// a run, so its versions wait (text 0.3, F-627). Set by
+    /// [`TargetStartup::across`], and by a service on a first hop. `false`
+    /// by default.
+    pub across_face: bool,
+    /// `hold_s` (`desired.v2` §2.18, "The hold is bounded"): a run no read
+    /// has stated within it of its first version leaves the deployment's
+    /// word, as across a face. 10 s by default.
+    pub hold: Duration,
 }
 
 impl Default for TargetStartup {
@@ -1396,6 +1409,8 @@ impl Default for TargetStartup {
             timeout: Duration::from_secs(1),
             poll: PRESENCE_POLL,
             word_alone: false,
+            across_face: false,
+            hold: HOLD,
         }
     }
 }
@@ -1433,10 +1448,12 @@ impl TargetStartup {
 
     /// Across a constrained face (core §8.1, `link.v2` §2.20): every GET and
     /// presence read waits at least the face's `reply_timeout_ms`, and so
-    /// does the archive's read. Over RF, a reply came back 3.3–7.4 s after
+    /// does the archive's read, and no descriptor reaches the target
+    /// ([`TargetStartup::across_face`]). Over RF, a reply came back 3.3–7.4 s after
     /// its GET, where the default [`TargetStartup::timeout`] is 1 s.
     #[must_use]
     pub fn across(mut self, far: &zenkey_model::link::FarSide) -> Self {
+        self.across_face = true;
         self.timeout = far.at_least(self.timeout);
         if let Some((_, timeout)) = &mut self.archive {
             *timeout = far.at_least(*timeout);
@@ -1582,6 +1599,19 @@ pub struct Seeded {
     pub revision: AuthorRevision,
 }
 
+/// `hold_s`'s default (`desired.v2` §2.18, "The hold is bounded").
+pub const HOLD: Duration = Duration::from_secs(10);
+
+/// How many runs a target keeps judged by the deployment's word after a
+/// read named none (`Revisions::by_word`): the runs a target remembers
+/// (§2.6).
+const BY_WORD: usize = 16;
+
+/// How many times the read at an author's instance token is made again
+/// while a run held before it is stated by none (`desired.v2` §2.18, text
+/// 0.3, F-628).
+const SEED_RETRIES_AT_TOKEN: u64 = 4;
+
 /// Why a seed is made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Why {
@@ -1670,6 +1700,9 @@ enum Event {
     EndedV2(model2::Ended),
     /// `desired.v2`: a heartbeat of the author's.
     Beat(v2::Heard),
+    /// A held run's `hold_s` ran out (`desired.v2` §2.18): the run, and the
+    /// hold it ends.
+    HoldDue(String, u64),
 }
 
 /// One role a target holds on a desired resource (§2.5–§2.10), from
@@ -1694,6 +1727,10 @@ struct TargetInner {
     given: String,
     /// What the author's descriptors named of its revision (§2.18).
     revisions: tokio::sync::Mutex<Revisions>,
+    /// How many times an instance token of the author's appeared, as its
+    /// watch or its poll heard it (§2.18: a token follows its descriptor,
+    /// core §8.2).
+    appearances: Arc<AtomicU64>,
     /// `desired.v2`'s half, for a role bound to an author of it.
     v2: Option<v2::V2>,
     /// The slice's key; `None` for the kill switch.
@@ -1743,6 +1780,44 @@ struct Revisions {
     majors: BTreeMap<String, Option<Major>>,
     /// The runs whose stop was logged.
     said: std::collections::BTreeSet<String>,
+    /// The runs none of whose author's descriptors stated them when a
+    /// version under them was read, where descriptors reach the target:
+    /// their versions held until a read after the author's instance token
+    /// appears (§2.18, "None states the run yet", text 0.3, F-621).
+    pending: BTreeMap<String, Pending>,
+    /// The runs a read after that token found stated by none, or whose
+    /// `hold_s` ran out: the deployment's word, kept across reads until a
+    /// read states the run, [`BY_WORD`] at most.
+    by_word: std::collections::BTreeSet<String>,
+    /// The holds made so far: the next one's id.
+    holds: u64,
+}
+
+impl Revisions {
+    /// `run` judged by the deployment's word from now on (§2.18): kept
+    /// with the runs so judged, one let go past [`BY_WORD`], whose next
+    /// version is read again.
+    fn by_word(&mut self, run: String) {
+        self.by_word.insert(run.clone());
+        self.runs.insert(run, Named::Unread);
+        while self.by_word.len() > BY_WORD {
+            let Some(first) = self.by_word.iter().next().cloned() else {
+                break;
+            };
+            self.by_word.remove(&first);
+        }
+    }
+}
+
+/// A run's versions held while no descriptor states it (§2.18).
+struct Pending {
+    /// Which hold this is: its `hold_s` timer ends this one alone.
+    id: u64,
+    /// [`TargetInner::appearances`] when the read that found none was
+    /// asked: a token appearing after it is one the next read follows.
+    since: u64,
+    /// Its versions, in the order they arrived, judged once it is read.
+    held: Vec<Incoming>,
 }
 
 /// What a descriptor read named of the author's revision.
@@ -1795,8 +1870,11 @@ impl Target {
         resource: &str,
         report: Option<ReportAt>,
         handler: Arc<dyn Handler>,
-        startup: TargetStartup,
+        mut startup: TargetStartup,
     ) -> Result<Self> {
+        // A service on a first hop reaches its router only across a
+        // constrained face (core §8.1): no presence crosses to it.
+        startup.across_face |= b.config().first_hop;
         let own = b.address()?.clone();
         let (interface, optional) = b.role_of(role)?;
         let contract: &Contract = author.contract();
@@ -1940,6 +2018,7 @@ impl Target {
                 author_iface: contract.iface.clone(),
                 given: Fingerprint::of(contract).to_string(),
                 revisions: tokio::sync::Mutex::new(Revisions::default()),
+                appearances: Arc::default(),
                 v2,
                 key,
                 author: author_addr,
@@ -2142,18 +2221,51 @@ impl TargetInner {
     /// start's seed, and at each seed after its instance token appears or
     /// is withdrawn. What each names under the run it states replaces what
     /// was held, so a stop lasts while a descriptor names it.
+    ///
+    /// A run held because no descriptor stated it (§2.18, "None states
+    /// the run yet") is released once this read states it, or once it is
+    /// a read after the author's instance token appeared that states it
+    /// not, which leaves the deployment's word: its versions are judged
+    /// again, in the order they arrived.
     async fn read_revisions(&self) {
         if self.startup.word_alone {
             return;
         }
         let Some(author) = &self.author else { return };
-        let read = crate::answer::owner_revisions(
-            &self.session,
-            author,
-            &self.author_iface,
-            self.startup.timeout,
-        )
-        .await;
+        let seen = self.appearances.load(Ordering::Acquire);
+        // The read at a token MAY be made again, a few times and soon, as
+        // v1 §2.5's seed is (text 0.3, F-628): a token can reach the target
+        // before the route to its author's queryable does. Made again while
+        // a run held before that token is stated by none, four times at
+        // most, 100 ms more apart each time.
+        let mut attempt = 0u64;
+        let read = loop {
+            let read = crate::answer::owner_revisions(
+                &self.session,
+                author,
+                &self.author_iface,
+                self.startup.timeout,
+            )
+            .await;
+            let stated = |run: &String| match &read {
+                crate::answer::OwnerRevisions::Named(named) => {
+                    named.iter().any(|(r, _)| r.as_ref() == Some(run))
+                }
+                _ => false,
+            };
+            let unstated = self
+                .revisions
+                .lock()
+                .await
+                .pending
+                .iter()
+                .any(|(run, p)| seen > p.since && !stated(run));
+            if !unstated || attempt == SEED_RETRIES_AT_TOKEN {
+                break read;
+            }
+            attempt += 1;
+            tokio::time::sleep(Duration::from_millis(100 * attempt)).await;
+        };
         let mut rv = self.revisions.lock().await;
         let mut runs = BTreeMap::new();
         let mut sweep = Vec::new();
@@ -2171,17 +2283,49 @@ impl TargetInner {
             crate::answer::OwnerRevisions::Unreached => sweep.push(Named::Word),
             crate::answer::OwnerRevisions::Unread => sweep.push(Named::Unread),
         }
+        // A run a descriptor states now is judged by the revision it names,
+        // never by the word any more.
+        rv.by_word.retain(|r| !runs.contains_key(r));
+        let mut release = Vec::new();
+        for (run, p) in std::mem::take(&mut rv.pending) {
+            if runs.contains_key(&run) {
+                release.extend(p.held);
+            } else if seen > p.since {
+                tracing::debug!(role = %self.role, %run, "desired: no descriptor of the author's states the run after its instance token appeared: the deployment's word stands for it (desired.v2 §2.18)");
+                rv.by_word(run);
+                release.extend(p.held);
+            } else {
+                rv.pending.insert(run, p);
+            }
+        }
+        for run in &rv.by_word {
+            runs.entry(run.clone()).or_insert(Named::Unread);
+        }
         rv.runs = runs;
         rv.sweep = sweep;
+        drop(rv);
+        for i in release {
+            let _ = self.tx.send(Event::Sample(i));
+        }
     }
 
     /// Whether a version under `run` may be judged (§2.18): not while the
     /// author's descriptor stating that run names a revision of the other
     /// major, which the role cannot report. A run the last read did not
-    /// hold is read once ([`crate::answer::owner_revision`]); a version
+    /// hold is read once ([`crate::answer::run_revision`]); a version
     /// with no run, no descriptor reaching the target, and a read that
     /// failed take the deployment's word.
-    async fn admits(&self, run: Option<zenkey_model::wire::Run>) -> bool {
+    ///
+    /// **None states the run yet** (text 0.3, F-621, F-627): where
+    /// descriptors reach the target, anywhere but across a face
+    /// ([`TargetStartup::across_face`]), a read that finds none stating the
+    /// run, no descriptor at all among them, holds that run's versions,
+    /// `held` with them, until [`TargetInner::read_revisions`] releases
+    /// them. A run first seen while its instance's token stood is read so
+    /// at once, and waits for the next appearance. A version read from an
+    /// archive is never held, and takes the deployment's word where the
+    /// run is not known.
+    async fn admits(&self, run: Option<zenkey_model::wire::Run>, held: Option<&Incoming>) -> bool {
         if self.startup.word_alone {
             return true;
         }
@@ -2189,25 +2333,71 @@ impl TargetInner {
             return true;
         };
         let at = run.to_string();
+        // Last-known from an archive is never held (§2.18, §2.9): with its
+        // author absent no descriptor will state its run, so the
+        // deployment's word judges it. Its author's return is an
+        // appearance, and its next run is read first.
+        let archived = held.is_some_and(|i| i.via == Via::Archive);
         let mut rv = self.revisions.lock().await;
+        if let Some(p) = rv.pending.get_mut(&at) {
+            if archived {
+                return true;
+            }
+            p.held.extend(held.cloned());
+            return false;
+        }
         let named = match rv.runs.get(&at) {
             Some(n) => n.clone(),
+            None if archived => Named::Word,
             None => {
-                let n = match crate::answer::owner_revision(
+                let since = self.appearances.load(Ordering::Acquire);
+                let read = crate::answer::run_revision(
                     &self.session,
                     key,
                     run,
                     &self.author_iface,
                     self.startup.timeout,
                 )
-                .await
-                {
-                    crate::answer::OwnerRevision::Named(fingerprint) => {
+                .await;
+                use crate::answer::{OwnerRevision, RunRevision};
+                // Descriptors answered and none states the run; or none
+                // answered where descriptors reach the target, which is the
+                // deployment's word, never what a read drew: anywhere but
+                // across a face (F-627), an author not started yet included.
+                let hold = match &read {
+                    RunRevision::NotStated => true,
+                    RunRevision::Read(OwnerRevision::Unreached) => !self.startup.across_face,
+                    RunRevision::Read(_) => false,
+                };
+                if hold {
+                    tracing::debug!(role = %self.role, run = %at, hold_s = self.startup.hold.as_secs_f64(), "desired: no descriptor of the author's states the run yet: its versions are held until a read after its instance token appears, or hold_s (desired.v2 §2.18)");
+                    rv.holds += 1;
+                    let id = rv.holds;
+                    rv.pending.insert(
+                        at.clone(),
+                        Pending {
+                            id,
+                            since,
+                            held: held.into_iter().cloned().collect(),
+                        },
+                    );
+                    // "The hold is bounded": at hold_s, the word.
+                    let (tx, hold) = (self.tx.clone(), self.startup.hold);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(hold).await;
+                        let _ = tx.send(Event::HoldDue(at, id));
+                    });
+                    return false;
+                }
+                let n = match read {
+                    RunRevision::Read(OwnerRevision::Named(fingerprint)) => {
                         let major = self.major_named(&mut rv, &fingerprint).await;
                         Named::Revision { fingerprint, major }
                     }
-                    crate::answer::OwnerRevision::Unreached => Named::Word,
-                    crate::answer::OwnerRevision::Unread => Named::Unread,
+                    RunRevision::Read(OwnerRevision::Unreached) => Named::Word,
+                    RunRevision::Read(OwnerRevision::Unread) | RunRevision::NotStated => {
+                        Named::Unread
+                    }
                 };
                 rv.runs.insert(at.clone(), n.clone());
                 n
@@ -2224,6 +2414,28 @@ impl TargetInner {
                 false
             }
             _ => true,
+        }
+    }
+
+    /// A held run's `hold_s` ran out (§2.18, "The hold is bounded"): where
+    /// that hold still stands, the run leaves the deployment's word, as
+    /// across a face, and its versions are judged again in the order they
+    /// arrived.
+    async fn hold_due(&self, run: &str, id: u64) {
+        let held = {
+            let mut rv = self.revisions.lock().await;
+            if rv.pending.get(run).is_none_or(|p| p.id != id) {
+                return;
+            }
+            let Some(p) = rv.pending.remove(run) else {
+                return;
+            };
+            tracing::debug!(role = %self.role, run, hold_s = self.startup.hold.as_secs_f64(), "desired: no read stated the run within hold_s of its first version: the deployment's word stands for it (desired.v2 §2.18)");
+            rv.by_word(run.to_owned());
+            p.held
+        };
+        for i in held {
+            let _ = self.tx.send(Event::Sample(i));
         }
     }
 
@@ -2303,6 +2515,7 @@ impl TargetInner {
         match (&self.startup.watch, &selector) {
             (Some(w), Some(sel)) => {
                 let tx = self.tx.clone();
+                let appearances = Arc::clone(&self.appearances);
                 // Without history unless the watch session is in a
                 // namespace (core §8.1, 0.41; #851): the seed below reads
                 // what is held, and the round trip after a history would
@@ -2313,6 +2526,7 @@ impl TargetInner {
                     .history(crate::presence::subscriber_needs_history(w))
                     .callback(move |s: Sample| {
                         let why = if s.kind() == SampleKind::Put {
+                            appearances.fetch_add(1, Ordering::AcqRel);
                             Why::Appeared
                         } else {
                             Why::Withdrawn
@@ -2421,6 +2635,13 @@ impl TargetInner {
                 && (read.complete || !read.keys.is_empty())
             {
                 if shown.as_ref().is_some_and(|s| *s != read.keys) {
+                    // A token the last read did not hold appeared (§2.18).
+                    if shown
+                        .as_ref()
+                        .is_some_and(|s| read.keys.iter().any(|k| !s.contains(k)))
+                    {
+                        self.appearances.fetch_add(1, Ordering::AcqRel);
+                    }
                     self.seed_soon(Why::Appeared);
                 }
                 shown = Some(read.keys);
@@ -2680,6 +2901,7 @@ impl TargetInner {
         match ev {
             // desired.v2's alone.
             Event::Read(_) | Event::EndedV2(_) | Event::Beat(_) => {}
+            Event::HoldDue(run, id) => self.hold_due(&run, id).await,
             Event::Seed(why) => self.seed_soon(why),
             Event::Called => {
                 let report = {
@@ -2692,7 +2914,7 @@ impl TargetInner {
             Event::Sample(i) => {
                 // §2.18: never a version under a run whose revision the
                 // role's report cannot report.
-                if !self.admits(i.inband.map(|s| s.run)).await {
+                if !self.admits(i.inband.map(|s| s.run), Some(&i)).await {
                     return;
                 }
                 let sample = self.sample_of(&i);

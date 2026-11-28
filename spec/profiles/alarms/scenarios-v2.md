@@ -58,6 +58,12 @@ The reference runs the runtime's. Its default is `alarms.v1`.
   out. A runner MAY keep them in a slow tier, and run them on a copy of
   the standard contract with `freshness.ttl_s = 4`, made in memory and
   never published.
+  - **Every reader reads the copy's horizon.** S, G and the tools hold
+    the copy. Each is given it, or retrieves it (core §8.4). Each ages
+    the alarms at 4 s (v2.md §2.7). §2's and §6's waits are then past
+    4 s. The heartbeat's tag is the copy's.
+  - Aged at 900 s, the copy's A would read firing in §6. On the
+    standard contract, the two readings agree.
 - **Sizes** are a put's payload under a 16-bit run. A 32-bit run adds 2
   bytes.
 

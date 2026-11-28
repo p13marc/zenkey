@@ -570,6 +570,16 @@
       ],
       "fingerprint": null
     },
+    "e051-packed-place": {
+      "codes": [
+        "E044",
+        "E044",
+        "E047",
+        "E051",
+        "E051"
+      ],
+      "fingerprint": null
+    },
     "e051-packed-tag": {
       "codes": [
         "E051",

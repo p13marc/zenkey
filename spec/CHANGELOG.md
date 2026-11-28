@@ -3,6 +3,56 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.118 — 2026-11-28: editorial: §9.2's cascades 7 and 8 read E044 as a type's placement, never its declaration, as both linters do, no keyword changed (#1152)
+
+zk2py's round 126 filed F-618 against 0.117's cascade 7: "E051 reads a
+type with none of E038 to E045". Read literally, that range holds E044,
+so a type at the tag 0 that an explicit stream names would draw E044
+alone. Cascade 8's parenthesis said the same of E047's marker half and
+E049.
+
+**What E044 is.** It is §7.1's rule on where a packed type goes: an
+explicit stream's type, or an attachment, travels with no CH (§9.2's
+row, "per reference"). It reads the resource, not the declaration, and
+it leaves the type's layout form whole. Every other code of the range
+reads the declaration, and only those make a form one that two
+implementations could write apart. So the text was wrong, and both
+linters were right.
+- **Measured** (zk2py's `packed_tag_live`, round 126): over the 304
+  contract files under its three roots, zk2py's linter and `zk2 contract
+  lint` agree. A type at the tag 0 as an explicit stream's type or an
+  attachment draws E044 and E051 at both. A frame resource whose record
+  type has a marker, its attachment that type, draws E044 and E047 at
+  both.
+
+**What changed.**
+- **Cascade 7.** E051 reads a type whose declaration has none of E038 to
+  E043 and E045. Its last sentence, "as E038 to E045 do", reads "as those
+  lints do": E044 reads only a type a resource places. A new item says
+  E044 is no finding of the declaration, and that a type at the tag 0
+  an explicit stream names draws both.
+- **Cascade 8.** E047's marker half and E049 wait for a packed
+  declaration with no finding (E038 to E043, E045). An attachment's E044
+  does not stop them.
+- **§9.4, "Its declarations"** are linted E038 to E043 and E045, and its
+  placement E044, where it said E038 to E045.
+- **A new fixture, `contracts/e051-packed-place`,** over
+  `schemas/packed/tag.json`: `Zero` as an explicit stream's type, and as
+  a frame resource's record type and attachment. Two E044, one E047 and
+  two E051, `Unnamed`'s among them. Written by reading the text;
+  `zk2 contract lint` of a5055e41, run as a black box, reports exactly
+  those codes. 118 contract fixtures.
+
+**What deliberately did not change.**
+- **No code moves:** both linters already report what the text now
+  says. A contract's validity does not move either, only the codes
+  §9.2 asks for exactly.
+- **No keyword.** The cascades state no MUST or SHOULD. 298 rules.
+- **Observer** stays 0.37.
+
+**Not verified.** The reference's and zk2py's conformance runners have
+not run the new fixture. The black box read it alone.
+
 ## 0.117 — 2026-11-28: §9.2's E051, a packed type whose layout tag is 0; §7.5 accepts a heartbeat's tag 0, and says why (#1152)
 
 alarms.v2's `Alarm` record, as first drafted, hashed to the tag 0 (#984).

@@ -605,7 +605,27 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   revision is of the other major is never judged (`TargetInner::admits`,
   logged once a run): the role is stopped while the descriptor names it,
   its report as it was. No descriptor, a read that failed or a revision
-  not retrieved take the deployment's word. `Seeded::revision`
+  not retrieved take the deployment's word. **None states the run yet**
+  (text 0.3, F-621, F-627, F-628): where descriptors reach the target,
+  the deployment's word (anywhere but across a face:
+  `TargetStartup::across_face`, set by `across(far)`, by a first hop, and
+  by the owner example's `--desired-across-face`), a read that answers
+  and states not the run (`answer::run_revision`'s `NotStated`), or
+  answers nothing, holds the run (`Revisions::pending`, its samples and
+  read entries kept) until `read_revisions` states it, or reads after an
+  instance token of the author's appeared once the run was first seen
+  (`TargetInner::appearances`, counted by the watch and the poll) and
+  states it not, which leaves the word (`by_word`, kept); that read is
+  made again up to `SEED_RETRIES_AT_TOKEN` (4) times, 100 ms more apart
+  each, while a held run stays unstated. The held versions are then sent
+  again as samples. The hold is bounded: `TargetStartup::hold`
+  (`hold_s`, `HOLD` 10 s; the owner example's `--desired-hold-ms`) ends
+  it by the word (`Event::HoldDue`, `hold_due`, `s16_a_hold_ends_at_hold_s`).
+  `by_word` lets a run go once a read states it, and holds `BY_WORD` (16)
+  at most. An archive's version (`Via::Archive`, §2.9) is never
+  held: an unknown run's takes the word, in every role, a desired.v1
+  role's included (e19d78b1). §13's P answers a descriptor stating R
+  (`author_descriptor`, `answer_descriptor`) before its token. `Seeded::revision`
   (`AuthorRevision::{NotRead, Word, Given, Another, Stopped, Unread}`)
   says what it read, and the owner example's `desired seeds` writes it
   `revision=…`. `TargetStartup::word_alone` (`by_word_alone`, the owner
@@ -615,9 +635,20 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   is `scenarios-v2.md` §1–§8 and §10–§16 over `tests/contracts/{tasking,
   worker}.v2.toml` (§13 a played author, §14 an author on a runtime of its
   own that the test stops, behind a router denying the target's session
-  `@zk`; §16's four runs at once, A and B by `by_word_alone` through R1
+  `@zk`; §16's five runs at once, A and B by `by_word_alone` through R1
   with timestamping off and on, C both directions of the refusal, D the
-  stop), with `config_v2_as_a_target`; the owner example's `--desired-v2`,
+  stop, E the new run read first: an author killed and restarted on run
+  C's revision under a new run, its two puts never judged, the stop's
+  warning read from the binary's `zenkey::desired` log, `desired_log`),
+  `s16_a_version_put_before_its_descriptor_waits_for_its_token` (X plays
+  the next instance: a put, then the descriptor, then the token, and the
+  held put acted on only after the token; §2's step 4 plays a new instance
+  so too, both through `answer_descriptor`),
+  `s16_a_target_before_its_author_holds_a_version_put_before_its_descriptor`
+  (no author yet: X's put held, released at its token; then a run no
+  descriptor states, the word at the next token), §14's target told
+  `across_face`,
+  with `config_v2_as_a_target`; the owner example's `--desired-v2`,
   `--desired-ttl <s>` and `--desired-timeout-ms <ms>` drive it (`desired
   gets` listing `<held>=<unchanged|whole>`, `desired delete-unheld`,
   `desired watch`).

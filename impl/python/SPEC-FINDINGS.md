@@ -32865,3 +32865,646 @@ py-conformance` **8680 of 8680**.
 F-619 and F-620 are resolved.
 
   F-365 stays open as #965's.
+
+## At core 0.119, link.v2 0.29, alarms.v2 0.2 and desired.v2 0.3
+
+Round 127 read this tree at 53475c13 (#984, #986, #1152), its black
+boxes built from 53475c13. Four text versions moved, each answering
+findings of rounds 117 to 126, and a gap review-bot found in
+`desired.v2` §2.18. Each changelog entry was read first, then each hunk
+it names.
+
+### The walk, before and after
+
+- **Re-keyed** (258123da): 7 readings counted `v2/plan.json`'s cases or
+  read an index row. Each now takes the tree's: 55 cases, alarms.v2 at
+  0.2, link.v2 at 0.29. **8679 of 8682.**
+- **The new cases passed as zk2py stood:** `contracts/e051-packed-place`
+  gives E044 twice, E047 and E051 twice; `v2/plan.json`'s case 54 is
+  case 48's plan with one finding more.
+- **The three failures** were readings that pinned what the answers
+  moved: cascades 7 and 8 (F-618) and "no case draws
+  `exposure_disagrees`" (F-573). Each now reads its answer.
+- **After the moves:** `just py-conformance` **8687 of 8687**, with
+  `_round127_readings`.
+
+### The answers, read cold
+
+| Finding | Holds | The answer, quoted |
+|---|---|---|
+| F-618 | yes | Cascade 7: "E051 reads a type whose declaration has none of E038 to E043 and E045 ... as those lints do". Its new item: "E044 is no finding of the declaration. It reads where a resource places the type (§7.1), and leaves its layout form whole." Cascade 8: "(E038 to E043, E045). An attachment's E044 does not stop them." §9.4: "linted E038 to E043 and E045, and its placement E044". **Resolved.** zk2py's code read it so already; its docstrings now cite 0.119's ranges. |
+| F-573 | yes | `v2/plan.json` case 54: "a collection the revisions disagree on is read `host`, for the horizon and for the longest put". §2.9's item now cites the file. **Resolved.** |
+| F-613 | yes | §2.7: "**The horizon is the revision's.** A reader ages an alarm at the `freshness.ttl_s` of the revision its owner's descriptor names (core §3.3)." "A copy with another horizon is read at its own." The Conventions: "**Every reader reads the copy's horizon.**" **Resolved.** zk2py's G moved (below). |
+| F-614 | yes | §2.6: "**Taking chooses between an identity's slots.** ... Taking moves no slot's answer." "**With no run stated,** ... It answers each entry by its slot, as §2.15's table does." **Resolved.** No code moved: zk2py answered so in round 124. |
+| §2.18, review-bot's gap | yes | "**A new run is read first.** A target MUST NOT judge a version under a run whose descriptor it has not read, nor a snapshot with no entry under it, before it reads its author's descriptors for that run." zk2py's target moved (below). But the hold does not guard what it is for (F-621). |
+
+**F-573's figures, computed zk2py's own way.**
+- **As written:** the longest owner heartbeat is 1,211 bits, 160 bytes,
+  at 60 s.
+- **Counted `link`** (quiet.v1's second revision alone): 1,267 bits, 167
+  bytes, at 30 s. These are the entry's figures.
+- **zk2py's plan of that variant** draws `block_over_batch` and
+  `horizon_under_face` at the `link` key. It also draws
+  `horizon_under_face` at quiet.v1's own heartbeat, which then crosses.
+  The entry's "it would fail twice" leaves that third out. That is a
+  note, not a finding.
+
+### What moved in zk2py
+
+- **The alarms reader's horizon** (83311607). Round 124's S was handed
+  the copy, but `read_owner`, zk2py's G, aged each snapshot entry at a
+  fixed 900 s. That is what F-613 measured of zenctl.
+  - **The revision:** G now holds the standard revision and any it is
+    given. It takes the `alarms.v2` revision the descriptor names, held
+    or retrieved by fingerprint (core §8.4). Across a face it takes the
+    one the deployment's word names, and never retrieves.
+  - **The age:** each entry is aged at that revision's
+    `freshness.ttl_s`.
+  - **Without one:** a firing entry reads unobservable, freshness.v1's
+    `not_a_horizon` (F-623), and a resolved one no, resolved.
+- **The target's hold** (7769bf94). A put or delete heard live, a read's
+  entry, or a snapshot with no entry, under a run whose descriptors the
+  target has not read, waits by run, in its order of arrival.
+  - One read of that run's descriptors is made in the background.
+  - What waited is then judged by the revision they name.
+- **E051's cascade:** the docstrings alone (7a4ef98b).
+- **The live runners** (d2c62b9e): §2 and §6 with every reader, §6 on a
+  first hop and across a face, §16's run E, and §14 step 5 as 0.3 words
+  it.
+
+### Live: alarms.v2 on the 4 s copy, every reader
+
+The black boxes are `owner` and `zenctl` of 53475c13, run and never
+read. Every router is zenoh-python's.
+- **The pairings:** `--pairing ref-owner` puts the reference's owner
+  under both readers, and `zk2py-owner` zk2py's owner.
+- **The readers:** in each section they are zk2py's G (`read_owner`)
+  and `zenctl alarms --format json --clocks-synced`.
+- **Given or not:** each reader is given the copy beside `tc.v1` by
+  `--contracts`, or `tc.v1` alone.
+
+| Section | ref-owner | zk2py-owner |
+|---|---|---|
+| §2, Expected 4: H past the 4 s horizon, confirmed | both readers, given and not given: yes, `firing` | the same |
+| §6, Expected 2: A's bit cleared, 7 s | given: A unobservable, `stale`; B no, `resolved`. Not given: each retrieves the copy (zk2py says `retrieved`), and the same | the same |
+| §6, the owner on a first hop (`--first-hop`, no bundle held) | given: A `stale`. Not given: A unobservable, **`not_a_horizon` at both**; B no, `resolved` | the same |
+| §6 read across a face (`--across-face granted`) | zenctl given the copy: A `stale`. **Not given: A yes, `firing`, and anything firing yes, exit 1** (F-622). zk2py: a word that names the copy it holds, `stale`; one that names no `alarms.v2` revision, or the copy unheld, `not_a_horizon` | the same |
+
+- **Every section, both pairings:** 77 of 77 and 76 of 76, the slow
+  tier at 900 s included.
+- **The two readers agree** on every answer, but the far reader not given
+  the copy (F-622). F-613's disagreement is gone.
+- **zenctl's stderr on the copy** still says "has not confirmed it
+  within 900 s (alarms.v1 §2.7)", though it ages at 4 s. That is the
+  reference's wording, not the text's.
+
+### Live: desired.v2 §14 step 5 and §16 run E
+
+The black boxes are `owner` of 53475c13, run and never read. Every
+router is zenoh-python's.
+- **§14:** `desired_v2_scenarios --only 14 --only 14-ohb`, in both cross
+  pairings: 13 of 13 each. Step 5's read came after the adoption,
+  answered unchanged, in all four runs.
+  - **The whole suite,** the reference's author and zk2py's target:
+    120 of 121. The one failure is §14 step 5 on its other path. The
+    read, asked during the descriptors' read, carried v3's stamp and
+    was answered whole. The next heartbeat made a second read, answered
+    unchanged, as §2.5's "Whole" says (F-625). The check now takes that
+    path. Three more runs of §14 with zk2py's target read after the
+    adoption, 6 of 6 each: that path came once in eight runs.
+- **§16, runs A to D** (`desired_v2_mixed --only s16`): 36 of 36.
+- **§16, run E** (`desired_v2_mixed --only run-e`), each run in a fresh
+  directory:
+  - **Expected 7** held in every run.
+  - **Expected 8** held in 13 of 44, over four sessions. By pairing:
+    the reference to itself 2 of 11, the reference's author and zk2py's
+    target 6 of 11, zk2py's author and the reference's target 2 of 11,
+    zk2py to itself 3 of 11.
+  - **Each failure is the same.** No act, but `Rp` receives a report:
+    `converged`, its version the new run's `/0`, v1's put again,
+    adopted. The role then stops, and `desired seeds` says
+    `revision=stopped:desired.v1:…`. v2 is never acted on (F-621).
+  - **With zk2py's author putting again after its descriptor**
+    (`--desired-after-descriptor`, core §8.2 step 3 and before step 4):
+    10 of 10, with both targets.
+
+### F-621 · contradiction · `desired.v2` §2.18, against core §8.2: the hold reads the new run's descriptors before its author has put them
+
+> §2.18: "**A new run is read first.** A target MUST NOT judge a version
+> under a run whose descriptor it has not read ... before it reads its
+> author's descriptors for that run. It reads them once (core §3.3)."
+> "**A read that names none** leaves the deployment's word: no
+> descriptor reached the target, as across a face, none states the run,
+> or the read failed."
+> "**Why.** An author that restarts on a revision of the other major
+> puts its first version just after its new descriptor (core §8.2),
+> before a target has read it."
+> Core §8.2: "3. declare the descriptor's queryable and put the first
+> descriptor (§3.3) ... 4. declare the instance token, then the
+> interface tokens." "an owner that holds a state member's value at
+> start SHOULD put it before step 4".
+> `scenarios-v2.md` §16, Expected 8: "the target judges nothing of the
+> new run before it reads the descriptor stating that run (§2.18). It
+> names run C's revision, so the role stops. ... `Rp` and `Run` receive
+> nothing."
+
+- **The premise does not hold.** Core §8.2 places a state's value before
+  step 4, but not after step 3. §2.11's "MUST put again each document it
+  keeps under its new run before it answers a GET with it" places it
+  before nothing else. Neither author waits for its descriptor.
+- **Measured** (run E, above): G read the author's descriptors the
+  moment S heard the new run's first put. It found none stating the run
+  in 16 of 20, 8 of 10 for each author.
+- **Then the read names none.** §2.18 leaves the deployment's word, the
+  scenarios' own `tasking.v2`, so the target adopts v1's put again
+  under the new run. It puts that report, and Expected 8 fails, in 31
+  of 44 runs, in every pairing, the reference's to itself included.
+- **"It reads them once."** A target that reads no descriptor again,
+  across a face or with no presence to follow, keeps the word for that
+  run. It then acts on v2 too. In run E the seed at the new instance
+  token's appearance read again, and stopped the role.
+- **Put after step 3, it holds:** zk2py's author with its puts again
+  after its descriptor, 10 of 10.
+- **Fix:** either of these.
+  - `desired.v2` §2.11 makes it a MUST that a new instance puts its
+    documents again after its descriptor (core §8.2 step 3) and before
+    step 4. Core's "A profile MAY make it a MUST for its own resources"
+    reads the before. This adds an after.
+  - Or a read that names none, where descriptors can reach the target,
+    is read again at the instance token's appearance before the run is
+    judged.
+- **Changes:** whether §2.18's MUST NOT can be kept by any target. As
+  the text stands, a target adopts or acts on the first version of a
+  run its role cannot report, the hazard the item names.
+
+### F-622 · gap · `alarms.v2` §2.7, across a face: a deployment's word that names no `alarms.v2` revision
+
+> §2.7: "Across a face, the deployment's word names the revision
+> (§2.11)." "**A revision not in hand** gives no horizon ... never at
+> 900 s: a shorter horizon read at the standard one would call a stale
+> alarm fresh."
+> §2.11: "A far reader takes an owner's table from the revision its
+> catalog names for the owner's contract (core §8.6, §4)."
+
+- **The gap.** The text does not say where the word names the
+  `alarms.v2` revision, or what a word that names none means: the
+  standard revision, or none. zenctl's `--across-face` word names a
+  major alone ("the deployment's word that it implements the major the
+  selector spells"), and its `--contracts` names tables.
+- **Measured** (§6 read across a face, both pairings): the owner on the
+  4 s copy, A's bit cleared, 7 s.
+  - **`zenctl alarms --across-face granted --contracts tc.v1`:** A yes,
+    `firing`; anything firing yes; exit 1. It ages at the standard
+    900 s, the hazard §2.7 names.
+  - **Given the copy too:** A unobservable, `stale`; exit 2.
+  - **zk2py**, given a word that names no `alarms.v2` revision: A
+    unobservable, `not_a_horizon`.
+- **Fix:** say that the deployment's word names the `alarms.v2`
+  revision, by its catalog (core §8.6). Then say what a word that names
+  none means. zk2py reads none, so no horizon. If it means the standard
+  revision instead, a deployment on another horizon must name its own.
+- **Changes:** whether a far reader of a short-horizon owner calls a
+  stale alarm firing.
+
+### F-623 · minor · `alarms.v2` §2.7: "A revision not in hand" names no reason, and no fixture holds it
+
+> §2.7: "A reader that neither holds nor can retrieve the revision its
+> owner names reads that owner's alarms' freshness as unobservable".
+> §2.14: "A reader MUST answer "is this alarm firing?" as the fixture
+> does. `[F: v2/conclusions.json]`"
+> v1 §2.16: "**Any other reason** says something of the alarm, its owner
+> or the deployment that time does not settle: ... and `freshness.v2`'s
+> `no_stamp`, `clock_disagrees` and `not_a_horizon` among them. It MAY
+> be reported."
+
+- **No reason is named.** Both readers chose `not_a_horizon`
+  (measured, the first hop), freshness.v1's reason for "no horizon in
+  the value".
+- **The reason decides what a tool reports** (v1 §2.16's two lists).
+  `not_a_horizon` is in the second, so the change MAY be reported. A
+  retrieval that failed once and a later read settles is nearer the
+  first, the reader's own sight.
+- **No evidence.** The item carries no tag. Its parent's `[Sc: §2, §6]`
+  puts no reader without the revision, and `conclusions.json` has no
+  such case.
+- **Fix:** name the reason and its list, and add a case.
+
+### F-624 · index · core's CHANGELOG has no 0.118, and link's no `link.v2` 0.28
+
+> Core's header: "Every change goes through
+> [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
+> what changed, what deliberately did not, and why."
+
+- Core's entries go from 0.117 to 0.119, and `link.v2`'s from 0.27 to
+  0.29. No entry says that a version was skipped, or which change took
+  it.
+- **Fix:** 0.119's and `link.v2` 0.29's entries say so.
+
+### F-625 · minor · `desired.v2` `scenarios-v2.md` §14, Expected 5: a read answered whole during the hold is followed by one more
+
+> Expected 5: "The first heartbeat of the new instance is of another
+> run, and the target reads once." "Asked while the descriptors' read
+> runs, it carries v3's earlier stamp and is answered whole. Its entry
+> waits with the put, and is the same version."
+> §2.5: "**Whole:** it judges the entry (§2.6), and expects none. The
+> next heartbeat makes it read once more, and that read settles what it
+> expects."
+> The entry of 0.3: "One read either way, and `Run` receives nothing."
+
+- **The second read.** On the second path §2.5 makes the target read
+  once more, at the next heartbeat. Expected 4 says so of its own whole
+  answer ("The next heartbeat makes it read once more, answered
+  unchanged"), and Expected 5 does not.
+- **Measured:** the reference's author, zk2py's target, the whole suite.
+  The gets were `[{held 0000/3, whole}, {held 0001/1, unchanged}]`.
+- **Fix:** Expected 5's bullet adds §2.5's read once more, answered
+  unchanged. The entry's "One read either way" is wrong of that path.
+
+### Not run
+
+- **§14 step 5's second path by the reference's target:** four runs
+  read after the adoption.
+- **A target that follows no presence under run E**, where F-621's
+  word would stand for v2 too: the argument is the text's.
+- **§16 across a face.**
+
+### Counts at core 0.119, link.v2 0.29, alarms.v2 0.2 and desired.v2 0.3
+
+625 entries.
+- **New: F-621 to F-625:**
+  - one contradiction, F-621;
+  - one gap, F-622;
+  - two minor errors, F-623 and F-625;
+  - one index error, F-624.
+- **Settle first:** F-621. §2.18's new MUST NOT cannot be kept as the
+  text stands, by either implementation.
+- **Resolved:** F-573, F-613, F-614 and F-618. F-612 was resolved in
+  #1170, though rounds 125 and 126 still listed it open.
+- **Open:** F-437 to F-441; F-621 to F-625.
+
+  F-365 stays open as #965's.
+
+## At core 0.118, link.v2 0.28, alarms.v2 0.2 and desired.v2 0.3 (the mend)
+
+Round 127's mend read this tree at b07f1c24 (#984, #986), its black
+boxes built from b07f1c24. The answers chunk renumbers round 127's two
+editorial entries, core 0.119 to 0.118 and `link.v2` 0.29 to 0.28
+(F-624), and answers F-621 to F-623 and F-625. Each changelog entry was
+read first, then each hunk it names. "At core 0.119, link.v2 0.29,
+alarms.v2 0.2 and desired.v2 0.3" above is round 127's, at the numbers
+it read.
+
+### The walk, before and after
+
+- **Re-keyed** (c40c31d2): every version zk2py reads and every citation
+  it writes takes the renumbered tree's: the round's version reading,
+  F-618's and F-573's rows, "55 since 0.28", and the docstrings of
+  `contract.py`, `packed.py` and `schemas.py`.
+- **Reading 43** of `alarms` `v2/conclusions.json` passed as written:
+  zk2py gave `not_a_horizon` since round 127.
+- **Two readings quoted words the mend moved,** F-613's and §2.18's.
+  Their quotes were re-keyed; each answer is read apart.
+- **`just py-conformance`: 8688 of 8688** after the re-key, **8692 of
+  8692** after the moves, with `_round127b_readings`.
+
+### The answers, read cold
+
+| Finding | Holds | The answer, quoted |
+|---|---|---|
+| F-621 | yes | `desired.v2` §2.18: "**None states the run yet.** Where descriptors reach the target, a read that finds none stating the run holds that run's versions still. The target reads again when the author's instance token appears, which follows its descriptor (core §8.2, steps 3 and 4). Only a read after that token that names none leaves the deployment's word." "**A read that names none** leaves the deployment's word: no descriptor reached the target, as across a face, or the read failed." **Resolved.** Core §8.2 puts the descriptor at step 3 and the token at step 4, and §1.5 mints a new instance id at each restart, so the token is a new key that a target sees appear. No author's order is constrained. zk2py's target moved (below). What the item leaves unsaid is F-627 and F-628. |
+| F-622 | yes | `alarms.v2` §2.7: "Across a face, the deployment's word names the revision (§2.11): the `alarms.v2` revision a reader is given, else the standard one, which every reader holds. A deployment that runs another revision gives it." **Resolved.** zk2py's far reader moved (below). A far reader still cannot tell a deployment that runs the copy and does not give it. It then ages at 900 s and calls the copy's stale A firing. The text puts that on the deployment, with no keyword. That is a note, not a finding. |
+| F-623 | yes | §2.7: "Its reason is `freshness.v1`'s `not_a_horizon`, no horizon in hand (v1 §2.16's second list). `[F: v2/conclusions.json]`" Reading 43. **Resolved.** No code moved. |
+| F-624 | yes | Core's entries now go from 0.117 to 0.118, and `link`'s from `link.v2` 0.27 to 0.28. **Resolved.** The renumbering left two words behind (F-626). |
+| F-625 | yes | `scenarios-v2.md` §14, Expected 5: "Asked while the descriptors' read runs, it carries v3's earlier stamp and is answered whole. Its entry waits with the put, and is the same version. The next heartbeat makes it read once more, answered unchanged (§2.5)." **Resolved.** zk2py's runner took that path since round 127. It now takes it on purpose (below). |
+
+Also read: §2's step 4, "X, as a new instance of the author, ... then
+answers a descriptor stating that run, and declares its instance
+token", and its Expected 4, "The put waits ... At X's instance token
+the target reads again". zk2py's §2 runner moved to it.
+
+### What moved in zk2py
+
+- **The target's hold** (4e4a173b), `desired_v2_live.Target`:
+  - **Across a face,** a read that draws no descriptor leaves the word
+    at once, as before. So does a read that fails.
+  - **Elsewhere,** a read that draws no descriptor, or only descriptors
+    stating other runs, holds the run. Its versions and snapshots with
+    no entry wait, in their order of arrival. A later version of the
+    run makes no read.
+  - **At each appearance** of an author's instance token, followed or
+    polled, every held run is read again. That read leaves the run's
+    word: the revision a descriptor names, or, naming none, the
+    deployment's word.
+  - **"After that token"** is read as after a token seen to appear once
+    the run was first seen. A seed at an appearance is such a read.
+  - **The read at the token** is made again, up to four times, 100 ms
+    more apart each time, while the instance that appeared has not
+    answered (F-628). That is zk2py's choice.
+  - `desired holds` says what each hold did.
+- **The far reader's revision** (04c118cb),
+  `alarms_v2_live.horizon_of`, across a face:
+  - a word that names an `alarms.v2` revision names it: held, its
+    horizon; not held, none, never retrieved;
+  - a word that names none takes the revision the reader was given
+    beside the standard (`given`), else the standard's 900 s
+    (`standard`);
+  - two given and none named is no word zk2py can read: no horizon.
+  - At home nothing moved.
+- **For the live runs:**
+  - `desired_v2_scenarios` §2's step 4: X answers a descriptor stating
+    its run 1 s after its put, and declares its token 1 s after that.
+  - `--only 14-during` takes §14 step 5's second path. A complete
+    queryable of the author's instance keys, on the target's side of
+    the face, holds each query 1.2 s and answers nothing. The target's
+    reads time out at 3 s.
+  - `desired_v2_mixed --cross` runs run E in the two cross pairings, and
+    `--only run-e-late` runs it with zk2py's author waiting 1,500 ms
+    between its puts again and its descriptor
+    (`--desired-descriptor-late-ms`).
+  - `alarms_v2_scenarios --only 17` checks zenctl not given the copy
+    against zk2py's reader given none.
+
+### Live
+
+The black boxes are `owner` and `zenctl` of b07f1c24, run and never
+read. Every router is zenoh-python's.
+
+**`desired.v2` §16, run E** (`desired_v2_mixed --only run-e --cross
+--repeat 10`). Each author puts before its descriptor, as both do by
+default.
+
+| Pairing | Expected 7 and 8 | G's read at the first put found the run stated | The put before the new token |
+|---|---|---|---|
+| zk2py's author, the reference's target | 10 of 10 | 2 of 10 | 0 to 4 ms |
+| the reference's author, zk2py's target | 10 of 10 | 2 of 10 | 1 to 3 ms |
+
+- **zk2py's target held the run in 4 of 10.** In the other 6 its first
+  read came after the descriptor.
+- **The read at the token** found the descriptor at once in every
+  hold. It was never made again.
+- **G's read found no descriptor at all** in 16 of 20, not another
+  run's: the old instance's was gone, and the new one's not yet
+  declared (F-627).
+
+**Run E with the descriptor 1,500 ms late** (`--only run-e-late
+--repeat 10`, zk2py's author):
+
+| Target | Expected 7 and 8 | Held |
+|---|---|---|
+| the reference's | 10 of 10 | (not visible) |
+| zk2py's | 10 of 10 | 10 of 10, each released at the token, by run C's revision |
+
+G found no descriptor at the first put in 20 of 20. Neither target acted
+on either put, and `Rp` and `Run` received nothing. **Before the mend,
+round 127 measured Expected 8 in 13 of 44.**
+
+**§2, step 4 as the mend words it** (`--only 2`), both cross pairings:
+6 of 6 each. The put waited 2 s, through X's descriptor, and was acted
+on at X's token.
+
+**§14 step 5's second path** (`--only 14-during`):
+- **The reference's author, zk2py's target:** 7 of 7. The read asked
+  during the descriptors' read carried v3's earlier stamp and was
+  answered whole. The next heartbeat's read was answered unchanged, as
+  Expected 5 says.
+- **zk2py's author, the reference's target:** 6 of 7 in each of four
+  runs, one at 1.2 s and three at 2.5 s. The reference's target adopted
+  the put before the new instance's first heartbeat each time, on the
+  first path: the stand-in held none of its reads long enough to
+  matter. Whether it made one, the black box does not say.
+- **A first try held each query 2.5 s,** longer than a heartbeat's
+  period, in three runs with zk2py's target: 5 of 7 each. zk2py then
+  read three times: whole, whole again at the next heartbeat, then
+  unchanged.
+  Expected 5's "answered unchanged" holds where the descriptors' read
+  ends before the next heartbeat. That is a note: across a face with no
+  stand-in, the read ends at once.
+
+**`alarms.v2` §6 read across a face, no revision given**
+(`alarms_v2_scenarios --only 17 --only 15`), both pairings: 5 of 5 each.
+- **zenctl `--across-face granted`, not given the copy:** A yes,
+  `firing`; anything firing yes. That is the standard revision's 900 s,
+  as the mend says.
+- **zk2py's reader, given none:** `standard`, 900 s, A yes, `firing`.
+  The two agree.
+- **Given the copy, named or not:** both read A unobservable, `stale`,
+  at 4 s.
+- **The copy named and not held:** zk2py reads A unobservable,
+  `not_a_horizon`.
+
+**Beside them,** to see that the hold moved nothing else:
+- **`desired_v2_scenarios`, the whole suite,** the reference's author
+  and zk2py's target: 128 of 128. One not run, §12, as before.
+- **`desired_v2_mixed --only s16`,** runs A to E in all four pairings:
+  44 of 44.
+
+### F-626 · index · `link` `v2/plan.json`: the renumbering left "link.v2 0.29" in case 54's note and in the description
+
+> Case 54's `policy`: "# a collection two revisions disagree on is read
+> host (link.v2 0.28)".
+> Its `note`: "Written by reading link.v2 0.29 and the reference's
+> merge".
+> The file's `description`: "Case 54, a collection two revisions
+> disagree on (§2.9, F-573), ... written by reading link.v2 0.29 and the
+> reference's merge".
+> `link`'s CHANGELOG: "## link.v2 0.28 — 2026-11-28: editorial:
+> `v2/plan.json`'s case 54".
+
+- The renumbering moved the policy's comment and the headings, not
+  these two. zk2py's walk pins them (c40c31d2).
+- **Fix:** "link.v2 0.28" in both.
+- **Resolved** (the lead, after the mend): case 54's note and the description read "link.v2 0.28" (`7134601a`).
+
+### F-627 · gap · `desired.v2` §2.18: "Where descriptors reach the target" names nothing a target observes, and a read that draws no descriptor at all reads as both items
+
+> "**A read that names none** leaves the deployment's word: no
+> descriptor reached the target, as across a face, or the read failed."
+> "**None states the run yet.** Where descriptors reach the target, a
+> read that finds none stating the run holds that run's versions
+> still."
+> §2.18, above: "Where no descriptor reaches the target, it is the
+> deployment's word."
+
+- **Two readings of one read.** A read that draws no descriptor at all
+  is "no descriptor reached the target", and leaves the word. Where
+  descriptors reach the target, the same read "finds none stating the
+  run", and holds. Which applies is the deployment's, "as across a
+  face", but the text says neither how a target knows it, nor that
+  this is what decides.
+- **It is run E's read.** G's read at the new run's first put drew no
+  descriptor at all in 16 of 20 runs, and in 20 of 20 with the
+  descriptor late. The old instance's was gone, and the new one's not
+  yet declared. A target that reads "reached" from the read itself
+  takes the word there, and acts: F-621 again.
+- **zk2py reads it by the deployment.** A target not told it is across
+  a face holds. A target across one takes the word at once. A target
+  that has never read a descriptor of its author, its author not yet
+  started, holds too.
+- **The reference:** across a face (§14), it adopted a new run's put
+  before a stand-in that held every query of the author's instance keys
+  could delay it. It may make no read where no presence crosses. The
+  black box does not say.
+- **Fix:** say that "where descriptors reach the target" is the
+  deployment's: not across a face, or wherever the author's instance
+  tokens reach the target. Say that a read drawing none there finds
+  none stating the run.
+- **Changes:** whether two targets hold or act on the same read.
+- **Resolved** by desired.v2 0.3 (the lead, after the mend): "Where descriptors reach the target" is the deployment's, wherever the author's instance tokens reach it, never across a face, and a read that draws none there finds none stating the run. zk2py's reading.
+
+### F-628 · minor · `desired.v2` §2.18: the read at the token can miss the descriptor, and which token a run's read follows is not said
+
+> "The target reads again when the author's instance token appears,
+> which follows its descriptor (core §8.2, steps 3 and 4). Only a read
+> after that token that names none leaves the deployment's word."
+> v1 §2.5: "A seed that draws nothing at an appearance MAY be made
+> again, a few times and soon: a token can reach the target's router
+> before the route to its author's queryable does".
+
+- **The read at the token can miss.** v1 §2.5 says a token can arrive
+  before the route to the author's queryable. A descriptor read made at
+  the token then draws none, and §2.18 leaves the word: the case the
+  hold is for. v1 §2.5's MAY covers a seed, not this read.
+- **zk2py makes it again,** up to four times, 100 ms more apart each
+  time, while the instance that appeared has not answered. In run E's
+  14 holds, the read at the token never needed it.
+- **"That token" names no run.** A token can appear before a run's
+  first version: an author that puts after step 4, its descriptor
+  missed by the target's first read. Is that first read "after that
+  token"? zk2py counts only a token seen to appear once the run was
+  first seen. A run whose token came first is held until the next
+  appearance.
+- **Fix:** let the read at the token be made again as v1 §2.5's seed
+  is. Say which token a run's read follows: one that appears after its
+  first version, or the token of the instance whose descriptor the read
+  misses.
+- **Resolved** by desired.v2 0.3 (the lead, after the mend): the read at the token MAY be made again as v1 §2.5's seed is, and the token is one that appears after the target first saw the run; a run first seen while its instance's token stood is read at once and, unstated, waits for the next appearance. zk2py's reading.
+
+### Not run
+
+- **§14 step 5's second path with the reference's target:** four runs,
+  each on the first path (F-627).
+- **Run E with a target across a face,** or one that follows no
+  presence: the argument is the text's.
+- **§16 across a face.**
+- **The read at the token missing the descriptor** (F-628): not seen in
+  14 holds.
+
+### Counts at core 0.118, link.v2 0.28, alarms.v2 0.2 and desired.v2 0.3 (the mend)
+
+628 entries.
+- **New: F-626 to F-628:**
+  - one index error, F-626;
+  - one gap, F-627;
+  - one minor error, F-628.
+- **Resolved:** F-621 to F-625.
+- **Open:** F-437 to F-441; F-626 to F-628.
+
+  F-365 stays open as #965's.
+
+## After review-bot on #1176
+
+Round 127's second mend read this tree at 1fe83745, one spec commit on
+the mend's: review-bot's two answers on #1176, each a changelog line
+and an item. Each line was read first, then its item. No live run: the
+reference's half lands after this.
+
+### The answers, read cold
+
+| Item | Holds | The answer, quoted |
+|---|---|---|
+| `desired.v2` 0.3 §2.18, "The hold is bounded" | yes | "A run that no read has stated within `hold_s` of its first version leaves the deployment's word, as across a face. `hold_s` is 10 s unless the deployment says otherwise." **It holds.** A hold now ends, at the token or at hold_s, and the race it guards (F-621) takes milliseconds. zk2py's target moved (7e4f844c). The item's parent still says "Only" (F-633). |
+| `alarms.v2` 0.2 §2.7, "No descriptor read" | yes | "On the near side, an owner whose descriptor the reader could not read is read as a revision not in hand: unobservable, never 900 s. Only across a face does the deployment's word stand for it." **It holds.** zk2py read it so since round 127, and nothing moved: no revision named, no horizon, and §2.14's step 2 answers `no_descriptor` first. One fixture gives such a reading a freshness the item rules out (F-634). |
+
+### What moved in zk2py
+
+- **The target's bound** (7e4f844c), `desired_v2_live.Target`:
+  - `hold_s` is the deployment's: `Target(hold_s=…)`, and
+    `--desired-hold-s` in `desired_v2_owner`, 10 s by default. A
+    hold_s of 0 or less is refused.
+  - **"Its first version"** is read as the first version the target
+    saw: its first arrival, or the reply of the seed that drew it. A
+    target cannot see when its author put it.
+  - **At hold_s,** a run held, or one whose first read is still out,
+    leaves the word. What waited is judged by it, in its order of
+    arrival. "No read has stated" is read strictly: a read still out
+    then has not stated it.
+  - **A read out at the bound** keeps no hold when it ends. A revision
+    it states is the run's for its later versions, by §2.18's first
+    item ("the one the author's descriptor names for the version's
+    run"). A `desired.v1` revision stops the role (F-589). zk2py reads
+    that from the text, so it is a note, not a finding.
+  - `desired holds` adds `bound` and `late`.
+- **The near reader** (`alarms_v2_live`): nothing moved.
+
+### The walk
+
+`_round127c_readings` (e1bc05c2) adds two readings:
+- **The bound**, run with hold_s 0.3 s over stood-in descriptor reads,
+  in four cases:
+  - a run never stated, with no token, leaves the word at hold_s;
+  - a read at a token still out then leaves the word at the bound,
+    before that read ends;
+  - that read, stating a `desired.v1` revision late, stops the run's
+    next version;
+  - a first read still out at hold_s leaves the word at the bound.
+- **The near reader** with no descriptor read, holding the standard
+  alone or the copy too: no horizon, `no_descriptor`.
+- Each pins its item and its changelog line.
+
+**`just py-conformance`: 8694 of 8694**, up from 8692.
+
+### F-633 · minor · `desired.v2` §2.18: "Only a read after such a token" still says it alone leaves the word
+
+> "**None states the run yet.** ... Only a read after such a token
+> that names none leaves the deployment's word."
+> "**A run first seen while its instance's token stood** is read at
+> once. Unstated, it waits for the next appearance."
+> "**The hold is bounded.** A run that no read has stated within
+> `hold_s` of its first version leaves the deployment's word".
+
+- **Two ways out, one "Only".** The bound is a second way to leave the
+  word, written as a sub-item of the sentence that says there is one.
+  A run first seen while its token stood "waits for the next
+  appearance", which may never come. The bound ends that wait too.
+- **zk2py reads the sub-item as the exception,** and nothing turns on
+  the wording.
+- **Fix:** "Only a read after such a token that names none, or the
+  bound below, leaves the deployment's word"; "Unstated, it waits for
+  the next appearance, or the bound".
+- **Changes:** nothing zk2py does. A reader who stops at "Only" builds
+  the unbounded hold.
+- **Resolved** (the lead): "A read after such a token that names none leaves the deployment's word, as the bound below does."
+
+### F-634 · minor · `alarms` `v2/conclusions.json`: reading 27 gives a descriptor not read a fresh alarm, and the description's reasons lack `not_a_horizon`
+
+> Reading 27: "the descriptor not read", `presence` "present",
+> `descriptor` null, `freshness` {"verdict": "fresh", "reason":
+> "within_horizon"}; expect `no_descriptor` for both questions.
+> The description: "`freshness` is freshness.v2's verdict over the
+> slot's observations at 900 s ... unobservable: listened_too_short,
+> silent, no_stamp, clock_untrusted, clock_disagrees, near_horizon or
+> no_observation".
+> §2.7: "an owner whose descriptor the reader could not read is read as
+> a revision not in hand: unobservable, never 900 s."
+
+- **Reading 27's input is one a near reader no longer has.** With no
+  descriptor read there is no horizon, so the freshness is
+  unobservable, `not_a_horizon`, never fresh at 900 s. Its expected
+  answers stand: §2.14's step 2 comes before the freshness.
+- **The description's list** of unobservable reasons lacks
+  `not_a_horizon`, which reading 43 gives (F-623).
+- **Fix:** reading 27's `freshness` {"verdict": "unobservable",
+  "reason": "not_a_horizon"}, and `not_a_horizon` in the list.
+- **Changes:** nothing any reader concludes. zk2py's alarms family
+  runs both readings as written.
+- **Resolved** (the lead): reading 27's `freshness` is unobservable, `not_a_horizon`, and the description lists `not_a_horizon`.
+
+### Counts after review-bot on #1176
+
+630 entries on this branch. F-629 to F-632 are round 128's, on another
+branch.
+- **New: F-633 and F-634,** two minor errors. Neither is a blocker.
+- **Both answers hold.**
+- **Open:** F-437 to F-441; F-633 and F-634.
+
+  F-365 stays open as #965's.

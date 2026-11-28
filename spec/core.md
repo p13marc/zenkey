@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.117** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.118** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -4268,16 +4268,20 @@ because of these rules:
    - E042 and E045 read the fields of a record that have neither E038 nor
      E043. A repeat inside one field's `values` or `reserved` is E042 too,
      on a field without E038.
-   - E051 reads a type with none of E038 to E045, in a file without
-     E028. Only such a type has a layout form whose JCS bytes every
-     implementation agrees on (§9.6). It reads every type the file
-     defines, whether a resource names it or not, as E038 to E045 do,
-     but a type a profile derives (§7.6).
-   `[F: contracts/e038-packed-shape, e042-packed-duplicate, e045-packed-extension, e051-packed-tag]`
+   - E051 reads a type whose declaration has none of E038 to E043 and
+     E045, in a file without E028. Only such a type has a layout form
+     whose JCS bytes every implementation agrees on (§9.6). It reads
+     every type the file defines, whether a resource names it or not, as
+     those lints do, but a type a profile derives (§7.6).
+   - E044 is no finding of the declaration. It reads where a resource
+     places the type (§7.1), and leaves its layout form whole. So a type
+     at the tag 0 that an explicit stream names draws both E044 and E051.
+   `[F: contracts/e038-packed-shape, e042-packed-duplicate, e045-packed-extension, e051-packed-tag, e051-packed-place]`
 8. **On a frame resource,** E046 alone where `frame` cannot be.
    - E047 and E049 read the record type, so they wait for one that
      resolves (E023, E024). E047's marker half and E049 also wait for a
-     packed declaration with no finding (E038 to E045).
+     packed declaration with no finding (E038 to E043, E045). An
+     attachment's E044 does not stop them.
    - E050 waits for the values it reads: none of them E048's. It reads
      the `timing.*` values as `timing.v1` §2.2 reads a declaration. Where
      one of them does not read, the declaration is invalid. E050 then
@@ -4426,8 +4430,8 @@ MUST have the same fingerprint.
 - **`packed:Name`** is `types/Name` in the one listed packed file that
   defines it (E023 when none does, E024 when several do).
 - **`packed:stem#Name`** looks only in the packed file with that stem.
-- **Its declarations** are linted E038 to E045, and its placement E044
-  (§7.1).
+- **Its declarations** are linted E038 to E043 and E045, and its
+  placement E044 (§7.1).
 
 `[F: contracts/ok-packed, e024-packed-ambiguous, e024-packed-twice]`
 
