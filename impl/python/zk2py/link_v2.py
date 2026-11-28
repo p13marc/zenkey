@@ -626,8 +626,9 @@ class FaceReading:
         for r in self.crossed.values():
             if not r.packed:
                 warn("not_packed", r.name)                                             # §2.17
-            if r.block and r.longest_put is not None and r.longest_put > self.transport["batch_bytes"]:
-                warn("block_over_batch", r.name)                                       # §2.16
+            if r.block and r.longest_put is not None and \
+                    link.over_batch(r.longest_put, r, self.transport["sequence"], face):
+                warn("block_over_batch", r.name)                                       # §2.16 (0.30)
             if self.f.horizon_s is not None and r.frame is not None:
                 h = r.horizon()
                 if h.horizon == "within" and h.ttl_s < self.f.horizon_s:
@@ -662,7 +663,9 @@ class FaceReading:
                 # a listed service's longest owner heartbeat is above
                 # batch_bytes".
                 longest = owner_heartbeat_longest([res[i] for i in mine])
-                over = over or (longest is not None and longest > self.transport["batch_bytes"])
+                # 0.30: "with the allowance of a put at data and drop, the key's QoS".
+                over = over or (longest is not None and
+                                link.over_batch(longest, None, self.transport["sequence"], face))
             if under:
                 warn("horizon_under_face", OWNER_HEARTBEAT_AT)                         # §2.9, §2.12
             if over:
