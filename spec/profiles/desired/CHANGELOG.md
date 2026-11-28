@@ -76,6 +76,7 @@ run E included. zk2py moves.
 - **§14's Expected 5** says the second read §2.5 makes after a whole answer (F-625).
 - **Where descriptors reach the target** is the deployment's: wherever the author's instance tokens reach it, never across a face. A read that draws no descriptor there finds none stating the run (round 127's mend, F-627). The read at the token MAY be made again as v1 §2.5's seed is, and the token is one that appears after the target first saw the run (F-628). zk2py already read it so; the reference moves.
 - **Last-known from an archive** is never held: with its author absent no descriptor will state its run, so the target judges it by the deployment's word (§2.9). Held, it would wait for ever, and §7 and §10 would fail. §13's P answers a descriptor stating R and declares its token, as §2's X does.
+- **The hold is bounded** (review-bot on #1176): a run no read has stated within `hold_s` of its first version, 10 s by default, leaves the deployment's word. Unbounded, a deployment that misread where tokens reach left its target inert for ever.
 - **§2's step 4:** X, a new instance of the author, answers a descriptor stating its run and declares its token, so its put is admitted at the token. As 0.3's first draft wrote it, X stated no run, and the hold would last for ever.
 
 ## desired.v2 0.2 — 2026-11-27: zk2py's rounds 118 to 121: a target built before this major binds through no router that timestamps, a failed revert keeps its version, a report resource of any kind, and §9's T holds its author's revision (#986)

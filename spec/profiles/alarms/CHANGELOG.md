@@ -78,6 +78,7 @@ worded. The reference's tool has not run on the copy since it moves.
 
 - **Across a face** (zk2py's round 127, F-622), the deployment's word names the `alarms.v2` revision a reader is given, else the standard one, which every reader holds. A deployment that runs another revision gives it.
 - **A revision not in hand** is reported with `freshness.v1`'s reason `not_a_horizon` (F-623). `v2/conclusions.json` gains reading 43.
+- **No descriptor read** on the near side is read as a revision not in hand, unobservable (review-bot on #1176: zk2py and the reference disagreed). Only across a face does the word stand for it.
 
 ## alarms.v2 0.1 — 2026-11-27: a new major: an alarm in a slot, a transition in one packed record, words by table, a resolve with no delete, and "nothing fires" from one snapshot (#984)
 
