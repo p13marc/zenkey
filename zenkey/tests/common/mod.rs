@@ -105,6 +105,29 @@ pub fn imp(name: &str) -> Implementation {
     Implementation::new(contract(name))
 }
 
+/// A test's copy of a standard contract, `spec/profiles/<path>`, its every
+/// `"freshness.ttl_s" = <standard>` set to `ttl_s`: made in memory, never
+/// published, never in `spec/`. The short-horizon copy the profiles'
+/// scenario conventions allow a runner (#1151's third part).
+pub fn short_horizon(path: &str, standard: u64, ttl_s: u64) -> Implementation {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../spec/profiles")
+        .join(path);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let copy = text.replace(
+        &format!("\"freshness.ttl_s\" = {standard}"),
+        &format!("\"freshness.ttl_s\" = {ttl_s}"),
+    );
+    assert_ne!(
+        copy,
+        text,
+        "{} holds no horizon of {standard} s",
+        path.display()
+    );
+    let l = zenkey::model::contract::load_str(&copy, path.parent().unwrap(), None);
+    Implementation::new(l.contract.unwrap_or_else(|| panic!("{}", l.report)))
+}
+
 pub fn addr(s: &str) -> Addr {
     s.parse().expect("an address")
 }
