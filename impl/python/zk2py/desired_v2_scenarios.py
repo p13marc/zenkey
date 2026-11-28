@@ -769,12 +769,37 @@ def section2(rp: Report) -> None:
                  rr == "desired reread 2000" and len(rereads) >= 1
                  and all(g == {"held": s2, "alone": True} for g in rereads)
                  and target.acts() == acts0 and not bus.since(t3, RP), f"{rereads}")
+        # Step 4 as desired.v2 0.3's mend words it: "X, as a new instance of
+        # the author, puts v3's content on D under a 32-bit run of its own,
+        # at seq 0. It then answers a descriptor stating that run, and
+        # declares its instance token." Its descriptor is the author's, with
+        # X's instance and run.
+        import secrets
+
+        import zenoh
+
+        from . import freshness_v2 as f2
+
         mine = d2.Version.of(32, 0x0BADCAFE, 0)
+        docs = f2.descriptors_of(bus.x, AUTHOR, 1.0)
+        xid = secrets.token_hex(8)
+        xkey = f"zk2/{AUTHOR}/@zk/instance/{xid}"
+        xdoc = json.dumps({**(docs[0] if docs else {}), "instance": xid, "run": mine.run.text}).encode()
+        t4 = time.monotonic()
         x_put(v(3), mine)
+        time.sleep(1.0)
+        bus.entities.append(bus.x.declare_queryable(xkey, zenoh.handlers.Callback(
+            lambda q: q.reply(xkey, xdoc, encoding="application/json")), complete=True))
+        time.sleep(1.0)
+        waited = (target.acts() == acts0 and not bus.since(t4, RP) and not bus.since(t4, RUN))
+        bus.entities.append(bus.x.liveliness().declare_token(xkey))
         ok = _wait(lambda: target.report() == converged(mine.text, 3), 5.0, 0.05)
-        rp.check(sec, "4. X's v3 under a 32-bit run of its own at seq 0: another run, admitted and acted on; the "
-                      "report is converged on v3 under X's version", ok and target.acts() == (acts0 or 0) + 1,
-                 str(target.report()))
+        rp.check(sec, "4. X's v3 under a 32-bit run of its own at seq 0, then a descriptor stating that run: the "
+                      "put waits, nothing acted and nothing on Rp or Run, until X's instance token; then the "
+                      "target reads again, another run is admitted and acted on, and the report is converged on v3 "
+                      "under X's version (§2.18, 0.3's mend)",
+                 bool(docs) and waited and ok and target.acts() == (acts0 or 0) + 1,
+                 f"X's descriptor from {len(docs)} read, waited {waited}, {target.report()}")
         t5 = time.monotonic()
         x_put(v(1), d2.Version(ver2.run, ver2.seq - 1))
         time.sleep(1.0)
@@ -1322,22 +1347,55 @@ def watched_catalog(path: Path) -> Path:
     return path
 
 
-def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
+def section14(rp: Report, moves: bool = True, ohb: bool = False, during: bool = False) -> None:
     """``ohb``: the author confirms ``tasking.v2`` by an owner heartbeat
     under a catalog, on :data:`HBS`, and sends no heartbeat of it; the
-    target holds the catalog and reads the group (§2.5)."""
+    target holds the catalog and reads the group (§2.5).
+
+    ``during`` (round 127's mend) takes step 5's second path, "Asked while
+    the descriptors' read runs": a complete queryable of the author's
+    instance keys on the target's side of the face, the test's, holds each
+    query 1.2 s and answers nothing, and the target's reads time out at 3 s.
+    Its descriptors' read then runs 1.2 s, less than a heartbeat's period,
+    and names none, as across the face with no stand-in; the new instance's
+    first heartbeat comes meanwhile."""
     sec = "§14 the watch" + ("" if moves else ", a target that does not move what it expects") + (
-        ", by an owner heartbeat under a catalog" if ohb else "") + f" [{pairing()}]"
+        ", by an owner heartbeat under a catalog" if ohb else "") + (
+        ", step 5's second path, the descriptors' read held 1.2 s" if during else "") + f" [{pairing()}]"
     bus = Bus(cut=True, face=True)
+    stand_in = None
+    bus_done = threading.Event()
     try:
         global HB
         hb_kept, HB = HB, HBS if ohb else HB
+        if during:
+            import zenoh
+
+            stand_in = bus.live.open_client(bus.ep2)
+            held_q: list[tuple[float, Any]] = []
+            lock = threading.Lock()
+
+            def hold_q(q: Any) -> None:
+                with lock:
+                    held_q.append((time.monotonic(), q))
+
+            def drop() -> None:
+                while stand_in is not None and not bus_done.is_set():
+                    with lock:
+                        now = time.monotonic()
+                        held_q[:] = [(t, q) for t, q in held_q if now - t < 1.2]
+                    bus_done.wait(0.05)
+
+            bus.entities.append(stand_in.declare_queryable(f"zk2/{AUTHOR}/@zk/instance/*",
+                                                           zenoh.handlers.Callback(hold_q), complete=True))
+            threading.Thread(target=drop, daemon=True).start()
         catalog = watched_catalog(bus.dir / "catalog.json") if ohb else None
         a_kw: dict[str, Any] = {"watched": True, "catalog": catalog, "owner_heartbeat": ohb}
         author = bus.author(**a_kw)
         s1 = author.put(TARGET, v(1))
         g0, t1 = len(author.gets()), time.monotonic()
-        target = bus.target(on=2, across=True, watch=True, watched=True, moves=moves, catalog=catalog)
+        target = bus.target(on=2, across=True, watch=True, watched=True, moves=moves, catalog=catalog,
+                            reply_timeout_ms=3000 if during else None)
         time.sleep(10.0)
         gets = author.gets()[g0:]
         w = target.watch()
@@ -1412,7 +1470,7 @@ def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
         # next heartbeat makes it read once more, and that read settles what
         # it expects", which Expected 5 does not say (F-625): so two reads
         # on that path, the second unchanged.
-        after, during = [{"held": new, "alone": True}], [{"held": s3, "alone": False}, {"held": new, "alone": True}]
+        after, path2 = [{"held": new, "alone": True}], [{"held": s3, "alone": False}, {"held": new, "alone": True}]
         rp.check(sec, "5. the author restarts from its record: S receives a put on D holding v3's content under a new "
                       "run; the target reads its author's descriptors for that run before it judges the put, none "
                       "crosses, and it adopts the put; the first heartbeat of the new instance is of another run, and "
@@ -1420,9 +1478,13 @@ def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
                       "while the descriptors' read runs, and then, by §2.5's \"Whole\", once more at the next "
                       "heartbeat, answered unchanged (F-625); Run receives nothing (0.3)",
                  new is not None and new != s3 and target.report() == converged(new, 3) and target.acts() == acts0
-                 and gets in (after, during) and not [g for g in bus.since2(t5) if g[1] == RUN]
+                 and gets in (after, path2) and not [g for g in bus.since2(t5) if g[1] == RUN]
                  and len(hb_runs) == 1, f"put {new}, gets {gets}, heartbeat runs {hb_runs}")
-        rp.note(sec, f"step 5: the new run's read was {'answered unchanged, after the adoption' if gets == after else 'answered whole, during the descriptors read, then once more, unchanged' if gets == during else gets}")
+        if during:
+            rp.check(sec, "5. the second path taken: the read asked while the descriptors' read runs carries v3's "
+                          "earlier stamp, answered whole, and the next heartbeat's read once more is answered "
+                          "unchanged (§2.5, F-625's answer)", gets == path2, f"gets {gets}")
+        rp.note(sec, f"step 5: the new run's read was {'answered unchanged, after the adoption' if gets == after else 'answered whole, during the descriptors read, then once more, unchanged' if gets == path2 else gets}")
         g0, t6, w0 = len(author.gets()), time.monotonic(), target.watch()
         author.pause()
         time.sleep(6.0)
@@ -1447,7 +1509,10 @@ def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
                      f"{len(own)} heartbeats of tasking.v2, the watch {w1['raw']}")
     finally:
         HB = hb_kept
+        bus_done.set()
         bus.close()
+        if stand_in is not None:
+            bus.live.close(stand_in)
 
 
 def section15(rp: Report) -> None:
@@ -1493,7 +1558,8 @@ def section15(rp: Report) -> None:
 SECTIONS = {"1": section1, "2": section2, "3": section3, "4": section4, "5": section5, "6": section6,
             "7": section7, "8": section8, "10": section10,
             "13": section13, "14": section14, "14-no-move": lambda rp: section14(rp, moves=False),
-            "14-ohb": lambda rp: section14(rp, ohb=True), "15": section15,
+            "14-ohb": lambda rp: section14(rp, ohb=True), "14-during": lambda rp: section14(rp, during=True),
+            "15": section15,
             # round 121: §9 with the reference's zenctl as T, §11 and §12 (zk2py.desired_v2_s9)
             "9": lambda rp: _s9().section9(rp), "11": lambda rp: _s9().section11(rp),
             "12": lambda rp: _s9().section12(rp), "majors": lambda rp: _s9().section_majors(rp)}

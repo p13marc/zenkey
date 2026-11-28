@@ -10,7 +10,7 @@ zk2py processes against each other (#609, round 118)::
         [--desired-across] [--desired-reply-timeout-ms <ms>] [--desired-watch] [--desired-no-move]
         [--desired-catalog <file>] [--desired-owner-heartbeat] [--desired-contract <file>]
         [--desired-archive <system>/<service>] [--desired-worker <file>] [--desired-word-alone]
-        [--desired-after-descriptor]
+        [--desired-after-descriptor] [--desired-descriptor-late-ms <ms>]
         <system>/<service>
 
 Standard output: ``connected <endpoint>``, then ``ready
@@ -159,6 +159,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="the author's new instance puts its documents again after its descriptor (core §8.2 step "
                          "3) and before its tokens, where by default it puts them before step 3 (desired.v2 §2.18, "
                          "0.3, its why; round 127)")
+    ap.add_argument("--desired-descriptor-late-ms", type=int, default=0,
+                    help="the author's new instance waits this long after its puts again before its descriptor "
+                         "(core §8.2 step 3), so a target's first read finds none stating its run (desired.v2 "
+                         "§2.18, 0.3's mend, \"None states the run yet\"; round 127's mend)")
     ap.add_argument("address")
     args = ap.parse_args(argv)
     print(f"connected {args.connect}", flush=True)
@@ -174,7 +178,8 @@ def main(argv: list[str] | None = None) -> int:
                             run_record=args.desired_run_record, window_s=args.desired_window,
                             watched=args.desired_watched, tokenless=tuple(args.tokenless),
                             catalog=args.desired_catalog, owner_heartbeat=args.desired_owner_heartbeat,
-                            tasking=tasking, after_descriptor=args.desired_after_descriptor)
+                            tasking=tasking, after_descriptor=args.desired_after_descriptor,
+                            descriptor_late_s=args.desired_descriptor_late_ms / 1000)
             instance = author.start()
         if args.desired_target or args.desired_unbound:
             target = Target(args.address, args.connect, author=args.desired_target or "lab/author",

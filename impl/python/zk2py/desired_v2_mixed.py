@@ -48,6 +48,17 @@ C's from its record. ``--repeat <n>`` runs it n times in each pairing.
 ``--only run-e-after`` runs it with zk2py's author putting its documents
 again after its descriptor (``--desired-after-descriptor``), beside each
 target.
+
+``--only run-e-late`` (round 127's mend) runs it with zk2py's author
+waiting 1,500 ms between its puts again and its descriptor
+(``--desired-descriptor-late-ms``), beside each target: a first read that
+cannot find the run stated.
+
+``--cross`` (round 127's mend) runs run E in the two cross pairings alone:
+zk2py's author with the reference's target, and the reference's author
+with zk2py's target, each author putting before its descriptor, as both
+do by default. zk2py's target then says what each hold did (``desired
+holds``): desired.v2 0.3's mend, "None states the run yet".
 """
 
 from __future__ import annotations
@@ -384,7 +395,7 @@ def _descriptor_at_first_put(w: Wire, key: str, after: set[str]) -> dict[str, An
     return out
 
 
-def run_e(rp: Report, a_impl: str, t_impl: str, tmp: str, after: bool = False) -> dict[str, Any]:
+def run_e(rp: Report, a_impl: str, t_impl: str, tmp: str, after: bool = False, late_ms: int = 0) -> dict[str, Any]:
     """§16 run E (desired.v2 0.3), each run in a directory of its own: run D's target, told the scenarios' own
     tasking.v2; its author starts on that revision, then ends without
     closing and starts again on run C's revision (tasking.v2 using
@@ -401,7 +412,8 @@ def run_e(rp: Report, a_impl: str, t_impl: str, tmp: str, after: bool = False) -
     import tempfile
 
     sec = (f"§16 run E: a new run read first [{impl_name(a_impl)} author"
-           f"{', its puts again after its descriptor' if after else ''}, {impl_name(t_impl)} target]")
+           f"{', its puts again after its descriptor' if after else ''}"
+           f"{f', its descriptor {late_ms} ms after its puts again' if late_ms else ''}, {impl_name(t_impl)} target]")
     w = Wire(True)
     key = f"zk2/{AUTHOR}/tasking.v2/state/tasks/{TARGET}"
     run_c = str(MIXED / "tasking.v2.toml")
@@ -415,6 +427,7 @@ def run_e(rp: Report, a_impl: str, t_impl: str, tmp: str, after: bool = False) -
             return w.add(_py("zk2py.desired_v2_owner", w.ep,
                              ["--desired-author", "--desired-record", rec, "--desired-run-record", runs,
                               *(["--desired-after-descriptor"] if after else []),
+                              *(["--desired-descriptor-late-ms", str(late_ms)] if late_ms else []),
                               *(["--desired-contract", files[0]] if files else [])], AUTHOR))
         return w.add(_rust(w.ep, ["--desired-author", "--desired-v2", "--desired-record", rec, "--run-file", runs],
                            AUTHOR, files))
@@ -469,6 +482,7 @@ def run_e(rp: Report, a_impl: str, t_impl: str, tmp: str, after: bool = False) -
         new_puts = [v for k, _, v in wire if k == "put" and v and v.split("/")[0] not in runs7]
         later = [(k.rsplit("/", 1)[1], b.hex()) for t, k, b in heard if t >= t8 and k in (rp_key, run_key)]
         seeds8 = target.cmd("desired seeds") or ""
+        holds = target.cmd("desired holds") if t_impl == "zk2py" else None
         words = dict(x.split("=", 1) for x in seeds8.split()[3:] if "=" in x)
         acts8 = target.n_acts()
         rp.check(sec, "8. the author restarts on run C's revision under a new run, from its record, and puts v1 "
@@ -481,6 +495,8 @@ def run_e(rp: Report, a_impl: str, t_impl: str, tmp: str, after: bool = False) -
                  f"author {said2!r}, the new run's puts {new_puts}, acts {acts7} -> {acts8}, after the restart "
                  f"{later}, seeds {seeds7!r} -> {seeds8!r}")
         rp.note(sec, f"G's descriptor read at the new run's first put: {probe}")
+        if holds is not None:
+            rp.note(sec, f"zk2py's target, what each hold did: {holds}")
         ms = lambda t: round((t - t8) * 1000)  # noqa: E731
         rp.note(sec, "after the kill, ms: the new run's puts on D "
                      f"{[(ms(t), v) for t, v in d_at if t >= t8]}, the author's instance tokens "
@@ -489,15 +505,18 @@ def run_e(rp: Report, a_impl: str, t_impl: str, tmp: str, after: bool = False) -
         sub_d.undeclare()
         sub_t.undeclare()
         sub.undeclare()
-        return {"seeds": seeds8, "acts": [acts7, acts8], "after": later, "probe": probe, "puts": new_puts}
+        return {"seeds": seeds8, "acts": [acts7, acts8], "after": later, "probe": probe, "puts": new_puts,
+                "holds": holds}
     finally:
         w.close()
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.desired_v2_mixed", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=["v1-target", "v2-target", "s16", "run-e", "run-e-after", "hlc"])
+    ap.add_argument("--only", action="append", choices=["v1-target", "v2-target", "s16", "run-e", "run-e-after", "run-e-late",
+                                                       "hlc"])
     ap.add_argument("--repeat", type=int, default=1, help="run E this many times in each pairing")
+    ap.add_argument("--cross", action="store_true", help="run E in the two cross pairings alone")
     args = ap.parse_args(argv)
     rp = Report()
     only = args.only or ["v1-target", "v2-target"]
@@ -516,13 +535,20 @@ def main(argv: list[str] | None = None) -> int:
         import tempfile
 
         tmp = tempfile.mkdtemp(prefix="zk2py-run-e-", dir=os.environ.get("ZK2PY_SCRATCH"))
-        runs += [(run_e, (a, t, tmp)) for _ in range(args.repeat) for a in impls for t in impls]
+        pairs = [("zk2py", "rust"), ("rust", "zk2py")] if args.cross else [(a, t) for a in impls for t in impls]
+        runs += [(run_e, (a, t, tmp)) for _ in range(args.repeat) for a, t in pairs]
     if "run-e-after" in only:
         import os
         import tempfile
 
         tmp = tempfile.mkdtemp(prefix="zk2py-run-e-", dir=os.environ.get("ZK2PY_SCRATCH"))
         runs += [(run_e, ("zk2py", t, tmp, True)) for _ in range(args.repeat) for t in impls]
+    if "run-e-late" in only:
+        import os
+        import tempfile
+
+        tmp = tempfile.mkdtemp(prefix="zk2py-run-e-", dir=os.environ.get("ZK2PY_SCRATCH"))
+        runs += [(run_e, ("zk2py", t, tmp, False, 1500)) for _ in range(args.repeat) for t in impls]
     if "hlc" in only:
         # round 125 (F-617): run A's router, the target's own session's HLC on
         runs += [(v1_target, (a, t, False, True, True)) for a in impls for t in impls]

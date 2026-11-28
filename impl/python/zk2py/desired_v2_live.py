@@ -106,8 +106,14 @@ class Author:
     def __init__(self, address: str, endpoint: str, *, record: str | None = None, run_record: str | None = None,
                  window_s: float = 60.0, tasking: Any = None, watched: bool = False,
                  tokenless: tuple[str, ...] = (), catalog: str | None = None,
-                 owner_heartbeat: bool = False, after_descriptor: bool = False) -> None:
+                 owner_heartbeat: bool = False, after_descriptor: bool = False,
+                 descriptor_late_s: float = 0.0) -> None:
         self.address, self.endpoint = address, endpoint
+        #: a new instance's wait between its puts again and its descriptor
+        #: (core §8.2 orders nothing there): desired.v2 0.3's mend, "An author
+        #: MAY put a version before its descriptor ... so the first read can
+        #: find nothing", made a window a target cannot miss (round 127's mend)
+        self.descriptor_late_s = descriptor_late_s
         #: a new instance's puts again made after its descriptor (core §8.2
         #: step 3) rather than before it, both before its tokens: §2.18's why
         #: (0.3), "puts its first version just after its new descriptor",
@@ -238,6 +244,8 @@ class Author:
         self.adoption["found"] = "record"
         self._again(owner, rec["documents"] if isinstance(rec.get("documents"), dict) else {},
                     rec["deletes"] if isinstance(rec.get("deletes"), dict) else {}, True)
+        if self.descriptor_late_s > 0 and not self.after_descriptor:
+            time.sleep(self.descriptor_late_s)
 
     def put(self, target: str, document: Any) -> tuple[str, str, str | None]:
         """§2.11 "Only on a change": ("put", key, version), or ("unchanged",
