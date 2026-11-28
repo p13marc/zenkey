@@ -4,6 +4,17 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the compact descriptor read (#980's C5b, C5b2)
+
+Core 0.120 §3.3. A descriptor under `zenoh/bytes` is the compact form,
+which no owner writes before C5c. Every reader of the window reads one
+through the window's catalogs (`--catalog`, Settings). No flag or file
+changed. No scene changed, so no pixel moved.
+
+| Before | Now | Notes |
+|---|---|---|
+| a compact descriptor read as JSON: invalid | the lens, the nodes pane, its `redundancy.v1` and `arbitration.v1` readings, the Why ladder and the admin sweep's join read it through the window's catalogs: the nodes pane shows its decoding (its zid, what it implements, its standby marks) | given no catalog that reads it: "descriptor: compact, not read — unknown_catalog …", and its interfaces are not listed, never guessed |
+
 ## Unreleased (`main`, zk2) — zenoh 1.10.2, and `--binding zenoh-1.10.2` (#1165)
 
 Core 0.114; `link.v2` 0.25 §2.4, §2.19. No rule changed. No pixel moved.

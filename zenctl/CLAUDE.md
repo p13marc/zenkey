@@ -659,3 +659,12 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `service_show_renders_a_compact_descriptor_through_the_catalog` over the
   runtime's `compact_owner`; a test owner's hand-written JSON descriptor
   states `application/json`.
+
+  C5b2 (#980): `health`, `config` (`set_v2`'s pre-check included),
+  `alarms`, `desired`, `telemetry` (`spec.catalogs`), `check conform`,
+  `arbitration` (`spec.catalogs`), `why` (`run_why_through`) and the
+  windowed verbs (`zk2::read_lens` takes the catalogs: `get`, `rate`,
+  `field`, `snapshot`, `timeline`, `record`) read a compact descriptor
+  through `--catalog`; `admin graph` takes `ContractArgs`
+  (`help-admin.trycmd` re-blessed). `live_zk2.rs`'s
+  `why_reads_a_compact_descriptor_through_the_catalog`.

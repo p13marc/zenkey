@@ -1003,3 +1003,23 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   alike, `unknown_catalog` and `unknown_revision`, a revision retrieved,
   `serving` and `owner_revision_held`. Test owners that hand-write a JSON
   descriptor state `application/json` (`owner_heartbeat.rs`).
+
+  C5b2 (#980): every runtime descriptor reader goes through `presence::Held`.
+  `presence::heard(sample, held)` reads a descriptor put by its form, here
+  and now (no retrieval, a callback cannot wait), and `Found::zid` its
+  `meta.zid`: `timing`'s subscriber and `read_descriptors` (whose GET reads
+  each reply through `read_held`), `arbitration`'s `described` and
+  `describe` (`Inputs::held`, the consumer's), and `timing::Sources::held`.
+  `redundancy`'s `Driver::held` is `Service::held()` (the catalog it writes
+  under and the revisions it implements, retrieving). `ownership::split_brain_held`.
+  `Client::with_catalogs` and `Fleet::with_catalogs` (`Settings::catalogs`;
+  a role's client holds the service's catalog, `operation.rs`).
+  `Archive::start_through(session, config, catalogs)` (`Inner::held`: the
+  catalogs and the revisions it records), which `runs_revision` and
+  `entries_of`'s `stray_reply_del` read through; `start` holds none.
+  `desired`'s target (`TargetInner::held`: the service's catalog and the
+  author's revision) reads `owner_revisions` (now taking a `Held`),
+  `owner_revision_held` and `owner_catalog_held`. Left catalog-less: the pub
+  `presence::descriptor`, `answer::owner_revision` and `owner_catalog`,
+  which read either form and leave a compact one unread.
+  `tests/compact_descriptor.rs`' `a_client_and_a_put_read_the_compact_form`.
