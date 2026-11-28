@@ -316,7 +316,8 @@ class Follower:
         mend)."""
         asked = time.monotonic()
         p = live.list_presence(self.reader, f"zk2/{self.address}/@zk/**", GET_TIMEOUT_S)
-        self.counts["presence_reads"] = self.counts.get("presence_reads", 0) + 1
+        with self.lock:
+            self.counts["presence_reads"] = self.counts.get("presence_reads", 0) + 1
         if p.kind == live.NOT_MADE:
             return
         shown = {a["instance"] for a in p.alive if f"{a['system']}/{a['service']}" == self.address

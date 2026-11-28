@@ -406,6 +406,9 @@ class Held:
     seq: int | None
     before_read: bool = False
     value: Any = None
+    #: its Zenoh timestamp's id, which decides it under a ``redundancy.v1``
+    #: incumbent learnt while it is held (step 2)
+    stamp: str | None = None
 
 
 @dataclass
@@ -454,7 +457,7 @@ class Hold:
     def _decide_held(self, step: Step, at_read_end: bool) -> None:
         keep: list[Held] = []
         for h in self.held:
-            d = decide(self.view, h.run, read_ended=at_read_end and h.before_read)
+            d = decide(self.view, h.run, h.stamp, read_ended=at_read_end and h.before_read)
             if d.decision == ACCEPT:
                 step.accepted.append(h.id)
                 self.on_accept(h, d)
@@ -485,13 +488,13 @@ class Hold:
         d = decide(self.view, run, stamp)
         if d.decision == ACCEPT:
             step.accepted.append(sid)
-            self.on_accept(Held(sid, key, kind, run, seq, value=value), d)
+            self.on_accept(Held(sid, key, kind, run, seq, value=value, stamp=stamp), d)
             return step
         if d.decision == DISCARD:
             step.discarded.append({"id": sid, "reason": d.reason})
-            self.on_discard(Held(sid, key, kind, run, seq, value=value), d)
+            self.on_discard(Held(sid, key, kind, run, seq, value=value, stamp=stamp), d)
             return step
-        new = Held(sid, key, kind, run, seq, value=value)
+        new = Held(sid, key, kind, run, seq, value=value, stamp=stamp)
         if kind == "state":
             old = next((h for h in self.held if h.kind == "state" and h.key == key), None)
             if old is not None:
