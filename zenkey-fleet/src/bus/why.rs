@@ -28,6 +28,7 @@ use zenoh::sample::SampleKind;
 use crate::bus::contracts::BundleStore;
 use crate::bus::presence::Scope;
 use crate::model::catalog::{ContractState, DescriptorRead, Observed};
+use crate::model::deployment::Catalogs;
 use crate::report::{RungId, Stamp, WhyReport};
 use crate::{Error, Result};
 
@@ -191,15 +192,39 @@ pub async fn run_why(
     target: WhyTarget,
     spec: WhySpec,
 ) -> WhyReport {
-    let obs = observe(session, store, namespace, target, spec).await;
+    run_why_through(
+        session,
+        store,
+        &Catalogs::default(),
+        namespace,
+        target,
+        spec,
+    )
+    .await
+}
+
+/// [`run_why`], an owner's compact descriptor (core §3.3) read through
+/// `catalogs`, the deployment's (`--catalog`, §8.6), and the revisions it
+/// names from `store`. Without the one it names it is not read, and the
+/// ladder stops at the descriptor, never a guess.
+pub async fn run_why_through(
+    session: &Session,
+    store: &BundleStore,
+    catalogs: &Catalogs,
+    namespace: &str,
+    target: WhyTarget,
+    spec: WhySpec,
+) -> WhyReport {
+    let obs = observe(session, store, catalogs, namespace, target, spec).await;
     crate::judge::why::judge(&obs)
 }
 
 /// Reads what the ladder reaches, judging what is in hand before each
-/// read (see the module doc).
+/// read (see the module doc), a compact descriptor through `catalogs`.
 pub async fn observe(
     session: &Session,
     store: &BundleStore,
+    catalogs: &Catalogs,
     namespace: &str,
     target: WhyTarget,
     spec: WhySpec,
@@ -216,8 +241,9 @@ pub async fn observe(
         None => return obs,
     };
     let t = spec.timeout;
+    let describing = crate::bus::presence::Describing::new(catalogs, store);
     obs.presence = Some(
-        crate::bus::presence::observe(session, &Scope::service(&addr), t)
+        crate::bus::presence::observe_through(session, &Scope::service(&addr), t, &describing)
             .await
             .map_err(|e| crate::one_line(&e)),
     );
@@ -275,7 +301,7 @@ pub async fn observe(
                 .collect();
             let revisions: Vec<&zenkey_model::contract::Contract> =
                 held.iter().map(AsRef::as_ref).collect();
-            Some(state_answer(session, &key, t, &revisions).await)
+            Some(state_answer(session, &key, t, &revisions, catalogs).await)
         }
         KindToken::Stream | KindToken::ExplicitStream => {
             Some(stream_answer(session, &key, spec.window).await)
@@ -319,6 +345,7 @@ async fn state_answer(
     key: &str,
     timeout: Duration,
     revisions: &[&zenkey_model::contract::Contract],
+    catalogs: &Catalogs,
 ) -> std::result::Result<KeyAnswer, String> {
     let replies = session
         .get(key)
@@ -337,7 +364,8 @@ async fn state_answer(
             Err(_) => complete = false,
         }
     }
-    let mut owners = crate::bus::query::OwnerRevisions::new(session, timeout, revisions, None);
+    let mut owners =
+        crate::bus::query::OwnerRevisions::new(session, timeout, revisions, None, catalogs);
     let (kept, strays) = crate::bus::query::merged_without_strays(samples, &mut owners, |s| {
         crate::bus::query::reply_entries(s)
             .into_iter()

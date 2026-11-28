@@ -890,7 +890,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
     let config_records = if owners.is_empty() {
         None
     } else {
-        Some(crate::bus::config::get_records(s, &owners, t).await)
+        Some(crate::bus::config::get_records(s, &owners, t, &spec.catalogs).await)
     };
     // desired.v1 (#840, DD): over this presence read and these revisions,
     // nothing read again but the targets' reports and the slices.

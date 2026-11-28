@@ -256,7 +256,7 @@ pub use bus::admin::{
     AdminEntry, RouterVerification, UNDER_TABLES_LOCK, admin_doc_omits_loopback, admin_get,
     admin_get_within, declared_entities, declared_entities_within, declared_entity_selectors,
     mesh_links, reaches_tables_lock, render_dot, routers, storages, topology,
-    topology_with_instances,
+    topology_with_instances, topology_with_instances_through,
 };
 pub use bus::monitor::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
@@ -293,7 +293,7 @@ pub use judge::doctor_delta::doctor_delta;
 // reads, the session-free judge, and the two in a row.
 pub use bus::why::{
     ArchiveRead, KeyAnswer, KeyReply, WhyObservation, WhySpec, WhyTarget, observe as observe_why,
-    run_why,
+    run_why, run_why_through,
 };
 pub use judge::why::judge as judge_why;
 // zk2's `check conform` (#703): one service against the revision it claims,
@@ -438,7 +438,9 @@ pub use model::namespace::{join as with_namespace, strip as strip_namespace};
 // The raw observers' lens (#612, FJ8b): a wire key resolved through the
 // namespace, presence and the contracts in hand, rung by rung (the tooling
 // guide's O2), and the read that keeps it current.
-pub use bus::lens::{LensFeed, REFRESH_MIN as LENS_REFRESH_MIN, read as read_lens};
+pub use bus::lens::{
+    LensFeed, REFRESH_MIN as LENS_REFRESH_MIN, read as read_lens, read_through as read_lens_through,
+};
 pub use model::lens::{
     Checked, Lens, Resolution, Resolved, check_payload, conformance, declared_qos, observed_qos,
     qos_mismatch, sample_conformance,

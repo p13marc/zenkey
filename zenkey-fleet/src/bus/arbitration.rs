@@ -109,6 +109,11 @@ pub struct ArbitrationSpec {
     /// word: a face policy's `[transport]`, its binding's defaults, or
     /// zenoh 1.10.1's (#1011).
     pub routers: zenkey_model::budget::Routers,
+    /// The deployment catalogs given (`--catalog`, core §8.6): what a
+    /// compact descriptor (§3.3) is read through, its revisions from the
+    /// store. One not read lists nothing and names no `meta.zid`, never a
+    /// guess.
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 impl ArbitrationSpec {
@@ -120,6 +125,7 @@ impl ArbitrationSpec {
             deadlines: None,
             role: None,
             routers: zenkey_model::budget::Routers::default(),
+            catalogs: crate::model::deployment::Catalogs::default(),
         }
     }
 
@@ -227,10 +233,12 @@ pub async fn observe(
         skipped: Vec::new(),
         unobservable: None,
     };
-    // 1. The consumers in scope.
+    // 1. The consumers in scope. A compact descriptor (core §3.3) reads
+    // through the catalogs given and the store.
+    let describing = crate::bus::presence::Describing::new(&spec.catalogs, store);
     let scope = target.as_ref().map_or_else(Scope::all, Scope::service);
     obs.asked.push(scope.selector());
-    let first = match crate::bus::presence::observe(session, &scope, t).await {
+    let first = match crate::bus::presence::observe_through(session, &scope, t, &describing).await {
         Ok(o) => o,
         Err(e) => {
             obs.unobservable = Some(format!(
@@ -275,7 +283,7 @@ pub async fn observe(
     for e in &scopes {
         let Ok(sc) = Scope::entry(e) else { continue };
         obs.asked.push(sc.selector());
-        match crate::bus::presence::observe(session, &sc, t).await {
+        match crate::bus::presence::observe_through(session, &sc, t, &describing).await {
             Ok(o) => {
                 let _ = store.fetch_all(session, &Catalog::new(&o).wanted()).await;
             }
@@ -335,6 +343,7 @@ pub async fn observe(
     // 3. The views, all at once.
     if spec.listen > Duration::ZERO || spec.deadlines.is_some_and(|n| n > 0) {
         let sp = &spec;
+        let describing = &describing;
         let views = obs.roles.iter().enumerate().filter_map(|(i, r)| {
             let declared = r.read.arbitrated.as_ref()?;
             let binding = r.read.reading.binding.as_ref()?;
@@ -360,6 +369,7 @@ pub async fn observe(
                         r.read.governed,
                         span,
                         sp,
+                        describing,
                     )
                     .await,
                 )
@@ -460,6 +470,7 @@ async fn listen(
     governed: bool,
     span: Duration,
     spec: &ArbitrationSpec,
+    describing: &crate::bus::presence::Describing,
 ) -> Result<(ViewBook, Listened), String> {
     let t = spec.timeout;
     let iface = declared.iface.clone();
@@ -600,6 +611,7 @@ async fn listen(
         stall,
         stall_seen: StallSeen::default(),
         stall_bound: spec.stall_bound(),
+        describing: describing.clone(),
         answers: answers_tx,
         asked_zids: BTreeSet::new(),
         burst: BTreeSet::new(),
@@ -611,7 +623,7 @@ async fn listen(
     if governed {
         for e in &entries {
             let Ok(sc) = Scope::entry(e) else { continue };
-            match crate::bus::presence::observe(session, &sc, t).await {
+            match crate::bus::presence::observe_through(session, &sc, t, describing).await {
                 Ok(o) => {
                     let now = Instant::now();
                     for (address, ids) in held_by_address(o.tokens.iter(), &v.iface, None) {
@@ -752,6 +764,8 @@ struct Follow {
     stall: std::result::Result<StallWatch, String>,
     stall_seen: StallSeen,
     stall_bound: Duration,
+    /// What a holder's descriptor is read through (core §3.3).
+    describing: crate::bus::presence::Describing,
     answers: tokio::sync::mpsc::UnboundedSender<Answered>,
     /// Holders whose descriptor was asked for.
     asked_zids: BTreeSet<(Addr, InstanceId)>,
@@ -880,16 +894,11 @@ impl Follow {
             return;
         }
         let (session, t, tx) = (self.session.clone(), self.timeout, self.answers.clone());
+        let describing = self.describing.clone();
         // The finished ones are let go, so a long window holds none.
         while self.tasks.try_join_next().is_some() {}
         self.tasks.spawn(async move {
-            let reads = crate::bus::presence::describe_each(
-                &session,
-                wanted,
-                t,
-                &crate::bus::presence::Describing::default(),
-            )
-            .await;
+            let reads = crate::bus::presence::describe_each(&session, wanted, t, &describing).await;
             for ((a, i), r) in reads {
                 let zid = r
                     .descriptor()

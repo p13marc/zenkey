@@ -29,14 +29,20 @@ pub async fn routers(args: &Link) -> Result<()> {
 /// space in no namespace, presence and descriptors in the deployment's.
 pub async fn graph(cli: crate::cli::AdminGraphArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
+    // An instance's compact descriptor reads through --catalog (core §3.3).
+    let offline = crate::cmd::zk2::load_contracts(&cli.contracts)?;
+    let catalogs = crate::cmd::zk2::load_catalogs(&cli.contracts)?;
+    let describing =
+        zenkey_fleet::Describing::new(&catalogs, &crate::cmd::zk2::store(&dep, &offline));
     let raw = dep.link().session().await?;
     let deployment = dep.session().await?;
-    let report = zenkey_fleet::topology_with_instances(
+    let report = zenkey_fleet::topology_with_instances_through(
         &raw,
         &deployment,
         dep.namespace(),
         dep.timeout(),
         cli.trust_admin_space,
+        &describing,
     )
     .await?;
     if cli.dot {

@@ -736,6 +736,59 @@ async fn service_show_renders_a_compact_descriptor_through_the_catalog() {
     );
 }
 
+/// `why` reads a compact descriptor (core §3.3, #980 C5b2) through
+/// `--catalog`: the ladder passes the descriptor and reaches the key's
+/// answer, which no queryable gives; without the catalog it stops at the
+/// descriptor, unobservable, never reading the key through a guessed
+/// revision.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn why_reads_a_compact_descriptor_through_the_catalog() {
+    use scenario::compact_owner;
+    use zenkey::model::descriptor::Form;
+    let mut bus = Bus::bare(None).await;
+    let at = |name: &str| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../zenkey/tests/contracts/{name}.toml"));
+        load_path(&path).contract.expect("a test contract")
+    };
+    let (nav, ping) = (at("nav.v2"), at("ping.v1"));
+    let revisions = [&nav, &ping];
+    let catalog = compact_owner::catalog(&revisions);
+    let d = compact_owner::descriptor(
+        "lab/why",
+        "00000000000000c9",
+        &catalog,
+        &revisions,
+        true,
+        &[],
+        None,
+    );
+    let bytes = compact_owner::compact(&d, &catalog, &revisions);
+    let mut owner = compact_owner::serve(&bus.owners, &d, Form::Compact, bytes).await;
+    owner.hold(&nav).await;
+    owner.hold(&ping).await;
+    bus.keep(owner);
+    let dir = tempfile::tempdir().expect("a directory");
+    let file = dir.path().join("catalog.json");
+    std::fs::write(&file, catalog.to_jcs()).expect("the catalog's file");
+    let file = file.to_str().expect("a UTF-8 path");
+    let why = ["why", "zk2/lab/why/nav.v2/state/pose", "--format", "json"];
+    let given: Vec<&str> = why.iter().copied().chain(["--catalog", file]).collect();
+    let stopped = |r: &Run| r.json()["stopped_at"].as_str().map(str::to_owned);
+    let run = bus
+        .until(&given, |r| {
+            stopped(r).is_some_and(|s| s != "presence" && s != "descriptor")
+        })
+        .await;
+    assert!(
+        stopped(&run).is_some_and(|s| s != "presence" && s != "descriptor"),
+        "past the descriptor: {run}"
+    );
+    let run = bus.zenctl(&why).await;
+    assert_eq!(stopped(&run).as_deref(), Some("descriptor"), "{run}");
+    exits(&run, 2);
+}
+
 /// `service show`: the descriptor as served; an address presence does not
 /// show is silence, and silence is exit 2 — never an empty 0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

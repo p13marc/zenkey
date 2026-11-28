@@ -526,6 +526,7 @@ pub fn why(
     slot: crate::message::SlotId,
     session: zenoh::Session,
     store: zenkey_fleet::BundleStore,
+    catalogs: Arc<zenkey_fleet::Catalogs>,
     namespace: String,
     target: zenkey_fleet::WhyTarget,
     timeout: Duration,
@@ -536,7 +537,14 @@ pub fn why(
                 timeout,
                 window: WHY_WINDOW,
             };
-            Arc::new(zenkey_fleet::run_why(&session, &store, &namespace, target, spec).await)
+            // An owner's compact descriptor reads through the window's
+            // catalogs (core §3.3).
+            Arc::new(
+                zenkey_fleet::run_why_through(
+                    &session, &store, &catalogs, &namespace, target, spec,
+                )
+                .await,
+            )
         },
         // The asking slot's id rides the landing (#257).
         move |out| Message::Pane(PaneMsg::Why(slot, crate::view::why::WhyMsg::Done(Ok(out)))),

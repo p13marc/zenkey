@@ -238,6 +238,9 @@ async fn observe_with(
         return read;
     }
     let t = spec.timeout;
+    // A compact descriptor (core §3.3) reads through the catalogs given and
+    // the store.
+    let describing = crate::bus::presence::Describing::new(&spec.catalogs, store);
     let mut contracts = contracts;
     if let (Some(word), Some(a)) = (&spec.face, target) {
         read.targets.push(across_face(a, word, spec, offline));
@@ -247,7 +250,7 @@ async fn observe_with(
             None => {
                 read.asked.push(presence_selector(target));
                 let scope = target.map_or_else(Scope::all, Scope::service);
-                crate::bus::presence::observe(session, &scope, t)
+                crate::bus::presence::observe_through(session, &scope, t, &describing)
                     .await
                     .map_err(|e| crate::one_line(&e))
             }
@@ -306,11 +309,16 @@ async fn observe_with(
                 .iter()
                 .cloned()
                 .map(|x| {
-                    let s = session.clone();
+                    let (s, describing) = (session.clone(), describing.clone());
                     Box::pin(async move {
-                        crate::bus::presence::observe(&s, &Scope::service(&x), t)
-                            .await
-                            .map_err(|e| crate::one_line(&e))
+                        crate::bus::presence::observe_through(
+                            &s,
+                            &Scope::service(&x),
+                            t,
+                            &describing,
+                        )
+                        .await
+                        .map_err(|e| crate::one_line(&e))
                     }) as BoxFuture<'static, _>
                 })
                 .collect(),
@@ -439,7 +447,7 @@ async fn observe_with(
     );
     let providers = async {
         if needs_archives {
-            Some(archive_providers(session, t).await)
+            Some(archive_providers(session, t, &describing).await)
         } else {
             None
         }
@@ -1184,8 +1192,12 @@ fn member_replies(samples: Vec<zenoh::sample::Sample>, slice: &str) -> Vec<Membe
 }
 
 /// The archives presence shows, by token or descriptor (core §4.4).
-async fn archive_providers(session: &Session, t: Duration) -> Result<Vec<Addr>, String> {
-    let all = crate::bus::presence::observe(session, &Scope::all(), t)
+async fn archive_providers(
+    session: &Session,
+    t: Duration,
+    describing: &crate::bus::presence::Describing,
+) -> Result<Vec<Addr>, String> {
+    let all = crate::bus::presence::observe_through(session, &Scope::all(), t, describing)
         .await
         .map_err(|e| crate::one_line(&e))?;
     let archive = IfaceId::from_str(ARCHIVE).expect("archive.v1 is an interface id");

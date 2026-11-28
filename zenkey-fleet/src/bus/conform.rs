@@ -480,8 +480,11 @@ pub async fn observe(
     let store = BundleStore::new(t);
     store.seed(offline);
     let scope = Scope::service(&address);
+    // A compact descriptor (core §3.3) reads through the catalogs given and
+    // the run's store.
+    let describing = crate::bus::presence::Describing::new(catalogs, &store);
     let (presence, admin) = tokio::join!(
-        crate::bus::presence::observe(session, &scope, t),
+        crate::bus::presence::observe_through(session, &scope, t, &describing),
         crate::judge::doctor::admin_space(&bus.raw, t, spec.trust_admin),
     );
     let presence = presence.map_err(|e| crate::one_line(&e));
@@ -612,6 +615,7 @@ pub async fn observe(
         }
         let mut tspec = crate::bus::telemetry::TelemetrySpec::new(t, spec.window);
         tspec.routers = spec.routers;
+        tspec.catalogs = catalogs.clone();
         let scope = crate::model::telemetry::TelemetryScope::of(&address).with_iface(iface.clone());
         Some(
             crate::bus::telemetry::observe(
@@ -635,6 +639,7 @@ pub async fn observe(
         }
         let mut tspec = crate::bus::timing::TimingSpec::new(t, spec.window);
         tspec.routers = spec.routers;
+        tspec.catalogs = catalogs.clone();
         let scope = crate::model::timing::TimingScope::of(&address).with_iface(iface.clone());
         Some(
             crate::bus::timing::observe(
@@ -678,6 +683,7 @@ pub async fn observe(
         let mut ds = crate::bus::desired::DesiredSpec::new(t);
         // No case reads an archive's last-known.
         ds.archives = false;
+        ds.catalogs = catalogs.clone();
         obs.desired = Some(
             crate::bus::desired::observe(session, Some(&obs.address), &ds, &store, offline).await,
         );
@@ -696,7 +702,8 @@ pub async fn observe(
         && marks_standby(first, &obs.iface)
     {
         let guard: Vec<&Revision> = offline.of_iface(&obs.iface).map(|r| r.as_ref()).collect();
-        obs.redundancy = Some(standby_suite(session, &obs.address, &rev, &guard, t).await);
+        obs.redundancy =
+            Some(standby_suite(session, &obs.address, &rev, &guard, t, &describing).await);
     }
     obs
 }
@@ -1658,7 +1665,13 @@ async fn config_suite(
             crate::bus::config::get(session, &selector, t, &epochs).await
         }
         Some(Ok(target)) => {
-            crate::bus::config::get_records(session, &[(address.clone(), target.clone())], t).await
+            crate::bus::config::get_records(
+                session,
+                &[(address.clone(), target.clone())],
+                t,
+                catalogs,
+            )
+            .await
         }
         Some(Err(u)) => Err(u.why.clone()),
     };
@@ -1982,6 +1995,7 @@ async fn standby_suite(
     rev: &Revision,
     guard: &[&Revision],
     timeout: Duration,
+    describing: &crate::bus::presence::Describing,
 ) -> StandbyConform {
     let (planned, not_probed) = exposure_plan(addr, rev, guard);
     let mut probes = Vec::new();
@@ -1991,9 +2005,10 @@ async fn standby_suite(
             Err(e) => Err(e),
         });
     }
-    let second = crate::bus::presence::observe(session, &Scope::service(addr), timeout)
-        .await
-        .map_err(|e| crate::one_line(&e));
+    let second =
+        crate::bus::presence::observe_through(session, &Scope::service(addr), timeout, describing)
+            .await
+            .map_err(|e| crate::one_line(&e));
     StandbyConform {
         probes,
         not_probed,

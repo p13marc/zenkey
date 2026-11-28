@@ -278,6 +278,21 @@ impl Describing {
         }
     }
 
+    /// Through `catalogs`, with a store of its own seeded with `offline`,
+    /// which retrieves each other revision a compact descriptor names
+    /// (§8.4), each attempt bounded by `timeout`: what a reader that holds
+    /// no store of its own reads with. Hold it across reads, so a revision
+    /// is retrieved once.
+    pub fn retrieving(
+        catalogs: &Catalogs,
+        offline: &crate::model::catalog::ContractSet,
+        timeout: Duration,
+    ) -> Describing {
+        let store = BundleStore::new(timeout);
+        store.seed(offline);
+        Describing::new(catalogs, &store)
+    }
+
     /// The deployment catalogs it reads a compact descriptor's indices
     /// through.
     pub fn catalogs(&self) -> &[DeploymentCatalog] {

@@ -72,7 +72,7 @@ pub async fn run(cli: crate::cli::RateArgs) -> Result<()> {
         }
         None => {
             let ns_session = dep.session().await?;
-            zk2::read_lens(&dep, &ns_session, &store).await
+            zk2::read_lens(&dep, &ns_session, &store, &catalogs).await
         }
     };
 
