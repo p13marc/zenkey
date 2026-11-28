@@ -2999,3 +2999,279 @@ async fn s15_both_majors_side_by_side() {
         s.close().await.unwrap();
     }
 }
+
+// ─── v2 §2.10, "A heartbeat" (#987's N3) ─────────────────────────────────
+
+const BEACON: &str = "lab/beacon";
+const STATUS: &str = "zk2/lab/beacon/beacon.v2/state/status";
+
+/// One holder of `beacon-governed-run.v2` at `lab/beacon`, built by hand on
+/// a session of its own: its instance token, its interface token, and a
+/// descriptor stating the run `run` holds, served on a GET (core §3.3).
+struct Holder {
+    session: zenoh::Session,
+    run: Arc<Mutex<Run>>,
+    _tokens: Vec<zenoh::liveliness::LivelinessToken>,
+    _descriptor: zenoh::query::Queryable<()>,
+}
+
+async fn holder(ep: &str, instance: u64, run: Run) -> Holder {
+    use zenoh::Wait;
+    let session = client(ep).await;
+    let c = common::contract("beacon-governed-run.v2");
+    let fp = zenkey::model::canonical::Fingerprint::of(&c);
+    let id = id(instance);
+    let run = Arc::new(Mutex::new(run));
+    let r = Arc::clone(&run);
+    let (fps, ids) = (fp.to_string(), id.to_string());
+    let key = format!("zk2/{BEACON}/@zk/instance/{id}");
+    let on = key.clone();
+    let descriptor = session
+        .declare_queryable(key.clone())
+        .callback(move |q| {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "format": "zk2-descriptor/0.1",
+                "service": BEACON,
+                "instance": ids,
+                "run": r.lock().unwrap().hex(),
+                "interfaces": [{"iface": "beacon.v2", "contract": fps, "minor": 2}],
+                "profiles": ["freshness.v2", "redundancy.v2"],
+            }))
+            .unwrap();
+            // On its own key, as an owner answers a read of
+            // `@zk/instance/*` (core §3.3).
+            let _ = q
+                .reply(on.as_str(), body)
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                .wait();
+        })
+        .await
+        .unwrap();
+    let tokens = vec![
+        session.liveliness().declare_token(key).await.unwrap(),
+        session
+            .liveliness()
+            .declare_token(format!(
+                "zk2/{BEACON}/@zk/alive/beacon.v2/{id}/{}",
+                fp.hex().fp16()
+            ))
+            .await
+            .unwrap(),
+    ];
+    Holder {
+        session,
+        run,
+        _tokens: tokens,
+        _descriptor: descriptor,
+    }
+}
+
+impl Holder {
+    /// Its put of `status`: `record` under its run at `seq`.
+    async fn put(&self, seq: u32, record: &str) -> Stamp {
+        let stamp = Stamp {
+            run: *self.run.lock().unwrap(),
+            seq: zenkey::model::wire::Seq::new(seq).unwrap(),
+        };
+        let bytes = zenkey::model::wire::Envelope::mutation(
+            zenkey::model::wire::Tag::NONE,
+            stamp,
+            record.as_bytes(),
+        )
+        .write();
+        self.session
+            .put(STATUS, bytes)
+            .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+            .await
+            .unwrap();
+        stamp
+    }
+
+    /// Its heartbeat covering `beacon.v2` (core §7.5's form 6), under its
+    /// run at `seq`, its section's digest over `held`.
+    async fn beat(&self, seq: u32, held: &[(&str, Stamp)]) {
+        let run = *self.run.lock().unwrap();
+        put_beat(&self.session, run, seq, held).await;
+    }
+}
+
+/// A heartbeat covering `beacon.v2` at `lab/beacon`, under `run` at `seq`,
+/// its one section's digest over `held`, vouched for.
+async fn put_beat(s: &zenoh::Session, run: Run, seq: u32, held: &[(&str, Stamp)]) {
+    use zenkey::model::heartbeat::{Digest, Heartbeat, Layout, Members, Section, Time};
+    let layout = Layout::of(&common::contract("beacon-governed-run.v2"));
+    let sections = layout
+        .collections
+        .iter()
+        .map(|_| {
+            Some(Section {
+                digest: Digest::of(held.iter().copied()),
+                members: Members::One { vouched: true },
+            })
+        })
+        .collect();
+    let body = Heartbeat {
+        time: Time::Unknown,
+        sections,
+    }
+    .envelope(
+        &layout,
+        Stamp {
+            run,
+            seq: zenkey::model::wire::Seq::new(seq).unwrap(),
+        },
+    )
+    .unwrap();
+    let iface: IfaceId = "beacon.v2".parse().unwrap();
+    s.put(zenkey::model::heartbeat::key("lab", "beacon", &iface), body)
+        .encoding(zenoh::bytes::Encoding::ZENOH_BYTES)
+        .await
+        .unwrap();
+}
+
+/// v2 §2.10, "A heartbeat" (#987's N3): a follower reads the heartbeats
+/// that cover its interface under its incumbent's runs alone.
+///
+/// A (id 0xa) and B (id 0xb) both hold `beacon-governed-run.v2`'s token at
+/// `lab/beacon`, a split: K follows A, the lowest. A puts `status` and a
+/// heartbeat whose digest is over it, which confirms it. B puts two
+/// heartbeats whose digest is over nothing: K discards both,
+/// `not_incumbent`, and its view never reads them, so it is neither due a
+/// read nor counts a lost heartbeat. P, a consumer that does not follow,
+/// reads all three, and its view is due a read after B's two. X puts one
+/// under a run no descriptor states: K holds it, and discards it
+/// `unattributed` once its read of the descriptors ends. A takes a new run
+/// and puts a heartbeat under it before any descriptor put: K holds it,
+/// reads A's descriptor stating the run, and its view reads it then.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_follower_reads_its_incumbents_heartbeats_alone() {
+    use zenkey::consumer::{Consumer, Delivery, HeartbeatRead};
+    let (_r1, ep) = router(None).await;
+    let (ra, rb, rx, ra2) = (
+        Run::U32(0x0a0a_0a0a),
+        Run::U32(0x0b0b_0b0b),
+        Run::U32(0x0c0c_0c0c),
+        Run::U32(0x0a0a_0a0b),
+    );
+    let a = holder(&ep, 0xa, ra).await;
+    let b = holder(&ep, 0xb, rb).await;
+    let x = client(&ep).await;
+    let beacon: Addr = BEACON.parse().unwrap();
+
+    // K, the follower, and P, a consumer that does not follow.
+    let (ks, kw, ps) = (client(&ep).await, client(&ep).await, client(&ep).await);
+    let contract = Arc::new(common::contract("beacon-governed-run.v2"));
+    let k = Consumer::for_tool(&ks, Arc::clone(&contract), &[BEACON], &BTreeMap::new())
+        .unwrap()
+        .with_watch(kw.clone());
+    let told: Told = Arc::default();
+    let t = Arc::clone(&told);
+    let following = k
+        .follow("state/status", move |e| {
+            t.lock().unwrap().push((Instant::now(), e))
+        })
+        .await
+        .unwrap();
+    let p = Consumer::for_tool(&ps, contract, &[BEACON], &BTreeMap::new()).unwrap();
+    let p_reads: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
+    let pr = Arc::clone(&p_reads);
+    let p_sub = p
+        .subscribe_heartbeats(
+            "state/status",
+            |_: Delivery| {},
+            move |h| pr.lock().unwrap().push(h),
+        )
+        .await
+        .unwrap();
+    eventually("K follows A, the lowest holder", || async {
+        following.incumbent(&beacon) == Some(id(0xa))
+    })
+    .await;
+    let beats = |why: Option<Discard>| -> Vec<Run> {
+        told.lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, e)| match (e, why) {
+                (FollowEvent::Heartbeat { stamp, .. }, None) => Some(stamp.run),
+                (FollowEvent::HeartbeatDiscarded { stamp, why: w, .. }, Some(want))
+                    if *w == want =>
+                {
+                    Some(stamp.run)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+
+    // A's status, then its heartbeat over it: K's view confirms it.
+    let up = a.put(0, "up").await;
+    eventually("K holds A's status", || async {
+        following
+            .value(STATUS)
+            .is_some_and(|d| d.inband == Some(up))
+    })
+    .await;
+    a.beat(0, &[(STATUS, up)]).await;
+    eventually("A's heartbeat is read", || async { beats(None) == [ra] }).await;
+    let sub = following.subscription();
+    assert!(sub.confirmed(STATUS).is_some(), "A's heartbeat confirms");
+    assert_eq!(sub.heartbeats(), 1);
+
+    // B's two, over nothing: discarded, never read.
+    for seq in [0, 1] {
+        b.beat(seq, &[]).await;
+    }
+    eventually("K discards B's two", || async {
+        beats(Some(Discard::NotIncumbent)) == [rb, rb]
+    })
+    .await;
+    eventually("P read all three", || async {
+        p_reads.lock().unwrap().len() == 3
+    })
+    .await;
+    assert_eq!(sub.heartbeats(), 1, "K's view read A's alone");
+    assert!(
+        !sub.reread_due(&beacon) && sub.rereads() == 0,
+        "no divergence of K's: B's is no heartbeat of its incumbent's"
+    );
+    assert!(
+        p_sub.reread_due(&beacon) || p_sub.rereads() > 0,
+        "P's view, which reads every run, is due a read after B's two"
+    );
+
+    // X's, under a run no descriptor states: held, then discarded.
+    put_beat(&x, rx, 0, &[(STATUS, up)]).await;
+    eventually("K discards X's, unattributed", || async {
+        beats(Some(Discard::Unattributed)) == [rx]
+    })
+    .await;
+    assert!(
+        told.lock().unwrap().iter().any(|(_, e)| matches!(
+            e,
+            FollowEvent::HeartbeatHeld { stamp, .. } if stamp.run == rx
+        )),
+        "held for one read first"
+    );
+    assert_eq!(sub.heartbeats(), 1);
+
+    // A's new run, stated by its descriptor's GET alone: K holds the
+    // heartbeat, its read finds the run A's, and its view reads it.
+    *a.run.lock().unwrap() = ra2;
+    a.beat(0, &[(STATUS, up)]).await;
+    eventually("A's heartbeat under its new run is read", || async {
+        beats(None) == [ra, ra2]
+    })
+    .await;
+    assert_eq!(sub.heartbeats(), 2);
+    let counts = following.counts();
+    assert_eq!(counts.heartbeats, 2);
+    assert_eq!(counts.heartbeats_held, 2, "X's, and A's under its new run");
+    assert_eq!(counts.heartbeats_discarded.get("not_incumbent"), Some(&2));
+    assert_eq!(counts.heartbeats_discarded.get("unattributed"), Some(&1));
+    assert!(counts.reads >= 2, "a read for each held heartbeat");
+
+    drop((following, p_sub));
+    for s in [a.session.clone(), b.session.clone(), x, ks, kw, ps] {
+        let _ = s.close().await;
+    }
+}

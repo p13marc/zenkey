@@ -1,0 +1,15 @@
+# beacon.v2, minor 2: its status governed by redundancy.v2, for that
+# major's §2.10, "A heartbeat" (#987 N3): a follower reads the heartbeats
+# that cover the interface under its incumbent's runs alone, so another
+# instance's is neither a lost delivery nor a divergence. The election is
+# the profile's `claim`.
+[interface]
+name  = "beacon"
+major = 2
+minor = 2
+uses  = ["freshness.v2", "redundancy.v2"]
+
+[resources.status]                         # one member, followed by heartbeats
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 2 }
