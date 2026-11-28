@@ -4541,7 +4541,9 @@ fn redundancy_conclusions() {
 
 /// The adopters' singletons read as governed under `claim`, and the
 /// scenarios' contracts as `claim` and `external` (redundancy.v1 §2.2,
-/// Appendix B; #841's "done when").
+/// Appendix B; #841's "done when"). ZenSight's two list `redundancy.v2`
+/// since #1149's Z2 (#987's N4), so they read as a reader of both majors
+/// reads them (v2 §2.2, Appendix C).
 #[test]
 fn redundancy_examples_are_governed() {
     use zenkey_model::contract::load_path;
@@ -4569,12 +4571,12 @@ fn redundancy_examples_are_governed() {
         let c = l.contract.expect("a contract");
         assert!(redundancy::is_governed(&c), "{file}");
         assert_eq!(
-            redundancy::declaration_of(&c, false),
+            redundancy::either_declaration_of(&c, false),
             redundancy::Declaration::Governed(election),
             "{file}"
         );
         assert_eq!(
-            redundancy::declaration_of(&c, true),
+            redundancy::either_declaration_of(&c, true),
             redundancy::Declaration::Invalid(vec![redundancy::Invalid::Tokenless]),
             "{file}: a governed interface is never tokenless"
         );
