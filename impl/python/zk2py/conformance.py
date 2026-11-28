@@ -2082,6 +2082,100 @@ def _redundancy_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _redundancy_v2_declarations(path: Path) -> list[Result]:
+    """redundancy.v2 §2.2 (#609, round 128): a contract's uses and resources,
+    and the tokenless set -> its declaration; an address's candidates'
+    revisions -> the governance a tool reads (§2.2 "Across revisions",
+    §2.15)."""
+    from . import redundancy_v2 as r2
+
+    doc = _load_json(path)
+    out = []
+    for i, c in enumerate(doc["cases"]):
+        got = r2.declaration(c["contract"]["uses"], c["contract"]["resources"], c["tokenless"]).as_json()
+        out.append(_check(f"v2 declarations #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(doc["addresses"]):
+        got = {"governance": r2.governance(c["revisions"])}
+        out.append(_check(f"v2 addresses #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _redundancy_v2_descriptors(path: Path) -> list[Result]:
+    """redundancy.v2 §2.10, §2.14 (#609, round 128): a descriptor, the
+    governed interface and its governance -> its run, listing, mark and
+    findings."""
+    from . import redundancy_v2 as r2
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = r2.read_descriptor(c["descriptor"], c["iface"], c["governance"]).as_json()
+        out.append(_check(f"v2 descriptors #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _redundancy_v2_fences(path: Path) -> list[Result]:
+    """redundancy.v2 §2.10, §2.17 (#609, round 128): one sample against a
+    follower's state -> the rule's decision; a follower's arrivals -> what
+    each does under the hold for one read; a candidate's own run and the
+    runs it read -> whether it draws again."""
+    from . import redundancy_v2 as r2
+
+    doc = _load_json(path)
+    out = []
+    for i, c in enumerate(doc["samples"]):
+        smp = c["sample"]
+        run = r2.sample_run(smp["form"], bytes.fromhex(smp["bytes"]) if "bytes" in smp else None, smp.get("chunk"))
+        got = r2.decide(r2.View.of(c["follower"]), run, smp.get("stamp"), bool(c["read_ended"])).as_json()
+        out.append(_check(f"v2 fences samples #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(doc["sequences"]):
+        start = c["start"]
+        view = r2.View(set(start.get("holders") or []),
+                       {k: r2.Known(2, {r for r in (r2.Run.parse(x) for x in v) if r is not None})
+                        for k, v in (start.get("runs") or {}).items()})
+        h = r2.Hold(view)
+        got = []
+        for st in c["steps"]:
+            if "sample" in st:
+                x = st["sample"]
+                got.append(h.sample(x["id"], x["key"], x["kind"], r2.Run.parse(x["run"]), x["seq"]).as_json())
+            elif "token" in st:
+                got.append(h.token(st["token"]["instance"], bool(st["token"]["held"])).as_json())
+            elif "descriptor" in st:
+                got.append(h.descriptor(st["descriptor"]["instance"], r2.Run.parse(st["descriptor"]["run"]))
+                           .as_json())
+            elif "read_ends" in st:
+                got.append(h.read_ends([(d["instance"], r2.Run.parse(d["run"]), None, None)
+                                        for d in st["read_ends"]["descriptors"]]).as_json())
+            else:
+                got.append({"unknown step": sorted(st)})
+        out.append(_check(f"v2 fences sequences #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(doc["draws"]):
+        out.append(_check(f"v2 fences draws #{i}: {c['note']}", {"draw_again": r2.draw_again(c["own"], c["read"])},
+                          c["expect"]))
+    return out
+
+
+#: redundancy.v2's fixtures (``conformance/v2/``), by file name; an unknown
+#: file fails, as in :data:`PROFILE_FIXTURES`.
+REDUNDANCY_V2_FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
+    "declarations.json": _redundancy_v2_declarations, "descriptors.json": _redundancy_v2_descriptors,
+    "fences.json": _redundancy_v2_fences,
+}
+
+
+def _redundancy_v2(directory: Path) -> list[Result]:
+    out: list[Result] = []
+    for path in sorted(directory.iterdir()):
+        if path.name == "README.md":
+            continue
+        run = REDUNDANCY_V2_FIXTURES.get(path.name)
+        if run is None:
+            out.append((f"v2/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        out += run(path)
+    return out
+
+
 def _timing_declarations(path: Path) -> list[Result]:
     """timing.v1 §2.2, §2.3, §2.5: a resolved resource (or its layers), or a
     requirement -> its declaration."""
@@ -2247,7 +2341,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "redundancy": {"declarations.json": _redundancy_declarations, "descriptors.json": _redundancy_descriptors,
                    "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
                    "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions,
-                   "polls.json": _redundancy_polls},
+                   "polls.json": _redundancy_polls, "v2": _redundancy_v2},
     "timing": {"declarations.json": _timing_declarations, "deadlines.json": _timing_deadlines,
                "lifespans.json": _timing_lifespans, "periods.json": _timing_periods,
                "conclusions.json": _timing_conclusions},
