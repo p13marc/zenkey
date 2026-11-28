@@ -58,13 +58,16 @@ shape, built from 0.23's packaged crates: `modem.v3` 3.4 with `frames/fast` alon
   beside its node's router is on no first hop, and keeps the JSON form; a device whose session
   reaches its router only across a face is on one.
   - A tool reads a compact descriptor only through the catalog and every revision it names.
-    Such an owner holds no bundle (core §8.4), so give the tools `--contracts` for each
-    revision, the standard `spec/profiles/health/health.v1.toml` and
-    `spec/profiles/freshness/freshness.v2.toml` among them, or hold the bundles on the near
-    side. Without them `zenctl service show` reads `unknown_revision`, and the doctor, which
-    takes no `--contracts`, leaves every check unobservable (§4).
-  - `zenctl check conform` reads the bundle no holder serves as a `contract-served`
-    violation, even with every revision given by `--contracts`.
+    Such an owner holds no bundle (core §8.4). The standard revisions, `health.v1`'s and
+    `freshness.v2`'s among them, are every tool's own, compiled in from `zenkey`. Give the
+    tools `--contracts` for the others, `modem.v3` and `sx1262_config.v1`, or hold their
+    bundles on the near side. Without them `zenctl service show` and the doctor read
+    `unknown_revision`, never a guess. The doctor takes `--contracts` beside `--catalog`, as
+    `service show` does, and so do `iface list` and `graph` (§4).
+  - `zenctl check conform … --face-policy F`, where F lists the owner on a device face, asks
+    no bundle of it (core §8.2, §8.4): `contract-served` passes where a holder on the near
+    side serves the bundle, and is not asked where none does. Without such a policy the owner
+    is any owner, and no holder serving its bundle is a violation.
   - A 0.22 reader reads none: on a first hop, move the owner after its readers, or run it
     with `ServiceConfig::compact_descriptor(false)`.
 - **The owner heartbeat** (`freshness.v2` 0.9 to 0.14, #1110). New in 0.23, and off by
@@ -648,10 +651,13 @@ a namespace of your own, `replay FILE --namespace NS`, and read it as across a f
 --across-face h-3fa9c2d41b7e/rf0 --namespace NS --contracts … --catalog …`.
 
 **The doctor** reads presence and descriptors, which the faces' `@zk` deny keeps off the radio,
-so it runs on the node's side, with `--catalog`. It takes no `--contracts`: an owner on a first
-hop holds no bundle (core §8.4), so the doctor reads such an owner's compact descriptor only
-where a holder on the near side serves every revision it names, and otherwise leaves each of
-its checks unobservable (`unknown_revision`).
+so it runs on the node's side, with `--catalog`. An owner on a first hop holds no bundle (core
+§8.4), so the doctor reads such an owner's compact descriptor through the standard revisions
+it holds compiled in and each other revision `--contracts` gives or a holder on the near side
+serves; one that none of these has leaves each of its checks unobservable (`unknown_revision`).
+A revision `--contracts` holds is never retrieved, so `contract-unavailable` does not ask its
+holders. With `--face-policy`, a bundle no holder serves of a device on a device face is the
+deployment's warning, never the owner's error.
 
 **zengui and zenwatch across a face.** zengui takes `--catalog` and `--contracts`. Its Inspector
 reads a frame's fields, its Series plots them, its Config tool drives `config.v1` and
@@ -672,7 +678,8 @@ interfaces (#982's design, §3). `ServiceConfig::first_hop` saves them: the serv
 instance token alone, with no interface token and no contract queryable (core §8.1, #982's H2).
 It refuses `archive.v1`, and an interface that uses `redundancy.v1`. Given the catalog, it writes
 its descriptor in the compact form (core 0.120), and holds no bundle, so a reader needs every
-revision the descriptor names, `health.v1`'s and `freshness.v2`'s standard contracts among them.
+revision the descriptor names: the standard ones each tool holds compiled in, and the service's
+own by `--contracts` or from a holder on the near side.
 
 ## 5. What must be decided
 

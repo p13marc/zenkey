@@ -141,7 +141,10 @@ library consumer of this crate does not pay for `dirs` and `toml`.
   [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C5).
   Move the tools before the owners. Every reader here reads both forms:
   a compact descriptor through the catalogs it was given and each
-  revision it names, held or retrieved, and never guessed. One not read is
+  revision it names, held or retrieved, and never guessed; the standard
+  revisions `zenkey` embeds are every reader's own (`model::standard`),
+  so a first-hop owner, which holds no bundle, reads without them given
+  (core §8.4). One not read is
   `report::presence::DescriptorAnswer::Unread` and
   `model::catalog::DescriptorRead::Unread`, with why (`unknown_catalog`,
   `unknown_revision`), and the read is not complete.
@@ -178,7 +181,9 @@ library consumer of this crate does not pay for `dirs` and `toml`.
   `judge::redundancy::row` takes each instance's run).
 - **Grown or changed, and what to write instead:**
   - a report or spec struct written field by field needs its new
-    members, above;
+    members, above, and `ConformSpec::first_hop` (the face policy's word
+    that the owner is on a first hop, so `contract-served` asks it no
+    bundle, core §8.4);
   - `TelemetrySpec` is no longer `Copy`, and `bus::health::ServiceHeard`
     gains private fields, so no literal builds it;
   - `TimingBook::seed` and `owed_read`, and `ViewBook::sample` and `read`,

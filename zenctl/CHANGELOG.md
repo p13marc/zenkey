@@ -6,6 +6,26 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — a first-hop device read with the catalog alone (#975, 0.23's release candidate)
+
+Core §8.4: an owner on a first hop holds no bundle, and its deployment
+holds each on this side of the hop, in a holder or given to each reader.
+Every verb now holds the standard revisions `zenkey` embeds (`health.v1`,
+`health.v2`, `freshness.v2`, `alarms.v1`, `alarms.v2`, `config.v1`), so a
+compact descriptor naming them reads through `--catalog` alone; any other
+revision is held by `--contracts` or retrieved, never guessed. New flags:
+`doctor --contracts`, and `--contracts` and `--catalog` on `iface list`
+and `graph`. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `service list` and `show`, the doctor, `telemetry` and every reader of a descriptor: a first-hop owner's compact descriptor `unknown_revision` without `health.v1`'s and `freshness.v2`'s contracts by `--contracts` | read through `--catalog`, the standard revisions compiled in | an owner's other revisions still come from `--contracts` or a holder on the near side |
+| `doctor`: no `--contracts` | `--contracts` seeds its store | a revision held so is never retrieved: `contract-unavailable`'s summary counts those its holders were not asked of |
+| `doctor --face-policy`: a listed device's bundle no holder serves, an error citing §8.2 | a warning, the deployment's (§8.4) | any other owner's stays the error |
+| `iface list`, `graph`: no `--catalog`; `iface show` took it and read no compact descriptor through it | each reads a compact descriptor through `--catalog` | |
+| `check conform --face-policy F`: an owner F lists on a device face, its bundle no holder serves, a `contract-served` violation | `contract-served` not asked; served by a near-side holder, passed | the rest is judged against `--contracts`, else the standard revision; told nothing, the owner is any owner |
+| `check face`: `transport.wait_before_close_ms  planned 240000000`, zenoh's µs under the policy's key | `planned 240000`, in the key's ms | `--format json` keeps zenoh's units beside `path`, as before |
+
 ## Unreleased (`main`, zk2) — `acl gen --face-policy` and `check face` weigh a frame or a `block` put with what zenoh writes beside it (#1136)
 
 `link.v1` 0.22 §2.8, `link.v2` 0.30 §2.16. A face's plan warns
