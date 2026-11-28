@@ -1897,13 +1897,35 @@ written. This section is what the core requires of it.
     origin.
 - **It answers GETs only.** It never puts on its keys, because it is not a
   second publisher of the data.
-- **Each reply's attachment** is a JSON object:
-  `{"iface", "contract", "type", "confirmed"}`.
-  - The first three are the archived value's type identity (§7.1).
-  - The members are encoded as in a descriptor and the canonical form:
-    `iface` is the interface id, `contract` the fingerprint, and `type`
-    the type object of §9.5.
-  - `confirmed` is `false` while alignment has not confirmed the key (below).
+- **Each reply's attachment** states the archived value's type identity
+  (§7.1), and whether alignment confirmed its key (below). It has two
+  forms, told apart by their length. `[F: archive/attachments.json]`
+  - **The JSON form** is an object: `{"iface", "contract", "type",
+    "confirmed"}`. The first three are the type identity, encoded as in a
+    descriptor and the canonical form. `iface` is the interface id,
+    `contract` the fingerprint, and `type` the type object of §9.5.
+    `confirmed` is `false` while alignment has not confirmed the key.
+  - **The compact form** is 3 bytes. It names the revision by its index in
+    the archive's catalog (§8.6), and the resource by its place in that
+    revision ("The compact attachment", below).
+  - **Read by its length.** An attachment of exactly 3 bytes is the
+    compact form, and any other the JSON form. A JSON object holding the
+    four members is never that short, so no byte marks the form.
+- **Writing it.** An archive given a catalog SHOULD write the compact
+  form. `[Sc: state.md §5]`
+  - It writes the JSON form for a value whose revision that catalog does
+    not list, or whose resource is past the 128th of its revision. An
+    archive given no catalog writes the JSON form.
+  - **The archive's catalog** is the one its descriptor names (§3.3).
+    Where no descriptor of it crosses, across a constrained face (§8.5),
+    the deployment's word names it, as §8.6 says of an owner's.
+- **Reading it.** A reader of an archive's replies MUST read both forms.
+  `[F: archive/attachments.json]` `[Sc: state.md §5]`
+  - **`confirmed`** is a bit of the compact form's own, so a reader reads
+    it with no catalog.
+  - **The identity** is read through the archive's catalog, as §8.6 reads
+    an index, and from the revision the index names. It decodes to the
+    JSON form's three members.
 - **An archive's backend MUST NOT accept a put older than a delete it
   holds.** The storage manager of zenoh 1.10.1 accepts one, and resurrects
   the key, so it cannot be an archive's store as released.
@@ -1944,8 +1966,9 @@ written. This section is what the core requires of it.
   - **What a reply confirms.** A value read from the owner is confirmed,
     a snapshot's entry included.
     A value read from a peer archive keeps the peer's confirmation: it is
-    confirmed when the peer's attachment says `"confirmed": true`, and
-    unconfirmed otherwise, an absent or unreadable attachment included. A
+    confirmed when the peer's attachment says so, `"confirmed": true` or
+    its compact form's bit, and unconfirmed otherwise, an absent or
+    unreadable attachment included. A
     `reply_del` from a peer is positive evidence, as one from the owner is:
     the peer holds the owner's delete, with its stamps.
     `[Sc: state.md §5]`
@@ -1974,6 +1997,48 @@ written. This section is what the core requires of it.
 - **What a tool can see**: [`observer.md`](observer.md) §4.5.
 
 `[Sc: state.md §4–§6, §9]`
+
+**The compact attachment.** Its 24 bits are bit fields, most significant
+bit first, as a heartbeat's body's are (§7.5).
+
+```text
+attachment   index · resource · confirmed · extension · reserved
+index        10 bits: the value's revision, by its index in the archive's catalog (§8.6)
+resource     7 bits: the value's resource, by its place among that revision's resources
+             in the canonical form's order (§9.5), from 0
+confirmed    1 bit: 1 when alignment confirmed the key
+extension    1 bit: 0. A later version may define it
+reserved     5 bits: 0
+```
+
+- **Writing.** An implementation that writes a compact attachment MUST
+  write it as the layout says. `[F: archive/attachments.json]`
+- **Decoding.** `iface` and `contract` are the pair the index names. `type`
+  is the type object of the resource it names, in that revision's
+  canonical form (§9.5). `confirmed` is its bit.
+- **Reading.** A reader decodes it with the origin key of the reply (above),
+  the archive's catalog, and the catalogs and the revisions it holds. An
+  implementation MUST refuse a compact attachment for the first of these
+  that applies, naming the refusal: `[F: archive/attachments.json]`
+  - the extension bit is 1 (`extension`);
+  - a reserved bit is 1 (`reserved`);
+  - the reader holds neither the archive's catalog nor one whose `lineage`
+    holds it (`unknown_catalog`). An archive that names no catalog is
+    refused so too;
+  - the index is at or above the count read through (`unknown_index`);
+  - the reader holds no revision of the pair it names
+    (`unknown_revision`);
+  - the resource is at or above the revision's count of resources, or
+    names one that is not a state, of kind token `state` or `@state`
+    (`resource`);
+  - the origin key is not a key of that resource (`origin`). Its interface
+    is not the pair's, or its kind token and its resource's chunks do not
+    match the resource's template (§2.2).
+- **What a refusal leaves.** The first two leave nothing read, so the key
+  is unconfirmed, as with an unreadable attachment (above). A later one
+  leaves the `confirmed` bit read, and the identity unknown.
+- **Never a guess.** A reader never reads an index through another
+  catalog, nor a resource through another revision.
 
 ---
 
@@ -6391,6 +6456,7 @@ section each was written against, whose pointer leads on.
 | `conformance/packed/` | §7.6 |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
+| `conformance/archive/` | §4.4: `attachments.json` an archive reply's attachment, its two forms told by their length, the compact form's bytes and its reading through the archive's catalog and a revision, and every refusal |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §8 a replay filtered and ordered by each event's time, against the seqs, an unknown time and a run change among them, and two puts that carry no event; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key; §16 a conditional read answered by the held stamp alone, and whole after a put, for another stamp, for a payload that is no held stamp, on every other kind of GET, after a delete and across a restart, and a reader's merge of each answer |
 | `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, an owner's error beside a router's `Timeout`, a querier's and a malformed one, an earlier version's envelope read as the transport's, and a request under another `Encoding` refused |
@@ -6681,6 +6747,18 @@ brief:
   and a record's bytes → the JSON reading, or the reader's refusal, the
   first in §7.6's order (`reads`). Every accepted write reads back under
   the type's tag, to its value or to the `reads_as` its case gives.
+- **`archive/attachments.json`**: each revision its cases read, by its
+  authoring file → its pair and its resources in canonical order, each
+  with its type object. Named catalogs, each a JSON value, and their ids.
+  - The archive's catalog or none, a revision, a resource and its
+    `confirmed` → the compact attachment's bytes in hex, or the JSON form
+    (`writes`).
+  - An attachment's bytes, the origin key, the catalog the archive's
+    descriptor names or none, the catalogs a reader holds and the
+    revisions it lacks → its form. A compact one reads to its `confirmed`
+    and its identity, the JSON form's members, or to the refusal's token,
+    the first in §4.4's order, with its `confirmed` where it was read
+    (`reads`).
 - **`catalog/`**: a catalog's text → its id, or the reader's refusal,
   the first in §8.6's order (`documents.json`). A catalog's text → its
   JCS bytes, their sha256 and its id (`ids.json`). Named catalogs, each a

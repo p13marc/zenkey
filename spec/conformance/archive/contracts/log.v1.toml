@@ -1,0 +1,22 @@
+# An archived log, for the attachment fixtures: a plain state, an explicit
+# one under a template, and a stream, which no archive records.
+[interface]
+name    = "log"
+major   = 1
+minor   = 0
+summary = "A log, for the archive attachment fixtures"
+
+[resources.level]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources."journal/{entry}"]
+kind        = "state"
+explicit    = true
+type        = { raw = "application/octet-stream" }
+params      = { entry = "string" }
+cardinality = 100
+
+[resources.ticks]
+kind = "stream"
+type = { raw = "application/octet-stream" }
