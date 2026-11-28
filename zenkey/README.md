@@ -108,8 +108,11 @@ its standard input.
     form takes some hundreds. `ServiceConfig::compact_descriptor` asks for
     either form; `None`, the default, writes this one there and the JSON
     form elsewhere, and a role keeps the JSON form. Its readers need the
-    catalog and every revision it names, held or retrieved: one without
-    reads `presence::Found::Unread`, never absent. A 0.22 reader reads
+    catalog and every revision it names, held or retrieved, the standard
+    contracts this crate embeds always held (`zenkey::standard`, new), so
+    a consumer of a first-hop device's own interface reads it with its own
+    contract and the catalog: one without reads `presence::Found::Unread`,
+    never absent. A 0.22 reader reads
     none, so a first-hop owner moves after its readers, or runs
     `compact_descriptor(false)`.
   - **An archive's attachment** may be compact too (core 0.120, #980's

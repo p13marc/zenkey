@@ -1129,14 +1129,16 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   rc-023's part B (#975): a first hop read with the catalog alone (core
   §8.4, a deployment provisions its bundles to each reader).
   `model::standard` holds the six bundles `zenkey` embeds (`health.v1`,
-  `health.v2`, `freshness.v2`, `alarms.v1`, `alarms.v2`, `config.v1`), its
-  test pinning them to `zenkey/bundles/`. `Describing::read` takes a
+  `health.v2`, `freshness.v2`, `alarms.v1`, `alarms.v2`, `config.v1`) as
+  revisions, read from `zenkey::standard`'s one list, its test checking
+  the two agree. `Describing::read` takes a
   standard revision a compact descriptor names from there, never retrieved,
   and holds it in the store (`BundleStore::hold`, `pub(crate)`), so the
   doctor's checks after the read have it; every other revision is the
   store's, held or retrieved, and one none has stays `unknown_revision`.
-  `OwnerRevisions`' `described` holds them too, and the lens's #990
-  heartbeat revision is `standard`'s. The doctor's `contract-unavailable`
+  `OwnerRevisions`' `described`, a `zenkey::presence::Held`, reads them
+  as every runtime `Held` does, and the lens's #990 heartbeat revision is
+  `standard`'s. The doctor's `contract-unavailable`
   counts revisions held by the reader (`--contracts`, standard), never
   retrieved, in its summary, and a bundle no holder serves of a device
   `DoctorSpec::first_hop` lists is a warning, the deployment's (§8.4),

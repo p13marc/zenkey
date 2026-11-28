@@ -678,8 +678,10 @@ interfaces (#982's design, §3). `ServiceConfig::first_hop` saves them: the serv
 instance token alone, with no interface token and no contract queryable (core §8.1, #982's H2).
 It refuses `archive.v1`, and an interface that uses `redundancy.v1`. Given the catalog, it writes
 its descriptor in the compact form (core 0.120), and holds no bundle, so a reader needs every
-revision the descriptor names: the standard ones each tool holds compiled in, and the service's
-own by `--contracts` or from a holder on the near side.
+revision the descriptor names: the standard ones each tool and each `zenkey` consumer holds
+compiled in (`zenkey::standard`), and the service's own by `--contracts`, its consumer's own
+contract, or from a holder on the near side. A consumer of a first-hop owner's interface,
+holding that contract and the catalog, reads the owner's descriptor and binds.
 
 ## 5. What must be decided
 

@@ -1,7 +1,8 @@
-//! The standard revisions every tool holds compiled in: the bundles
-//! `zenkey` embeds byte for byte, one for each standard contract it
-//! implements (core §10 point 1): `health.v1`, `health.v2`, `freshness.v2`,
-//! `alarms.v1`, `alarms.v2` and `config.v1`.
+//! The standard revisions every tool holds compiled in: the contracts
+//! `zenkey` embeds byte for byte ([`zenkey::standard`], which owns the
+//! list), one for each standard contract it implements (core §10 point 1):
+//! `health.v1`, `health.v2`, `freshness.v2`, `alarms.v1`, `alarms.v2` and
+//! `config.v1`, here as revisions read from their bundles.
 //!
 //! An owner on a first hop holds no bundle, and a deployment holds each of
 //! its bundles "on the near side of the hop: in a holder there, or
@@ -21,21 +22,11 @@ use zenkey_model::grammar::IfaceId;
 use crate::model::catalog::{ContractSet, Revision};
 use crate::report::ContractSource;
 
-/// Each bundle `zenkey` embeds, by the interface it is the standard
-/// contract of.
-const EMBEDDED: [(&str, &[u8]); 6] = [
-    ("health.v1", zenkey::health::BUNDLE),
-    ("health.v2", zenkey::health::v2::BUNDLE),
-    ("freshness.v2", zenkey::heartbeat::BUNDLE),
-    ("alarms.v1", zenkey::alarms::BUNDLE),
-    ("alarms.v2", zenkey::alarms::v2::BUNDLE),
-    ("config.v1", zenkey::config_v1::BUNDLE),
-];
-
 static STANDARD: LazyLock<ContractSet> = LazyLock::new(|| {
     let mut set = ContractSet::new();
-    for (iface, bytes) in EMBEDDED {
-        let bundle = zenkey_model::bundle::Bundle::verify(bytes)
+    for imp in zenkey::standard::implementations() {
+        let iface = imp.iface();
+        let bundle = zenkey_model::bundle::Bundle::verify(imp.bundle_bytes())
             .unwrap_or_else(|e| panic!("zenkey's {iface} bundle verifies: {e:?}"));
         let revision = Revision::from_bundle(bundle, ContractSource::Bundle)
             .unwrap_or_else(|e| panic!("zenkey's {iface} bundle reads: {e:?}"));
@@ -59,36 +50,24 @@ pub fn revision(iface: &IfaceId, fingerprint: &Fingerprint) -> Option<&'static A
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::path::Path;
 
     use super::*;
 
-    /// Every bundle under `zenkey/bundles/`, the directory the runtime's
-    /// `include_bytes!` read, is held here, and nothing else is: a
-    /// standard contract `zenkey` comes to embed is one every tool holds.
+    /// One revision for each standard contract `zenkey` embeds, at its
+    /// fingerprint: the runtime's readers and the tools hold one list
+    /// (`zenkey::standard`'s test pins it to `zenkey/bundles/`).
     #[test]
-    fn every_bundle_zenkey_embeds_is_held() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../zenkey/bundles");
-        let mut embedded = BTreeSet::new();
-        for iface in std::fs::read_dir(&root).expect("zenkey's bundles") {
-            let iface = iface.expect("an entry").path();
-            let name = iface
-                .file_name()
-                .and_then(|n| n.to_str())
-                .expect("a name")
-                .to_owned();
-            for file in std::fs::read_dir(&iface).expect("an interface's bundles") {
-                let file = file.expect("an entry").file_name();
-                let file = file.to_str().expect("a name");
-                let hex = file.strip_suffix(".bundle.json").expect("a bundle");
-                embedded.insert((name.clone(), format!("sha256:{hex}")));
-            }
-        }
+    fn every_contract_zenkey_embeds_is_held() {
+        let embedded: BTreeSet<(String, String)> = zenkey::standard::implementations()
+            .iter()
+            .map(|i| (i.iface().to_string(), i.fingerprint().to_string()))
+            .collect();
         let held: BTreeSet<(String, String)> = revisions()
             .iter()
             .map(|r| (r.iface().to_string(), r.fingerprint().to_string()))
             .collect();
         assert_eq!(held, embedded);
+        assert_eq!(held.len(), 6, "{held:?}");
     }
 
     #[test]
