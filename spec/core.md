@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.120** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.121** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -4265,21 +4265,66 @@ facts.
     heartbeat's is the shortest of the collections its groups cover. A state of a
     contract that uses `freshness.v2` has none of its own: its owner
     re-puts nothing, and its heartbeat speaks for it. A subscription to
-    what has no horizon is never declared again.
+    what has no horizon follows the others (below).
   - **The silence** counts from the latest of three instants: the
-    subscription's declaration, its last sample, and its session's last
-    transport opening or closing. A transport that opens again declares
-    every subscription anew. Through a session cut off from every router
-    nothing is declared.
+    subscription's declaration or its latest repair's, its last sample,
+    and its session's last transport opening or closing. A transport that
+    opens again declares every subscription anew. Through a session cut
+    off from every router nothing is declared.
   - **Declaring again** undeclares the subscription, then declares it
     anew. Beside the old one, zenoh 1.10.1 would join the new subscriber
     to it and send nothing (Appendix B). A sample put between the two is
     missed, after two horizons of silence. It costs one declaration a
     silent subscription every two horizons.
-  - **What it repairs** is a subscriber's declaration. A lost
-    `DeclareKeyExpr` it does not: a session's runtime declares a prefix
-    toward its router once a transport (Appendix B). Only a transport
-    that opens again repairs that.
+  - **What declaring again repairs** is a lost `DeclareSubscriber`, where
+    the reader is its router's one subscriber to that key expression.
+    - A router declares a key expression toward another once, for its
+      first subscriber (Appendix B). Beside another reader's
+      subscription, declaring again changes nothing there, and nothing
+      crosses.
+    - Nor does it repair a lost `DeclareKeyExpr`: a session's runtime
+      declares a prefix toward its router once a transport (Appendix B).
+  - A consumer or a tool whose subscription stays silent for two more of
+    its horizons after declaring it again SHOULD declare a **repair
+    subscription** for it. `[F: repair/keys.json]` `[Sc: constrained.md §9]`
+    - **Its key expression** is the subscription's, with `$*` appended to
+      the last chunk of its literal prefix: `…/frames/fast$*`, and an
+      event's `…/device_fault$*/*`. `$*` also matches no character, so
+      the repair matches every key the subscription does.
+    - **What it repairs.** No reader's own subscription declares that key
+      expression, so the near router declares it toward the far router.
+      The far router then routes the key's samples to the near router,
+      which delivers them to every subscription behind it that matches.
+      The repair's literal prefix ends a chunk earlier, so it rides a key
+      expression of its own, and repairs a lost `DeclareKeyExpr` too.
+    - **It stays while the subscription does.** Undeclaring it would
+      undeclare it at the far router as well, where the subscription's
+      own declaration is still missing.
+    - **The reader filters locally.** A sample reaches its session once,
+      and the subscription delivers what it matches. The repair delivers
+      nothing, so a key that merely extends the chunk is dropped.
+    - **A later repair.** Each further two horizons of silence declare
+      one more, its `$*` one character further left (`…/frames/fas$*t`),
+      up to three. Another reader behind the router may hold the same
+      repair, so a lost one stays lost; the next one is new there. No key
+      expression can carry a session's own id and still match the key.
+      Past three, the subscription is declared again.
+    - **A sample heard** ends the run, and the next silence is met by
+      declaring again first. The repairs held stay.
+    - **What it costs** is one declaration every two horizons of silence,
+      the first with its key expression. A key that the repair alone
+      matches crosses too, and is dropped.
+    - **Where it cannot help.** A template whose first chunk is a
+      parameter has no repair: `$*` on its kind would leave the far
+      side's grants (§11.1). A grant of one exact key, such as a
+      heartbeat's, includes no repair, and the far router refuses it.
+  - A consumer or a tool SHOULD declare a subscription to what has **no
+    horizon**, such as an event's, again and repair it beside its
+    subscriptions across the face that have one. It does so each time one
+    of them is due, where it has heard nothing for as long. Its
+    declaration rode with theirs, and was lost with them. A reader that
+    holds none with a horizon declares it once.
+    `[Sc: constrained.md §9]`
   - A caller across the face MAY open its session again after two GETs
     in a row drew no reply, its transport up. A session that opens again
     declares everything anew. Toward a far router in a south region, the
@@ -6100,6 +6145,26 @@ Read in zenoh's `src/`, and in `zenoh-transport`'s:
      and 5 s (the wire baseline's W2 findings 6 and 7).
    - The draft upstream report, not filed:
      [`declarations-are-never-repaired.md`](../docs/zk2/upstream/declarations-are-never-repaired.md).
+5. **A router declares a key expression toward another once.** A router
+   sends a subscriber's declaration on a face the first time it holds a
+   subscriber to that key expression, and nothing for the next one
+   (`maybe_propagate_subscriber`, `net/routing/hat/peer/pubsub.rs:71–145`,
+   its `local_subs` checked at `:77–83`). So a reader that declares again
+   beside another reader of the key expression sends nothing across.
+   - Measured on zenoh-modem's simulated radio: two readers behind router
+     B, each declaring again at two horizons, heard nothing for 735 s
+     (the wire baseline's `rc-023-redeclare-shared-1`).
+6. **A wildcard ends a key expression's prefix.** A resource's non-wild
+   prefix is its chunks before the first that holds `*`
+   (`Resource::new`, `dispatcher/resource.rs:444–466`), and a declaration
+   rides that prefix's mapping (`decl_key`, `:660–728`). So
+   `…/frames/fast$*` rides `…/frames`, a mapping of its own.
+   - Measured on the same path: a third session on router B subscribing
+     to `…/frames/fast$*` made router B send a `DeclareKeyExpr` of
+     `…/stream/frames` (57 B) and the `DeclareSubscriber` (14 B), and
+     nothing else. Both readers heard the next frame. The same held for
+     an event's `…/device_fault$*/*` (55 B and 24 B), each reader hearing
+     the next event (`rc-023-repair-check-1`).
 
 Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §8 and
 §9 (`zenkey/tests/constrained.rs`, `zenkey-fleet/tests/redeclare.rs`):
@@ -6109,7 +6174,11 @@ Measured by [`scenarios/constrained.md`](scenarios/constrained.md) §8 and
   for two horizons. Declared again once, it heard the stream from then
   on. With ARQ, it stayed silent;
 - one whose `DeclareKeyExpr` the proxy dropped stayed silent, declared
-  again.
+  again. Its repair two horizons later crossed, and it heard the stream;
+- two readers behind one far router, whose declarations the proxy
+  dropped, stayed silent, each declared again. At four horizons the
+  first reader's repairs crossed, and both heard the stream and an event
+  beside it, each sample once.
 
 **A first hop's declarations** (§8.1, §8.4). Read in zenoh's `src/`:
 1. **A client's runtime sends its declarations unasked.** A session
@@ -6456,6 +6525,7 @@ section each was written against, whose pointer leads on.
 | `conformance/packed/` | §7.6 |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
+| `conformance/repair/` | §8.5: `keys.json` a repair subscription's key expression, and each later repair's |
 | `conformance/archive/` | §4.4: `attachments.json` an archive reply's attachment, its two forms told by their length, the compact form's bytes and its reading through the archive's catalog and a revision, and every refusal |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §8 a replay filtered and ordered by each event's time, against the seqs, an unknown time and a run change among them, and two puts that carry no event; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key; §16 a conditional read answered by the held stamp alone, and whole after a put, for another stamp, for a payload that is no held stamp, on every other kind of GET, after a delete and across a restart, and a reader's merge of each answer |
@@ -6465,7 +6535,7 @@ section each was written against, whose pointer leads on.
 | `scenarios/retrieval.md` | §8.4 |
 | `scenarios/types.md` | §2.4, §7.1–§7.2 |
 | `scenarios/security.md` | §11; §4 the admin read admitting no GET of a node's declaration records, and a query admitted by inclusion |
-| `scenarios/constrained.md` | §1.6, R7, §8.5, §12; §7 keys across a face, and Appendix B; §8 a reply across a face (§8.1); §9 a declaration lost across a face, declared again (§8.5); §10 an owner on a first hop: its instance token alone, no bundle, what the near side reads, and what a deny spares (§8.1, §8.2, §8.4, Appendix B) |
+| `scenarios/constrained.md` | §1.6, R7, §8.5, §12; §7 keys across a face, and Appendix B; §8 a reply across a face (§8.1); §9 a declaration lost across a face, declared again, and repaired where declaring again changes nothing: a lost key expression's, and two readers' behind one far router with an event beside them (§8.5); §10 an owner on a first hop: its instance token alone, no bundle, what the near side reads, and what a deny spares (§8.1, §8.2, §8.4, Appendix B) |
 | `scenarios/budget.md` | §2.7: what a path drops and a reader sees (§1–§3), an owner keeping its bound and its rate (§4–§7); a stalled reader, and a tool's window over one (§1); Appendix B |
 | `profiles/<name>/conformance/`, `profiles/<name>/scenarios.md` | each profile's own rules (§10; [`profiles/README.md`](profiles/README.md)) |
 | `profiles/freshness/scenarios.md` §1, §2 | §4.2 a re-put, §4.3 an owner ahead |
@@ -6766,6 +6836,10 @@ brief:
   or the checker's refusal (`succession.json`'s `successions`). The
   catalogs a reader holds, the id an owner names or none, and an index or
   none → the epoch and the entry, or the reader's refusal (`reads`).
+- **`repair/keys.json`**: a subscription's key expression across a face,
+  base-relative or under a namespace → its repair subscriptions' key
+  expressions in the order a reader declares them, none where §8.5 gives
+  none.
 - **`compat/`:** the class, the warning rule names (sorted and
   deduplicated) and `same_revision`. The case layout and the one-resource
   wrapper are in [`compat/README.md`](conformance/compat/README.md).

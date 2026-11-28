@@ -140,6 +140,12 @@ runtime has declared the key's prefix toward the router.
 4. On a far client that never subscribed, the proxy drops the batch
    holding the stream's key: its `DeclareKeyExpr`, and the
    `DeclareSubscriber` beside it.
+5. **Two readers behind one far router.** A far router attaches through
+   the proxy. The owner puts an event every 200 ms too. The far router
+   has declared both keys' prefixes, with a first subscription to each.
+   Two readers, its clients, each subscribe to both. The second starts
+   0.5 s after the first. For 1.5 s the proxy drops every batch the far
+   router sends: its `DeclareSubscriber`s. The transport stays up.
 
 **Expected.**
 1. Nothing is delivered for two horizons, 2 s. The subscription is then
@@ -149,10 +155,20 @@ runtime has declared the key's prefix toward the router.
    declared again, and stays silent.
 4. Nothing is delivered for three horizons. The subscription is declared
    again on the scope the router never learned, and stays silent (core
-   Appendix B).
+   Appendix B). At four horizons its repair subscription crosses,
+   `…/stream/level$*`. It rides a key expression of its own, `…/stream`.
+   The stream is delivered from then on.
+5. Nothing is delivered for three and a half horizons. Each subscription
+   is declared again at two, the event's beside the stream's. Nothing
+   crosses: the far router holds the other reader's. At four horizons the
+   first reader's repairs cross, `…/stream/level$*` and
+   `…/events/trip$*/*`. Both readers then hear the stream and the event,
+   each sample once. The second reader hears before its own four
+   horizons, and declares no repair.
 
-*The reference: `zenkey/tests/constrained.rs` (§8, §9 steps 1, 3 and 4)
-and `zenkey-fleet/tests/redeclare.rs` (step 2).*
+*The reference: `zenkey/tests/constrained.rs` (§8, §9 steps 1, 3, 4 and
+5) and `zenkey-fleet/tests/redeclare.rs` (steps 2 and 5, a tool's
+watches).*
 
 ## §10 A first-hop device (§3.3, §8.1, §8.2, §8.4, §8.5; observer §3.6, §3.11, §7.1)
 

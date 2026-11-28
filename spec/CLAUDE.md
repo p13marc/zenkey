@@ -421,7 +421,21 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   (#1011's item 3). Appendix B's "A lost declaration and a late reply",
   `scenarios/constrained.md` §8 and §9 (a proxy drops the declaration's
   batch, in process), `docs/zk2/upstream/declarations-are-never-repaired.md`;
-  230 rules. Core 0.92 (#985 C4a, for #980): §7.5 defines a call's forms,
+  230 rules. Core 0.121 and observer text 0.39 (#1185, 0.23.0's
+  release-candidate soak): §8.5's repair subscription, a consumer's or a
+  tool's SHOULD when a subscription stays silent two horizons after it was
+  declared again (a router declares a key expression toward another once,
+  so beside a second reader declaring again sends nothing): its key with
+  `$*` appended to its literal prefix's last chunk, kept while it reads,
+  delivering nothing (the reader filters locally), up to three, each
+  later one's `$*` a character further left; it repairs a lost
+  `DeclareKeyExpr` too (its prefix is a chunk shorter). A second SHOULD:
+  a subscription with no horizon (an event's) is declared again and
+  repaired beside the reader's others. Appendix B's facts 5 and 6,
+  `conformance/repair/keys.json` (Appendix E; a reading of the text, never
+  blessed; zk2py lists it `NOT_RUN`), `constrained.md` §9 step 5 and step
+  4's repair; the live check is the wire baseline's
+  `rc-023-repair-check-1`; 312 rules. Core 0.92 (#985 C4a, for #980): §7.5 defines a call's forms,
   a request `CH · record` (`request_run`), a value and an error (the
   error byte, a message of up to 255 bytes cut at a character, a detail;
   `cause`, `detail`, `extension`, `utf8`), adopted by no rule until C4c;

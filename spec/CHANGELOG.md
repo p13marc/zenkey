@@ -3,6 +3,100 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.121 — 2026-11-29: §8.5's repair subscription: where declaring again changes nothing at a router another reader of the key shares, a reader declares its key with `$*` in its literal prefix's last chunk, kept while it reads; and an event's subscription declared again and repaired beside the others (#1185)
+
+0.23.0's release-candidate soak (#1186, the wire baseline's "Release
+candidate 0.23.0", findings 2 and 6) found two gaps in 0.91's
+re-declaration (#988 L4).
+- **Beside a second reader** of the key behind the same router, a
+  reader's undeclare and declare change nothing there. The router keeps
+  its own declaration toward the far router, which never got it, and
+  sends nothing. `rc-023-redeclare-shared-1` stayed silent for 735 s, and
+  the face soak for 681 s after one lost SDU of declarations.
+- **An event's subscription** has no horizon, so it was never declared
+  again, and a lost declaration lost its events while the transport
+  stayed up.
+
+A session that opens again does not help: the router keeps the other
+reader's declaration. Link ARQ is the medium's driver's, not zenkey's.
+The maintainer chose a subscription on a key expression new at the near
+router, verified live first.
+
+**What changed.**
+- **§8.5, "What declaring again repairs."** A lost `DeclareSubscriber`,
+  where the reader is its router's one subscriber to that key
+  expression. A router declares a key expression toward another once,
+  for its first subscriber. A lost `DeclareKeyExpr` it still does not
+  repair.
+- **Added: §8.5, the repair subscription.** A consumer or a tool whose
+  subscription stays silent for two more horizons after declaring it
+  again SHOULD declare a repair subscription.
+  `[F: repair/keys.json]` `[Sc: constrained.md §9]`
+  - **Its key expression** is the subscription's with `$*` appended to the
+    last chunk of its literal prefix: `…/frames/fast$*`, an event's
+    `…/device_fault$*/*`. `$*` matches no character too, so it matches
+    every key the subscription does.
+  - **No reader's own subscription declares it**, so the near router
+    declares it toward the far one, which routes the key's samples to
+    every reader behind it. Its literal prefix ends a chunk earlier, so
+    it rides a key expression of its own, and repairs a lost
+    `DeclareKeyExpr` too.
+  - **It stays** while the subscription does, since undeclaring it would
+    undeclare it at the far router. It delivers nothing: the
+    subscription delivers what it matches, so a key that merely extends
+    the chunk is dropped.
+  - **Up to three**, each later one's `$*` a character further left
+    (`…/frames/fas$*t`). A repair another reader holds is no news at the
+    router, so a lost one stays lost; the next is new. The brief asked
+    whether a repair could take the reader's session id instead: no. A
+    chunk `fast$*` plus anything matches `fast` only when the chunk ends
+    in it, so `fast$*<id>` is canonical and matches no key it should.
+  - **A sample heard** ends the run; the repairs held stay.
+  - **No repair** for a template whose first chunk is a parameter, and
+    none that a grant of one exact key includes, such as a heartbeat's.
+- **Added: §8.5, a subscription with no horizon.** A consumer or a tool
+  SHOULD declare one again, and repair it, beside its subscriptions
+  across the face that have one, each time one of them is due, where it
+  has heard nothing for as long. One that holds none with a horizon
+  declares it once.
+- **§8.5, "The silence"** counts from the latest repair too.
+- **Appendix B, "A lost declaration and a late reply"**, gains fact 5, a
+  router declares a key expression toward another once, and fact 6, a
+  wildcard ends a key expression's prefix, each with its zenoh file and
+  lines and its measurement, and two measured lines.
+- **Appendix C and E** index `conformance/repair/`, and
+  `scenarios/constrained.md` §9 gains step 5: two readers behind one
+  far router, a stream and an event. Step 4's lost `DeclareKeyExpr` is
+  now repaired at four horizons.
+- **Observer 0.39** is the tool's half ([`observer-CHANGELOG.md`](observer-CHANGELOG.md)).
+- `RULES.md` gains two rules, both a consumer's and a tool's.
+
+**The live check, before the rule** (the wire baseline's
+`rc-023-repair-check-1`). On W1-73's path across rf0's plan, bare, the
+shared case: neither reader's re-declaration crossed, at 600 s and 624 s.
+A third session on router B then subscribed to `…/frames/fast$*`. Router
+B sent a `DeclareKeyExpr` of `…/stream/frames` (57 B) and the
+`DeclareSubscriber` (14 B), and nothing else, and both readers got the
+next frame. A fourth, on `…/device_fault$*/*`, did the same (55 B and
+24 B), and both got the next event. zenctl refuses `$*` in a selector
+(tooling guide §8.2), so the two sessions were zenoh-python's.
+
+**The reference.** `zenkey_model::link::repair_key` and `REPAIRS`.
+`zenkey::redeclare::Redeclaring` declares again, then repairs, with a
+subscription of no horizon following the others; `Redeclaring::repaired`
+and `counts` count them. A `Consumer` holds one for itself and its
+clones, so an event's subscription follows its stream's
+(`Subscription::repaired`). The fleet's `Monitor::watch_across` takes
+the horizon as an option (`Monitor::repaired`), and zenctl and zengui
+watch an event's selector through it.
+
+**Deliberately not changed.**
+- **No MUST**, as at 0.91.
+- **The MAY** to open a session again stands, for a caller.
+- **The grants.** The generator still grants a heartbeat's key exactly
+  (§11.1), so a heartbeat's repair is refused at the far router. No
+  face of zenoh-modem's lets a heartbeat cross.
+
 ## 0.120 — 2026-11-28: §3.3's compact descriptor, defined: its bytes, its decoding through a catalog and its revisions, its refusals, and the checks on what it decodes; then adopted: a reader reads both forms, and an owner on a first hop given a catalog writes it; and §4.4's archive attachment in two forms, the compact one 3 bytes (#980 C5a, C5c, C3)
 
 #980's C5 cuts a descriptor to a few bytes for an owner across a

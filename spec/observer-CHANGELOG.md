@@ -13,6 +13,32 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.39 — 2026-11-29: §7.5: a tool repairs a scope that declaring again did not, and declares an event's again beside the others, as core 0.121 says (#1185)
+
+0.23.0's release-candidate soak (#1186) found a far reader's
+re-declaration repairing nothing while a second reader of the key
+shared its router. Core 0.121 adds §8.5's repair subscription. This is a
+tool's half.
+
+**What changed.**
+- **§7.5, "Declaring again after silence."** A tool's SHOULD declares a
+  scope again after two silent horizons, and repairs it when two more
+  pass, as core §8.5 says. A scope with no horizon, an event's, is
+  declared again and repaired beside the tool's scopes that have one,
+  where it was never declared again.
+- **"What it concludes."** A scope repaired is still silent until a
+  sample arrives (§2). A lost `DeclareKeyExpr` no longer stays lost until
+  the transport opens again: the repair rides a key expression of its
+  own.
+- **"What a scope costs"** names the repair.
+
+**What deliberately did not change.** A tool's horizon, its reading of
+the face's `arq`, and what silence lets it conclude.
+
+**Verified.** `zenkey-fleet/tests/redeclare.rs`: two monitors behind one
+far router, a stream's watch and an event's each, are repaired at four
+horizons by the first monitor's repairs (`constrained.md` §9 step 5).
+
 ## 0.38 — 2026-11-29: §3.6: a read never undoes a token heard since it was asked (#987)
 
 zk2py's round 128 (F-629) measured the reference's follower of a
