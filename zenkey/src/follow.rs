@@ -18,7 +18,7 @@
 //! |---|---|
 //! | v2 §2.10 the incumbent: the watch, a complete read, the holder's descriptor | a liveliness subscriber on each provider's `@zk/alive/<iface>/**` on the consumer's watch session ([`Consumer::with_watch`], refused without one), its round trip, then a read of each provider's tokens on the consumer's own session; a read again [`BURST`] after a withdrawal; each holder's descriptor read when none is held |
 //! | observer §3.6 (0.38): a read never undoes a token heard since it was asked | each presence read asks the fence first ([`Fence::ask`]) and carries its [`zenkey_model::redundancy::Asked`] back, so its answer applies to no instance the watch heard declared or withdrawn while it ran: B's token heard at a takeover stands over a read again asked after A's withdrawal that came back without it (round 128's F-629) |
-//! | v2 §2.10 each instance's runs, as its descriptors state them | every descriptor put heard on the providers' `@zk/instance/*`, and every one read, through [`zenkey_model::redundancy::read_descriptor`]: its run kept beside those before. Its major is the revision's its entry names: the consumer's own where the fingerprints agree, else the one major of `redundancy` its `profiles` lists (core §3.3: the `uses` of what it implements), else unknown and read by run |
+//! | v2 §2.10 each instance's runs, as its descriptors state them | every descriptor put heard on the providers' `@zk/instance/*`, and every one read, through [`zenkey_model::redundancy::read_descriptor`], each read by its form through the consumer's catalogs and contract (core §3.3: a compact one as its JSON twin, one not read never guessed): its run kept beside those before. Its major is the revision's its entry names: the consumer's own where the fingerprints agree, else the one major of `redundancy` its `profiles` lists (core §3.3: the `uses` of what it implements), else unknown and read by run |
 //! | v2 §2.10 the rule, by run; v1 §2.10 by `meta.zid` under a `redundancy.v1` incumbent | each sample's in-band stamp and Zenoh timestamp's id to [`Fence::offer`], a state's by its key ([`Member::Key`]), any other alone |
 //! | v2 §2.10 an unattributed sample held for one read of the descriptors asked after it, one read at a time | each read the fence asks: a GET of the address's `@zk/instance/*` on the consumer's session, its end handed back ([`Fence::read_ended`]) |
 //! | v2 §2.10 a change of incumbent: seed again, merge only the incumbent's snapshots, the omission rule | a state's S4 GET of that provider ([`Consumer::get_answer`]'s, through a gate): each reply judged by its run (a snapshot's page by its header's), an unattributed one decided after one read of the descriptors; what is admitted merged into the view by core §4.3's consumer rule, and each member of the provider's a complete snapshot of the incumbent's lists neither live nor as a tombstone dropped, unless it was put under the snapshot's run past its asof |
@@ -509,6 +509,7 @@ struct SeedGate {
     core: Arc<Mutex<Core>>,
     addr: Addr,
     session: zenoh::Session,
+    held: crate::presence::Held,
     timeout: Duration,
 }
 
@@ -574,7 +575,7 @@ impl ReplyGate for SeedGate {
             // these replies arrived; each descriptor learnt (deciding a live
             // sample it states the run of), then these decided, an
             // unattributed one discarded.
-            let read = read_descriptors(&self.session, &self.addr, self.timeout).await;
+            let read = read_descriptors(&self.session, &self.addr, &self.held, self.timeout).await;
             let mut c = lock(&self.core);
             for (i, v) in read {
                 let d = c.described(&v);
@@ -602,10 +603,14 @@ impl ReplyGate for SeedGate {
 }
 
 /// Every descriptor `addr` answers on `session` (v2 §2.10's read of the
-/// address's descriptors): each instance's, as JSON.
+/// address's descriptors): each instance's, as JSON, read by its form
+/// through what `held` holds, a compact one's revisions retrieved where it
+/// lacks them (core §3.3, [`crate::presence::read_held`]). One not read is
+/// left out, never guessed.
 pub(crate) async fn read_descriptors(
     session: &zenoh::Session,
     addr: &Addr,
+    held: &crate::presence::Held,
     timeout: Duration,
 ) -> Vec<(InstanceId, Value)> {
     let selector = format!("zk2/{}/{}/@zk/instance/*", addr.system, addr.service);
@@ -622,25 +627,31 @@ pub(crate) async fn read_descriptors(
     let mut out = Vec::new();
     while let Ok(reply) = rx.recv_async().await {
         let Ok(s) = reply.into_result() else { continue };
-        if let Some((a, i, v)) = descriptor_of(&s)
-            && a == *addr
-        {
-            out.push((i, v));
+        if s.kind() != SampleKind::Put {
+            continue;
+        }
+        let Ok(ZkKey::Instance { addr: a, instance }) = parse(s.key_expr().as_str()) else {
+            continue;
+        };
+        if a != *addr {
+            continue;
+        }
+        let served = crate::presence::Served::of(&s);
+        let found = crate::presence::read_held(session, served, &a, &instance, held, timeout).await;
+        if let Some(v) = found.json() {
+            out.push((instance, v));
         }
     }
     out
 }
 
-/// A descriptor's address, instance and JSON, from its key and payload.
-fn descriptor_of(s: &Sample) -> Option<(Addr, InstanceId, Value)> {
-    if s.kind() != SampleKind::Put {
-        return None;
-    }
-    let Ok(ZkKey::Instance { addr, instance }) = parse(s.key_expr().as_str()) else {
-        return None;
-    };
-    let v: Value = serde_json::from_slice(&s.payload().to_bytes()).ok()?;
-    Some((addr, instance, v))
+/// A descriptor put's address, instance and JSON, read by its form through
+/// what `held` holds, here and now ([`crate::presence::heard`]): a compact
+/// one naming a revision `held` lacks is not read here, and the holder's
+/// descriptor GET, which retrieves it, reads it.
+fn descriptor_of(s: &Sample, held: &crate::presence::Held) -> Option<(Addr, InstanceId, Value)> {
+    let (addr, instance, found) = crate::presence::heard(s, held)?;
+    Some((addr, instance, found.json()?))
 }
 
 /// The holders of `iface`'s token a read's keys show, by address.
@@ -794,9 +805,16 @@ async fn seed_address(
                 .undescribed()
                 .contains(&(addr.clone(), inc.clone()));
             if !held
-                && let Ok(crate::presence::Found::Descriptor(_, bytes)) =
-                    crate::presence::descriptor(consumer.session(), &addr, inc, st.timeout).await
-                && let Ok(v) = serde_json::from_slice::<Value>(&bytes)
+                && let Some(v) = crate::presence::descriptor_held(
+                    consumer.session(),
+                    &addr,
+                    inc,
+                    &consumer.held(),
+                    st.timeout,
+                )
+                .await
+                .ok()
+                .and_then(|f| f.json())
             {
                 let mut c = lock(&core);
                 let d = c.described(&v);
@@ -807,6 +825,7 @@ async fn seed_address(
                 core: Arc::clone(&core),
                 addr: addr.clone(),
                 session: consumer.session().clone(),
+                held: consumer.held(),
                 timeout: st.timeout,
             };
             let bound = consumer.bound_to(&addr);
@@ -962,11 +981,12 @@ impl Consumer {
         for p in self.providers() {
             let (sys, svc) = p.chunks();
             let (c, rt, delay) = (Arc::clone(&core), rt.clone(), st.descriptor_delay);
+            let held = self.held();
             let sub = self
                 .session()
                 .declare_subscriber(format!("zk2/{sys}/{svc}/@zk/instance/*"))
                 .callback(move |s: Sample| {
-                    let Some((addr, instance, v)) = descriptor_of(&s) else {
+                    let Some((addr, instance, v)) = descriptor_of(&s, &held) else {
                         return;
                     };
                     let apply = {
@@ -1033,17 +1053,16 @@ impl Consumer {
                  first read may not be heard (core §8.1)"
             );
         }
-        // Each holder's descriptor, where none is held.
+        // Each holder's descriptor, where none is held, read by its form
+        // through the consumer's catalogs and contract (core §3.3).
         let (c, session, timeout) = (Arc::clone(&core), self.session().clone(), st.timeout);
+        let held = self.held();
         tasks.0.push(tokio::spawn(async move {
             while let Some((addr, instance)) = describe_rx.recv().await {
-                let found = crate::presence::descriptor(&session, &addr, &instance, timeout).await;
-                let v = match found {
-                    Ok(crate::presence::Found::Descriptor(_, bytes)) => {
-                        serde_json::from_slice::<Value>(&bytes).ok()
-                    }
-                    _ => None,
-                };
+                let found =
+                    crate::presence::descriptor_held(&session, &addr, &instance, &held, timeout)
+                        .await;
+                let v = found.ok().and_then(|f| f.json());
                 let mut core = lock(&c);
                 match v {
                     Some(v) => {
@@ -1059,10 +1078,10 @@ impl Consumer {
             }
         }));
         // The reads the fence asks for a held sample, one at a time.
-        let (c, session) = (Arc::clone(&core), self.session().clone());
+        let (c, session, held) = (Arc::clone(&core), self.session().clone(), self.held());
         tasks.0.push(tokio::spawn(async move {
             while let Some(addr) = reads_rx.recv().await {
-                let read = read_descriptors(&session, &addr, timeout).await;
+                let read = read_descriptors(&session, &addr, &held, timeout).await;
                 let mut core = lock(&c);
                 core.counts.reads += 1;
                 let descriptors: Vec<(InstanceId, Described)> = read

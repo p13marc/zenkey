@@ -927,7 +927,9 @@ impl Follow {
 
     /// Each read of an address's descriptors the fence asked
     /// (`redundancy.v2` §2.10), beside the view, one at a time per
-    /// address: its end handed back as [`Answered::DescriptorsRead`].
+    /// address, each descriptor read by its form through what the view
+    /// reads one through (core §3.3): its end handed back as
+    /// [`Answered::DescriptorsRead`].
     fn read_descriptors(&mut self, book: &mut ViewBook) {
         for a in book.take_reads() {
             if !self.reading.insert(a.clone()) {
@@ -940,10 +942,18 @@ impl Follow {
                 self.iface.clone(),
                 self.majors.clone(),
             );
+            let describing = self.describing.clone();
             while self.tasks.try_join_next().is_some() {}
             self.tasks.spawn(async move {
                 let sc = Scope::service(&a);
-                let read = match crate::bus::presence::observe(&session, &sc, t).await {
+                let read = match crate::bus::presence::observe_through(
+                    &session,
+                    &sc,
+                    t,
+                    &describing,
+                )
+                .await
+                {
                     Ok(o) => served(&o)
                         .filter(|(at, _, _)| **at == a)
                         .map(|(_, i, d)| (i.clone(), described(d, &iface, &majors)))

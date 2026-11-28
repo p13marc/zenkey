@@ -689,6 +689,7 @@ where
         )));
         tasks.push(tokio::spawn(read_descriptors(
             i.session.clone(),
+            i.held.clone(),
             Arc::clone(&core),
             descriptors_rx,
         )));
@@ -830,14 +831,16 @@ fn describe_value(
 }
 
 /// The reads of an address's descriptors the fence asks for a sample it
-/// holds (`redundancy.v2` §2.10), one at a time: each end handed back.
+/// holds (`redundancy.v2` §2.10), one at a time, each read by its form
+/// through what `held` holds (core §3.3): each end handed back.
 async fn read_descriptors(
     session: zenoh::Session,
+    held: crate::presence::Held,
     core: Arc<Mutex<Core>>,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<Addr>,
 ) {
     while let Some(addr) = rx.recv().await {
-        let read = crate::follow::read_descriptors(&session, &addr, READ_TIMEOUT).await;
+        let read = crate::follow::read_descriptors(&session, &addr, &held, READ_TIMEOUT).await;
         let mut c = lock(&core);
         let (iface, major) = (c.iface.clone(), c.major);
         let Some(inc) = c.incumbents.as_mut() else {
