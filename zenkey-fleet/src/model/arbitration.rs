@@ -23,7 +23,11 @@
 //! - **The view** ([`ViewBook`]) is the model's [`Arbiter`] over the tool's
 //!   own events, on its own monotonic clock, instants never going back
 //!   (§2.9), with a governed interface's [`Incumbents`] beside it (§2.5,
-//!   outcome 6), and what the tool knows it lost (§2.14's `lost`).
+//!   outcome 6, text 0.7: the fence of the major each holder's revision
+//!   uses, by its `meta.zid` under `redundancy.v1` and by its runs under
+//!   `redundancy.v2`, an unattributed sample counted `not_incumbent` while
+//!   one read of the address's descriptors runs), and what the tool knows
+//!   it lost (§2.14's `lost`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
@@ -179,9 +183,14 @@ pub struct RoleRead {
     /// The revisions of the required interface it was read over, by
     /// fingerprint.
     pub revisions: Vec<Fingerprint>,
-    /// The required interface is governed (`redundancy.v1` §2.2) in every
-    /// revision held: the view counts §2.5's `not_incumbent`.
+    /// The required interface is governed (`redundancy.v1` §2.2, either
+    /// major, `redundancy.v2` §2.2) in every revision held: the view counts
+    /// §2.5's `not_incumbent`.
     pub governed: bool,
+    /// The major of `redundancy` each governed revision held uses, by
+    /// fingerprint: what a holder whose descriptor names it is fenced by
+    /// (§2.5, outcome 6, text 0.7).
+    pub majors: BTreeMap<Fingerprint, zenkey_model::redundancy::Major>,
     /// Whether the role carries `arbitration.policy` as far as the tool can
     /// see: `None` when its declaring contract is not in hand.
     pub carries_policy: Option<bool>,
@@ -254,6 +263,10 @@ pub fn read_role(
         && revs
             .iter()
             .all(|(_, c)| zenkey_model::redundancy::is_governed(c));
+    let majors = revs
+        .iter()
+        .filter_map(|(fp, c)| zenkey_model::redundancy::Major::of(&c.uses).map(|m| (fp.clone(), m)))
+        .collect();
     RoleRead {
         reading: Reading {
             declaration,
@@ -263,6 +276,7 @@ pub fn read_role(
         arbitrated,
         revisions: revs.into_iter().map(|(fp, _)| fp).collect(),
         governed,
+        majors,
         carries_policy,
         notes,
     }
@@ -282,6 +296,47 @@ pub fn served(o: &Observed) -> impl Iterator<Item = (&Addr, &InstanceId, &Descri
         .iter()
         .flatten()
         .filter_map(|((a, i), read)| Some((a, i, read.descriptor()?)))
+}
+
+/// What one holder's descriptor says to a governed interface's fence
+/// (§2.5, outcome 6, text 0.7; `redundancy.v2` §2.10, §2.17): its run, as
+/// `redundancy.v2` reads it, its `meta.zid`, and the major of the revision
+/// its entry of `iface` names, by `majors` (the revisions held), else the
+/// one major of `redundancy` its `profiles` lists, else unknown, read by
+/// run, as the runtime's follower reads it.
+pub fn described(
+    d: &Descriptor,
+    iface: &IfaceId,
+    majors: &BTreeMap<Fingerprint, zenkey_model::redundancy::Major>,
+) -> zenkey_model::redundancy::Described {
+    use zenkey_model::redundancy::Major;
+    let want = iface.to_string();
+    let named = d
+        .interfaces
+        .iter()
+        .find(|e| e.iface == want)
+        .and_then(|e| Fingerprint::parse(&e.contract).ok())
+        .and_then(|fp| majors.get(&fp).copied());
+    let listed: BTreeSet<Major> = d
+        .profiles
+        .iter()
+        .filter_map(|p| IfaceId::from_str(p).ok())
+        .filter(|p| p.name() == zenkey_model::redundancy::NAME)
+        .filter_map(|p| Major::from_number(p.major()))
+        .collect();
+    let major = named.or(match (listed.len(), listed.first()) {
+        (1, Some(m)) => Some(*m),
+        _ => None,
+    });
+    zenkey_model::redundancy::Described {
+        major,
+        run: d.run.as_deref().and_then(zenkey_model::wire::Run::from_hex),
+        zid: d
+            .meta
+            .get("zid")
+            .and_then(|z| z.as_str())
+            .and_then(zenkey_model::timing::zid_value),
+    }
 }
 
 /// The instances holding `iface`'s interface token, per address, that
@@ -374,6 +429,9 @@ pub struct ViewBook {
     origin: Instant,
     last: Instant,
     incumbents: Option<Incumbents>,
+    /// The addresses whose descriptors the fence asks a read of, for a
+    /// sample it holds (`redundancy.v2` §2.10): one read at a time each.
+    reads: Vec<Addr>,
     switches: Vec<ViewSwitch>,
     switches_dropped: u64,
     /// The last instant it knew it lost a sample: a queue's refusal, or a
@@ -401,6 +459,7 @@ impl ViewBook {
             origin,
             last: origin,
             incumbents: governed.then(Incumbents::default),
+            reads: Vec::new(),
             switches: Vec::new(),
             switches_dropped: 0,
             lost_at: None,
@@ -468,19 +527,41 @@ impl ViewBook {
     }
 
     /// A sample of the role's subscription at its arrival `at`: its key,
-    /// base-relative, whether it is a delete, and its stamp's clock id.
-    /// Nothing is expired: a tool holds no ε of the consumer's binding
-    /// (§2.5, outcome 5: with none stated, nothing is).
+    /// base-relative, whether it is a delete, its stamp's clock id and its
+    /// in-band stamp. Nothing is expired: a tool holds no ε of the
+    /// consumer's binding (§2.5, outcome 5: with none stated, nothing is).
+    ///
+    /// **Outcome 6** (text 0.7): of a governed interface, what the major's
+    /// follower accepts now, by the fence (`redundancy.v1` §2.10 by the
+    /// incumbent's `meta.zid`, `redundancy.v2` §2.10 by its runs). One it
+    /// holds, unattributed, is counted `not_incumbent`, and its read of the
+    /// address's descriptors asked ([`ViewBook::take_reads`]), as the
+    /// runtime's arbitration counts it.
     pub fn sample(
         &mut self,
         at: Instant,
         key: &str,
         delete: bool,
         stamp: Option<u128>,
+        inband: Option<zenkey_model::wire::Stamp>,
     ) -> Option<Outcome> {
         let not_incumbent = !delete
-            && match (&self.incumbents, self.arbiter.identify(key)) {
-                (Some(inc), Ok(addr)) => !inc.accepts(&addr, stamp),
+            && match (self.incumbents.as_mut(), self.arbiter.identify(key)) {
+                (Some(inc), Ok(addr)) => {
+                    let out = inc.offer(
+                        &addr,
+                        zenkey_model::redundancy::Sample {
+                            stamp: inband,
+                            timestamp_id: stamp,
+                        },
+                        zenkey_model::redundancy::Member::Alone,
+                        (),
+                    );
+                    if out.asks_read {
+                        self.reads.push(addr);
+                    }
+                    out.accepted.is_empty()
+                }
                 _ => false,
             };
         self.observe(
@@ -544,11 +625,39 @@ impl ViewBook {
         self.observe(at, Event::Tick);
     }
 
-    /// A holder's `meta.zid`, from its descriptor (`redundancy.v1` §2.10).
-    pub fn described(&mut self, addr: Addr, instance: InstanceId, zid: u128) {
+    /// What a holder's descriptor says ([`described`]): its major, its run
+    /// and its `meta.zid` (`redundancy.v1` §2.10, `redundancy.v2` §2.10).
+    pub fn describe(
+        &mut self,
+        addr: &Addr,
+        instance: InstanceId,
+        d: zenkey_model::redundancy::Described,
+    ) {
         if let Some(inc) = self.incumbents.as_mut() {
-            inc.described(addr, instance, zid);
+            inc.describe(addr, instance, d);
         }
+    }
+
+    /// The end of a read of `addr`'s descriptors the fence asked
+    /// (`redundancy.v2` §2.10), with what each said: every sample held
+    /// decided, the next read asked while any is still held.
+    pub fn read_ended(
+        &mut self,
+        addr: &Addr,
+        descriptors: Vec<(InstanceId, zenkey_model::redundancy::Described)>,
+    ) {
+        if let Some(inc) = self.incumbents.as_mut()
+            && inc.read_ended(addr, descriptors).asks_read
+        {
+            self.reads.push(addr.clone());
+        }
+    }
+
+    /// The reads of an address's descriptors the fence asked since the
+    /// last call, each to make once and hand back to
+    /// [`ViewBook::read_ended`].
+    pub fn take_reads(&mut self) -> Vec<Addr> {
+        std::mem::take(&mut self.reads)
     }
 
     /// The holders whose descriptor to get: none when not governed.
@@ -678,15 +787,15 @@ mod tests {
         assert_eq!(v.switches().len(), 1);
         assert_eq!(v.switches()[0].cause, Cause::Start);
         assert_eq!(
-            v.sample(ms(10), TELEOP, false, None),
+            v.sample(ms(10), TELEOP, false, None, None),
             Some(Outcome::Delivered)
         );
         assert_eq!(
-            v.sample(ms(20), SAFETY, false, None),
+            v.sample(ms(20), SAFETY, false, None, None),
             Some(Outcome::Delivered)
         );
         assert_eq!(
-            v.sample(ms(5), TELEOP, false, None),
+            v.sample(ms(5), TELEOP, false, None, None),
             Some(Outcome::NotActive)
         );
         assert_eq!(v.due(), Some(ms(320)));
@@ -725,22 +834,141 @@ mod tests {
         let binding = Binding::parse(&["lab/safety"]).unwrap();
         let mut v = ViewBook::new(&declared(), binding, BTreeMap::new(), true, t0);
         assert_eq!(
-            v.sample(ms(1), SAFETY, false, Some(0xa1)),
+            v.sample(ms(1), SAFETY, false, Some(0xa1), None),
             Some(Outcome::NotIncumbent)
         );
         let lab_safety: Addr = "lab/safety".parse().unwrap();
         let i: InstanceId = "000000000000000a".parse().unwrap();
         v.read(ms(2), lab_safety.clone(), true, [i.clone()].into());
         assert_eq!(v.undescribed(), [(lab_safety.clone(), i.clone())]);
-        v.described(lab_safety, i, 0xa1);
+        v.describe(
+            &lab_safety,
+            i,
+            zenkey_model::redundancy::Described {
+                major: Some(zenkey_model::redundancy::Major::V1),
+                run: None,
+                zid: Some(0xa1),
+            },
+        );
         assert_eq!(
-            v.sample(ms(3), SAFETY, false, Some(0xb2)),
+            v.sample(ms(3), SAFETY, false, Some(0xb2), None),
             Some(Outcome::NotIncumbent)
         );
         assert_eq!(
-            v.sample(ms(4), SAFETY, false, Some(0xa1)),
+            v.sample(ms(4), SAFETY, false, Some(0xa1), None),
             Some(Outcome::Delivered)
         );
+    }
+
+    /// Outcome 6 under `redundancy.v2` (text 0.7): a holder followed by
+    /// its runs, as its descriptor states them; another instance's run is
+    /// `not_incumbent`, and so is a run no descriptor states, held while
+    /// one read of the address's descriptors runs, and still so after it.
+    /// A run its descriptor states, read then, is the incumbent's.
+    #[test]
+    fn a_governed_view_fences_by_run_under_redundancy_v2() {
+        use zenkey_model::redundancy::{Described, Major};
+        use zenkey_model::wire::{Run, Seq, Stamp};
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let binding = Binding::parse(&["lab/safety"]).unwrap();
+        let mut v = ViewBook::new(&declared(), binding, BTreeMap::new(), true, t0);
+        let at = |run: u32, seq: u32| {
+            Some(Stamp {
+                run: Run::U32(run),
+                seq: Seq::new(seq).unwrap(),
+            })
+        };
+        let lab_safety: Addr = "lab/safety".parse().unwrap();
+        let (a, b): (InstanceId, InstanceId) = (
+            "000000000000000a".parse().unwrap(),
+            "000000000000000b".parse().unwrap(),
+        );
+        v.read(
+            ms(1),
+            lab_safety.clone(),
+            true,
+            [a.clone(), b.clone()].into(),
+        );
+        let of = |run: u32| Described {
+            major: Some(Major::V2),
+            run: Some(Run::U32(run)),
+            zid: None,
+        };
+        v.describe(&lab_safety, a.clone(), of(0xaaaa_0001));
+        v.describe(&lab_safety, b.clone(), of(0xbbbb_0002));
+        assert_eq!(
+            v.sample(ms(2), SAFETY, false, None, at(0xaaaa_0001, 0)),
+            Some(Outcome::Delivered),
+            "the incumbent's run, the lowest holder's"
+        );
+        assert_eq!(
+            v.sample(ms(3), SAFETY, false, None, at(0xbbbb_0002, 0)),
+            Some(Outcome::NotIncumbent),
+            "the other holder's run"
+        );
+        assert!(v.take_reads().is_empty(), "nothing held");
+        // A run no descriptor states: held, counted not_incumbent, a read
+        // asked once.
+        assert_eq!(
+            v.sample(ms(4), SAFETY, false, None, at(0xaaaa_0003, 0)),
+            Some(Outcome::NotIncumbent)
+        );
+        assert_eq!(
+            v.sample(ms(5), SAFETY, false, None, at(0xaaaa_0003, 1)),
+            Some(Outcome::NotIncumbent)
+        );
+        assert_eq!(v.take_reads(), std::slice::from_ref(&lab_safety));
+        // The read finds A's new run: A's from then on.
+        v.read_ended(&lab_safety, vec![(a.clone(), of(0xaaaa_0003))]);
+        assert!(v.take_reads().is_empty());
+        assert_eq!(
+            v.sample(ms(6), SAFETY, false, None, at(0xaaaa_0003, 2)),
+            Some(Outcome::Delivered)
+        );
+        // A v2 incumbent's sample is never read by its Zenoh timestamp.
+        assert_eq!(
+            v.sample(ms(7), SAFETY, false, Some(0xa1), None),
+            Some(Outcome::NotIncumbent),
+            "no envelope, no run"
+        );
+    }
+
+    /// A holder's descriptor read for the fence: its run, its `meta.zid`,
+    /// and its major by the revision its entry names, else by the one
+    /// major of `redundancy` its `profiles` lists.
+    #[test]
+    fn a_holders_descriptor_says_its_major_run_and_zid() {
+        use zenkey_model::redundancy::Major;
+        let fp = format!("sha256:{}", "a".repeat(64));
+        let d = |profiles: serde_json::Value| -> Descriptor {
+            serde_json::from_value(serde_json::json!({
+                "format": "zk2-descriptor/0.1",
+                "service": "lab/safety",
+                "instance": "000000000000000a",
+                "run": "0a0b0c0d",
+                "interfaces": [{"iface": "steer.v1", "contract": fp, "minor": 1}],
+                "profiles": profiles,
+                "meta": {"zid": "a1"},
+            }))
+            .unwrap()
+        };
+        let iface: IfaceId = "steer.v1".parse().unwrap();
+        let held: BTreeMap<Fingerprint, Major> =
+            [(Fingerprint::parse(&fp).unwrap(), Major::V2)].into();
+        let r = described(&d(serde_json::json!([])), &iface, &held);
+        assert_eq!(r.major, Some(Major::V2));
+        assert_eq!(r.run, zenkey_model::wire::Run::from_hex("0a0b0c0d"));
+        assert_eq!(r.zid, Some(0xa1));
+        let none = BTreeMap::new();
+        let r = described(&d(serde_json::json!(["redundancy.v1"])), &iface, &none);
+        assert_eq!(r.major, Some(Major::V1));
+        let r = described(
+            &d(serde_json::json!(["redundancy.v1", "redundancy.v2"])),
+            &iface,
+            &none,
+        );
+        assert_eq!(r.major, None, "two majors listed: unknown, read by run");
     }
 
     /// The subjects of a descriptor: one per address and role, from its

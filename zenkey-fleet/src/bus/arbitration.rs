@@ -35,8 +35,10 @@
 //!      the view starts once the last is declared, and has listened from
 //!      then (§2.14, text 0.3);
 //!    - a governed interface's incumbents read once after the round trip
-//!      (§2.5, outcome 6), and the descriptor of each holder whose
-//!      `meta.zid` is not held;
+//!      (§2.5, outcome 6), and the descriptor of each holder of which none
+//!      is held: its major, its run and its `meta.zid` (text 0.7), and,
+//!      for a sample the fence holds unattributed (`redundancy.v2` §2.10),
+//!      one read of the address's descriptors at a time;
 //!    - every callback into **one** bounded queue, so samples and token
 //!      moves are folded in the one order received, what the queue refuses
 //!      a loss, and a watch of this reader's own receive path
@@ -70,8 +72,8 @@ use crate::bus::contracts::BundleStore;
 use crate::bus::presence::Scope;
 use crate::bus::stall::{StallSeen, StallWatch};
 use crate::model::arbitration::{
-    Declaring, RoleRead, RoleSubject, ViewBook, held_by_address, in_scope, offline_subject,
-    read_role, served, subjects,
+    Declaring, RoleRead, RoleSubject, ViewBook, described, held_by_address, in_scope,
+    offline_subject, read_role, served, subjects,
 };
 use crate::model::catalog::{Catalog, ContractSet, ContractState, Contracts};
 use crate::report::ArbitrationReport;
@@ -358,6 +360,7 @@ pub async fn observe(
                         binding.clone(),
                         required.shared_contract(),
                         r.read.governed,
+                        &r.read.majors,
                         span,
                         sp,
                     )
@@ -408,6 +411,9 @@ enum Delivery {
         key: String,
         delete: bool,
         stamp: Option<u128>,
+        /// Its in-band stamp (core §7.5), a put's: what a `redundancy.v2`
+        /// incumbent is followed by (text 0.7).
+        inband: Option<zenkey_model::wire::Stamp>,
         at: Instant,
     },
     Token {
@@ -444,8 +450,15 @@ enum Answered {
     },
     /// A read again made, whatever it showed.
     Made,
-    /// A holder's `meta.zid`, or none read.
-    Described(Addr, InstanceId, Option<u128>),
+    /// A holder's descriptor, as the fence reads it, or none read.
+    Described(
+        Addr,
+        InstanceId,
+        Option<zenkey_model::redundancy::Described>,
+    ),
+    /// A read of an address's descriptors the fence asked, ended: each
+    /// instance's, as the fence reads it.
+    DescriptorsRead(Addr, Vec<(InstanceId, zenkey_model::redundancy::Described)>),
 }
 
 /// One role's view over `spec.listen` (the module doc's step 3).
@@ -458,6 +471,7 @@ async fn listen(
     binding: Binding,
     required: Arc<Contract>,
     governed: bool,
+    majors: &std::collections::BTreeMap<Fingerprint, zenkey_model::redundancy::Major>,
     span: Duration,
     spec: &ArbitrationSpec,
 ) -> Result<(ViewBook, Listened), String> {
@@ -563,10 +577,16 @@ async fn listen(
                         );
                         return;
                     }
+                    let delete = sample.kind() == SampleKind::Delete;
                     q.send(Delivery::Sample {
                         key: sample.key_expr().as_str().to_owned(),
-                        delete: sample.kind() == SampleKind::Delete,
+                        delete,
                         stamp: sample.timestamp().and_then(zenkey::timing::stamp_id),
+                        inband: if delete {
+                            None
+                        } else {
+                            zenkey::inband::stamp(&sample)
+                        },
                         at: now,
                     });
                 }),
@@ -601,7 +621,9 @@ async fn listen(
         stall_seen: StallSeen::default(),
         stall_bound: spec.stall_bound(),
         answers: answers_tx,
+        majors: majors.clone(),
         asked_zids: BTreeSet::new(),
+        reading: BTreeSet::new(),
         burst: BTreeSet::new(),
         awaiting_event: None,
         tasks: tokio::task::JoinSet::new(),
@@ -618,13 +640,9 @@ async fn listen(
                         book.read(now, address, o.complete, ids);
                     }
                     for (a, i, d) in served(&o) {
-                        if let Some(z) = d
-                            .meta
-                            .get("zid")
-                            .and_then(|z| z.as_str())
-                            .and_then(zenkey_model::timing::zid_value)
-                        {
-                            book.described(a.clone(), i.clone(), z);
+                        let said = described(d, &v.iface, majors);
+                        if said.zid.is_some() || said.run.is_some() {
+                            book.describe(a, i.clone(), said);
                         }
                     }
                 }
@@ -717,11 +735,16 @@ async fn listen(
                     }
                     Some(Answered::Made) => l.reads += 1,
                     Some(Answered::Described(a, i, z)) => match z {
-                        Some(z) => book.described(a, i, z),
+                        Some(d) => book.describe(&a, i, d),
                         None => {
                             v.asked_zids.remove(&(a, i));
                         }
                     },
+                    Some(Answered::DescriptorsRead(a, read)) => {
+                        v.reading.remove(&a);
+                        book.read_ended(&a, read);
+                        v.read_descriptors(&mut book);
+                    }
                     None => {}
                 }
             }
@@ -753,8 +776,12 @@ struct Follow {
     stall_seen: StallSeen,
     stall_bound: Duration,
     answers: tokio::sync::mpsc::UnboundedSender<Answered>,
+    /// The major of each governed revision held, by fingerprint.
+    majors: std::collections::BTreeMap<Fingerprint, zenkey_model::redundancy::Major>,
     /// Holders whose descriptor was asked for.
     asked_zids: BTreeSet<(Addr, InstanceId)>,
+    /// Addresses whose descriptors are being read for the fence.
+    reading: BTreeSet<Addr>,
     /// Addresses owed a read again, in the burst being gathered.
     burst: BTreeSet<Addr>,
     /// A move begun at a withdrawal whose transport event has not come
@@ -792,9 +819,11 @@ impl Follow {
                 key,
                 delete,
                 stamp,
+                inband,
                 at,
             } => {
-                book.sample(at, &key, delete, stamp);
+                book.sample(at, &key, delete, stamp, inband);
+                self.read_descriptors(book);
             }
             Delivery::Token { key, held, at } => {
                 // F-268: a withdrawal heard while the watch session holds
@@ -869,7 +898,42 @@ impl Follow {
         });
     }
 
-    /// The descriptor of each holder whose `meta.zid` is not held, once.
+    /// Each read of an address's descriptors the fence asked
+    /// (`redundancy.v2` §2.10), beside the view, one at a time per
+    /// address: its end handed back as [`Answered::DescriptorsRead`].
+    fn read_descriptors(&mut self, book: &mut ViewBook) {
+        for a in book.take_reads() {
+            if !self.reading.insert(a.clone()) {
+                continue;
+            }
+            let (session, t, tx, iface, majors) = (
+                self.session.clone(),
+                self.timeout,
+                self.answers.clone(),
+                self.iface.clone(),
+                self.majors.clone(),
+            );
+            while self.tasks.try_join_next().is_some() {}
+            self.tasks.spawn(async move {
+                let sc = Scope::service(&a);
+                let read = match crate::bus::presence::observe(&session, &sc, t).await {
+                    Ok(o) => served(&o)
+                        .filter(|(at, _, _)| **at == a)
+                        .map(|(_, i, d)| (i.clone(), described(d, &iface, &majors)))
+                        .collect(),
+                    Err(e) => {
+                        tracing::debug!(
+                            "arbitration.v1: a read of {a}'s descriptors was not made: {e}"
+                        );
+                        Vec::new()
+                    }
+                };
+                let _ = tx.send(Answered::DescriptorsRead(a, read));
+            });
+        }
+    }
+
+    /// The descriptor of each holder of which none is held, once.
     fn describe(&mut self, book: &ViewBook) {
         let wanted: Vec<(Addr, InstanceId)> = book
             .undescribed()
@@ -879,18 +943,26 @@ impl Follow {
         if wanted.is_empty() {
             return;
         }
-        let (session, t, tx) = (self.session.clone(), self.timeout, self.answers.clone());
+        let (session, t, tx, iface, majors) = (
+            self.session.clone(),
+            self.timeout,
+            self.answers.clone(),
+            self.iface.clone(),
+            self.majors.clone(),
+        );
         // The finished ones are let go, so a long window holds none.
         while self.tasks.try_join_next().is_some() {}
         self.tasks.spawn(async move {
             let reads = crate::bus::presence::describe_each(&session, wanted, t).await;
             for ((a, i), r) in reads {
-                let zid = r
+                // A descriptor stating neither a `meta.zid` a v1 incumbent
+                // is followed by nor a run a v2 one is: none held, asked
+                // again at the holder's next sight.
+                let said = r
                     .descriptor()
-                    .and_then(|d| d.meta.get("zid"))
-                    .and_then(|z| z.as_str())
-                    .and_then(zenkey_model::timing::zid_value);
-                let _ = tx.send(Answered::Described(a, i, zid));
+                    .map(|d| described(d, &iface, &majors))
+                    .filter(|d| d.zid.is_some() || d.run.is_some());
+                let _ = tx.send(Answered::Described(a, i, said));
             }
         });
     }

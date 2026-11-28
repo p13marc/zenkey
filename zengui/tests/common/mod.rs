@@ -1512,12 +1512,14 @@ impl World {
                 "zk2/lab/teleop/steer.v1/stream/cmd",
                 false,
                 None,
+                None,
             );
             if n >= 2 {
                 book.sample(
                     ms(45 + n * 50),
                     "zk2/lab/autopilot/steer.v1/stream/cmd",
                     false,
+                    None,
                     None,
                 );
             }
