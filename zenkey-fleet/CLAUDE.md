@@ -991,7 +991,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   entry `None`: no horizon, so `slot_reading` judges its freshness
   unobservable (`not_a_horizon`), never 900 s (§2.7, "A revision not in
   hand", the lead's default); the word is the `alarms.v2` revision held
-  offline. Each owner's v2 view is made with its revision's layout
+  offline, and stands only across a face (`Slots::across`, from
+  `BookSpec::face`): on the near side an owner no refresh's words name
+  is a revision not in hand too (text 0.2, "No descriptor read",
+  `no_descriptor_read_on_the_near_side_is_a_revision_not_in_hand`). Each owner's v2 view is made with its revision's layout
   (`Slots::layout_of`, the standard's where none is in hand;
   `alarms_views(&self.v2, owner)`, the heartbeat's tag being the
   revision's, core §7.5), and `v2_words` swaps a view read by another

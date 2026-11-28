@@ -742,7 +742,7 @@ impl AlarmBook {
             catalogs: Vec::new(),
             beats: BTreeMap::new(),
             pending_live: BTreeMap::new(),
-            v2: v2::Slots::default(),
+            v2: v2::Slots::across(spec.face.is_some()),
         }
     }
 

@@ -311,6 +311,10 @@ pub(super) struct Slots {
     words: V2Words,
     archived: BTreeMap<(Addr, u8), ArchivedAlarm>,
     refused: u64,
+    /// The reader is across a face from the scope's owner (§2.11): only
+    /// there does the deployment's word name the revision of an owner none
+    /// of whose descriptors it read (§2.7).
+    across_face: bool,
 }
 
 impl Default for Slots {
@@ -325,11 +329,20 @@ impl Default for Slots {
             },
             archived: BTreeMap::new(),
             refused: 0,
+            across_face: false,
         }
     }
 }
 
 impl Slots {
+    /// The book's `alarms.v2` half, across a face from its owner or not.
+    pub(super) fn across(across_face: bool) -> Slots {
+        Slots {
+            across_face,
+            ..Slots::default()
+        }
+    }
+
     /// Whether a read answered for `addr` with a page of its records: what
     /// reads an owner with no descriptor in hand by `alarms.v2`.
     pub(super) fn answered(&self, addr: &Addr) -> bool {
@@ -355,18 +368,20 @@ impl Slots {
 
     /// The `alarms.v2` revision this reader reads `addr` by (§2.7): the one
     /// its present, or its last, descriptors name, `None` where one they
-    /// name is not in hand; the deployment's word for an owner none of
-    /// whose descriptors reached this reader; the standard revision where
-    /// it holds neither.
+    /// name is not in hand. For an owner none of whose descriptors this
+    /// reader read: across a face, the deployment's word, the revision
+    /// held offline else the standard one; on the near side `None`, a
+    /// revision not in hand (text 0.2, "No descriptor read").
     pub(super) fn revision(&self, addr: &Addr) -> Option<&V2Revision> {
         match self.words.revisions.get(addr) {
             Some(named) => named.as_ref(),
-            None => Some(
+            None if self.across_face => Some(
                 self.words
                     .word_revision
                     .as_ref()
                     .unwrap_or_else(|| V2Revision::standard()),
             ),
+            None => None,
         }
     }
 
@@ -1600,10 +1615,16 @@ mod tests {
         }
     }
 
+    /// The words a refresh reads for `owner`, whose descriptor names the
+    /// standard revision beside its table's.
     fn named(owner: &str, table: Option<Vec<m2::Rule>>) -> V2Words {
         V2Words {
             tables: BTreeMap::from([(owner.parse().unwrap(), table)]),
             default_epoch: Some(0),
+            revisions: BTreeMap::from([(
+                owner.parse().unwrap(),
+                Some(V2Revision::standard().clone()),
+            )]),
             ..V2Words::default()
         }
     }
@@ -1983,16 +2004,23 @@ mod tests {
             (Answer::Unobservable, Reason::Stale),
             "at the copy's 4 s"
         );
-        // An owner none of whose descriptors reached the reader is read by
-        // the deployment's word, the revision held offline.
+        // An owner none of whose descriptors this reader read: on the near
+        // side a revision not in hand (text 0.2, "No descriptor read");
+        // across a face the deployment's word, the revision held offline,
+        // else the standard one.
         let gone: Addr = "lab/gone".parse().unwrap();
-        assert_eq!(bk.v2.revision(&gone), Some(standard));
+        assert_eq!(bk.v2.revision(&gone), None, "the near side");
         bk.v2_words(V2Words {
             word_revision: Some(copy.clone()),
+            revisions: BTreeMap::new(),
             ..named("lab/svc", Some(table()))
         });
-        assert_eq!(bk.v2.revision(&gone), Some(&copy));
-        assert_eq!(bk.v2.revision(&owner), Some(&copy), "its own word kept");
+        assert_eq!(bk.v2.revision(&gone), None, "the word is a face's alone");
+        assert_eq!(bk.v2.revision(&owner), Some(&copy), "its own kept");
+        let mut far = Slots::across(true);
+        assert_eq!(far.revision(&gone), Some(standard));
+        far.words.word_revision = Some(copy.clone());
+        assert_eq!(far.revision(&gone), Some(&copy));
 
         // A revision its owner names that is not in hand gives no horizon:
         // unobservable, never at the standard's 900 s, at once as 10 s on;
@@ -2013,5 +2041,52 @@ mod tests {
         );
         let j = bk.slot_reading(&owner, 0, t0, wall).unwrap().firing();
         assert_eq!(j.answer, Answer::Unobservable, "fresh or not, no verdict");
+    }
+
+    /// §2.7 (text 0.2, "No descriptor read", review-bot on #1176): on the
+    /// near side, an owner whose descriptor names no revision this reader
+    /// read is a revision not in hand, its firing alarm unobservable,
+    /// `not_a_horizon`, never aged at 900 s; across a face, the deployment's
+    /// word, the standard revision, ages it: yes, `firing`.
+    #[test]
+    fn no_descriptor_read_on_the_near_side_is_a_revision_not_in_hand() {
+        let t0 = Instant::now();
+        let wall = SystemTime::now();
+        let owner: Addr = "lab/svc".parse().unwrap();
+        let firing = |face: Option<bool>| {
+            let mut spec = BookSpec::new(Duration::from_secs(1));
+            spec.clocks_synced = true;
+            spec.face = face;
+            let scope = AlarmScope::parse("zk2/lab/svc/alarms.v2/state/alarms/*").unwrap();
+            let mut bk = AlarmBook::new(scope, spec);
+            if face.is_none() {
+                bk.presence_read(&observed("lab/svc", m2::IFACE), t0);
+            }
+            // No refresh's words name a revision of the owner's.
+            bk.v2_words(V2Words {
+                revisions: BTreeMap::new(),
+                ..named("lab/svc", Some(table()))
+            });
+            bk.seed_v2(
+                read(t0, vec![page("lab/svc", 7, &[(0, 3, a(State::Firing))])]),
+                t0,
+                wall,
+            );
+            let j = bk.slot_reading(&owner, 0, t0, wall).unwrap().firing();
+            (j.answer, j.reason)
+        };
+        assert_eq!(
+            firing(None),
+            (
+                Answer::Unobservable,
+                Reason::Freshness(fm::Reason::NotAHorizon)
+            ),
+            "the near side"
+        );
+        assert_eq!(
+            firing(Some(true)),
+            (Answer::Yes, Reason::Firing),
+            "across a face"
+        );
     }
 }
