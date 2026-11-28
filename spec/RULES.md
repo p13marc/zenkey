@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 90 |
+| [Owner](#owner) | 91 |
 | [Consumer](#consumer) | 35 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 19 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 87, 27 of them a reader's |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 89, 29 of them a reader's |
 | [Implementation: the static rules](#implementation-the-static-rules) | 85 |
-| Every rule, once | 302 |
+| Every rule, once | 305 |
 | [Rule ids](#rule-ids) | 86 |
 
 ## Owner
@@ -65,6 +65,7 @@ The owner, consumer and caller sections each point to them.
 **Where it reads.** Where an owner reads presence, state or the admin space,
 `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](core.md#33-the-descriptor-record),
 [§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
@@ -240,6 +241,7 @@ The owner, consumer and caller sections each point to them.
 | [§8.1](core.md#81-tokens) | An owner MUST hold one per interface **of which it currently exposes at least one resource**, and none otherwise, except for its **tokenless set**. | `[Sc: presence.md §1]` `[Sc: profiles/redundancy/scenarios.md §1]` |
 | [§8.1](core.md#81-tokens) | Such an owner SHOULD put every interface it implements in its tokenless set. | `[Sc: constrained.md §10]` `[F: descriptors/ok-tokenless]` |
 | [§8.1](core.md#81-tokens) | Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses `redundancy.v1`. | `[Sc: constrained.md §10]` |
+| [§8.1](core.md#81-tokens) | Such an owner, given a catalog (§8.6), SHOULD write its descriptor in the compact form (§3.3). | `[Sc: constrained.md §10]` |
 | [§8.1](core.md#81-tokens) | The owner MUST hold one member token per member, and cycle it whenever that member's continuity breaks. | `[Sc: presence.md §3]` |
 | [§8.1](core.md#81-tokens) | An owner that starts a new instance id while running MUST declare the new descriptor and tokens first, in §8.2's order (the descriptor's queryable and first put, then the tokens), then undeclare the old ones. | `[Sc: presence.md §3]` |
 
@@ -271,6 +273,7 @@ The owner, consumer and caller sections each point to them.
 **Where it reads.** Where a consumer reads presence, state or the admin
 space, `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](core.md#33-the-descriptor-record),
 [§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
@@ -362,6 +365,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 **Where it reads.** Where a caller reads presence, state or the admin space,
 `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](core.md#33-the-descriptor-record),
 [§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
@@ -497,6 +501,13 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§11.3](core.md#113-facts-a-deployment-designs-around) | A deployment under `allow` MUST refuse unauthenticated sessions at the link. | none cited |
 
 ## Observer: the tool role, and a reader
+
+### [core §3.3 The descriptor record](core.md#33-the-descriptor-record)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§3.3](core.md#33-the-descriptor-record), *reader* | A reader of descriptors MUST read both forms. | `[F: descriptors/compact/]` `[Sc: constrained.md §10]` |
+| [§3.3](core.md#33-the-descriptor-record), *reader* | A reader MUST NOT guess a catalog or a revision it does not hold. | `[F: descriptors/compact/vectors.json]` `[Sc: constrained.md §10]` |
 
 ### [core §4.2 Rules for owners and consumers](core.md#42-rules-for-owners-and-consumers)
 

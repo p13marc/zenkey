@@ -3,7 +3,7 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.120 — 2026-11-28: §3.3's compact descriptor, defined: its bytes, its decoding through a catalog and its revisions, its refusals, and the checks on what it decodes (#980 C5a)
+## 0.120 — 2026-11-28: §3.3's compact descriptor, defined: its bytes, its decoding through a catalog and its revisions, its refusals, and the checks on what it decodes; then adopted: a reader reads both forms, and an owner on a first hop given a catalog writes it (#980 C5a, C5c)
 
 #980's C5 cuts a descriptor to a few bytes for an owner across a
 constrained first hop (#982). zenoh-modem's node descriptor, `modem.v3`,
@@ -11,9 +11,10 @@ constrained first hop (#982). zenoh-modem's node descriptor, `modem.v3`,
 8 RF SDUs, or 83.5 s of SF12's 864 s a day, each time it crosses. The
 design memo on #980, whose defaults the maintainer kept, names each
 revision by its catalog index (§8.6) and states capabilities as bits. The
-same descriptor is then 22 B, one SDU. C5a defines the form. No rule
-adopts it: C5b has the readers read both forms, and C5c has a first-hop
-owner write it.
+same descriptor is then 22 B, one SDU. C5a defines the form, and C5c
+adopts it (below): a reader reads both forms, and an owner on a first hop
+given a catalog writes the compact one. C5b and C5b2, between them, had
+the reference's readers read it, and changed no text.
 
 **What changed.**
 - **§3.3, "The compact form".** A descriptor's second form, a put's
@@ -93,9 +94,9 @@ owner write it.
   no leading zero.
 
 **What deliberately did not change.**
-- **No rule adopts the form.** The GET still answers JSON, no owner writes
-  the compact form, and no reader is required to read it. §8.1's SHOULD
-  for a first-hop owner is C5c's, and the reader's MUST C5b's.
+- **C5a adopted no rule.** Under C5a alone the GET still answered JSON,
+  no owner wrote the compact form, and no reader was required to read it.
+  C5c's part, below, adopts it.
 - **The JSON form,** its schema, its checks and its size rule.
 - **No nonce, no requires, no minor** (the memo's questions 2 to 4): the
   key holds the instance id, a first-hop device binds no role today, and
@@ -118,6 +119,54 @@ owner write it.
   fingerprints matched the reference's for all six. A second reading,
   written from the finished text without the first, computed every case
   again. Never blessed.
+
+**C5c: the form adopted.** The memo's questions 4 and 7 kept their
+defaults: an instance with a role writes JSON, and a first-hop owner
+SHOULD write the compact form, not MUST, since one with no catalog has to
+stay describable.
+- **§3.3, "Both forms are read".** A reader of descriptors MUST read both
+  forms, telling them apart by the `Encoding`, a compact one through the
+  catalogs and revisions it holds. It MUST NOT guess a catalog or a
+  revision it does not hold. A provider found by a descriptor it did not
+  read is unobservable, never absent (observer §3.6, unchanged).
+  `[F: descriptors/compact/]` `[Sc: constrained.md §10]`
+- **§3.3's opening** names §8.1 as where an owner is told to write the
+  form, in place of "no rule here has an owner write one, or a reader
+  read one". "What carries it" adds that a compact put needs no Zenoh
+  timestamp, the envelope's run and seq ordering an instance's puts (the
+  memo's default).
+- **§8.1, "On a first hop", "Its descriptor's form".** Such an owner,
+  given a catalog, SHOULD write its descriptor in the compact form: each
+  put of it, and each reply to its GET. `[Sc: constrained.md §10]`
+  - It writes JSON where it holds a role, which only JSON's `requires`
+    carries; where it was given no catalog; and where its descriptor has
+    no compact form (§3.3's list).
+  - Off a first hop, an owner given a catalog MAY write it. JSON stays the
+    default there: a near-side tool without the catalog would see no
+    compact owner at all (the memo's risk 1).
+  - Either form, the GET answers the form of the last put.
+- **`constrained.md` §10, step 7.** The device given the catalog of its
+  three revisions writes the compact form. The proxy counts each
+  descriptor put across the hop against step 3's JSON one, a quarter at
+  most. A tool and a consumer holding the catalog read it and find the
+  device; holding none, the tool's read is `unknown_catalog` and the
+  consumer's wait does not end. The reference measured 47 B against
+  695 B on the wire, the payload 36 B against 664 B.
+- **`RULES.md`** gains three rules: the reader's MUST and MUST NOT, under
+  observer marked *reader*, and §8.1's SHOULD under owner. Its "Where it
+  reads" lists gain core §3.3, which raises its mean words per sentence
+  from 12.19 to 12.25, a hand edit of `.prose-baseline.json`: the lists
+  are generated, one sentence each.
+
+**Decided where the memo left it open (C5c).**
+- **The zid stays.** §3.3's SHOULD that an owner state `meta.zid` binds
+  either form, so the reference's compact descriptor carries the zid, 16 B
+  of its 36. The memo's 22 B for zenoh-modem's node is without it.
+- **A seq for every put.** The seq is the as-of mark's (C5a's decision):
+  at start the last seq minted before the descriptor, the status and the
+  state put before the tokens included; at a new run 0, as at a re-mint.
+- **No new version.** C5c extends 0.120's entry, since the form was not
+  yet adopted and nothing merged between.
 
 ## 0.117 — 2026-11-28: §9.2's E051, a packed type whose layout tag is 0; §7.5 accepts a heartbeat's tag 0, and says why (#1152)
 

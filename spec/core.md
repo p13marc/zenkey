@@ -979,13 +979,28 @@ and reports these codes. `[F: descriptors/]`
 **compact descriptor**. It names each revision by its index in the
 deployment catalog (§8.6), so it carries in some 20 bytes what the JSON
 form says in a kilobyte. This section defines its bytes, how a reader
-decodes them, and the checks on what it decodes. No rule here has an
-owner write one, or a reader read one.
+decodes them, and the checks on what it decodes. Which owner writes one is
+§8.1's, "On a first hop".
 
 - **What carries it.** A compact descriptor is a put's payload on the
   instance key, or the GET's reply there, under the `Encoding`
   `zenoh/bytes`. The JSON form travels under `application/json`. So the
-  `Encoding` tells the two apart, never the bytes.
+  `Encoding` tells the two apart, never the bytes. Its put needs no Zenoh
+  timestamp: the envelope's run and seq order an instance's puts.
+- **Both forms are read.** A reader of descriptors MUST read both forms.
+  It tells them apart by the `Encoding`. It reads a compact one through
+  the catalogs and the revisions it holds ("Reading", below).
+  `[F: descriptors/compact/]` `[Sc: constrained.md §10]`
+  - A reader MUST NOT guess a catalog or a revision it does not hold. A
+    compact descriptor that names one is a descriptor it did not read
+    ("Never a guess", below). `[F: descriptors/compact/vectors.json]`
+    `[Sc: constrained.md §10]`
+  - A tool, a consumer and an owner reading another instance's
+    descriptor are each such a reader. A tool shows a compact one as the
+    members it decodes to.
+  - **A descriptor not read** is not a verdict. A reader that finds a
+    provider by its descriptor reads that provider as unobservable, never
+    absent ([`observer.md`](observer.md) §3.6).
 - **What it leaves out:**
   - `minor`: the index names the revision, and a bundle keeps no minor
     (§9.5);
@@ -3771,6 +3786,23 @@ Liveliness tokens carry no payload; everything is in the key.
     lists each interface, marked `"token": false`. How a reader finds the
     owner is [`observer.md`](observer.md) §3.6, and what it concludes from
     its token §3.11.
+  - **Its descriptor's form.** Such an owner, given a catalog (§8.6),
+    SHOULD write its descriptor in the compact form (§3.3).
+    `[Sc: constrained.md §10]` Each put of it is, and each reply to its
+    GET.
+    - **Why.** The descriptor crosses the hop at each start, each change
+      and each near-side GET. The JSON form takes about a kilobyte, and
+      the compact form some 20 bytes (§3.3, "Sizes").
+    - **Where it writes JSON.** An owner with a role writes the JSON form,
+      which alone carries `requires`. So does one given no catalog, and
+      one whose descriptor has no compact form (§3.3, "Which descriptors
+      have one").
+    - **Off a first hop,** an owner given a catalog MAY write the compact
+      form. The JSON form stays the default there: a reader that holds no
+      catalog reads no compact descriptor, so every near-side tool would
+      need the catalog to see the owner at all.
+    - **Either form,** the owner answers its GET in the form of its last
+      put, under that form's `Encoding`.
   - **Its replies cross the hop.** A reader on the near side waits for
     them, its descriptor's included, as "Across a constrained face" says
     (below).
