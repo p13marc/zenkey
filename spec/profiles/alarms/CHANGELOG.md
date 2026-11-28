@@ -7,6 +7,50 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `alarms.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## alarms.v2 draft — 2026-11-28: used by ZenSight (#1149, Z2)
+
+The text's status moves from `experimental` to `draft`. That is the
+status of a profile an adopter's mapping uses
+([`../README.md`](../README.md), "The process"). #1149's Z2 moves
+ZenSight's mapping onto zk2c, each contract by a review-class
+`uses_changed` revision published in `examples/zk2/.history`. Its
+README's "Frames" and "The framework set on zk2c" say what moved. Every
+ZenSight service implements this major's standard contract, as the
+README's Shape table says. Each of its alarms is by words, since its
+rules are configured at run time (§2.4).
+
+**Changed: the status alone.** The index lists `alarms.v2` in its first
+table, used by zensight, and the header's status reads `draft`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.2, written against core 0.115, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **Appendix C, which says no adopter uses this major,** is left as
+  written, for the text's next version. This move edits no rule and no
+  appendix.
+
+## `v1.md` experimental — 2026-11-28: no user left (#1149, Z2)
+
+The text's status moves from `draft` to `experimental`. That is the
+status of a profile that no adopter's mapping and no shipped service
+uses ([`../README.md`](../README.md), "The process"). #1149's Z2 moves
+ZenSight's mapping onto zk2c, each contract by a review-class
+`uses_changed` revision published in `examples/zk2/.history`. Its
+README's "Frames" and "The framework set on zk2c" say what moved. Every
+ZenSight service implements `alarms.v2` in its place. No other adopter's
+mapping or shipped service implements `alarms.v1`, and zenwatch owns no
+alarms.
+
+**Changed: the status alone.** The index lists `alarms.v1` in its second
+table, "Experimental: no adopter yet", and the header's status reads
+`experimental`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.14, written against core 0.100, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **Appendix B, which maps ZenSight's alarms,** is left as written, for
+  the text's next version. This move edits no rule and no appendix.
+
 ## alarms.v2 0.2 — 2026-11-28: zk2py's round 124: an alarm ages at the horizon of the revision its owner names, and a reader with no run stated answers each entry by its slot, no keyword changed (#984)
 
 zk2py's round 124 filed four findings against 0.1. #1170 resolved F-612

@@ -7,6 +7,30 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `telemetry.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## `v1.md` experimental — 2026-11-28: no user left (#1149, Z2)
+
+The text's status moves from `draft` to `experimental`. That is the
+status of a profile that no adopter's mapping and no shipped service
+uses ([`../README.md`](../README.md), "The process"). #1149's Z2 moves
+ZenSight's mapping onto zk2c, each contract by a review-class
+`uses_changed` revision published in `examples/zk2/.history`. Its
+README's "Frames" and "The framework set on zk2c" say what moved.
+`zs.sysinfo.v1`, `zs.snmp.v1`, `zs.netring.v1` and `zs.parallax.v1` list
+`telemetry.v2` in its place at their minor 3. Their Points read as
+before (`telemetry.v2` §1), and the first three add frame resources. No
+contract of an adopter's mapping lists `telemetry.v1` any longer.
+
+**Changed: the status alone.** The index lists `telemetry.v1` in its
+second table, "Experimental: no adopter yet", and the header's status
+reads `experimental`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.10, written against core 0.35, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **Appendix B, which names ZenSight's four contracts,** is left as
+  written, for the text's next version. This move edits no rule and no
+  appendix.
+
 ## 0.10 — 2026-11-07: §2.6 states a CBOR sample's indefinite lengths and its one data item, which 0.9 dropped (#609, #985)
 
 zk2py's round 104 read core 0.99 cold, with the four profile texts that

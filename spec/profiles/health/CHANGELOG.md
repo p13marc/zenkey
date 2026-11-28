@@ -7,6 +7,28 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `health.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## health.v2 draft — 2026-11-28: used by ZenSight (#1149, Z2)
+
+The text's status moves from `experimental` to `draft`. That is the
+status of a profile an adopter's mapping uses
+([`../README.md`](../README.md), "The process"). #1149's Z2 moves
+ZenSight's mapping onto zk2c, each contract by a review-class
+`uses_changed` revision published in `examples/zk2/.history`. Its
+README's "Frames" and "The framework set on zk2c" say what moved. Every
+ZenSight service implements this major's standard contract in place of
+`health.v1`'s, as the README's Shape table says. `health.v1` stays used
+by zenoh-modem, tcgui and zenwatch.
+
+**Changed: the status alone.** The index lists `health.v2` in its first
+table, used by zensight, and the header's status reads `draft`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.3, written against core 0.113, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **Appendix C, which says no adopter uses this major,** is left as
+  written, for the text's next version. This move edits no rule and no
+  appendix.
+
 ## health.v2 0.3 — 2026-11-27: zk2py's rounds 120 and 123: which owner heartbeats answer the clock, a record whose time no catalog in hand dates, `not_used` under `health.v1`, and what a linter reports (#986)
 
 zk2py's round 120 read 0.1 cold, and its round 123 ran it against the

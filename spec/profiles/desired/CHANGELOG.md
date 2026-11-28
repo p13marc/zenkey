@@ -7,6 +7,50 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `desired.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## desired.v2 draft — 2026-11-28: used by ZenSight (#1149, Z2)
+
+The text's status moves from `experimental` to `draft`. That is the
+status of a profile an adopter's mapping uses
+([`../README.md`](../README.md), "The process"). #1149's Z2 moves
+ZenSight's mapping onto zk2c, each contract by a review-class
+`uses_changed` revision published in `examples/zk2/.history`. Its
+README's "Frames" and "The framework set on zk2c" say what moved.
+`zs.desired.v1` 1.2 lists this major in place of `desired.v1`, beside
+`redundancy.v1` (§2.4). Its target `zs.thresholds.v1` 1.2 reports its
+role in the packed `Report` (§2.10), an optional resource added in a
+minor (§2.18).
+
+**Changed: the status alone.** The index lists `desired.v2` in its first
+table, used by zensight, and the header's status reads `draft`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.3, written against core 0.112, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **Appendix C, which says ZenSight stays on `desired.v1`,** is left as
+  written, for the text's next version. This move edits no rule and no
+  appendix.
+
+## `v1.md` experimental — 2026-11-28: no user left (#1149, Z2)
+
+The text's status moves from `draft` to `experimental`. That is the
+status of a profile that no adopter's mapping and no shipped service
+uses ([`../README.md`](../README.md), "The process"). #1149's Z2 moves
+ZenSight's mapping onto zk2c, each contract by a review-class
+`uses_changed` revision published in `examples/zk2/.history`. Its
+README's "Frames" and "The framework set on zk2c" say what moved.
+`zs.desired.v1` 1.2 lists `desired.v2` in its place, and no other
+adopter's contract lists `desired.v1`.
+
+**Changed: the status alone.** The index lists `desired.v1` in its
+second table, "Experimental: no adopter yet", and the header's status
+reads `experimental`.
+
+**Deliberately not changed.**
+- **No rule.** The text stays 0.14, written against core 0.73, and its
+  fixtures, scenarios, runtime and tools are as they were.
+- **Appendix B, which maps ZenSight's author,** is left as written, for
+  the text's next version. This move edits no rule and no appendix.
+
 ## desired.v2 0.3 — 2026-11-28: §2.18: a target judges nothing of its author's new run before it reads the descriptor stating that run, with §16's run E (#986)
 
 review-bot, on #1171, read 0.2's §2.18 against zk2py's target. §2.18
