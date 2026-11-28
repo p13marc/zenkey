@@ -9638,6 +9638,76 @@ header restates `link.v1` 0.21 (F-620). Both are resolved.
 - **`packed_tag_live`** 319 of 319. **`just py-conformance`** 8680 of
   8680.
 
+## Core 0.119, `link.v2` 0.29, `alarms.v2` 0.2 and `desired.v2` 0.3: F-573, F-613, F-614 and F-618 answered, and a new run read first (round 127)
+
+Round 127 read this tree at 53475c13 (#984, #986, #1152), its black
+boxes built from 53475c13.
+- **Core 0.119:** cascades 7 and 8 and §9.4 read "E038 to E043 and E045".
+  E044 reads where a resource places a type (F-618). New case:
+  `contracts/e051-packed-place`.
+- **`link.v2` 0.29:** `v2/plan.json`'s case 54, a collection two revisions
+  disagree on, read `host` (F-573).
+- **`alarms.v2` 0.2:** an alarm ages at the `freshness.ttl_s` of the
+  revision its owner names, and is unobservable without it (F-613). A
+  reader with no run stated answers each entry by its slot (F-614).
+- **`desired.v2` 0.3:** §2.18's "A new run is read first", §14's
+  Expected 5 and §16's run E.
+
+**`just py-conformance`: 8687 of 8687.** Re-keyed first, at 8679 of
+8682. Both new cases passed as zk2py stood. The three failures were
+readings that pinned what the answers moved. `_round127_readings` reads
+each answer and the target's hold.
+
+### What changed in zk2py
+
+- **`alarms_v2_live.read_owner`:** ages at the horizon of the revision
+  the descriptor names, held or retrieved, or across a face the word's.
+  Without one, a firing entry reads unobservable, `not_a_horizon`.
+  `horizon_of` and `ttl_of` are new.
+- **`desired_v2_live.Target`:** a put, a read's entry or a snapshot with
+  no entry under a run whose descriptors it has not read waits for one
+  read of them, then is judged in its order of arrival.
+- **`packed`, `schemas`, `contract`:** cite 0.119's ranges. No code
+  moved.
+- **For the live runs:**
+  - `alarms_v2_owner --first-hop`;
+  - `owner.Owner`'s `after_descriptor` hook, and `desired_v2_owner
+    --desired-after-descriptor`, an author whose puts again follow its
+    descriptor;
+  - `alarms_v2_scenarios`: §2 and §6 with every reader, `--only 16` (§6
+    on a first hop) and `--only 17` (§6 across a face);
+  - `desired_v2_mixed --only run-e|run-e-after [--repeat <n>]`;
+  - `desired_v2_scenarios`: §14 step 5 as 0.3 words it.
+
+### Live
+
+```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.alarms_v2_scenarios \
+  --pairing ref-owner|zk2py-owner --only 2 --only 6 --only 16 --only 17
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.desired_v2_mixed --only s16 --only run-e-after [--repeat <n>]
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.desired_v2_scenarios --author rust|zk2py --target zk2py|rust \
+  --only 14 --only 14-ohb
+```
+
+| Run | Result |
+|---|---|
+| `alarms.v2` §2 and §6 on the 4 s copy, both pairings, zk2py's G and zenctl, given the copy and not | 13 of 13 each. Every reader ages at 4 s: not given, each retrieves the copy |
+| §6, the owner on a first hop, not given the copy | A unobservable, `not_a_horizon`, at both readers (F-623) |
+| §6 read across a face | zenctl not given the copy: A yes, `firing` at 900 s (F-622). zk2py: `not_a_horizon` |
+| `desired.v2` §14, both cross pairings | 13 of 13 each |
+| §16, runs A to D | 36 of 36 |
+| §16, run E | Expected 8 in 13 of 44, in all four pairings (F-621). With zk2py's author putting again after its descriptor, 10 of 10 |
+| `desired_v2_scenarios`, the reference's author and zk2py's target | 120 of 121: §14 step 5's read during the hold, then §2.5's read once more (F-625). The check now takes that path; three more runs of §14 read after the adoption, 6 of 6 each |
+| `alarms_v2_scenarios`, every section, both pairings | 77 of 77 and 76 of 76, the 900 s tier included |
+
+**Not run:** §14 step 5's second path by the reference's target; run
+E under a target that follows no presence; §16 across a face.
+
+Round 127 resolves F-573, F-613, F-614 and F-618. It files F-621 (a
+contradiction, the one to settle first), F-622 (a gap), F-623 and F-625
+(minor) and F-624 (an index error). See "At core 0.119, link.v2 0.29,
+alarms.v2 0.2 and desired.v2 0.3" in `SPEC-FINDINGS.md`.
+
 ## What it does not cover
 
 - **The rest of the live half:**
@@ -9853,7 +9923,8 @@ impl/python/
                                 §7.2, and §7.4's and §8.2's notes (blind_spots, memlock_note)
     owner.py          §3.3 §4 §5 §6 §8 a minimal owner, a standby (0.39), member tokens (§8.1); a minor only where
                                 its revision has one, empty members left out, its descriptor measured (0.107);
-                                owner heartbeats per class under a catalog (freshness.v2 0.9, round 113)
+                                owner heartbeats per class under a catalog (freshness.v2 0.9, round 113); a hook
+                                between §8.2's steps 3 and 4 (round 127)
     live_interop.py             the live runner, with the Rust owner and consume examples
     acl.py            §11       the grant generator: a deployment → zenoh's access_control block; Consume's owner
                                 heartbeat key per class (round 113)
@@ -9961,9 +10032,11 @@ impl/python/
     alarms_v2.py      alarms.v2 the record, tables and words, keys and slots, a restart's adoption, transitions by identity,
                       the heartbeat over a reader's slots, at, and the conclusions
     alarms_v2_fixtures.py alarms.v2 the runner of conformance/v2/
-    alarms_v2_live.py alarms.v2 the owner and the reader on a bus
-    alarms_v2_owner.py alarms.v2 the owner as a process, driven by the owner example's words
-    alarms_v2_scenarios.py alarms.v2 scenarios-v2.md §1 to §12 in both cross pairings, the bytes side by side, a far reader
+    alarms_v2_live.py alarms.v2 the owner and the reader on a bus; the reader ages at the horizon of the
+                                revision its owner names, unobservable without it (text 0.2, round 127)
+    alarms_v2_owner.py alarms.v2 the owner as a process, driven by the owner example's words; --first-hop (round 127)
+    alarms_v2_scenarios.py alarms.v2 scenarios-v2.md §1 to §12 in both cross pairings, the bytes side by side, a far reader;
+                                §2 and §6 with every reader, §6 on a first hop and across a face (round 127)
     telemetry.py      telemetry.v1 the standard schema's ids, declarations, carriers, a sample's conformance,
                                 a pair's epoch, continuity and rate, a contract's and a bundle's resources
     telemetry_scenarios.py telemetry.v1 scenarios.md §1–§9 against zk2py's owner or the Rust owner example, §8 across a face too,
@@ -9985,7 +10058,8 @@ impl/python/
                                 and a tool's four answers, each written before its fixture (round 118)
     desired_v2_live.py desired.v2 the author and the target on a bus: a snapshot's answer, a conditional
                                 re-read, a period or the watch, the packed report (round 118); an owner
-                                heartbeat's group read under a catalog, a seed made again soon (round 119)
+                                heartbeat's group read under a catalog, a seed made again soon (round 119);
+                                a new run's versions held until its descriptors are read (text 0.3, round 127)
     desired_v2_owner.py desired.v2 either party as a process
     desired_v2_scenarios.py desired.v2 scenarios-v2.md §1 to §15 in each pairing of zk2py and the reference, on a
                                 face of one deny; Rp's record after each Expected (round 119); §9, §11, §12 and
@@ -9993,7 +10067,8 @@ impl/python/
     desired_v2_edges.py desired.v2 four edges against each implementation: a revert on a snapshot with no entry,
                                 done, failed and held; a version at the asof; a run's record gone (round 119)
     desired_v2_mixed.py desired.v2 §2.18 on a bus: a v1 target under a v2 author, and the reverse (round 119);
-                                scenarios-v2.md §16's runs A to D, and a target's own session stamping (round 125)
+                                scenarios-v2.md §16's runs A to D, and a target's own session stamping (round 125);
+                                run E, and an author whose puts again follow its descriptor (round 127)
     desired_v2_tool.py desired.v2 §2.17's tool on a bus: each role by its author's major, the report by
                                 desired.report, the slice from a revision in hand, a window (round 121)
     desired_v2_s9.py  desired.v2 scenarios-v2.md §9 with zenctl and zk2py's tool side by side, §11, §12 on
