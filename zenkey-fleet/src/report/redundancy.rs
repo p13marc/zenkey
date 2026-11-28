@@ -1,6 +1,6 @@
-//! `redundancy.v1` (#841, RC): who serves a governed interface, as
-//! `zenctl redundancy` reads it (`spec/profiles/redundancy/v1.md` §2.15,
-//! §5).
+//! `redundancy` (#841, RC; #987's N3): who serves a governed interface,
+//! of either major, as `zenctl redundancy` reads it
+//! (`spec/profiles/redundancy/v1.md` §2.15, §5; `v2.md` §2.15, §5).
 //!
 //! **The profile's own vocabulary, then the judgement shape.** Each row is
 //! one address and governed interface, read twice a grace apart, and
@@ -110,6 +110,11 @@ pub struct RedundancySeen {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RedundancyInstance {
     pub instance: String,
+    /// The run its descriptor states (core §3.3), 4 or 8 lowercase
+    /// hexadecimal digits, when read: what a `redundancy.v2` follower
+    /// fences its samples by (`redundancy.v2` §2.15).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
     /// Its session's zid, as its descriptor states `meta.zid`, when read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub zid: Option<String>,
@@ -131,6 +136,11 @@ pub struct RedundancyRow {
     pub governance: String,
     /// Why, in words: the revisions read, or the one missing.
     pub governance_says: String,
+    /// The majors of `redundancy` its governed revisions use
+    /// (`redundancy.v1`, `redundancy.v2`), lowest first: both where a
+    /// candidate of each runs with one election (`redundancy.v2` §2.17),
+    /// none where no governed revision was read.
+    pub majors: Vec<String>,
     /// The holders of the interface's token in the second read, lowest
     /// first.
     pub holders: Vec<String>,
@@ -294,6 +304,7 @@ mod tests {
             iface: "ledger.v1".into(),
             governance: "claim".into(),
             governance_says: "s".into(),
+            majors: vec!["redundancy.v1".into()],
             holders: vec!["000000000000000a".into()],
             one_incumbent: answer(one.0, one.1),
             vacancy: answer(RedundancyAnswerToken::No, "held"),
@@ -306,6 +317,7 @@ mod tests {
             },
             instances: vec![RedundancyInstance {
                 instance: "000000000000000b".into(),
+                run: None,
                 zid: None,
                 first: Some(RedundancySeen {
                     token: false,
@@ -395,6 +407,7 @@ mod tests {
                     "iface": "ledger.v1",
                     "governance": "claim",
                     "governance_says": "s",
+                    "majors": ["redundancy.v1"],
                     "holders": ["000000000000000a"],
                     "one_incumbent": {"answer": "yes", "reason": "one", "says": "s"},
                     "vacancy": {"answer": "no", "reason": "held", "says": "s"},

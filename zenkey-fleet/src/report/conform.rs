@@ -185,16 +185,18 @@ pub enum CaseId {
     /// the window, without a horizon, is §2.11's SHOULD broken, named in a
     /// pass.
     DesiredAuthor,
-    /// The claimed revision's `redundancy.v1` declaration is valid, and no
-    /// descriptor puts the governed interface in a tokenless set
-    /// (`redundancy.v1` §2.2, §2.14; #841): a runtime refuses to start an
-    /// instance of an invalid one, so one running is the violation, its
-    /// reasons named. Not asked of a revision that does not use the
-    /// profile and carries no `redundancy.election`.
+    /// The claimed revision's `redundancy` declaration is valid, read by
+    /// the major its `uses` lists (`redundancy.v2` §2.2: `majors` and
+    /// `explicit_stream` under v2), and no descriptor puts the governed
+    /// interface in a tokenless set (`redundancy.v1` §2.2, §2.14; #841,
+    /// #987's N3): a runtime refuses to start an instance of an invalid
+    /// one, so one running is the violation, its reasons named. Not asked
+    /// of a revision that uses no major of the profile and carries no
+    /// `redundancy.election`.
     RedundancyDeclaration,
     /// Every instance marked standby, in two presence reads with probes
     /// between them, holds none of the interface's tokens and answers
-    /// none of its queryables (`redundancy.v1` §2.4; #841): a reply from
+    /// none of its queryables (`redundancy.v1` §2.4, either major; #841): a reply from
     /// its session to a GET over a state resource's or a fan-out-forbidden
     /// operation's wildcard, or its token while marked, is the violation.
     /// Clean only where an operation was probed, since every operation

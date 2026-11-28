@@ -335,7 +335,7 @@ impl CheckId {
             CheckId::SplitBrain => {
                 "do two instances of one service hold one interface's token for longer than \
                  the grace period, with at least two exposing an exclusive resource, or, of an \
-                 interface redundancy.v1 governs, whatever their marks?"
+                 interface a major of redundancy governs, whatever their marks?"
             }
             CheckId::BindingUnsatisfied => {
                 "does a role's binding select no provider visible to this reader?"
@@ -436,8 +436,8 @@ impl CheckId {
                  answering for it?"
             }
             CheckId::RedundancyVacancy => {
-                "does an interface redundancy.v1 governs have candidates and no incumbent, in both \
-                 of two complete presence reads a grace apart?"
+                "does an interface a major of redundancy governs have candidates and no incumbent, \
+                 in both of two complete presence reads a grace apart?"
             }
             CheckId::TimingDeclaration => {
                 "does a contract an owner implements declare timing.v1 values a reader cannot \
