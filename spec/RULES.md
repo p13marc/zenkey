@@ -56,8 +56,8 @@ The owner, consumer and caller sections each point to them.
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 19 |
 | [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 88, 28 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 81 |
-| Every rule, once | 299 |
+| [Implementation: the static rules](#implementation-the-static-rules) | 85 |
+| Every rule, once | 303 |
 | [Rule ids](#rule-ids) | 86 |
 
 ## Owner
@@ -795,6 +795,10 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§3.3](core.md#33-the-descriptor-record) | Its [the descriptor record's] schema is [`descriptor.schema.json`](descriptor.schema.json), and a checker MUST report exactly the `D…` codes that `conformance/descriptors/expect.json` lists for each document, checked against the fixture contract. | `[F: descriptors/]` |
+| [§3.3](core.md#33-the-descriptor-record) | An implementation MUST refuse a compact descriptor for the first of these that applies, in this order, naming the refusal: | `[F: descriptors/compact/vectors.json]` |
+| [§3.3](core.md#33-the-descriptor-record) | An implementation that writes a compact descriptor MUST write it as the layout says. | `[F: descriptors/compact/vectors.json]` |
+| [§3.3](core.md#33-the-descriptor-record) | An implementation MUST write every compact descriptor it accepts back to the same bytes, from its decoded descriptor, its seq and its `minted` bit. | `[F: descriptors/compact/vectors.json]` |
+| [§3.3](core.md#33-the-descriptor-record) | **The checks on a decoded descriptor.** … A checker MUST report exactly the codes that `compact/checks.json` lists for each. | `[F: descriptors/compact/checks.json]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 

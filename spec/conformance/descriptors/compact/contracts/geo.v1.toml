@@ -1,0 +1,23 @@
+# core §3.3's compact descriptor: the interface `descriptors/ok-unknown-interface`
+# lists, which the checker is not given; three resources, so two bits each.
+[interface]
+name    = "geo"
+major   = 1
+minor   = 1
+summary = "Geofences, for the compact descriptor's cases"
+
+[resources.fence]
+kind = "state"
+type = { raw = "application/json" }
+
+[resources.diagnostics]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "config:diagnostics"
+
+[resources."tracks/{track}"]
+kind        = "state"
+type        = { raw = "application/json" }
+params      = { track = "string" }
+cardinality = 50
