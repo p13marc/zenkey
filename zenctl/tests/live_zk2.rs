@@ -6516,10 +6516,113 @@ async fn health_owner(
     level: zenkey::health::Level,
     reason: &str,
 ) -> (Service, zenkey::health::Health) {
+    health_owner_on(s, address, level, reason, zenkey::health::implementation()).await
+}
+
+/// [`health_owner`] on `imp`, a revision of `health.v1`.
+async fn health_owner_on(
+    s: &zenoh::Session,
+    address: &str,
+    level: zenkey::health::Level,
+    reason: &str,
+    imp: Implementation,
+) -> (Service, zenkey::health::Health) {
     let mut b = ServiceBuilder::new(s, ServiceConfig::new(address.parse().expect("an address")));
-    let h = b.health().await.expect("health.v1");
+    let h = b.health_with(imp).await.expect("health.v1");
     h.set_status(level, reason).await.expect("a status");
     (b.start().await.expect("start"), h)
+}
+
+/// A test's copy of a standard contract, `spec/profiles/<file>`, its every
+/// `"freshness.ttl_s" = 60` set to 6 (the scenarios' conventions, #1151):
+/// written under `home/short-copy/`, beside the `schemas` it names (paths
+/// under `spec/profiles/` too), and never published. What the owner
+/// implements, and the file a tool across a face is given (`--contracts`).
+fn short_copy(home: &Path, file: &str, schemas: &[&str]) -> (Implementation, PathBuf) {
+    let profiles = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles");
+    let dir = home.join("short-copy");
+    for schema in schemas {
+        let to = dir.join(schema);
+        std::fs::create_dir_all(to.parent().expect("a parent")).expect("a dir");
+        std::fs::copy(profiles.join(schema), &to).expect("the schema");
+    }
+    let text = std::fs::read_to_string(profiles.join(file)).expect("the standard contract");
+    let copy = text.replace("\"freshness.ttl_s\" = 60", "\"freshness.ttl_s\" = 6");
+    assert_ne!(copy, text, "{file}'s horizon is 60 s");
+    let to = dir.join(file);
+    std::fs::create_dir_all(to.parent().expect("a parent")).expect("a dir");
+    std::fs::write(&to, copy).expect("the copy");
+    let l = load_path(&to);
+    (
+        Implementation::new(l.contract.unwrap_or_else(|| panic!("{}", l.report))),
+        to,
+    )
+}
+
+/// A health scenario's horizon, and the revision it is read by (the
+/// conventions' "The horizon", #1151): the standard contract's 60 s, or a
+/// test's copy whose `freshness.ttl_s` is 6, never published. The copy is
+/// written under a test's home with its schema beside it: across §8's face
+/// no descriptor crosses and nothing is retrieved, so the tool is given it
+/// (`--contracts`), the deployment's word, as the owner implements it.
+struct HealthOn {
+    imp: Implementation,
+    /// The copy's file, `None` on the standard contract.
+    file: Option<PathBuf>,
+    horizon: u64,
+}
+
+impl HealthOn {
+    /// The standard contract of `health.v<major>`: the slow tier.
+    fn standard(major: u8) -> HealthOn {
+        HealthOn {
+            imp: match major {
+                1 => zenkey::health::implementation(),
+                _ => zenkey::health::v2::implementation(),
+            },
+            file: None,
+            horizon: 60,
+        }
+    }
+
+    /// The copy of `health.v<major>`'s standard contract with a 6 s
+    /// horizon, written under `home`.
+    fn short(home: &Path, major: u8) -> HealthOn {
+        let (imp, file) = match major {
+            1 => short_copy(
+                home,
+                "health/health.v1.toml",
+                &["health/proto/health/v1/health.proto"],
+            ),
+            _ => short_copy(home, "health/health.v2.toml", &["health/health.v2.json"]),
+        };
+        HealthOn {
+            imp,
+            file: Some(file),
+            horizon: 6,
+        }
+    }
+
+    /// The scenario's wait of `standard` seconds at this horizon: 65 s is
+    /// the horizon and 5 s, 70 s the horizon and 10 s, 35 s half the
+    /// horizon and 5 s.
+    fn secs(&self, standard: u64) -> String {
+        match standard {
+            65 => self.horizon + 5,
+            70 => self.horizon + 10,
+            35 => self.horizon / 2 + 5,
+            other => panic!("no wait of {other} s in §8"),
+        }
+        .to_string()
+    }
+
+    /// `--contracts <the copy>`, or nothing on the standard contract.
+    fn contracts(&self) -> Vec<String> {
+        self.file
+            .iter()
+            .flat_map(|f| ["--contracts".to_owned(), f.display().to_string()])
+            .collect()
+    }
 }
 
 /// health.v1 `scenarios.md` §6 (§2.1): an owner holding DEGRADED reads
@@ -6879,14 +6982,28 @@ async fn face_bus_denying(denies: &[&str]) -> (Bus, PathBuf) {
 /// stale — never down, never FAILED, never absent. Run B, the face denying
 /// the vehicle's state: nothing of the status crosses at any step, and G
 /// reads unobservable, `face_closed`, each time. The two runs share no
-/// router and run at once; each waits 65 s a step, as the scenario does.
+/// router and run at once; each waits past the horizon a step, as the
+/// scenario does: on the copy's 6 s horizon, given to G as the deployment's
+/// word (`--contracts`), 11 s where the standard's waits 65 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn health_s8_across_a_constrained_face() {
+    health_s8(|home| HealthOn::short(home, 1)).await;
+}
+
+/// §8 at the standard contract: 65 s a step.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "slow tier: §8 waits 200 s at the contract's 60 s horizon"]
+async fn health_s8_across_a_constrained_face_at_60_s() {
+    health_s8(|_| HealthOn::standard(1)).await;
+}
+
+/// health.v1's §8 on the revision `on` gives for a bus's home.
+async fn health_s8(on: impl Fn(&Path) -> HealthOn) {
     use zenkey::health::Level;
     const NAV: &str = "vehicle-01/nav";
     const LIMIT: Duration = Duration::from_secs(120);
-    let health = |ground: &Path, face: &str, window: &str| -> Vec<String> {
-        [
+    let health = |ground: &Path, face: &str, window: &str, on: &HealthOn| -> Vec<String> {
+        let mut args: Vec<String> = [
             "health",
             NAV,
             "--across-face",
@@ -6901,11 +7018,14 @@ async fn health_s8_across_a_constrained_face() {
             "json",
         ]
         .map(str::to_owned)
-        .to_vec()
+        .to_vec();
+        args.extend(on.contracts());
+        args
     };
     let run_a = async {
         let (bus, ground) = face_bus(false).await;
-        let args = health(&ground, "crosses", "65");
+        let on = on(&bus.home);
+        let args = health(&ground, "crosses", &on.secs(65), &on);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         // Step 1: G listens before the owner starts.
         let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
@@ -6913,8 +7033,9 @@ async fn health_s8_across_a_constrained_face() {
         let row = health_of(&run, NAV).unwrap_or_else(|| panic!("a row: {run}"));
         assert_eq!(row["verdict"], "unobservable", "{run}");
         assert_eq!(row["reason"], "nothing_crossed", "never stale: {run}");
-        // Step 2: the owner starts; G listens 65 s.
-        let (svc, h) = health_owner(&bus.owners, NAV, Level::Ok, "serving").await;
+        // Step 2: the owner starts; G listens past the horizon.
+        let (svc, h) =
+            health_owner_on(&bus.owners, NAV, Level::Ok, "serving", on.imp.clone()).await;
         let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
         exits(&run, 0);
         let doc = run.json();
@@ -6939,7 +7060,7 @@ async fn health_s8_across_a_constrained_face() {
             }
         };
         matching(false).await;
-        let args = health(&ground, "crosses", "70");
+        let args = health(&ground, "crosses", &on.secs(70), &on);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let pending = bus.spawn_within(&args, LIMIT);
         matching(true).await;
@@ -6960,7 +7081,8 @@ async fn health_s8_across_a_constrained_face() {
     };
     let run_b = async {
         let (bus, ground) = face_bus(true).await;
-        let args = health(&ground, "denied", "65");
+        let on = on(&bus.home);
+        let args = health(&ground, "denied", &on.secs(65), &on);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let closed = |run: &Run| {
             exits(run, 2);
@@ -6975,7 +7097,8 @@ async fn health_s8_across_a_constrained_face() {
         // Step 1, before the owner starts.
         closed(&bus.spawn_within(&args, LIMIT).await.expect("the runner"));
         // Step 2, once it runs.
-        let (svc, h) = health_owner(&bus.owners, NAV, Level::Ok, "serving").await;
+        let (svc, h) =
+            health_owner_on(&bus.owners, NAV, Level::Ok, "serving", on.imp.clone()).await;
         closed(&bus.spawn_within(&args, LIMIT).await.expect("the runner"));
         drop((svc, h, bus));
     };
@@ -7532,7 +7655,7 @@ struct Nav {
 }
 
 impl Nav {
-    async fn start(bus: &Bus) -> Nav {
+    async fn start(bus: &Bus, on: &HealthOn) -> Nav {
         let mut cfg = ServiceConfig::new("vehicle-01/nav".parse().expect("an address"));
         cfg.clock_reference = Some("clock/heartbeat".to_owned());
         let mut b = ServiceBuilder::new(&bus.owners, cfg);
@@ -7540,7 +7663,7 @@ impl Nav {
             bus.home.join("nav.run"),
         )))
         .expect("a run store");
-        let h = b.health_v2().await.expect("health.v2");
+        let h = b.health_v2_with(on.imp.clone()).await.expect("health.v2");
         h.set_status(zenkey::health::Level::Ok, "serving")
             .await
             .expect("a status");
@@ -7586,16 +7709,30 @@ impl Nav {
 /// fault is shown as an occurrence, and the clock question is unobservable,
 /// `nothing_heard`: a fault published once cannot say the hold lasts. The
 /// three runs share no router and run at once; each listens as long as the
-/// scenario says.
+/// scenario says, on the copy's 6 s horizon, given to G as the deployment's
+/// word (`--contracts`): 11 s where the standard's listens 65 s, 8 s where
+/// it listens 35 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn health_v2_s8_across_a_constrained_face() {
+    health_v2_s8(|home| HealthOn::short(home, 2)).await;
+}
+
+/// health.v2's §8 at the standard contract: 65 s, 35 s and 70 s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "slow tier: §8 waits 235 s at the contract's 60 s horizon"]
+async fn health_v2_s8_across_a_constrained_face_at_60_s() {
+    health_v2_s8(|_| HealthOn::standard(2)).await;
+}
+
+/// health.v2's §8 on the revision `on` gives for a bus's home.
+async fn health_v2_s8(on: impl Fn(&Path) -> HealthOn) {
     const NAV: &str = "vehicle-01/nav";
     const FAULTS: &str = "zk2/vehicle-01/nav/health.v2/stream/faults";
     const STATE: &str = "zk2/vehicle-01/*/*/state/**";
     const BEATS: &str = "zk2/vehicle-01/*/freshness.v2/stream/**";
     const LIMIT: Duration = Duration::from_secs(120);
-    let health = |ground: &Path, face: &str, window: &str| -> Vec<String> {
-        [
+    let health = |ground: &Path, face: &str, window: &str, on: &HealthOn| -> Vec<String> {
+        let mut args: Vec<String> = [
             "health",
             NAV,
             "--across-face",
@@ -7612,11 +7749,15 @@ async fn health_v2_s8_across_a_constrained_face() {
             "json",
         ]
         .map(str::to_owned)
-        .to_vec()
+        .to_vec();
+        args.extend(on.contracts());
+        args
     };
     let row_of = |run: &Run| health_of(run, NAV).unwrap_or_else(|| panic!("a row: {run}"));
+    let on = &on;
     let run_a = async {
         let (bus, ground) = face_bus_denying(&[FAULTS]).await;
+        let on = on(&bus.home);
         let heard = ground_session(&bus.endpoint).await;
         let sizes: Arc<std::sync::Mutex<Vec<(String, usize)>>> = Arc::default();
         let into = Arc::clone(&sizes);
@@ -7629,7 +7770,7 @@ async fn health_v2_s8_across_a_constrained_face() {
             })
             .await
             .expect("the ground's subscriber");
-        let args = health(&ground, "crosses", "65");
+        let args = health(&ground, "crosses", &on.secs(65), &on);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         // Step 1: G listens before the owner starts.
         let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
@@ -7638,8 +7779,8 @@ async fn health_v2_s8_across_a_constrained_face() {
         assert_eq!(row["profile"], "health.v2", "the deployment's word: {run}");
         assert_eq!(row["verdict"], "unobservable", "{run}");
         assert_eq!(row["reason"], "nothing_crossed", "never stale: {run}");
-        // Step 2: the owner starts; G listens 65 s.
-        let nav = Nav::start(&bus).await;
+        // Step 2: the owner starts; G listens past the horizon.
+        let nav = Nav::start(&bus, &on).await;
         let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
         exits(&run, 0);
         let doc = run.json();
@@ -7674,9 +7815,10 @@ async fn health_v2_s8_across_a_constrained_face() {
                 "each heartbeat 16 bytes: {sizes:?}"
             );
         }
-        // Step 3: the owner's clock 2 s ahead; G listens 35 s.
+        // Step 3: the owner's clock 2 s ahead; G listens half a horizon
+        // and 5 s.
         nav.clock(2000, true).await;
-        let args = health(&ground, "crosses", "35");
+        let args = health(&ground, "crosses", &on.secs(35), &on);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
         exits(&run, 1);
@@ -7696,8 +7838,9 @@ async fn health_v2_s8_across_a_constrained_face() {
             "the faults' key denied"
         );
         // Step 4: the clock set right; the owner stops vouching for its
-        // status once G hears it, and G listens 65 s past it. The ground's
-        // own subscriber goes first: the status's matching is then G's.
+        // status once G hears it, and G listens past the horizon after it.
+        // The ground's own subscriber goes first: the status's matching is
+        // then G's.
         drop(listening);
         nav.clock(0, false).await;
         let writer = nav.h.status_writer().writer();
@@ -7709,7 +7852,7 @@ async fn health_v2_s8_across_a_constrained_face() {
             }
         };
         matching(false).await;
-        let args = health(&ground, "crosses", "70");
+        let args = health(&ground, "crosses", &on.secs(70), &on);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let pending = bus.spawn_within(&args, LIMIT);
         matching(true).await;
@@ -7739,6 +7882,7 @@ async fn health_v2_s8_across_a_constrained_face() {
             &[STATE, BEATS, FAULTS]
         };
         let (bus, ground) = face_bus_denying(denies).await;
+        let on = on(&bus.home);
         let judged = |run: &Run| {
             let row = row_of(run);
             assert_eq!(row["verdict"], "unobservable", "{run}");
@@ -7751,20 +7895,21 @@ async fn health_v2_s8_across_a_constrained_face() {
             );
             row
         };
-        let args = health(&ground, "denied", "65");
+        let args = health(&ground, "denied", &on.secs(65), &on);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         // Step 1, before the owner starts.
         let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
         exits(&run, 2);
         assert!(judged(&run).get("faults").is_none(), "{run}");
         // Step 2, once it runs.
-        let nav = Nav::start(&bus).await;
+        let nav = Nav::start(&bus, &on).await;
         let run = bus.spawn_within(&args, LIMIT).await.expect("the runner");
         exits(&run, 2);
         assert!(judged(&run).get("faults").is_none(), "{run}");
-        // Step 3, its clock 2 s ahead while G listens 35 s: the fault is
-        // published when the guard begins to hold, so G listens first.
-        let args = health(&ground, "denied", "35");
+        // Step 3, its clock 2 s ahead while G listens half a horizon and
+        // 5 s: the fault is published when the guard begins to hold, so G
+        // listens first.
+        let args = health(&ground, "denied", &on.secs(35), &on);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let faults = nav.h.faults_writer();
         let deadline = Instant::now() + SETTLE;
@@ -8152,12 +8297,31 @@ impl Rf {
         startup: zenkey::config_v1::Startup,
         device: Arc<sim::SimDevice>,
     ) -> Rf {
+        Rf::up_on(
+            session,
+            address,
+            startup,
+            device,
+            zenkey::config_v1::implementation(),
+        )
+        .await
+    }
+
+    /// [`Rf::up`] on `imp`, a revision of `config.v1`.
+    async fn up_on(
+        session: &zenoh::Session,
+        address: &str,
+        startup: zenkey::config_v1::Startup,
+        device: Arc<sim::SimDevice>,
+        imp: Implementation,
+    ) -> Rf {
         let mut b = ServiceBuilder::new(
             session,
             ServiceConfig::new(address.parse().expect("an address")),
         );
         let cfg = b
-            .config_v1(
+            .config_v1_with(
+                imp,
                 startup.clone(),
                 Arc::clone(&device) as Arc<dyn zenkey::config_v1::Device>,
             )
@@ -8176,9 +8340,27 @@ impl Rf {
     /// `lab/rf0`'s `rf`, a persisted layer, the floor and the delay its
     /// device states for a reach `apply_at`.
     async fn fresh(session: &zenoh::Session, address: &str, floor_s: u64, apply_ms: u64) -> Rf {
+        Rf::fresh_on(
+            session,
+            address,
+            floor_s,
+            apply_ms,
+            zenkey::config_v1::implementation(),
+        )
+        .await
+    }
+
+    /// [`Rf::fresh`] on `imp`, a revision of `config.v1`.
+    async fn fresh_on(
+        session: &zenoh::Session,
+        address: &str,
+        floor_s: u64,
+        apply_ms: u64,
+        imp: Implementation,
+    ) -> Rf {
         let startup = sim::rf_startup(false, floor_s, Duration::from_millis(apply_ms), true);
         let device = Arc::new(sim::SimDevice::new(&startup));
-        Rf::up(session, address, startup, device).await
+        Rf::up_on(session, address, startup, device, imp).await
     }
 
     /// A restart (§2.12): the old instance goes, the device runs its
@@ -8625,11 +8807,20 @@ async fn scenario_13_the_compact_status_across_a_constrained_face() {
 /// a value set without a window will not survive a restart; and after the
 /// owner stops, not asked on presence's word, and, for a reader that reads
 /// no presence and holds the status it last heard, unobservable, the
-/// status stale — never no.
+/// status stale — never no. The owner runs on a test's copy of the
+/// standard contract whose `freshness.ttl_s` is 6, as the scenarios'
+/// conventions allow (#1151), and the reader across a face is given it
+/// (`--contracts`): its window is 20 s where the standard's is 72 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn scenario_14_a_tools_answers() {
     let mut bus = Bus::bare(None).await;
-    let rf = Rf::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+    let (copy, copy_file) = short_copy(
+        &bus.home,
+        "config/config.v1.toml",
+        &["config/schemas/config.json"],
+    );
+    let copy_file = copy_file.display().to_string();
+    let rf = Rf::fresh_on(&bus.owners, "lab/rf0", 2, 500, copy).await;
     let plain = bring_up(
         &bus.owners,
         ServiceConfig::new("lab/plain".parse().unwrap()),
@@ -8724,8 +8915,10 @@ async fn scenario_14_a_tools_answers() {
             "lab/rf0",
             "--status",
             "--across-face",
+            "--contracts",
+            &copy_file,
             "--for",
-            "72",
+            "20",
             "--format",
             "json",
         ],
@@ -8738,14 +8931,15 @@ async fn scenario_14_a_tools_answers() {
     exits(&run, 0);
     tokio::time::sleep(Duration::from_millis(500)).await;
     rf.svc.close().await.expect("the owner stops");
-    // Within 60 s: not asked, the owner absent (presence's word).
+    // Within the horizon: not asked, the owner absent (presence's word).
     let run = bus
         .until(&get("lab/rf0"), |r| parsed(r)["premise"] == "absent")
         .await;
     let doc = run.json();
     assert_eq!(doc["pending"]["answer"], "not_asked", "{run}");
     assert_eq!(doc["pending"]["reason"], "absent");
-    // After it: unobservable, the status stale — never no.
+    // After it, 16 s past the put: unobservable, the status stale —
+    // never no.
     let run = held.await.expect("the held reading");
     let doc = run.json();
     assert_eq!(doc["status"]["freshness"]["verdict"], "stale", "{run}");
@@ -8892,16 +9086,33 @@ impl Rf2 {
         startup: zenkey::config_v2::Startup,
         device: Arc<sim::SimDevice>,
     ) -> Rf2 {
-        let mut b = ServiceBuilder::new(
-            session,
-            ServiceConfig::new(address.parse().expect("an address")),
-        );
         let l = load_path(Path::new(RFCFG));
         let contract = l
             .contract
             .unwrap_or_else(|| panic!("rfcfg.v1 does not load:\n{}", l.report));
-        b.implement(Implementation::new(contract))
-            .expect("rfcfg.v1 implemented");
+        Rf2::up_on(
+            session,
+            address,
+            startup,
+            device,
+            Implementation::new(contract),
+        )
+        .await
+    }
+
+    /// [`Rf2::up`] on `imp`, a revision of `rfcfg.v1`.
+    async fn up_on(
+        session: &zenoh::Session,
+        address: &str,
+        startup: zenkey::config_v2::Startup,
+        device: Arc<sim::SimDevice>,
+        imp: Implementation,
+    ) -> Rf2 {
+        let mut b = ServiceBuilder::new(
+            session,
+            ServiceConfig::new(address.parse().expect("an address")),
+        );
+        b.implement(imp).expect("rfcfg.v1 implemented");
         let cfg = b
             .config_v2(
                 startup.clone(),
@@ -8925,6 +9136,19 @@ impl Rf2 {
         let startup = sim::rfcfg_startup(floor_s, Duration::from_millis(apply_ms), true);
         let device = Arc::new(sim::SimDevice::new_v2(&startup));
         Rf2::up(session, address, startup, device).await
+    }
+
+    /// [`Rf2::fresh`] on `imp`, a revision of `rfcfg.v1`.
+    async fn fresh_on(
+        session: &zenoh::Session,
+        address: &str,
+        floor_s: u16,
+        apply_ms: u64,
+        imp: Implementation,
+    ) -> Rf2 {
+        let startup = sim::rfcfg_startup(floor_s, Duration::from_millis(apply_ms), true);
+        let device = Arc::new(sim::SimDevice::new_v2(&startup));
+        Rf2::up_on(session, address, startup, device, imp).await
     }
 
     /// A restart (v2 §2.12): the old instance goes, the device runs its
@@ -9731,10 +9955,24 @@ async fn config_v2_scenario_13_the_record_across_a_constrained_face() {
 /// not writable, though the contract declares it hot; and after the owner
 /// stops, not asked on presence's word, and, for a reader that reads no
 /// presence, unobservable, the record stale — never no.
+///
+/// The owner runs on a test's copy of `rfcfg.v1` whose `freshness.ttl_s`
+/// is 6, as the scenarios' conventions allow (#1151), and the reader
+/// across a face is given it (`--contracts`): its window is 20 s where
+/// `rfcfg.v1`'s is 72 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn config_v2_scenario_14_a_tools_answers() {
     let mut bus = Bus::bare(None).await;
-    let rf = Rf2::fresh(&bus.owners, "lab/rf0", 2, 500).await;
+    let (copy, copy_file) = short_copy(
+        &bus.home,
+        "config/conformance/contracts/rfcfg.v1.toml",
+        &[
+            "config/conformance/contracts/rfcfg.json",
+            "config/config.v2.json",
+        ],
+    );
+    let copy_file = copy_file.display().to_string();
+    let rf = Rf2::fresh_on(&bus.owners, "lab/rf0", 2, 500, copy).await;
     let plain = bring_up(
         &bus.owners,
         ServiceConfig::new("lab/plain".parse().unwrap()),
@@ -9837,9 +10075,9 @@ async fn config_v2_scenario_14_a_tools_answers() {
             "lab/rf0",
             "--across-face",
             "--contracts",
-            RFCFG,
+            &copy_file,
             "--for",
-            "72",
+            "20",
             "--format",
             "json",
         ],
@@ -9852,14 +10090,15 @@ async fn config_v2_scenario_14_a_tools_answers() {
     exits(&run, 0);
     tokio::time::sleep(Duration::from_millis(500)).await;
     rf.svc.close().await.expect("the owner stops");
-    // Within 60 s: not asked, the owner absent (presence's word).
+    // Within the horizon: not asked, the owner absent (presence's word).
     let run = bus
         .until(&get("lab/rf0"), |r| parsed(r)["premise"] == "absent")
         .await;
     let doc = run.json();
     assert_eq!(doc["pending"]["answer"], "not_asked", "{run}");
     assert_eq!(doc["pending"]["reason"], "absent");
-    // After it: unobservable, the record stale — never no.
+    // After it, 16 s past the put: unobservable, the record stale —
+    // never no.
     let run = held.await.expect("the held reading");
     let doc = run.json();
     assert_eq!(doc["profile"], "config.v2", "{run}");
