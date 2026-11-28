@@ -682,15 +682,16 @@ pub async fn observe(
             crate::bus::desired::observe(session, Some(&obs.address), &ds, &store, offline).await,
         );
     }
-    // redundancy.v1 (#841, RC): a governed revision with an instance
-    // marked standby has its standbys probed, then presence read again,
+    // redundancy (#841, RC; either major, #987's N3): a governed revision
+    // with an instance marked standby has its standbys probed, then
+    // presence read again,
     // unless the case is skipped (text 0.4, F-222: a skipped case sends
     // nothing). The probes are guarded by every revision of the interface
     // in hand (#862's review): the one under test, and those held offline.
     if let (Ok(first), Some(rev)) = (&obs.presence, obs.revision.clone())
         && obs.spec.skip.asks(CaseId::RedundancyStandby)
         && matches!(
-            zenkey_model::redundancy::declaration_of(rev.contract(), false),
+            zenkey_model::redundancy::either_declaration_of(rev.contract(), false),
             zenkey_model::redundancy::Declaration::Governed(_)
         )
         && marks_standby(first, &obs.iface)

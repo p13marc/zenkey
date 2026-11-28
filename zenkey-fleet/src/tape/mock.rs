@@ -568,7 +568,7 @@ pub async fn serve(session: &Session, spec: ServeSpec) -> Result<Served> {
         b.serve_state(&iface)
             .map_err(|e| runtime_error(&revision, e))?;
     }
-    let governed = zenkey_model::redundancy::declaration_of(contract, false)
+    let governed = zenkey_model::redundancy::either_declaration_of(contract, false)
         != zenkey_model::redundancy::Declaration::NotGoverned;
     let redundancy = match (elect, governed) {
         (Some(startup), true) => Some(

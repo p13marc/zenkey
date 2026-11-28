@@ -261,8 +261,10 @@ pub async fn open_in_namespace_across(
 /// every other put one too. A resource that declares `history` numbers its
 /// samples instead (§2.5). The exception is a `governed` owner, a candidate
 /// of an interface `redundancy.v1` governs, whose session's timestamping
-/// that profile's §2.10 asks for. A config file that states the setting is
-/// obeyed either way; everything else is [`open_in_namespace`]'s.
+/// that profile's §2.10 asks for; a `redundancy.v2` candidate's runs
+/// without, as any owner's (`redundancy.v2` §2.10), so its caller passes
+/// `false`. A config file that states the setting is obeyed either way;
+/// everything else is [`open_in_namespace`]'s.
 pub async fn open_owner_in_namespace(
     namespace: &str,
     file: Option<&Path>,

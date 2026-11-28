@@ -1,7 +1,7 @@
-//! `redundancy.v1` (#841, RC), the projection: two presence reads a grace
-//! apart, their descriptors and the revisions they name, as
+//! `redundancy` (#841, RC; #987's N3), the projection: two presence reads
+//! a grace apart, their descriptors and the revisions they name, as
 //! `zenkey_model::redundancy`'s [`Reading`] of one address and governed
-//! interface (`spec/profiles/redundancy/v1.md` §2.15).
+//! interface (`spec/profiles/redundancy/v1.md` §2.15, `v2.md` §2.15).
 //!
 //! Session-free: a [`crate::model::catalog::Observed`] is a value, so a
 //! `.zrec`, a test and the doctor's own reads project the same way. Nothing
@@ -18,10 +18,18 @@
 //!   made shows nothing and is not complete (core §8.1, 0.38).
 //! - **The governance** is read from the revision every candidate's
 //!   descriptor names for the interface, in either read (§2.2, §2.15
-//!   premise 3): one not in hand is `no_contract`; revisions that disagree
-//!   on governance or on the election are `disagree`. A revision whose
-//!   declaration is invalid gives no election to read, and reads as
-//!   `no_contract`, its words saying so (text 0.3).
+//!   premise 3), by a reader of both majors (`redundancy.v2` §2.2): its
+//!   token is `zenkey_model::redundancy::governance`'s over those
+//!   revisions, as `v2/declarations.json`'s `addresses` read it. One not
+//!   in hand is `no_contract`; revisions that disagree on governance or on
+//!   the election are `disagree`; a `redundancy.v1` revision and a
+//!   `redundancy.v2` one with one election are one election, and
+//!   [`Governed::majors`] names both. A revision whose declaration is
+//!   invalid gives no election to read, and reads as `no_contract`, its
+//!   words saying so (text 0.3).
+//! - **Each candidate's run** ([`run_of`]) is the one its descriptor states
+//!   (`redundancy.v2` §2.15), from the later read that served one, as its
+//!   `meta.zid` ([`zid_of`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
@@ -29,7 +37,7 @@ use std::str::FromStr;
 use zenkey_model::canonical::Fingerprint;
 use zenkey_model::grammar::{Addr, IfaceId, InstanceId, ZkKey};
 use zenkey_model::redundancy::{
-    self as model, Declaration, Governance, Listing, Read, Reading, Seen,
+    self as model, Declaration, Governance, Listing, Major, Read, Reading, Revision, Seen,
 };
 
 use crate::model::catalog::{ContractState, DescriptorRead, Observed};
@@ -137,37 +145,107 @@ pub fn subjects(
 }
 
 /// The governance one address's interface reads as, with why in words
-/// (§2.2, §2.15 premise 3).
+/// (§2.2, §2.15 premise 3; `redundancy.v2` §2.2, §2.15).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Governed {
     pub governance: Governance,
     pub says: String,
+    /// The majors of `redundancy` the governed revisions read use, lowest
+    /// first: none when no revision read is governed. A `redundancy.v1`
+    /// candidate and a `redundancy.v2` one with one election are one
+    /// election (`redundancy.v2` §2.17), so both can be here.
+    pub majors: Vec<Major>,
 }
 
-/// What one revision says of governance: its declaration, or why it says
-/// nothing.
-fn declared(
-    contracts: &Contracts,
-    iface: &IfaceId,
-    fp: &Fingerprint,
-) -> Result<Declaration, String> {
-    match contracts.get(&(iface.clone(), fp.clone())) {
-        Some(Ok(ContractState::Held(rev))) => Ok(model::declaration_of(rev.contract(), false)),
-        Some(Ok(ContractState::Unavailable { .. })) => Err(format!(
-            "{iface} {fp} is unavailable: no holder served it verified"
-        )),
-        Some(Ok(ContractState::Unreadable { reason })) => {
-            Err(format!("{iface} {fp} is unreadable: {reason}"))
+impl Governed {
+    /// The profile that governs it, as a finding names it:
+    /// `redundancy.v1`, `redundancy.v2`, `redundancy.v1 and
+    /// redundancy.v2`, or `redundancy` when no governed revision was read.
+    pub fn profile(&self) -> String {
+        profile_words(&self.majors)
+    }
+
+    /// Whether the profile governs it, by this verb: "governs" for one
+    /// major, "govern" for two.
+    pub fn governs(&self) -> &'static str {
+        if self.majors.len() > 1 {
+            "govern"
+        } else {
+            "governs"
         }
-        Some(Err(e)) => Err(format!("{iface} {fp} could not be retrieved: {e}")),
-        None => Err(format!("{iface} {fp} was not retrieved")),
+    }
+
+    /// The text a finding cites for a section: `redundancy.v2 §2.15` when
+    /// a revision read uses that major, else `redundancy.v1`'s, the text
+    /// `redundancy.v2` restates it from.
+    pub fn cite(&self, section: &str) -> String {
+        let text = if self.majors.contains(&Major::V2) {
+            Major::V2
+        } else {
+            Major::V1
+        };
+        format!("{text} {section}")
+    }
+}
+
+/// The majors in words, as [`Governed::profile`] names them.
+pub fn profile_words(majors: &[Major]) -> String {
+    match majors {
+        [] => model::NAME.to_owned(),
+        [m] => m.profile().to_owned(),
+        ms => {
+            let names: Vec<&str> = ms.iter().map(|m| m.profile()).collect();
+            names.join(" and ")
+        }
+    }
+}
+
+/// What one revision says of governance, as a reader of both majors reads
+/// it (`redundancy.v2` §2.2): its revision, and why it says nothing when
+/// it is unread or invalid.
+fn declared(contracts: &Contracts, iface: &IfaceId, fp: &Fingerprint) -> (Revision, String) {
+    match contracts.get(&(iface.clone(), fp.clone())) {
+        Some(Ok(ContractState::Held(rev))) => {
+            let c = rev.contract();
+            let why = match model::either_declaration_of(c, false) {
+                Declaration::Invalid(why) => {
+                    let major = Major::of(&c.uses).unwrap_or(Major::V1);
+                    format!(
+                        "{iface} {fp}'s {major} declaration is invalid ({}): it gives no \
+                         election to read ({major} §2.2)",
+                        why.iter()
+                            .map(|w| w.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+                _ => String::new(),
+            };
+            (Revision::of(c), why)
+        }
+        Some(Ok(ContractState::Unavailable { .. })) => (
+            Revision::Unread,
+            format!("{iface} {fp} is unavailable: no holder served it verified"),
+        ),
+        Some(Ok(ContractState::Unreadable { reason })) => (
+            Revision::Unread,
+            format!("{iface} {fp} is unreadable: {reason}"),
+        ),
+        Some(Err(e)) => (
+            Revision::Unread,
+            format!("{iface} {fp} could not be retrieved: {e}"),
+        ),
+        None => (Revision::Unread, format!("{iface} {fp} was not retrieved")),
     }
 }
 
 /// The governance of `addr`'s `iface`, from the revision every descriptor
 /// listing it names, in either read (§2.2): each instance is governed by
 /// the revision its descriptor names, and a tool reads the address's
-/// governance from every candidate's (§2.2, "Across revisions").
+/// governance from every candidate's (§2.2, "Across revisions"), of
+/// either major (`redundancy.v2` §2.2, §2.15). The token is
+/// `zenkey_model::redundancy::governance`'s over those revisions, as
+/// `v2/declarations.json`'s `addresses` read; this adds the words.
 pub fn governance(
     reads: &[Option<&Observed>],
     addr: &Addr,
@@ -194,73 +272,67 @@ pub fn governance(
                                 "a descriptor names {:?}, not a fingerprint: {err}",
                                 e.contract
                             ),
+                            majors: Vec::new(),
                         };
                     }
                 }
             }
         }
     }
-    if fps.is_empty() {
-        return Governed {
-            governance: Governance::NoContract,
-            says: format!(
-                "no descriptor read lists {iface}, so no revision says whether it is governed"
-            ),
-        };
-    }
-    let mut elections = BTreeSet::new();
-    let mut not_governed = Vec::new();
-    for fp in &fps {
-        match declared(contracts, iface, fp) {
-            Err(why) => {
-                return Governed {
-                    governance: Governance::NoContract,
-                    says: why,
-                };
-            }
-            Ok(Declaration::NotGoverned) => not_governed.push(fp.to_string()),
-            Ok(Declaration::Invalid(why)) => {
-                return Governed {
-                    governance: Governance::NoContract,
-                    says: format!(
-                        "{iface} {fp}'s redundancy.v1 declaration is invalid ({}): it gives no \
-                         election to read (redundancy.v1 §2.2)",
-                        why.iter()
-                            .map(|w| w.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                };
-            }
-            Ok(Declaration::Governed(e)) => {
-                elections.insert(e);
-            }
-        }
-    }
+    let read: Vec<(Revision, String)> = fps
+        .iter()
+        .map(|fp| declared(contracts, iface, fp))
+        .collect();
+    let governance = model::governance(read.iter().map(|(r, _)| *r));
+    let majors: Vec<Major> = read
+        .iter()
+        .filter_map(|(r, _)| match r {
+            Revision::Governed(m, _) => Some(*m),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let revisions = fps
         .iter()
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(", ");
-    match (elections.len(), not_governed.is_empty()) {
-        (0, _) => Governed {
-            governance: Governance::NotGoverned,
-            says: format!("{iface}'s revision(s) {revisions} list no redundancy.v1 in uses"),
-        },
-        (1, true) => {
-            let e = *elections.iter().next().expect("one");
-            Governed {
-                governance: Governance::Governed(e),
-                says: format!("{iface}'s revision(s) {revisions} use redundancy.v1, election {e}"),
-            }
+    let says = match governance {
+        _ if fps.is_empty() => {
+            format!("no descriptor read lists {iface}, so no revision says whether it is governed")
         }
-        _ => Governed {
-            governance: Governance::Disagree,
-            says: format!(
-                "{iface}'s revisions {revisions} disagree on governance or on the election \
-                 (redundancy.v1 §2.2)"
-            ),
-        },
+        Governance::NoContract => read
+            .iter()
+            .find(|(r, _)| matches!(r, Revision::Unread | Revision::Invalid))
+            .map(|(_, why)| why.clone())
+            .unwrap_or_default(),
+        Governance::NotGoverned => format!(
+            "{iface}'s revision(s) {revisions} list neither redundancy.v1 nor redundancy.v2 in \
+             uses"
+        ),
+        Governance::Governed(e) if majors.len() > 1 => format!(
+            "{iface}'s revisions {revisions} use {}, one election, {e} (redundancy.v2 §2.17)",
+            profile_words(&majors)
+        ),
+        Governance::Governed(e) => format!(
+            "{iface}'s revision(s) {revisions} use {}, election {e}",
+            profile_words(&majors)
+        ),
+        Governance::Disagree => format!(
+            "{iface}'s revisions {revisions} disagree on governance or on the election \
+             ({})",
+            if majors.contains(&Major::V2) {
+                "redundancy.v2 §2.2"
+            } else {
+                "redundancy.v1 §2.2"
+            }
+        ),
+    };
+    Governed {
+        governance,
+        says,
+        majors,
     }
 }
 
@@ -305,5 +377,20 @@ pub fn zid_of(reads: &[Option<&Observed>], addr: &Addr, id: &InstanceId) -> Opti
             .get("zid")?
             .as_str()
             .map(str::to_owned)
+    })
+}
+
+/// The run an instance's descriptor states (core §3.3; `redundancy.v2`
+/// §2.15: a tool shows each candidate's run beside its instance), from the
+/// later read that served one: 4 or 8 lowercase hexadecimal digits, as the
+/// descriptor spells it.
+pub fn run_of(reads: &[Option<&Observed>], addr: &Addr, id: &InstanceId) -> Option<String> {
+    reads.iter().rev().flatten().find_map(|o| {
+        o.descriptors
+            .as_ref()?
+            .get(&(addr.clone(), id.clone()))?
+            .descriptor()?
+            .run
+            .clone()
     })
 }
