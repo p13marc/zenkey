@@ -406,6 +406,30 @@ fn via_lines(d: &AclDirection) -> Vec<String> {
         .collect()
 }
 
+/// A transport value at zenoh's key, in zenoh's units, as the policy's key
+/// `key` states it (`link.v2` §2.1, §2.18): `wait_before_close` from µs to
+/// the milliseconds `transport.wait_before_close_ms` names, a fraction where
+/// it is no whole ms. Every other key is in one unit both ways, and a value
+/// that is no integer is shown as it is: no unit makes it one zenoh runs.
+fn in_policy_units(key: &str, v: &serde_json::Value) -> serde_json::Value {
+    if key != zenkey_model::link::TransportKey::WaitBeforeClose.at() {
+        return v.clone();
+    }
+    let ms = |us: i128| {
+        if us % 1_000 == 0 {
+            serde_json::Value::from((us / 1_000) as i64)
+        } else {
+            serde_json::Number::from_f64(us as f64 / 1_000.0)
+                .map_or_else(|| v.clone(), serde_json::Value::Number)
+        }
+    };
+    match (v.as_i64(), v.as_u64()) {
+        (Some(us), _) => ms(i128::from(us)),
+        (None, Some(us)) => ms(i128::from(us)),
+        (None, None) => v.clone(),
+    }
+}
+
 /// A `link.v2` policy's transport (§2.16), as the generator writes it
 /// (§2.18), each key beside zenoh's.
 fn transport_table(
@@ -623,16 +647,17 @@ impl Render for FaceCheck {
                         && k.peer
                             .as_ref()
                             .is_some_and(|p| !zenkey_model::link::same_value(p, &k.observed)));
+                let shown = |v: &serde_json::Value| in_policy_units(&k.key, v);
                 g.row([
                     Cell::text(format!("  {} {}", if differs { "✗" } else { " " }, k.key)),
-                    Cell::text(format!("planned {}", k.planned)),
+                    Cell::text(format!("planned {}", shown(&k.planned))),
                     Cell::text(format!(
                         "runs {}{}",
-                        k.observed,
+                        shown(&k.observed),
                         if k.stated { "" } else { " (the default)" }
                     )),
                     Cell::text(match &k.peer {
-                        Some(p) => format!("far end {p}"),
+                        Some(p) => format!("far end {}", shown(p)),
                         None => String::new(),
                     }),
                 ]);
