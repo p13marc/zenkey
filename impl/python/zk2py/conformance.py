@@ -4354,7 +4354,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
         + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
         + _round123_readings(root) + _round124_readings(root) + _round125_readings(root) \
-        + _round126_readings(root)
+        + _round126_readings(root) + _round127_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -5496,7 +5496,8 @@ def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple
     out.append(("core 0.117 §7.6 \"Never 0\", §9.2's E051 per type and cascade 7's clause, as zk2py reads them: "
                 "tag.json's Zero and Unnamed draw E051, Fine at 11 none; a file with E028 draws none; Grow at its "
                 "maximum of 100 has the tag 11, and at 127 had 0; since the mend after round 126 the row, the "
-                "clause, the odds and observer §7.3 set a type a profile derives aside",
+                "clause, the odds and observer §7.3 set a type a profile derives aside; since core 0.119 (F-618, "
+                "round 127) the clause reads \"none of E038 to E043 and E045\" and \"as those lints do\"",
                 [[w.split(": ")[1] for _, w in packed.tag_zero(packed.lint(tag), "tag.json")],
                  packed.lint(tag).types["Fine"].tag,
                  load_contract(root / "contracts" / "e028-packed-tag.toml").codes,
@@ -5505,10 +5506,10 @@ def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple
                 + missing(core, "- **Never 0.** A type whose tag is 0 is E051 (§9.2).",
                           "| E051 | a packed type whose layout tag is 0 (§7.6), the tag a record of any other kind "
                           "carries (§7.5); a type a profile derives aside | per type |",
-                          "- E051 reads a type with none of E038 to E045, in a file without E028. Only such a type "
-                          "has a layout form whose JCS bytes every implementation agrees on (§9.6). It reads every "
-                          "type the file defines, whether a resource names it or not, as E038 to E045 do, but a "
-                          "type a profile derives (§7.6).",
+                          "- E051 reads a type whose declaration has none of E038 to E043 and E045, in a file "
+                          "without E028. Only such a type has a layout form whose JCS bytes every implementation "
+                          "agrees on (§9.6). It reads every type the file defines, whether a resource names it or "
+                          "not, as those lints do, but a type a profile derives (§7.6).",
                           "- **Its tag may be 0.** One revision in 16 has the tag 0, which an owner heartbeat's CH "
                           "and a record of any other kind carry too. No lint refuses it, as E051 refuses a packed "
                           "type at 0 (§9.2).",
@@ -5522,14 +5523,24 @@ def _round126_e051(root: Path, core: str, flat: Any, missing: Any) -> list[tuple
                 [["Unnamed", "Zero"], 11, ["E028"], 11, 0]))
     # F-618: E044 is a reference's, and takes no type out of E051.
     e044 = load_contract(root / "contracts" / "e044-packed-place.toml").codes
-    out.append(("F-618 (round 126): cascade 7's \"none of E038 to E045\" holds E044, a reference's finding; zk2py "
-                "reads E051 beside it, as the reference does (packed_tag_live: an explicit stream's type at the tag "
-                "0 draws E044 and E051 at both), and cascade 8's \"(E038 to E045)\" so too; E044 is per reference, "
-                "and reads only the types a resource names",
+    out.append(("F-618 (round 126), resolved by core 0.119 (round 127): cascade 7's \"none of E038 to E045\" held "
+                "E044, a reference's finding; zk2py read E051 beside it, as the reference does (packed_tag_live), and "
+                "cascade 8's \"(E038 to E045)\" so too; E044 is per reference, and reads only the types a resource "
+                "names; 0.119 says so in cascade 7's new item, cascade 8's \"(E038 to E043, E045)\" and §9.4, and "
+                "contracts/e051-packed-place draws two E044, one E047 and two E051 in zk2py as its expect.json says",
                 [e044, "| E044 | a packed type with no CH to carry its tag: an explicit stream's type, or an "
-                       "attachment (§7.1) | per reference |" in core]
-                + missing(core, "a packed declaration with no finding (E038 to E045)."),
-                [["E044", "E044"], True]))
+                       "attachment (§7.1) | per reference |" in core,
+                 load_contract(root / "contracts" / "e051-packed-place.toml").codes,
+                 _load_json(root / "contracts" / "expect.json")["cases"]["e051-packed-place"]["codes"]]
+                + missing(core, "- E044 is no finding of the declaration. It reads where a resource places the type "
+                                "(§7.1), and leaves its layout form whole. So a type at the tag 0 that an explicit "
+                                "stream names draws both E044 and E051.",
+                          "E047's marker half and E049 also wait for a packed declaration with no finding (E038 to "
+                          "E043, E045). An attachment's E044 does not stop them.",
+                          "- **Its declarations** are linted E038 to E043 and E045, and its placement E044 (§7.1).")
+                + [x for x in ("none of E038 to E045", "(E038 to E045)", "linted E038 to E045") if x in core],
+                [["E044", "E044"], True, ["E044", "E044", "E047", "E051", "E051"],
+                 ["E044", "E044", "E047", "E051", "E051"]]))
     # The survey, by zk2py's reading of §7.6, over the three roots it may read.
     s = survey(spec.parent)
     clean = [r for r in s["rows"] if r["tag"] is not None]
@@ -5657,6 +5668,206 @@ def _round126_owner_heartbeats(root: Path, flat: Any, missing: Any) -> list[tupl
                 + missing(flat("profiles/link/CHANGELOG.md"), "**The header** restates `link.v1` text 0.20, and is "
                                                               "written against core 0.108"),
                 ["0.21", True]))
+    return out
+
+
+def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """core 0.119, link.v2 0.29, alarms.v2 0.2 and desired.v2 0.3 (#609,
+    round 127; #984, #986): each text at its version with its entry, and
+    each answer as zk2py now reads it: F-618's cascades, F-573's case 54,
+    F-613's horizon, F-614's slot, and §2.18's new run read first. No
+    session is opened: the target's hold is run over a descriptor read that
+    zk2py stands in for."""
+    import copy
+    import re
+    import threading
+
+    from . import alarms as v1, alarms_v2 as a2, alarms_v2_live as al, desired_v2 as d2, link, link_v2
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    def at(rel: str) -> str | None:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", flat(rel))
+        return m.group(1) if m else None
+
+    core, index = flat("core.md"), flat("profiles/README.md")
+    core_at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
+    log, llog = flat("CHANGELOG.md"), flat("profiles/link/CHANGELOG.md")
+    alog, dlog = flat("profiles/alarms/CHANGELOG.md"), flat("profiles/desired/CHANGELOG.md")
+    a2t, a2s = flat("profiles/alarms/v2.md"), flat("profiles/alarms/scenarios-v2.md")
+    d2t, d2s = flat("profiles/desired/v2.md"), flat("profiles/desired/scenarios-v2.md")
+
+    def row(name: str, rel: str, status: str, used: str, written: str) -> bool:
+        m = re.search(rf"\| \[`{re.escape(name)}`\]\({re.escape(rel)}\) \| (\d+\.\d+) \| {status} \| "
+                      rf"{re.escape(used)} \| {re.escape(written)} \|", index)
+        return m is not None
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("round 127's texts at their versions or later, each with its entry: core 0.119 by its header, "
+                "link.v2 0.29, alarms.v2 0.2 and desired.v2 0.3, still written against core 0.108, 0.115 and "
+                "0.112; the index's rows; core's CHANGELOG has no 0.118 entry and link's no link.v2 0.28 (F-623)",
+                [core_at is not None and _at_least(core_at.group(1), "0.119"),
+                 _at_least(at("profiles/link/v2.md"), "0.29"), _at_least(at("profiles/alarms/v2.md"), "0.2"),
+                 _at_least(at("profiles/desired/v2.md"), "0.3"),
+                 row("link.v2", "link/v2.md", "draft", "zenoh-modem", "0.108"),
+                 row("alarms.v2", "alarms/v2.md", "experimental", "none", "0.115"),
+                 row("desired.v2", "desired/v2.md", "experimental", "none", "0.112"),
+                 "## 0.118 " in log, "## link.v2 0.28 " in llog]
+                + missing(log, "## 0.119 — 2026-11-28: editorial: §9.2's cascades 7 and 8 read E044 as a type's "
+                               "placement, never its declaration, as both linters do, no keyword changed (#1152)")
+                + missing(llog, "## link.v2 0.29 — 2026-11-28: editorial: `v2/plan.json`'s case 54, a collection two "
+                                "revisions disagree on, read `host` for the horizon and the longest put, no keyword "
+                                "changed (#975)")
+                + missing(alog, "## alarms.v2 0.2 — 2026-11-28: zk2py's round 124: an alarm ages at the horizon of "
+                                "the revision its owner names, and a reader with no run stated answers each entry by "
+                                "its slot, no keyword changed (#984)")
+                + missing(dlog, "## desired.v2 0.3 — 2026-11-28: §2.18: a target judges nothing of its author's new "
+                                "run before it reads the descriptor stating that run, with §16's run E (#986)")
+                + missing(flat("profiles/link/v2.md"), "| **Written against** | core 0.108 (")
+                + missing(a2t, "| **Written against** | core 0.115 (")
+                + missing(d2t, "| **Written against** | core 0.112 ("),
+                [True] * 7 + [False, False]))
+
+    # -- F-573: v2/plan.json's case 54 -------------------------------------------------------
+    plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+
+    def figures(c: dict[str, Any]) -> list[Any]:
+        res = {i: link.merge_revisions(i, link.revisions_of(v)) for i, v in c["interfaces"].items()}
+        beating = [i for i in c["implements"]["node-a"] if link.heartbeat_of(c["interfaces"][i], res[i])]
+        rs = [res[i] for i in beating]
+        return [link_v2.owner_heartbeat_longest_bits(rs), link_v2.owner_heartbeat_longest(rs),
+                link_v2.owner_heartbeat_horizon(rs)]
+
+    c54 = plan[54]
+    counted = copy.deepcopy(c54)
+    counted["interfaces"]["quiet.v1"] = counted["interfaces"]["quiet.v1"]["revisions"][1]
+    got_c = link_v2.plan(counted["policy"], counted["implements"], _link_interfaces(counted), counted.get("catalog"))
+    out.append(("F-573, resolved by link.v2 0.29 (round 127): v2/plan.json's case 54 is case 48 with a second "
+                "revision of quiet.v1, in which `note` reads link at 30 s; read host, the plan is case 48's with "
+                "exposure_disagrees at quiet.v1/state/note, its longest owner heartbeat 1,211 bits, 160 bytes, at "
+                "60 s; counted link (quiet.v1 its second revision alone) 1,267 bits, 167 bytes, at 30 s, as the "
+                "entry says, and zk2py's plan of it draws block_over_batch and horizon_under_face at the link key, "
+                "and horizon_under_face at quiet.v1's own heartbeat, which then crosses: a third the entry's \"fail "
+                "twice\" leaves out; §2.9's item cites the file",
+                [len(plan), figures(plan[48]), figures(c54), figures(counted),
+                 sorted((f["code"], f["at"]) for fp in got_c["faces"] for f in fp["findings"]),
+                 c54["expect"]["faces"][0]["findings"] if c54["expect"].get("faces") else None]
+                + missing(a := flat("profiles/link/v2.md"), "- **A collection the revisions disagree on** is read "
+                          "`host`, as `link.v1` §2.3 reads it. The plan gives it no section and weighs no horizon of "
+                          "it (below, §2.16). `[F: v2/plan.json]`")
+                + missing(llog, "**Counted `link`,** it would fail twice."),
+                [55, [1211, 160, 60], [1211, 160, 60], [1267, 167, 30],
+                 [("block_over_batch", "freshness.v2/stream/heartbeats/link"),
+                  ("horizon_under_face", "freshness.v2/stream/heartbeat/quiet.v1"),
+                  ("horizon_under_face", "freshness.v2/stream/heartbeats/link")],
+                 [{"at": "quiet.v1/state/note", "code": "exposure_disagrees", "face": "radio", "severity": "warning"}]]))
+
+    # -- F-613: the horizon is the revision's ------------------------------------------------
+    std, cp = a2.standard(), al.standard(4)
+    held_std = {std.fingerprint: std.canonical}
+    nh = a2.judge_reading(a2.Reading("present", {"lists": True}, None, al.NO_REVISION, "firing"))
+    nh_res = a2.judge_reading(a2.Reading("present", {"lists": True}, None, al.NO_REVISION, "resolved"))
+    out.append(("F-613, resolved by alarms.v2 0.2 (round 127): §2.7's \"The horizon is the revision's\", §2.14's "
+                "step 6 and the Conventions' items; zk2py's reader ages by the revision its owner names: the "
+                "standard's 900 s and the copy's 4 s where held; the copy neither held nor retrievable (across a "
+                "face, never retrieved), or a word that names no alarms.v2 revision, gives none, and a firing "
+                "alarm then reads unobservable, freshness.v1's not_a_horizon, which the text does not name "
+                "(F-621), a resolved one no, resolved",
+                [al.horizon_of(None, [std.fingerprint], held_std)[:2],
+                 al.horizon_of(None, [cp.fingerprint], {**held_std, cp.fingerprint: cp.canonical})[:2],
+                 al.horizon_of(None, [cp.fingerprint], held_std, retrieve=False)[:2],
+                 al.horizon_of(None, ["sha256:" + "0" * 64], held_std, retrieve=False)[:2],
+                 al.horizon_of(None, [], held_std)[:2], nh.pair(), nh_res.pair()]
+                + missing(a2t, "- **The horizon is the revision's.** A reader ages an alarm at the `freshness.ttl_s` "
+                               "of the revision its owner's descriptor names (core §3.3). That is v1 §2.7's "
+                               "\"contract's horizon\". Across a face, the deployment's word names the revision "
+                               "(§2.11). `[Sc: §2, §6]`",
+                          "- The standard revision's horizon is 900 s. Every 900 s and 450 s in this text is that "
+                          "revision's.",
+                          "- **A revision not in hand** gives no horizon. A reader that neither holds nor can "
+                          "retrieve the revision its owner names reads that owner's alarms' freshness as "
+                          "unobservable, never at 900 s: a shorter horizon read at the standard one would call a "
+                          "stale alarm fresh.",
+                          "- **Step 6, its freshness,** is `freshness.v2`'s, at the horizon of the revision its owner "
+                          "names (§2.7).")
+                + missing(a2s, "- **Every reader reads the copy's horizon.** S, G and the tools hold the copy. Each "
+                               "is given it, or retrieves it (core §8.4). Each ages the alarms at 4 s (v2.md §2.7).")
+                + ([] if "not_a_horizon" not in a2t else ["v2.md names not_a_horizon"]),
+                [(900, "held"), (4, "held"), (None, "not_in_hand"), (None, "not_in_hand"), (None, "not_named"),
+                 {"answer": "unobservable", "reason": "not_a_horizon"}, {"answer": "no", "reason": "resolved"}]))
+
+    # -- F-614: with no run stated, each entry by its slot ------------------------------------
+    far = a2.judge_reading(a2.Reading("across_face", None, {"reachable": True}, ("fresh", "within_horizon"),
+                                      "firing", held_whole=True))
+    out.append(("F-614, resolved by alarms.v2 0.2 (round 127): §2.6's item is two, \"Taking chooses between an "
+                "identity's slots\" and \"With no run stated\", and §2.15's table answers a far reader's firing "
+                "entry by its slot; zk2py takes no slot with no run stated, and answers a far firing entry yes, "
+                "firing, as it did (no code moved)",
+                [a2.reader_slot([a2.SlotSeen(1, "0001", 0)], None), far.pair()]
+                + missing(a2t, "- **Taking chooses between an identity's slots.** A slot is taken only under the "
+                               "present run. Taking moves no slot's answer. A reader answers each record it holds by "
+                               "its slot (§2.14). `[F: v2/slots.json]`",
+                          "- **With no run stated,** as across a face, a reader takes no slot. It compares no "
+                          "identity across slots. It answers each entry by its slot, as §2.15's table does. So an "
+                          "established owner's firing entry is aged by its confirmation, never `not_held`. "
+                          "`[F: v2/conclusions.json]`",
+                          "| a GET by grant, answered by a complete snapshot | established. Each firing entry is "
+                          "answered by its slot (§2.6). It is aged by its confirmation (`freshness.v2` §2.6) |"),
+                [None, {"answer": "yes", "reason": "firing"}]))
+
+    # -- desired.v2 0.3 §2.18: a new run is read first ----------------------------------------
+    from .desired_v2_live import Target
+
+    t = Target("lab/worker", "tcp/127.0.0.1:1")
+    gate, order = threading.Event(), []
+    asked: list[Any] = []
+
+    def says(run: Any) -> tuple[str, Any]:
+        asked.append(run)
+        gate.wait(5.0)
+        return "stopped:desired.v1:sha256:" + "0" * 64, run
+
+    t._descriptor_says = says  # type: ignore[method-assign]
+    t._receive = lambda x, live_: order.append(("sample", x.version.text, t._revision_of_run(x.version.run.text)))  # type: ignore[method-assign]
+    t._receive_no_entry = lambda n: order.append(("no_entry", n.run.text, t._revision_of_run(n.run.text)))  # type: ignore[method-assign]
+    r7 = d2.Run(16, 7)
+    t._judge_or_wait(("sample", d2.Sample("owner", False, d2.Version(r7, 1)), True))
+    t._judge_or_wait(("sample", d2.Sample("owner", False, d2.Version(r7, 0)), False))
+    t._judge_or_wait(("no_entry", d2.NoEntry(r7, 0), False))
+    before = list(order)
+    gate.set()
+    for _ in range(100):
+        if len(order) == 3:
+            break
+        threading.Event().wait(0.02)
+    t.revisions["0008"] = "given"
+    t._judge_or_wait(("sample", d2.Sample("owner", False, d2.Version(d2.Run(16, 8), 0)), True))
+    stop = "stopped:desired.v1:sha256:" + "0" * 64
+    out.append(("desired.v2 0.3 §2.18, \"A new run is read first\" (review-bot's gap, round 127): zk2py's target "
+                "judges nothing of a run whose descriptors it has not read, a put, a read's entry and a snapshot "
+                "with no entry alike, reads them once, then judges each in its order of arrival by the revision "
+                "they name; a run already read is judged at once; §14's Expected 5 and §16's run E as worded",
+                [before, asked, order]
+                + missing(d2t, "- **A new run is read first.** A target MUST NOT judge a version under a run whose "
+                               "descriptor it has not read, nor a snapshot with no entry under it, before it reads "
+                               "its author's descriptors for that run. `[Sc: §14, §16]` It reads them once (core "
+                               "§3.3). It then judges what that run carries by the revision they name.",
+                          "- **A read that names none** leaves the deployment's word: no descriptor reached the "
+                          "target, as across a face, none states the run, or the read failed.",
+                          "- **Why.** An author that restarts on a revision of the other major puts its first "
+                          "version just after its new descriptor (core §8.2), before a target has read it.")
+                + missing(d2s, "- Asked while the descriptors' read runs, it carries v3's earlier stamp and is "
+                               "answered whole. Its entry waits with the put, and is the same version.",
+                          "8. The author's process ends without closing. It starts again on run C's revision, under "
+                          "a new run, from its record. It puts v1 again, and then v2.",
+                          "8. **Run E:** the target judges nothing of the new run before it reads the descriptor "
+                          "stating that run (§2.18). It names run C's revision, so the role stops. The target says "
+                          "so, and acts on neither put. `Rp` and `Run` receive nothing."),
+                [[], ["0007"], [("sample", "0007/1", stop), ("sample", "0007/0", stop), ("no_entry", "0007", stop),
+                                ("sample", "0008/0", "given")]]))
     return out
 
 
@@ -8472,11 +8683,12 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "plan's half), and its evidence (F-573): §2.16's warning it bears on cites `[F: v2/plan.json]`, and "
                 "no case of v2/plan.json's 49, 50 since link.v2 0.23's case 49 (round 118), 51 since 0.24's case "
                 "50 (round 121), 52 since 0.25's case 51 (round 122), 53 since 0.26's case 52 (round 125, whose entry "
-                "says F-573's case is drafted in the code half) and 54 since 0.27's case 53 (round 126), draws "
+                "says F-573's case is drafted in the code half) and 54 since 0.27's case 53 (round 126), drew "
                 "exposure_disagrees, "
-                "so none holds such a collection: a plan "
-                "that counted it `link`, for the horizon or for the longest put, passes the file whole; link.v1's "
-                "plan.json draws the code, in cases that weigh no owner heartbeat",
+                "so none held such a collection: a plan "
+                "that counted it `link`, for the horizon or for the longest put, passed the file whole; link.v1's "
+                "plan.json draws the code, in cases that weigh no owner heartbeat; since link.v2 0.29 (round 127) "
+                "case 54, of 55, draws it, and F-573 is resolved: :func:`_round127_readings`",
                 [len(plan), [i for i, c in enumerate(plan) if "exposure_disagrees" in codes(c["expect"])],
                  bool([i for i, c in enumerate(plan1) if "exposure_disagrees" in codes(c["expect"])])]
                 + missing(l2, "- **A collection the revisions disagree on** is read `host`, as `link.v1` §2.3 reads "
@@ -8485,7 +8697,7 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "heartbeat is above `batch_bytes` (`block_over_batch`). `[F: v2/plan.json]`")
                 + missing(llog, "- **Now:** the plan reads it `host`, for the horizon and for the longest put. Both "
                                 "implementations do."),
-                [54, [], True]))
+                [55, [54], True]))
 
     # -- scope/faces.json's four cases, v2/transport.json's five, carries.json's three ------
     faces = _load_json(root / "scope" / "faces.json")["cases"]

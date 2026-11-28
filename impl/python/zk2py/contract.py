@@ -601,7 +601,9 @@ class _Loader:
         """Core §7.7 and §9.2's E047 to E050 on a frame resource, in cascade
         8's order (core 0.83, #981 K1): E047 and E049 read the record type,
         waiting for one that resolves, and E047's marker half and E049 for a
-        packed declaration with no finding; E050 waits for the values it
+        packed declaration with no finding (core 0.119: "(E038 to E043,
+        E045). An attachment's E044 does not stop them"); E050 waits for the
+        values it
         reads, none of them E048's, and reads the ``timing.*`` values as
         ``timing.v1`` §2.2 reads a declaration: one that does not read makes
         it invalid, and E050 reads none of them (core 0.85, F-452). A frame

@@ -1,6 +1,7 @@
 """The ``packed`` type kind (core §7.6, 0.75, #979 B1): a packed file's
-shape and its lints (§9.2's E038 to E045, cascade 7, and since core 0.117
-E051, :func:`tag_zero`), each type's layout,
+shape and its lints (§9.2's E038 to E043 and E045, cascade 7, and since
+core 0.117 E051, :func:`tag_zero`; E044, where a resource places a type, is
+:mod:`zk2py.contract`'s, core 0.119), each type's layout,
 layout form and tag, and its codec, a record written from its JSON reading
 and read back to it.
 
@@ -582,7 +583,7 @@ def writer_decimal(f: Field, v: Any) -> Fraction:
     return -q if sign == "-" else q
 
 
-# -- the file and its lints (§9.2 E038–E045, cascade 7) -------------------------
+# -- the file and its lints (§9.2 E038–E043 and E045, cascade 7) ---------------
 
 @dataclass
 class Linted:
@@ -645,7 +646,7 @@ def _repeats(names: list[str]) -> int:
 def field_of(item: dict[str, Any]) -> Field:
     """One item of a type's ``fields``, as §7.6 declares it, read into its
     :class:`Field`: its kind, its bounds, reserved names, values or width.
-    The item is read as written; :func:`lint` judges it (E038 to E045). A
+    The item is read as written; :func:`lint` judges it (E038 to E043, E045). A
     caller that compares fields by their widths, as config.v2's lint does
     (``config_v2._normal``), reads them here."""
     t = item["type"]
@@ -702,7 +703,8 @@ def _declaration_problem(item: dict[str, Any]) -> tuple[str, str] | None:
 
 def lint(doc: Any, where: str = "") -> Linted:
     """Read one packed document (§7.6 "The schema file"): its types, and
-    §9.2's E038 to E045 under cascade 7."""
+    §9.2's E038 to E043 and E045 under cascade 7 (core 0.119: "Its
+    declarations are linted E038 to E043 and E045, and its placement E044")."""
     out = Linted()
     if not isinstance(doc, dict):
         out.err("E038", f"{where}: the top level is not an object")
@@ -788,9 +790,10 @@ def lint(doc: Any, where: str = "") -> Linted:
 def tag_zero(linted: Linted, where: str = "") -> list[tuple[str, str]]:
     """§9.2's E051 over one linted file, per type: "a packed type whose
     layout tag is 0 (§7.6), the tag a record of any other kind carries
-    (§7.5)". Cascade 7 (core 0.117): "E051 reads a type with none of E038 to
-    E045, in a file without E028 ... It reads every type the file defines,
-    whether a resource names it or not, as E038 to E045 do." So it reads
+    (§7.5)". Cascade 7 (core 0.119): "E051 reads a type whose declaration
+    has none of E038 to E043 and E045, in a file without E028 ... It reads
+    every type the file defines, whether a resource names it or not, as
+    those lints do, but a type a profile derives (§7.6)." So it reads
     :attr:`Linted.types`, the types with no finding of their own; the caller
     gives it a file with no E028 alone (:mod:`zk2py.schemas`), and the
     contract's loader sets aside each type a profile derives ("but a type a
@@ -798,8 +801,11 @@ def tag_zero(linted: Linted, where: str = "") -> list[tuple[str, str]]:
     :func:`zk2py.config_v2.derived_types`).
 
     E044 is a reference's, never a declaration's, so it takes no type out
-    here: zk2py reads "none of E038 to E045" as cascade 8's "a packed
-    declaration with no finding (E038 to E045)" (round 126's F-618).
+    here. Round 126 read 0.117's "none of E038 to E045" so (F-618), and core
+    0.119 says it: "E044 is no finding of the declaration. It reads where a
+    resource places the type (§7.1), and leaves its layout form whole. So a
+    type at the tag 0 that an explicit stream names draws both E044 and
+    E051."
 
     It is not among :func:`lint`'s findings: a type at the tag 0 still
     writes and reads (``frame/layouts.json``'s ``Tick``), and only a
