@@ -418,3 +418,96 @@ fn every_adopter_frame_has_its_largest_frame() {
     );
     assert_eq!(gendev["frames/sample"], 100);
 }
+
+/// zenoh-modem's node descriptor in its compact form (core §3.3, "Sizes";
+/// #980 C5a): `modem.v3`, `config.v1`, `health.v1` and `freshness.v2` at
+/// their current revisions, under `catalog.json`, holding all 30
+/// capabilities `modem.v3` gates on, as `zenctl gen` does. The design memo
+/// measured its JSON form at 1,344 B. Compact, it is 22 B with a 16-bit
+/// run, 24 B with a 32-bit one, and 16 B more with the zid. It decodes back
+/// to what was written.
+#[test]
+fn the_zenoh_modem_node_descriptor_is_22_bytes_compact() {
+    use zenkey_model::catalog::Catalog;
+    use zenkey_model::descriptor::compact::{Compact, decode, encode, gated};
+    use zenkey_model::descriptor::{Descriptor, FORMAT, InterfaceEntry};
+    use zenkey_model::grammar::{Addr, InstanceId};
+    use zenkey_model::wire::Seq;
+    let catalog =
+        Catalog::parse_bytes(&std::fs::read(examples().join("zenoh-modem/catalog.json")).unwrap())
+            .unwrap();
+    let profiles = Path::new(env!("CARGO_MANIFEST_DIR")).join("../spec/profiles");
+    let revisions: Vec<Contract> = [
+        examples().join("zenoh-modem/modem.v3.toml"),
+        profiles.join("config/config.v1.toml"),
+        profiles.join("health/health.v1.toml"),
+        profiles.join("freshness/freshness.v2.toml"),
+    ]
+    .iter()
+    .map(|f| load_path(f).contract.expect("validated above"))
+    .collect();
+    let refs: Vec<&Contract> = revisions.iter().collect();
+    let capabilities = gated(&revisions[0]);
+    assert_eq!(capabilities.len(), 30, "modem.v3's capabilities");
+    assert!(revisions[1..].iter().all(|c| gated(c).is_empty()));
+    let node = |run: &str, zid: Option<&str>| Compact {
+        descriptor: Descriptor {
+            format: FORMAT.to_owned(),
+            service: "h-3fa9c2d41b7e/rf0".into(),
+            instance: "3fa9c2d41b7e0012".into(),
+            run: Some(run.into()),
+            catalog: Some(catalog.id().hex()),
+            interfaces: revisions
+                .iter()
+                .map(|c| InterfaceEntry {
+                    iface: c.iface.to_string(),
+                    contract: Fingerprint::of(c).to_string(),
+                    minor: None,
+                    standby: false,
+                    token: true,
+                    unavailable: Vec::new(),
+                    cardinality: Default::default(),
+                })
+                .collect(),
+            capabilities: capabilities.clone(),
+            requires: Vec::new(),
+            profiles: Vec::new(),
+            meta: zid
+                .map(|z| [("zid".to_owned(), z.into())].into_iter().collect())
+                .unwrap_or_default(),
+        },
+        seq: Seq::new(41).unwrap(),
+        minted: false,
+    };
+    let held = [catalog.clone()];
+    let size = |v: &Compact| encode(v, &held, &refs).unwrap().len();
+    assert_eq!(size(&node("0003", None)), 22, "the memo's 22 B");
+    assert_eq!(size(&node("0000a1b2", None)), 24, "a 32-bit run");
+    assert_eq!(
+        size(&node("0003", Some("a1b2c3d4e5f60718293a4b5c6d7e8f90"))),
+        38,
+        "with the zid"
+    );
+    let v = node("0003", None);
+    let bytes = encode(&v, &held, &refs).unwrap();
+    let addr = Addr::new("h-3fa9c2d41b7e", "rf0").unwrap();
+    let instance: InstanceId = "3fa9c2d41b7e0012".parse().unwrap();
+    let back = decode(&bytes, &addr, &instance, &held, &refs).unwrap();
+    assert_eq!(back.descriptor.interfaces, {
+        let mut i = v.descriptor.interfaces.clone();
+        i.sort_by_key(|e| {
+            catalog.index_of(
+                &e.iface.parse().unwrap(),
+                &Fingerprint::parse(&e.contract).unwrap(),
+            )
+        });
+        i
+    });
+    assert_eq!(back.descriptor.capabilities, capabilities);
+    assert_eq!(
+        back.descriptor.profiles,
+        ["freshness.v2", "link.v1", "telemetry.v2"],
+        "the revisions' uses, sorted"
+    );
+    assert_eq!(encode(&back, &held, &refs).unwrap(), bytes, "writes back");
+}

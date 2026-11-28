@@ -27,6 +27,8 @@ use crate::diag::{Diagnostic, Report};
 use crate::grammar::{IfaceId, KindToken};
 use crate::wire::Run;
 
+pub mod compact;
+
 /// The format tag of this version of the record.
 pub const FORMAT: &str = "zk2-descriptor/0.1";
 
@@ -202,10 +204,10 @@ fn some_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Er
 /// supplied is checked for syntax only.
 #[must_use]
 pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report) {
-    let mut report = Report::default();
     let value = match crate::strict::parse_json(text) {
         Ok(v) => v,
         Err(e) => {
+            let mut report = Report::default();
             report.push(Diagnostic::error(
                 "D000",
                 "descriptor",
@@ -217,6 +219,7 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
     let d: Descriptor = match serde_json::from_value(value) {
         Ok(d) => d,
         Err(e) => {
+            let mut report = Report::default();
             report.push(Diagnostic::error(
                 "D000",
                 "descriptor",
@@ -225,6 +228,17 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
             return (None, report);
         }
     };
+    let report = check_descriptor(&d, contracts);
+    (Some(d), report)
+}
+
+/// Checks a descriptor already read: every code but D000, which is the
+/// reading's. What [`check`] reports once the JSON reads, and what a
+/// checker reports on a compact descriptor's decoding (core §3.3, "The
+/// checks on a decoded descriptor"; [`compact::decode`]).
+#[must_use]
+pub fn check_descriptor(d: &Descriptor, contracts: &[&Contract]) -> Report {
+    let mut report = Report::default();
     if d.format != FORMAT {
         report.push(Diagnostic::error(
             "D001",
@@ -424,7 +438,7 @@ pub fn check(text: &str, contracts: &[&Contract]) -> (Option<Descriptor>, Report
             "a profile is listed twice",
         ));
     }
-    (Some(d), report)
+    report
 }
 
 /// The exposure rules of one interface against its contract.
