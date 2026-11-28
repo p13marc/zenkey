@@ -1,0 +1,88 @@
+# core §3.3's compact descriptor: a revision that gates on ten capabilities,
+# one resource gated on two of them and one on a capability and a config,
+# so its bitmap is ten bits; thirteen resources, so a resource is four bits;
+# two templates, one unbounded, so a bound can take LEB128's five bytes.
+[interface]
+name    = "cap"
+major   = 1
+minor   = 0
+summary = "Sensors gated on capabilities, for the compact descriptor's cases"
+uses    = ["freshness.v1"]
+
+[resources.odom]
+kind = "state"
+type = { raw = "application/json" }
+
+[resources.baro]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "capability:baro"
+
+[resources.cam]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = ["capability:camera", "capability:gpu"]
+
+[resources.depth]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "capability:sonar"
+
+[resources.fix]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "capability:gnss"
+
+[resources.heat]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = ["config:heat", "capability:thermal"]
+
+[resources.lidar]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "capability:lidar"
+
+[resources.mag]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "capability:mag"
+
+[resources.radar]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "capability:radar"
+
+[resources."samples/{sample}"]
+kind        = "state"
+type        = { raw = "application/json" }
+params      = { sample = "string" }
+cardinality = "unbounded"
+
+[resources."zones/{zone}"]
+kind        = "state"
+type        = { raw = "application/json" }
+params      = { zone = "string" }
+cardinality = 300
+optional    = true
+
+[resources.imu_raw]
+kind     = "stream"
+type     = { raw = "application/octet-stream" }
+optional = true
+gate     = "capability:imu"
+
+[resources.calibrate]
+kind     = "operation"
+request  = { raw = "application/json" }
+response = { raw = "application/json" }
+optional = true
+gate     = "capability:imu"

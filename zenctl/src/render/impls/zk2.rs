@@ -146,6 +146,9 @@ fn descriptor_cell(d: &Asked<DescriptorAnswer>) -> Cell {
         Asked::Asked(DescriptorAnswer::Invalid { .. }) => {
             Cell::styled("descriptor invalid", style::ERROR)
         }
+        Asked::Asked(DescriptorAnswer::Unread { .. }) => {
+            Cell::styled("descriptor not read", style::UNPROVEN)
+        }
         Asked::Asked(DescriptorAnswer::Failed { .. }) => {
             Cell::styled("descriptor not asked: GET failed", style::UNPROVEN)
         }
@@ -370,6 +373,15 @@ impl Render for ServiceView {
                 }
                 Asked::Asked(DescriptorAnswer::Invalid { findings }) => {
                     t.line_styled(format!("  descriptor: invalid — {findings}"), style::ERROR);
+                }
+                Asked::Asked(DescriptorAnswer::Unread { reason }) => {
+                    t.line_styled(
+                        format!("  descriptor: compact, not read — {reason}"),
+                        style::UNPROVEN,
+                    );
+                    let mut g = Grid::unheaded(4);
+                    iface_rows(&mut g, &i.interfaces, false);
+                    t.grid(g);
                 }
                 Asked::Asked(DescriptorAnswer::Failed { reason }) => {
                     t.line_styled(

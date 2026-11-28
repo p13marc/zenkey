@@ -93,6 +93,10 @@ criterion = { workspace = true }
 # `tests/link_face.rs` §11: certificates for a session that presents a CN
 # beside its user name (`link.v1` 0.5, #769 LE).
 rcgen = { workspace = true }
+# `tests/compact_readers.rs` includes the runtime's example owners
+# (`zenkey/examples/owner/{config,desired}.rs`), whose contracts load from a
+# directory of their own (#980 C5b2).
+tempfile = { workspace = true }
 
 [[bench]]
 name = "fleet"

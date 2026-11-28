@@ -2297,14 +2297,21 @@ pub(crate) enum ServiceCmd {
     /// consumer is listed too: every instance holds an instance token. A read
     /// that ran to its timeout, or to its session's interests timeout
     /// (`routing/interests/timeout`), is possibly incomplete, and says so: a
-    /// service missing from it may still be up.
+    /// service missing from it may still be up. A compact descriptor (§3.3,
+    /// under `zenoh/bytes`) is read through --catalog, each revision it
+    /// names held by --contracts or retrieved; without the catalog it names
+    /// it is not read (`unknown_catalog`), and lists nothing.
     List(ServiceListArgs),
     /// One service: each instance's tokens and the descriptor it serves.
     ///
     /// The descriptor as served (spec §3.3): its interfaces with their full
     /// fingerprints, the tokenless set, capabilities, unavailable resources
-    /// and cardinality bounds, and every role with its bindings. Exit 2 when
-    /// presence shows no instance: silence is not an answer.
+    /// and cardinality bounds, and every role with its bindings. A compact
+    /// descriptor (under `zenoh/bytes`) is shown as the JSON form's members,
+    /// read through --catalog and each revision it names, held by
+    /// --contracts or retrieved; without the catalog it names it is not read
+    /// (`unknown_catalog`), never guessed. Exit 2 when presence shows no
+    /// instance: silence is not an answer.
     Show(ServiceShowArgs),
 }
 
@@ -2410,6 +2417,11 @@ pub(crate) struct ServiceListArgs {
     pub(crate) system: Option<String>,
     #[command(flatten)]
     pub(crate) first_hop: FirstHopArgs,
+    /// An owner's compact descriptor (core §3.3) is read through --catalog,
+    /// each revision it names held here or retrieved; without the catalog
+    /// it names it is not read, never guessed.
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -2435,6 +2447,12 @@ pub(crate) struct ServiceShowArgs {
     pub(crate) address: zenkey_model::grammar::Addr,
     #[command(flatten)]
     pub(crate) first_hop: FirstHopArgs,
+    /// An owner's compact descriptor (core §3.3) is read through --catalog,
+    /// each revision it names held here or retrieved, and shown as the JSON
+    /// form's members; without the catalog it names it is not read, never
+    /// guessed.
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -4461,6 +4479,10 @@ pub(crate) struct AdminGraphArgs {
     /// deployment's grants deny `@/**` queryables to every principal (§11.1).
     #[arg(long)]
     pub(crate) trust_admin_space: bool,
+    /// An instance's compact descriptor (core §3.3) is read through
+    /// --catalog, so its `meta.zid` joins it onto its router.
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }

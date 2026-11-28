@@ -7,6 +7,17 @@ names where its question went, or that nothing on `main` asks it yet. No
 aliases and no shims, except where the two spellings were always one fact
 (`base` and `namespace`).
 
+## Unreleased (`main`, zk2) — the compact descriptor read (#980's C5b2)
+
+Core 0.120 §3.3. A descriptor under `zenoh/bytes` is the compact form,
+which no owner writes before C5c. zenwatch reads one through the
+top-level `catalog`. No key of the config changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| a rule on a tokenless interface's tokens: refused when a JSON descriptor marks it `"token": false` | also when a compact one does, read through `catalog` | with no `catalog` that reads it, nothing says the interface is tokenless, so the rule is not refused on a guess (`tests/liveliness.rs`' `a_compact_descriptors_tokenless_interface_is_refused_through_the_catalog`) |
+| `alerts`, `alert-firing` and the doctor's rules: a compact descriptor not read | read through `catalog`, the fleet's readers' | |
+
 ## Unreleased (`main`, zk2) — zenoh 1.10.2, and `binding: "zenoh-1.10.2"` (#1165)
 
 Core 0.114; `link.v2` 0.25 §2.4, §2.19. No rule changed.

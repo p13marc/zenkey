@@ -51,13 +51,13 @@ The owner, consumer and caller sections each point to them.
 
 | Role | Rules |
 |---|---|
-| [Owner](#owner) | 90 |
+| [Owner](#owner) | 92 |
 | [Consumer](#consumer) | 35 |
 | [Caller](#caller) | 17 |
 | [Deployment](#deployment) | 19 |
-| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 88, 28 of them a reader's |
-| [Implementation: the static rules](#implementation-the-static-rules) | 81 |
-| Every rule, once | 299 |
+| [Observer: the tool role, and a reader](#observer-the-tool-role-and-a-reader) | 91, 31 of them a reader's |
+| [Implementation: the static rules](#implementation-the-static-rules) | 87 |
+| Every rule, once | 310 |
 | [Rule ids](#rule-ids) | 86 |
 
 ## Owner
@@ -65,6 +65,7 @@ The owner, consumer and caller sections each point to them.
 **Where it reads.** Where an owner reads presence, state or the admin space,
 `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](core.md#33-the-descriptor-record), [§4.4](core.md#44-archives),
 [§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
@@ -170,6 +171,7 @@ The owner, consumer and caller sections each point to them.
 
 | Rule | Sentence | Evidence |
 |---|---|---|
+| [§4.4](core.md#44-archives) | An archive given a catalog SHOULD write the compact form. | `[Sc: state.md §5]` |
 | [§4.4](core.md#44-archives) | **An archive's backend MUST NOT accept a put older than a delete it holds.** | `[Sc: state.md §9]` |
 | [§4.4](core.md#44-archives) | When an owner becomes reachable again, the archive MUST re-read the owner's recorded collection before serving it as confirmed. | `[Sc: state.md §5]` |
 | [§4.4](core.md#44-archives) | An archive SHOULD repeat an alignment that left keys unconfirmed, a bounded number of times. | `[Sc: state.md §5]` |
@@ -240,6 +242,7 @@ The owner, consumer and caller sections each point to them.
 | [§8.1](core.md#81-tokens) | An owner MUST hold one per interface **of which it currently exposes at least one resource**, and none otherwise, except for its **tokenless set**. | `[Sc: presence.md §1]` `[Sc: profiles/redundancy/scenarios.md §1]` |
 | [§8.1](core.md#81-tokens) | Such an owner SHOULD put every interface it implements in its tokenless set. | `[Sc: constrained.md §10]` `[F: descriptors/ok-tokenless]` |
 | [§8.1](core.md#81-tokens) | Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses `redundancy.v1`. | `[Sc: constrained.md §10]` |
+| [§8.1](core.md#81-tokens) | Such an owner, given a catalog (§8.6), SHOULD write its descriptor in the compact form (§3.3). | `[Sc: constrained.md §10]` |
 | [§8.1](core.md#81-tokens) | The owner MUST hold one member token per member, and cycle it whenever that member's continuity breaks. | `[Sc: presence.md §3]` |
 | [§8.1](core.md#81-tokens) | An owner that starts a new instance id while running MUST declare the new descriptor and tokens first, in §8.2's order (the descriptor's queryable and first put, then the tokens), then undeclare the old ones. | `[Sc: presence.md §3]` |
 
@@ -271,6 +274,7 @@ The owner, consumer and caller sections each point to them.
 **Where it reads.** Where a consumer reads presence, state or the admin
 space, `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](core.md#33-the-descriptor-record), [§4.4](core.md#44-archives),
 [§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
@@ -362,6 +366,7 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 **Where it reads.** Where a caller reads presence, state or the admin space,
 `observer.md`'s reader rules bind it (core §12). They are under
 [observer](#observer-the-tool-role-and-a-reader), marked *reader*:
+[§3.3](core.md#33-the-descriptor-record), [§4.4](core.md#44-archives),
 [§8.6](core.md#86-the-deployment-catalog),
 [§3.3](observer.md#33-possibly-incomplete),
 [§3.5](observer.md#35-a-session-cut-off), [§3.6](observer.md#36-absence),
@@ -498,6 +503,13 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 
 ## Observer: the tool role, and a reader
 
+### [core §3.3 The descriptor record](core.md#33-the-descriptor-record)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§3.3](core.md#33-the-descriptor-record), *reader* | A reader of descriptors MUST read both forms. | `[F: descriptors/compact/]` `[Sc: constrained.md §10]` |
+| [§3.3](core.md#33-the-descriptor-record), *reader* | A reader MUST NOT guess a catalog or a revision it does not hold. | `[F: descriptors/compact/vectors.json]` `[Sc: constrained.md §10]` |
+
 ### [core §4.2 Rules for owners and consumers](core.md#42-rules-for-owners-and-consumers)
 
 | Rule | Sentence | Evidence |
@@ -513,6 +525,12 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool MUST NOT send a held stamp other than the in-band stamp of the mutation it holds for that member, as the owner wrote it. | `[F: seed/held.json]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | **A held stamp in answer.** … A consumer or a tool MUST NOT read any other held stamp as unchanged. | `[F: seed/held.json]` `[Sc: state.md §16]` |
 | [§4.2](core.md#42-rules-for-owners-and-consumers) | A consumer or a tool that sent a held stamp MUST accept a snapshot in answer, and merge it as any member read's (above). | `[F: seed/held.json]` `[Sc: state.md §16]` |
+
+### [core §4.4 Archives](core.md#44-archives)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§4.4](core.md#44-archives), *reader* | A reader of an archive's replies MUST read both forms. | `[F: archive/attachments.json]` `[Sc: state.md §5]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 
@@ -795,6 +813,17 @@ space, `observer.md`'s reader rules bind it (core §12). They are under
 | Rule | Sentence | Evidence |
 |---|---|---|
 | [§3.3](core.md#33-the-descriptor-record) | Its [the descriptor record's] schema is [`descriptor.schema.json`](descriptor.schema.json), and a checker MUST report exactly the `D…` codes that `conformance/descriptors/expect.json` lists for each document, checked against the fixture contract. | `[F: descriptors/]` |
+| [§3.3](core.md#33-the-descriptor-record) | An implementation MUST refuse a compact descriptor for the first of these that applies, in this order, naming the refusal: | `[F: descriptors/compact/vectors.json]` |
+| [§3.3](core.md#33-the-descriptor-record) | An implementation that writes a compact descriptor MUST write it as the layout says. | `[F: descriptors/compact/vectors.json]` |
+| [§3.3](core.md#33-the-descriptor-record) | An implementation MUST write every compact descriptor it accepts back to the same bytes, from its decoded descriptor, its seq and its `minted` bit. | `[F: descriptors/compact/vectors.json]` |
+| [§3.3](core.md#33-the-descriptor-record) | **The checks on a decoded descriptor.** … A checker MUST report exactly the codes that `compact/checks.json` lists for each. | `[F: descriptors/compact/checks.json]` |
+
+### [core §4.4 Archives](core.md#44-archives)
+
+| Rule | Sentence | Evidence |
+|---|---|---|
+| [§4.4](core.md#44-archives) | An implementation that writes a compact attachment MUST write it as the layout says. | `[F: archive/attachments.json]` |
+| [§4.4](core.md#44-archives) | **Reading.** … An implementation MUST refuse a compact attachment for the first of these that applies, naming the refusal: | `[F: archive/attachments.json]` |
 
 ### [core §5.1 Rules](core.md#51-rules)
 

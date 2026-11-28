@@ -330,3 +330,24 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   `token-missing`, `state-stamp-foreign`), smoked in process by
   `tests/spray_smoke.rs`; `tests/live_bus.rs` (ignored, `just test-live`)
   brings it up in process on port 0.
+
+The compact descriptor (#980 C5b, core 0.120 §3.3): the presence link's
+`PresenceKey::catalogs` (the window's loaded `--catalog`, from
+`dep.contracts`) opens the lens with `LensFeed::open_through`, so the
+nodes pane shows a compact descriptor as its decoding (its zid, what it
+implements, its standby marks) and one not read as `Described::Unread`,
+"descriptor: compact, not read — …"; the pane's `redundancy.v1` reading
+reads through the same catalogs (`sweep::nodes::redundancy`,
+`RedundancySpec::catalogs`). No scene changed; `nodes.rs`'s
+`a_compact_descriptor_shows_as_its_decoding`.
+
+C5b2 (#980): the Why ladder (`services::value::why` takes the window's
+catalogs, `run_why_through`), the admin sweep (`sweep::admin` takes a
+`Describing`, `topology_with_instances_through`) and the nodes pane's
+`arbitration.v1` reading (`sweep::nodes::arbitration`,
+`ArbitrationSpec::catalogs`) read through the window's catalogs too.
+
+C3 (#980): the Inspector's last-known read goes through the window's
+catalogs (`last_known_state_through`), and the attachment pane shows an
+archive's compact attachment by its fields (`detail::attachment_text`, the
+fleet's `model::attachment`; `the_attachment_pane_reads_an_archives_compact_attachment`).

@@ -96,6 +96,9 @@ pub(crate) fn update(
                 slot.id,
                 session,
                 dep.store.clone(),
+                dep.contracts
+                    .as_ref()
+                    .map_or_else(Default::default, |c| Arc::clone(&c.catalogs)),
                 dep.namespace().to_string(),
                 target,
                 dep.timeout(),

@@ -123,6 +123,8 @@ pub async fn run(cli: TimingArgs) -> Result<()> {
     ));
     spec.across_face = across_face;
     spec.owner_zids = owner_zids;
+    // An owner's compact descriptor reads through --catalog (core §3.3).
+    spec.catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
     spec.settle = ASKING.ask(std::time::Duration::try_from_secs_f64(settle).map_err(|_| {
         if settle > 0.0 {
             unaskable!("--settle is longer than a wait can be: {settle:e} seconds")

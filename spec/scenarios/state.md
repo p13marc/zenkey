@@ -103,7 +103,7 @@ GETs the owner.
   identity in the attachment.
 - The consumer presents v3 as *last-known*, never as current.
 
-## §5 Alignment after reconnect (S5)
+## §5 Alignment after reconnect (S5, §4.4)
 
 **Steps.**
 1. With the link cut, the owner deletes the plan within W. The link heals
@@ -113,6 +113,12 @@ GETs the owner.
    is empty.
 3. The link stays cut and the owner stops. An archive on the owner's side
    still records the plan's deletion.
+4. **The compact attachment.** Both archives are given the deployment
+   catalog, which lists `mission_plan.v1` (core §8.6). The owner puts v4,
+   and the archive on its side records it. The link is cut, and the owner
+   stops. The vehicle's archive starts, holding nothing. The link heals.
+   The consumer reads the vehicle's archive's key for the plan, holding
+   the catalog, then holding none.
 
 **Expected.**
 1. The archive re-reads what it records of the owner's collection, the
@@ -127,9 +133,21 @@ GETs the owner.
    archive, reading it through the collection's archive form (core §4.4).
    That archive answers with the `reply_del`, which is positive evidence,
    and the vehicle's archive drops the plan.
+4. Each archive's replies carry the compact attachment, 3 bytes (core
+   §4.4). The JSON one of the same value is some 200 bytes.
+   - The vehicle's archive aligns from the owner-side archive. It holds
+     v4 confirmed, as that archive's compact attachment says.
+   - Holding the catalog, the consumer reads v4 as last-known and
+     confirmed, with the type identity the JSON form states.
+   - Holding none, it reads v4 as last-known and confirmed. Its type
+     identity is unknown (`unknown_catalog`), never guessed.
 
 *The reference (`zenkey/tests/state.rs`) refuses every read in step 2: a
-refusal of one read alone would be healed by the retry.*
+refusal of one read alone would be healed by the retry. In step 4 it
+measured the JSON attachment at 196 B. Its owner-side archives align only when
+it asks, and the vehicle's is asked again until it holds v4. An alignment
+at a token can run before the route has crossed, or after the owner went
+(core §4.4, "Retrying").*
 
 ## §6 A window shorter than the outage (S3, §4.4)
 

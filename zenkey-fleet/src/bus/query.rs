@@ -485,6 +485,11 @@ pub struct EntryEpochs {
 }
 
 impl EntryEpochs {
+    /// The catalogs given.
+    pub fn catalogs(&self) -> &crate::model::deployment::Catalogs {
+        &self.catalogs
+    }
+
     /// Under `catalogs`, with no descriptor in hand.
     pub fn of_catalogs(catalogs: &crate::model::deployment::Catalogs) -> EntryEpochs {
         EntryEpochs {
@@ -633,6 +638,9 @@ pub(crate) struct OwnerRevisions<'a> {
     timeout: Duration,
     held: &'a [&'a zenkey_model::contract::Contract],
     store: crate::bus::contracts::BundleStore,
+    /// What an owner's descriptor is read through, a compact one included
+    /// (core §3.3): the catalogs given and the revisions held.
+    described: zenkey::presence::Held,
     asked: std::collections::BTreeMap<(String, String), Owners>,
 }
 
@@ -650,12 +658,15 @@ enum Owners {
 impl<'a> OwnerRevisions<'a> {
     /// Over `session`, each read waiting `timeout`, the reader holding
     /// `held`; a revision it does not hold is retrieved through `store`,
-    /// where it has one, else through a store of its own.
+    /// where it has one, else through a store of its own. An owner's
+    /// compact descriptor (core §3.3) reads through `catalogs`; with none
+    /// that reads it, it is no word, and nothing is judged.
     pub(crate) fn new(
         session: &'a Session,
         timeout: Duration,
         held: &'a [&'a zenkey_model::contract::Contract],
         store: Option<&crate::bus::contracts::BundleStore>,
+        catalogs: &crate::model::deployment::Catalogs,
     ) -> Self {
         OwnerRevisions {
             session,
@@ -664,6 +675,13 @@ impl<'a> OwnerRevisions<'a> {
             store: store
                 .cloned()
                 .unwrap_or_else(|| crate::bus::contracts::BundleStore::new(timeout)),
+            described: zenkey::presence::Held::new(
+                std::sync::Arc::new(catalogs.held().to_vec()),
+                held.iter()
+                    .map(|c| std::sync::Arc::new((*c).clone()))
+                    .collect(),
+            )
+            .retrieving(),
             asked: std::collections::BTreeMap::new(),
         }
     }
@@ -696,11 +714,12 @@ impl<'a> OwnerRevisions<'a> {
         let owners = match self.asked.get(&at) {
             Some(o) => o.clone(),
             None => {
-                let o = match zenkey::answer::owner_revision(
+                let o = match zenkey::answer::owner_revision_held(
                     self.session,
                     key,
                     stamp.run,
                     &iface,
+                    &self.described,
                     self.timeout,
                 )
                 .await

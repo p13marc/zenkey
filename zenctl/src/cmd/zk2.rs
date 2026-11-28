@@ -81,7 +81,19 @@ pub async fn presence(
     session: &zenoh::Session,
     scope: &PresenceScope,
 ) -> Result<Catalog> {
-    let observed = zenkey_fleet::observe_presence(session, scope, dep.timeout()).await?;
+    presence_through(dep, session, scope, &zenkey_fleet::Describing::default()).await
+}
+
+/// [`presence`], each descriptor read by its form (core §3.3) through what
+/// `describing` holds: a compact one through `--catalog` and the store.
+pub async fn presence_through(
+    dep: &Deployment,
+    session: &zenoh::Session,
+    scope: &PresenceScope,
+    describing: &zenkey_fleet::Describing,
+) -> Result<Catalog> {
+    let observed =
+        zenkey_fleet::observe_presence_through(session, scope, dep.timeout(), describing).await?;
     let catalog = Catalog::new(&observed);
     crate::completion::remember_presence(
         dep.link().context_name(),
@@ -336,8 +348,10 @@ pub async fn read_lens(
     dep: &Deployment,
     session: &zenoh::Session,
     store: &BundleStore,
+    catalogs: &zenkey_fleet::Catalogs,
 ) -> Option<Catalog> {
-    match zenkey_fleet::read_lens(session, store, dep.timeout()).await {
+    // An owner's compact descriptor reads through --catalog (core §3.3).
+    match zenkey_fleet::read_lens_through(session, store, catalogs, dep.timeout()).await {
         Ok(catalog) => Some(catalog),
         Err(e) => {
             eprintln!(

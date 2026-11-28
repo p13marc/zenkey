@@ -14,6 +14,11 @@
 
 mod util;
 
+/// An owner answering core §3.3's compact descriptor (#980's C5b), the
+/// runtime's suites' too.
+#[path = "../../zenkey/tests/common/compact_owner.rs"]
+mod compact_owner;
+
 use std::time::Duration;
 
 use util::engine::{self, Capture, Options};
@@ -551,4 +556,57 @@ async fn liveliness_gone_on_a_tokenless_interface_is_refused_by_name() {
         assert!(text.contains(needle), "{needle:?} not in {text}");
     }
     svc.close().await.expect("close");
+}
+
+/// The same refusal through a compact descriptor (core §3.3, #980 C5b2):
+/// one marking `ping.v1` tokenless is read through the top-level `catalog`,
+/// and the rule is refused by name as on a JSON one. Given no catalog it is
+/// not read, so nothing says the interface is tokenless: the rule is not
+/// refused on a guess, and runs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_compact_descriptors_tokenless_interface_is_refused_through_the_catalog() {
+    use zenkey_model::descriptor::Form;
+    let (_router, ep) = zk2::router().await;
+    let owners = zk2::client_ns(&ep, Some(NS)).await;
+    let tool = zk2::client_ns(&ep, Some(NS)).await;
+    let ping = zk2::scenario("ping.v1");
+    let catalog = compact_owner::catalog(&[&ping]);
+    let d = compact_owner::descriptor(
+        "h2/tc",
+        "00000000000000c8",
+        &catalog,
+        &[&ping],
+        false,
+        &[],
+        None,
+    );
+    let bytes = compact_owner::compact(&d, &catalog, &[&ping]);
+    let mut owner = compact_owner::serve(&owners, &d, Form::Compact, bytes).await;
+    owner.hold(&ping).await;
+    zk2::tokens(&tool, "zk2/h2/tc/@zk/instance/*", 1).await;
+    let rule = || {
+        vec![engine::rule(
+            "ping-gone",
+            &format!("liveliness-gone {NS}/zk2/*/tc/@zk/alive/ping.v1/**"),
+            "warning",
+        )]
+    };
+    let e = engine::run_once_refused(
+        zk2::daemon_bus(&ep, NS).await,
+        rule(),
+        Options {
+            catalogs: zenkey_fleet::Catalogs::new(vec![catalog]),
+            ..Options::default()
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(zenwatch::exit::code_for(&e), zenwatch::exit::REFUSED, "{e}");
+    let text = e.to_string();
+    for needle in ["\"ping-gone\"", "h2/tc", "ping.v1 \"token\": false"] {
+        assert!(text.contains(needle), "{needle:?} not in {text}");
+    }
+    let ran =
+        engine::run_once_refused(zk2::daemon_bus(&ep, NS).await, rule(), Options::default()).await;
+    assert!(ran.is_ok(), "never refused on a guess: {:?}", ran.err());
 }

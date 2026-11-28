@@ -394,3 +394,83 @@ pub fn run_of(reads: &[Option<&Observed>], addr: &Addr, id: &InstanceId) -> Opti
             .clone()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zenkey_model::canonical::Fingerprint;
+    use zenkey_model::descriptor::{Descriptor, FORMAT, Form, InterfaceEntry, compact};
+
+    /// §2.3's listing read from a compact descriptor's decoding (core §3.3,
+    /// #980 C5b) as from its JSON twin: the entry's `standby` is its bit.
+    /// One not read, its catalog not held, is unread, never a guess.
+    #[test]
+    fn a_compact_descriptor_lists_its_standby_as_its_json_twin_does() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/ledger.v1.toml");
+        let ledger = zenkey_model::contract::load_path(&path)
+            .contract
+            .expect("ledger.v1");
+        let mut catalog = zenkey_model::catalog::Catalog::new(0).unwrap();
+        catalog
+            .push(ledger.iface.clone(), Fingerprint::of(&ledger))
+            .unwrap();
+        let (addr, id): (Addr, InstanceId) = (
+            "lab/ledger".parse().unwrap(),
+            "00000000000000b1".parse().unwrap(),
+        );
+        let d = Descriptor {
+            format: FORMAT.to_owned(),
+            service: addr.to_string(),
+            instance: id.to_string(),
+            run: Some("0007".to_owned()),
+            catalog: Some(catalog.id().hex()),
+            interfaces: vec![InterfaceEntry {
+                iface: ledger.iface.to_string(),
+                contract: Fingerprint::of(&ledger).to_string(),
+                minor: None,
+                standby: true,
+                token: true,
+                unavailable: Vec::new(),
+                cardinality: BTreeMap::new(),
+            }],
+            capabilities: Vec::new(),
+            requires: Vec::new(),
+            profiles: Vec::new(),
+            meta: BTreeMap::new(),
+        };
+        let bytes = compact::encode(
+            &compact::Compact {
+                descriptor: d.clone(),
+                seq: zenkey_model::wire::Seq::new(0).unwrap(),
+                minted: false,
+            },
+            std::slice::from_ref(&catalog),
+            &[&ledger],
+        )
+        .unwrap();
+        let served = zenkey::presence::Served {
+            form: Form::Compact,
+            bytes,
+        };
+        let decoded = DescriptorRead::from(served.clone().read(
+            &addr,
+            &id,
+            std::slice::from_ref(&catalog),
+            &[&ledger],
+        ));
+        let twin = DescriptorRead::Served(Box::new(d));
+        for read in [&decoded, &twin] {
+            assert_eq!(
+                listing_in(Some(read), &ledger.iface),
+                Listing::Listed { standby: true },
+                "{read:?}"
+            );
+        }
+        let unread = DescriptorRead::from(served.read(&addr, &id, &[], &[&ledger]));
+        assert!(
+            matches!(&unread, DescriptorRead::Unread(why) if why.starts_with("unknown_catalog"))
+        );
+        assert_eq!(listing_in(Some(&unread), &ledger.iface), Listing::Unread);
+    }
+}

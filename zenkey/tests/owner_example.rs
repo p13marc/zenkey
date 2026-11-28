@@ -4205,3 +4205,104 @@ async fn the_owner_example_runs_on_a_first_hop() {
     );
     o.stop().await;
 }
+
+/// `--compact-descriptor`, and `--first-hop` with `--catalog` (#980 C5c):
+/// the owner writes its descriptor in the compact form (core §3.3, §8.1),
+/// its GET answered under `zenoh/bytes`, and the consume example given the
+/// same catalog finds it by its instance token and that descriptor, and
+/// reads it (observer §3.6). `--compact-descriptor` without `--catalog`
+/// is refused before anything is opened, and `--help` names both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_example_writes_its_descriptor_compact() {
+    use zenkey::model::canonical::Fingerprint;
+    use zenkey::model::catalog::Catalog;
+    use zenkey::model::descriptor::Form;
+    for piece in ["--compact-descriptor", "With --catalog too"] {
+        assert!(owner::HELP.contains(piece), "--help names {piece:?}");
+    }
+    assert!(consume::HELP.contains("--catalog <path>"));
+    let (_r1, ep) = router(None).await;
+    let tool = client(&ep).await;
+    let contract = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/interop.v1.toml");
+    let interop = common::contract("interop.v1");
+    let mut catalog = Catalog::new(0).unwrap();
+    catalog
+        .push(interop.iface.clone(), Fingerprint::of(&interop))
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("catalog.json");
+    std::fs::write(&file, catalog.to_jcs()).unwrap();
+    let file = file.display().to_string();
+    let contract = contract.display().to_string();
+
+    let Err(e) = owner::Options::parse(&[
+        "--compact-descriptor".to_owned(),
+        "ex/c".to_owned(),
+        contract.clone(),
+    ]) else {
+        panic!("--compact-descriptor without --catalog was accepted")
+    };
+    assert!(
+        e.contains("--compact-descriptor") && e.contains("--catalog"),
+        "{e}"
+    );
+
+    for (address, flag) in [
+        ("ex/hop", "--first-hop"),
+        ("ex/near", "--compact-descriptor"),
+    ] {
+        let o = spawn_owner(&[
+            "--connect",
+            &ep,
+            "--catalog",
+            &file,
+            flag,
+            address,
+            &contract,
+        ]);
+        assert_eq!(line(&o.lines).await, format!("connected {ep}"));
+        let ready = line(&o.lines).await;
+        let key = ready.strip_prefix("ready ").unwrap().to_owned();
+        let instance = key.rsplit('/').next().unwrap().parse().unwrap();
+        let at: zenkey::model::grammar::Addr = address.parse().unwrap();
+        let reply = loop {
+            if let Some(r) = presence::descriptor_reply(&tool, &at, &instance, T)
+                .await
+                .unwrap()
+            {
+                break r;
+            }
+        };
+        assert_eq!(reply.form, Form::Compact, "{flag}");
+        assert!(reply.bytes.len() < 48, "{flag}: {} B", reply.bytes.len());
+        let held = presence::Held::new(
+            std::sync::Arc::new(vec![catalog.clone()]),
+            vec![std::sync::Arc::new(interop.clone())],
+        );
+        let d = presence::descriptor_held(&tool, &at, &instance, &held, T)
+            .await
+            .unwrap()
+            .into_descriptor()
+            .unwrap();
+        assert_eq!(d.interfaces[0].iface, "interop.v1");
+        assert_eq!(d.interfaces[0].token, flag != "--first-hop", "{flag}");
+        if flag == "--first-hop" {
+            // The consume example, given the catalog, finds the tokenless
+            // owner through its compact descriptor.
+            let args: Vec<String> = vec![
+                "--catalog".into(),
+                file.clone(),
+                ep.clone(),
+                address.into(),
+                contract.clone(),
+                "state/status".into(),
+                "@op/echo".into(),
+            ];
+            let mut said = Vec::new();
+            consume::run(&args, |l| said.push(l)).await.unwrap();
+            assert_eq!(said[0], format!("present {address}"), "{said:?}");
+            assert_eq!(said[2], "call value ping", "{said:?}");
+        }
+        o.stop().await;
+    }
+}

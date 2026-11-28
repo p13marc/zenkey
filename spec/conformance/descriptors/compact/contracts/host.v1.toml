@@ -1,0 +1,13 @@
+# core §3.3's compact descriptor: a revision that lists hostid.v1 in `uses`,
+# which a contract SHOULD NOT (hostid.v1 §2.8): its instance's `minted` bit
+# still says whether its system is minted.
+[interface]
+name    = "host"
+major   = 1
+minor   = 0
+summary = "A revision listing hostid.v1, for the compact descriptor's cases"
+uses    = ["hostid.v1"]
+
+[resources.uptime]
+kind = "state"
+type = { raw = "application/json" }

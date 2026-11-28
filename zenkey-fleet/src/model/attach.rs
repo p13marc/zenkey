@@ -117,6 +117,7 @@ pub fn join(
                     "its descriptor did not read ({}): the zid it would name is unknown",
                     match other {
                         DescriptorRead::Invalid(why) => format!("invalid: {why}"),
+                        DescriptorRead::Unread(why) => format!("not read: {why}"),
                         DescriptorRead::Silent => "no reply within the timeout".to_owned(),
                         DescriptorRead::Failed(why) => format!("the GET failed: {why}"),
                         DescriptorRead::Served(_) => unreachable!("matched above"),

@@ -1040,3 +1040,81 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   session-free test; zenctl's `alarms_v2_s6_*_at_the_copys_horizon` and
   `alarms_v2_an_owner_naming_a_revision_not_in_hand_reads_unobservable`
   the live ones.
+
+  The compact descriptor read (#980 C5b, core 0.120 §3.3): `bus::presence::Describing`
+  (`new(&Catalogs, &BundleStore)`, `read`) is what a read decodes a
+  compact descriptor through: the catalogs given and the store, each
+  revision its head names fetched there (`zenkey::presence::Served::names`);
+  `describe_each` and `describe_where` take one, `observe_through`
+  (`observe_presence_through` at the root) reads with one, and `observe`
+  and `describe` hold none. `DescriptorRead::Unread` (and
+  `DescriptorAnswer::Unread { reason }`, tag `unread`) is a compact one
+  not read for the reader's lack, never a verdict: the doctor's
+  `descriptor-invalid` leaves it unjudged, `token-missing` and the others
+  say `not read: …`, telemetry's and timing's openings count it
+  answered. Wired: `LensFeed::open_through` (catalogs; `open` none) for
+  zenctl's `echo` and zengui's presence link; the doctor
+  (`DoctorSpec::catalogs`) and its D-checks on the record read
+  (`descriptor::check_descriptor`, the JSON no longer re-encoded);
+  `RedundancySpec::catalogs` and `TimingSpec::catalogs` (zenctl's
+  `--catalog`), a compact one with no `meta.zid` naming no owner zid, so
+  its stamps `unattributed`. Every other `observe` (health, config,
+  alarms, desired, telemetry, conform, arbitration, why) reads a compact
+  one `Unread`. Tests: `zk2_core.rs`'s
+  `a_compact_descriptor_is_read_through_the_catalog_given` (presence, the
+  lens's providers, the feed), `zk2_doctor.rs`'s
+  `a_compact_descriptor_is_checked_on_its_decoding` (D005 on both forms;
+  unjudged with no catalog), `model::redundancy`'s and `model::timing`'s
+  session-free cases; `zk2_doctor.rs`'s `fake` states `application/json`.
+
+  C5b2 (#980): every other reader goes through `Describing` too.
+  `Describing::retrieving(catalogs, offline, timeout)` (a store of its own,
+  seeded) for a reader with none: health (`observe`, `archived`), config
+  (`ConfigSpec::describing`, its store or its own), alarms (`AlarmFeed`'s,
+  handed to each `AlarmRefresh` and `archived`). With the reader's store:
+  desired (`observe_with`, the uncovered authors, `archive_providers`),
+  telemetry (`TelemetrySpec::catalogs`, no longer `Copy`), conform (the
+  run's store; the telemetry, timing and desired sub-readings take its
+  catalogs; `standby_suite`), arbitration (`ArbitrationSpec::catalogs`,
+  `listen`'s and `Follow`'s), why (`run_why_through`, `observe` takes the
+  catalogs; `state_answer`'s strays), the windowed lens
+  (`bus::lens::read_through`, `read_lens_through`; the watchdog's
+  `WatchdogSpec::catalogs`, the trigger's), and `admin graph`
+  (`topology_with_instances_through`). `bus::query::OwnerRevisions::new`
+  takes the catalogs (`EntryEpochs::catalogs`), so a stray `reply_del` is
+  judged by a compact owner's revision; `config::get_records` takes them.
+  Left catalog-less: `bus::seed`'s `Revisions` (the seeded watch, zengui's),
+  which reads either form and leaves a compact owner's snapshot under no
+  omission rule; telemetry's `owners_answer` and `bus::presence::observe`
+  itself, which count or describe with none. `tests/compact_readers.rs`: a
+  router keeps a runtime owner's own descriptor from readers by its
+  session's zid (`compact_owner::deny_descriptors`) and a raw session
+  answers its compact twin (`compact_owner::twin_of`, `answer`); health
+  and alarms, config, desired (the author's), telemetry and why read it as
+  the JSON one, and unread with no catalog. `tempfile` is a dev-dependency
+  for the runtime's example owners it includes.
+
+  C5c (#980): a runtime owner now writes the compact form, on a first hop
+  given a catalog (or `ServiceConfig::compact_descriptor(true)`).
+  `tests/first_hop.rs`'s
+  `s10_the_fleet_reads_a_first_hop_devices_compact_descriptor`: the fleet's
+  `observe_presence_through` with `Describing::retrieving` (the catalog, the
+  revision offline, since a first-hop device holds no bundle) reads a real
+  owner's compact descriptor, and `observe_presence` with none reads it
+  `Unread` (`unknown_catalog`).
+
+  C3 (#980): the archive's compact attachment. `model::attachment`
+  (`is_archive_key`, a namespace's prefix allowed; `archive_attachment`, the
+  compact form's fields or its refusal on an archive's key; `attachment_value`
+  and `attachment_text`, else the structural ladder), which zenctl's
+  renderers and zengui's attachment pane use. The doctor's `archive_keys`
+  reads `confirmed` in either form. `bus::consume::last_known_through`
+  (`last_known_state_through`, `Catalogs`: the compact identity through the
+  catalog the archive's descriptor names, the revision read) beside
+  `last_known_in`, which holds none; `why` reads `confirmed` through the
+  runtime's `last_known`. `tests/compact_attachment.rs`: a compact and a JSON
+  archive on one router; `archive-unaligned` over both, the state report's
+  identity through the catalog equal to the JSON one's (nulls without), and
+  `why`'s last-known rung reading the compact bit, an owner kept present and
+  silent by a twin holding its tokens and descriptor. Its archives watch a
+  router no owner reaches, so they align only when asked.

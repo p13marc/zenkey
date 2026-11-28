@@ -16,6 +16,7 @@ use zenkey::model::contract::{Contract, load_path};
 use zenkey::model::grammar::Addr;
 use zenkey::{Implementation, ServiceConfig};
 
+pub mod compact_owner;
 pub mod forms_owner;
 pub mod panic_watchdog;
 pub mod snapshot_owner;

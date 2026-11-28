@@ -31,6 +31,15 @@ pub(crate) fn update(admin: &mut AdminState, msg: AdminMsg, cx: Ctx) -> Task<Mes
                     cx.dep.session.clone(),
                     cx.dep.namespace().to_string(),
                     cx.dep.timeout(),
+                    // A compact descriptor reads through the window's
+                    // catalogs and store (core §3.3).
+                    zenkey_fleet::Describing::new(
+                        cx.dep
+                            .contracts
+                            .as_ref()
+                            .map_or(&zenkey_fleet::Catalogs::default(), |c| &c.catalogs),
+                        &cx.dep.store,
+                    ),
                 ),
                 // The declared entities are the deployment's (the skeleton
                 // reads them): asked again with the sweep, landing where

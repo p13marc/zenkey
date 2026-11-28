@@ -1,6 +1,6 @@
 # zk2 core specification
 
-**Version 0.119** (0.1 accepted on 2026-10-08, #606). Every change goes
+**Version 0.120** (0.1 accepted on 2026-10-08, #606). Every change goes
 through [`CHANGELOG.md`](CHANGELOG.md), amendment-style: each entry records
 what changed, what deliberately did not, and why.
 
@@ -975,6 +975,241 @@ and reports these codes. `[F: descriptors/]`
    - the descriptor's size: the rule is its owner's (above), and a
      descriptor over 1 KB draws no code `[F: descriptors/ok-over-1kb]`.
 
+**The compact form.** A descriptor has a second form, in bytes: the
+**compact descriptor**. It names each revision by its index in the
+deployment catalog (§8.6), so it carries in some 20 bytes what the JSON
+form says in a kilobyte. This section defines its bytes, how a reader
+decodes them, and the checks on what it decodes. Which owner writes one is
+§8.1's, "On a first hop".
+
+- **What carries it.** A compact descriptor is a put's payload on the
+  instance key, or the GET's reply there, under the `Encoding`
+  `zenoh/bytes`. The JSON form travels under `application/json`. So the
+  `Encoding` tells the two apart, never the bytes. Its put needs no Zenoh
+  timestamp: the envelope's run and seq order an instance's puts.
+- **Both forms are read.** A reader of descriptors MUST read both forms.
+  It tells them apart by the `Encoding`. It reads a compact one through
+  the catalogs and the revisions it holds ("Reading", below).
+  `[F: descriptors/compact/]` `[Sc: constrained.md §10]`
+  - A reader MUST NOT guess a catalog or a revision it does not hold. A
+    compact descriptor that names one is a descriptor it did not read
+    ("Never a guess", below). `[F: descriptors/compact/vectors.json]`
+    `[Sc: constrained.md §10]`
+  - A tool, a consumer and an owner reading another instance's
+    descriptor are each such a reader. A tool shows a compact one as the
+    members it decodes to.
+  - **A descriptor not read** is not a verdict. A reader that finds a
+    provider by its descriptor reads that provider as unobservable, never
+    absent ([`observer.md`](observer.md) §3.6).
+- **What it leaves out:**
+  - `minor`: the index names the revision, and a bundle keeps no minor
+    (§9.5);
+  - `requires`: a binding is an address, and no catalog indexes one;
+  - `profiles`: a reader derives them (below);
+  - `meta` but its `zid`, and an `unavailable` entry's `reason`: they
+    are for a human. The zid stays, for a tool's attribution of a state
+    stamp (observer §4.4);
+  - a capability that no revision it lists gates on: it changes no
+    exposure.
+- **Which descriptors have one.** A descriptor has a compact form when
+  all of these hold. Any other is written as JSON.
+  - It states a run and names a catalog.
+  - It lists from 1 to 15 interfaces, each a revision that catalog lists.
+  - It lists no requirement.
+  - Each `unavailable` and `cardinality` names at most 255 resources of
+    its entry's revision, none twice.
+  - Each bound is at most 2^32 − 1, and a `meta.zid` is from 1 to 32
+    lowercase hex digits.
+
+**The layout.** The payload is §7.5's mutation form: CH with the tag 0,
+the run and the seq, then the compact descriptor's **body** as the record.
+
+```text
+body         catalog · flags · entries · bitmaps · unavailable lists · cardinality lists · zid · pad
+catalog      32 bits: the id of the catalog the instance writes under (§8.6)
+flags        count · minted · has_zid · extension
+count        4 bits: the entries, from 1 to 15
+minted       1 bit: 1 when the instance's system is minted
+has_zid      1 bit: 1 when the zid follows
+extension    2 bits: 0. A later version may define them
+entry        index · token · standby · has_unav · has_card
+index        10 bits: the entry's revision, by its index in the catalog
+token        1 bit: the entry's `token`
+standby      1 bit: the entry's `standby`
+has_unav     1 bit: 1 when the entry's unavailable list follows
+has_card     1 bit: 1 when the entry's cardinality list follows
+bitmap       a bit for each capability the entry's revision gates on: 1 when held
+unavailable  items · that many (resource · cause)
+cardinality  items · that many (resource · bound)
+items        8 bits: the items in the list, from 1 to 255
+resource     the item's resource, by its index in its revision
+cause        2 bits: 1 build, 2 config, 3 capability
+bound        an integer: the entry's bound for the resource
+zid          128 bits: the owner's session zid
+pad          zero bits up to the next whole byte, fewer than 8
+```
+
+- **The fields** are bit fields, most significant bit first, with no
+  padding between them, as a heartbeat's body's are (§7.5). The catalog
+  id is its 4 bytes in order.
+- **The run and the seq** are the instance's as-of mark (§5.1) when it
+  puts the descriptor.
+  - The run is the one it writes under, which `run` states.
+  - The seq is the last it minted for state and events under that run,
+    or 0 when it has minted none. The put mints none.
+- **The entries** come one for each interface entry, ordered by their
+  indices, lowest first. An index can come twice, for an interface listed
+  twice (D003, below).
+- **The bitmaps** come one for each entry, in the entries' order.
+  - A revision **gates on** a capability `<n>` when one of its resources
+    has the gate `capability:<n>` (§2.3). An entry's bitmap has a bit for
+    each capability its revision gates on, once, sorted as strings,
+    bytewise.
+  - A revision that gates on none takes no bit.
+  - A capability's bit is 1 when the instance holds it, in every bitmap
+    where it falls.
+- **The lists** follow in the entries' order: first the unavailable list
+  of each entry whose `has_unav` is 1, then the cardinality list of each
+  entry whose `has_card` is 1.
+  - An entry whose list is empty writes its bit 0, so a list holds at
+    least one item.
+  - A list's items come in ascending order of their resources, none
+    twice.
+- **A resource** is its place among its revision's resources in the
+  canonical form's order (§9.5), from 0. A revision of n resources writes
+  each in ⌈log₂ n⌉ bits, and in none where n is 0 or 1.
+- **A cause** has the code §7.5's error byte gives it. The code 0 is
+  unused.
+- **A bound** is an integer as a snapshot's is (§7.5): unsigned LEB128,
+  in its shortest form, at most 5 bytes and at most 2^32 − 1. Each of its
+  bytes is the next 8 bits of the body, wherever they fall.
+- **The zid** is the 128-bit unsigned integer that `meta.zid` writes in
+  hexadecimal, as zenoh writes a zid (Appendix B).
+- **Minted** says that the instance follows `hostid.v1` as a
+  derivation-only profile (§10), because its system is minted. A JSON
+  descriptor says so only where no contract lists `hostid.v1` in `uses`
+  ([`hostid.v1`](profiles/hostid/v1.md) §2.8).
+
+**Sizes.** A compact descriptor is its envelope's 6 bytes, or 8 with a
+32-bit run, then 5 bytes of catalog id and flags. Its entries, bitmaps,
+lists and zid follow in bits, and the pad.
+- **An entry** is 14 bits, and a bitmap one bit for each capability its
+  revision gates on.
+- **zenoh-modem's node** lists `modem.v3`, `config.v1`, `health.v1` and
+  `freshness.v2`. Only `modem.v3` gates on capabilities, 30 of them. Its
+  body is 32 + 8 + 4 × 14 + 30 bits, so 16 bytes, and 22 with its
+  envelope. Its JSON form is 1,344 B.
+
+**Decoding.** A compact descriptor decodes to a descriptor of the JSON
+form's members. So a tool and a checker read it as they read JSON.
+- `format` is `zk2-descriptor/0.1`. `service` and `instance` are the
+  instance key's (§1.1).
+- `run` is the envelope's run, in hexadecimal as `run` is written
+  (above). `catalog` is the catalog id's 8 lowercase hex digits.
+- Each entry decodes to an interface entry, in the same order.
+  - Its `iface` and `contract` are the pair its index names, read through
+    the catalog (§8.6).
+  - Its `token` and `standby` are its bits. It states no `minor`.
+  - Its `unavailable` lists its items in order, each its resource as
+    `<kind token>/<template>` and its cause, with no `reason`.
+  - Its `cardinality` maps each item's resource, named so, to its bound.
+- `capabilities` lists each capability whose bit is 1, once, sorted as
+  strings, bytewise.
+- `profiles` is the union of the listed revisions' `uses` and, where
+  `minted` is 1, `hostid.v1`. It is deduplicated, and sorted as §9.5
+  sorts `uses`.
+- `meta` holds `zid` alone, where the zid follows. Its value is the zid
+  in lowercase hexadecimal without leading zeros. Otherwise `meta` is
+  empty.
+- The descriptor states no `requires`.
+
+**Reading.** A reader decodes a compact descriptor with the key it came
+on, the catalogs it holds and the revisions it holds. It takes three
+steps:
+1. **The head,** with no catalog and no contract: CH, the run, the seq,
+   the catalog id, the flags and each entry.
+2. **The catalog:** the id and each entry's index, as §8.6 reads them.
+3. **The rest,** with each entry's revision.
+
+So the head and the catalog name every revision the rest needs, and a
+reader that lacks one learns which to retrieve (§8.4).
+
+An implementation MUST refuse a compact descriptor for the first of these
+that applies, in this order, naming the refusal:
+`[F: descriptors/compact/vectors.json]`
+- reading the head:
+  - no byte at all, so no CH (`short`);
+  - CH's form is not 0, or its tag is not 0 (`form`);
+  - fewer bytes than the run, the seq, the catalog id and the flags need
+    (`short`);
+  - a count of 0 (`count`);
+  - an extension bit is 1 (`extension`);
+  - then, for each entry in order: the body ends before its bits
+    (`short`), or its index is below the index before it (`order`);
+- reading through the catalog:
+  - the reader holds neither the catalog the id names, nor one whose
+    `lineage` holds it (`unknown_catalog`);
+  - then, for each entry in order: its index is at or above the count
+    read through (`unknown_index`), or the reader holds no revision of
+    the pair it names (`unknown_revision`);
+- reading the rest's fields in order:
+  - the body ends before a bit its fields need (`short`);
+  - a bitmap's bit for a capability is not the bit an earlier bitmap
+    holds for it (`capability`);
+  - a list's count of items is 0 (`count`);
+  - an item's resource is at or above its revision's count of resources
+    (`resource`), or is not above the resource of the item before it in
+    its list (`order`);
+  - a cause is 0 (`cause`);
+  - a bound is refused as a snapshot's integer is (`leb128`): its fifth
+    byte has its high bit set, it is above 2^32 − 1, or it is not in its
+    shortest form;
+- the body holds a byte after its pad (`trailing`);
+- a bit of the pad is 1 (`pad`).
+
+Each field is read whole, then judged, and the first field that draws a
+refusal decides. So an entry's index out of order is refused before a
+later entry cut short, and a cause of 0 before a later bound.
+
+- **Never a guess.** A reader that holds neither the catalog nor a
+  revision the descriptor needs reads none of it. It never reads an index
+  through another catalog, nor a bitmap through another revision. A
+  refused compact descriptor is one the reader did not read, as a JSON
+  one that is D000 is.
+
+**Writing.** An implementation that writes a compact descriptor MUST
+write it as the layout says. `[F: descriptors/compact/vectors.json]`
+- Its entries are ordered by their indices, lowest first.
+- A list is written only where it holds an item, and its items in
+  ascending order of their resources.
+- Every bit of one capability is the same, and a bound is in its shortest
+  form.
+
+An implementation MUST write every compact descriptor it accepts back to
+the same bytes, from its decoded descriptor, its seq and its `minted` bit.
+`[F: descriptors/compact/vectors.json]`
+
+**The checks on a decoded descriptor.** A checker reads a decoded
+descriptor with the contracts it is given, as it reads a JSON one. A
+checker MUST report exactly the codes that `compact/checks.json` lists for
+each.
+`[F: descriptors/compact/checks.json]`
+- **What cannot arise.**
+  - D000 to D002, D008 and D010: the decoding writes each member in its
+    form, and a bit cannot be misspelt.
+  - D003 for an `iface` or a `contract`: a catalog's reading refuses a
+    malformed one (§8.6).
+  - D009: the form has no `requires`.
+- **What arises as on JSON.**
+  - D003 for an interface listed twice: by an index twice, or by two
+    revisions of one interface.
+  - D004: the decoded fingerprint is read against the contracts given.
+  - D005 for a required resource, D006 and D007.
+  - D011 and D012, from the entry's `iface` and its bits.
+- **A twin** is a JSON case of `descriptors/` that a compact form can
+  carry, less the members the form leaves out. Each twin draws its JSON
+  case's codes.
+
 ---
 
 ## 4. State
@@ -1439,8 +1674,9 @@ time a profile reads (the table below).
   - **Explicit streams.** An `@stream` sample carries no envelope at this
     version. Its frames would be copied into one, or out of one, which
     loses the zero-copy path §7.4 serves.
-  - **What keeps its wire.** The descriptor and bundles carry no
-    envelope. A call carries §7.5's forms instead (§5.1).
+  - **What keeps its wire.** The descriptor's JSON form and bundles carry
+    no envelope. Its compact form is §7.5's mutation form, on the instance
+    key (§3.3). A call carries §7.5's forms instead (§5.1).
 - **The run** is an instance's ordering epoch, of 16 or 32 bits, as
   §7.5's width bit says. Two runs of different widths are two runs,
   whatever their values.
@@ -1661,13 +1897,35 @@ written. This section is what the core requires of it.
     origin.
 - **It answers GETs only.** It never puts on its keys, because it is not a
   second publisher of the data.
-- **Each reply's attachment** is a JSON object:
-  `{"iface", "contract", "type", "confirmed"}`.
-  - The first three are the archived value's type identity (§7.1).
-  - The members are encoded as in a descriptor and the canonical form:
-    `iface` is the interface id, `contract` the fingerprint, and `type`
-    the type object of §9.5.
-  - `confirmed` is `false` while alignment has not confirmed the key (below).
+- **Each reply's attachment** states the archived value's type identity
+  (§7.1), and whether alignment confirmed its key (below). It has two
+  forms, told apart by their length. `[F: archive/attachments.json]`
+  - **The JSON form** is an object: `{"iface", "contract", "type",
+    "confirmed"}`. The first three are the type identity, encoded as in a
+    descriptor and the canonical form. `iface` is the interface id,
+    `contract` the fingerprint, and `type` the type object of §9.5.
+    `confirmed` is `false` while alignment has not confirmed the key.
+  - **The compact form** is 3 bytes. It names the revision by its index in
+    the archive's catalog (§8.6), and the resource by its place in that
+    revision ("The compact attachment", below).
+  - **Read by its length.** An attachment of exactly 3 bytes is the
+    compact form, and any other the JSON form. A JSON object holding the
+    four members is never that short, so no byte marks the form.
+- **Writing it.** An archive given a catalog SHOULD write the compact
+  form. `[Sc: state.md §5]`
+  - It writes the JSON form for a value whose revision that catalog does
+    not list, or whose resource is past the 128th of its revision. An
+    archive given no catalog writes the JSON form.
+  - **The archive's catalog** is the one its descriptor names (§3.3).
+    Where no descriptor of it crosses, across a constrained face (§8.5),
+    the deployment's word names it, as §8.6 says of an owner's.
+- **Reading it.** A reader of an archive's replies MUST read both forms.
+  `[F: archive/attachments.json]` `[Sc: state.md §5]`
+  - **`confirmed`** is a bit of the compact form's own, so a reader reads
+    it with no catalog.
+  - **The identity** is read through the archive's catalog, as §8.6 reads
+    an index, and from the revision the index names. It decodes to the
+    JSON form's three members.
 - **An archive's backend MUST NOT accept a put older than a delete it
   holds.** The storage manager of zenoh 1.10.1 accepts one, and resurrects
   the key, so it cannot be an archive's store as released.
@@ -1708,8 +1966,9 @@ written. This section is what the core requires of it.
   - **What a reply confirms.** A value read from the owner is confirmed,
     a snapshot's entry included.
     A value read from a peer archive keeps the peer's confirmation: it is
-    confirmed when the peer's attachment says `"confirmed": true`, and
-    unconfirmed otherwise, an absent or unreadable attachment included. A
+    confirmed when the peer's attachment says so, `"confirmed": true` or
+    its compact form's bit, and unconfirmed otherwise, an absent or
+    unreadable attachment included. A
     `reply_del` from a peer is positive evidence, as one from the owner is:
     the peer holds the owner's delete, with its stamps.
     `[Sc: state.md §5]`
@@ -1738,6 +1997,48 @@ written. This section is what the core requires of it.
 - **What a tool can see**: [`observer.md`](observer.md) §4.5.
 
 `[Sc: state.md §4–§6, §9]`
+
+**The compact attachment.** Its 24 bits are bit fields, most significant
+bit first, as a heartbeat's body's are (§7.5).
+
+```text
+attachment   index · resource · confirmed · extension · reserved
+index        10 bits: the value's revision, by its index in the archive's catalog (§8.6)
+resource     7 bits: the value's resource, by its place among that revision's resources
+             in the canonical form's order (§9.5), from 0
+confirmed    1 bit: 1 when alignment confirmed the key
+extension    1 bit: 0. A later version may define it
+reserved     5 bits: 0
+```
+
+- **Writing.** An implementation that writes a compact attachment MUST
+  write it as the layout says. `[F: archive/attachments.json]`
+- **Decoding.** `iface` and `contract` are the pair the index names. `type`
+  is the type object of the resource it names, in that revision's
+  canonical form (§9.5). `confirmed` is its bit.
+- **Reading.** A reader decodes it with the origin key of the reply (above),
+  the archive's catalog, and the catalogs and the revisions it holds. An
+  implementation MUST refuse a compact attachment for the first of these
+  that applies, naming the refusal: `[F: archive/attachments.json]`
+  - the extension bit is 1 (`extension`);
+  - a reserved bit is 1 (`reserved`);
+  - the reader holds neither the archive's catalog nor one whose `lineage`
+    holds it (`unknown_catalog`). An archive that names no catalog is
+    refused so too;
+  - the index is at or above the count read through (`unknown_index`);
+  - the reader holds no revision of the pair it names
+    (`unknown_revision`);
+  - the resource is at or above the revision's count of resources, or
+    names one that is not a state, of kind token `state` or `@state`
+    (`resource`);
+  - the origin key is not a key of that resource (`origin`). Its interface
+    is not the pair's, or its kind token and its resource's chunks do not
+    match the resource's template (§2.2).
+- **What a refusal leaves.** The first two leave nothing read, so the key
+  is unconfirmed, as with an unreadable attachment (above). A later one
+  leaves the `confirmed` bit read, and the identity unknown.
+- **Never a guess.** A reader never reads an index through another
+  catalog, nor a resource through another revision.
 
 ---
 
@@ -3551,6 +3852,23 @@ Liveliness tokens carry no payload; everything is in the key.
     lists each interface, marked `"token": false`. How a reader finds the
     owner is [`observer.md`](observer.md) §3.6, and what it concludes from
     its token §3.11.
+  - **Its descriptor's form.** Such an owner, given a catalog (§8.6),
+    SHOULD write its descriptor in the compact form (§3.3).
+    `[Sc: constrained.md §10]` Each put of it is, and each reply to its
+    GET.
+    - **Why.** The descriptor crosses the hop at each start, each change
+      and each near-side GET. The JSON form takes about a kilobyte, and
+      the compact form some 20 bytes (§3.3, "Sizes").
+    - **Where it writes JSON.** An owner with a role writes the JSON form,
+      which alone carries `requires`. So does one given no catalog, and
+      one whose descriptor has no compact form (§3.3, "Which descriptors
+      have one").
+    - **Off a first hop,** an owner given a catalog MAY write the compact
+      form. The JSON form stays the default there: a reader that holds no
+      catalog reads no compact descriptor, so every near-side tool would
+      need the catalog to see the owner at all.
+    - **Either form,** the owner answers its GET in the form of its last
+      put, under that form's `Encoding`.
   - **Its replies cross the hop.** A reader on the near side waits for
     them, its descriptor's included, as "Across a constrained face" says
     (below).
@@ -5365,18 +5683,18 @@ that role's rules, and the static rules that bind every implementation
 contract states in §2.2, §2.4, §2.5, §2.6, §3.1, §7.1 and §10. A rule of
 any of these sections, §1, §7.5, §7.6, §7.7, §8.6 and §9 included, that names a role is that
 role's. A rule elsewhere that names the
-lint code checking it (§9.2) is static too, and so is §3.3's rule for a
-descriptor checker. A class holds its role's rules in this text and in
+lint code checking it (§9.2) is static too, and so are §3.3's rules for a
+descriptor checker and for a compact descriptor's bytes. A class holds its role's rules in this text and in
 [`observer.md`](observer.md).
 
 **How a static rule binds.** A static rule binds an implementation where
 it does what the rule governs. Such acts are parsing or building a key,
 and parsing or writing an envelope or a call's form (§7.5), a packed
 record (§7.6) or a frame (§7.7). So are reading or writing a snapshot's
-page, and cutting a snapshot into pages (§7.5). So are reading a catalog
-or checking its succession (§8.6), slugging a value, linting a contract,
-building or verifying a bundle, checking a history and classifying a
-revision. A rule on what a contract states binds it through the contracts
+page, and cutting a snapshot into pages (§7.5). So are decoding or
+writing a compact descriptor (§3.3), reading a catalog or checking its
+succession (§8.6), slugging a value, linting a contract, building or
+verifying a bundle, checking a history and classifying a revision. A rule on what a contract states binds it through the contracts
 it writes and the lints it runs.
 §9.8's publication rules bind whoever publishes a revision: its CI, and the
 person who accepts it.
@@ -6128,7 +6446,7 @@ section each was written against, whose pointer leads on.
 | `conformance/bundles/` | §9.6 |
 | `conformance/history/` | §9.7 |
 | `conformance/compat/` | §9.7 retention, §9.8, R4 |
-| `conformance/descriptors/` | §3.3 |
+| `conformance/descriptors/` | §3.3; `compact/` its compact form: `vectors.json` its bytes, its decoding through a catalog and a revision and every refusal, `checks.json` the checks on a decoded descriptor, each JSON case's twin among them |
 | `conformance/budget/` | §2.7, `lossless.json` and the reader's stall included |
 | `conformance/seed/` | §4.2 a late joiner's merge: `merge.json` the Zenoh timestamps' order, unstamped samples, and a tool's across two ids; `inband.json` §4.3's in-band stamps, plain and serial order, and a tool's and a consumer's across two runs; `snapshot.json` a seed over snapshots, their pages, asof, the omission rule and the revision that maps a collection's index; `held.json` a conditional read's reader: the held stamp it sends, and its merge of the answer |
 | `conformance/errors/` | §5.2: `forms.json` §7.5's error form, and every reply error it refuses read as the transport's, a router's `Timeout`, a querier's and one under another `Encoding` among them |
@@ -6138,6 +6456,7 @@ section each was written against, whose pointer leads on.
 | `conformance/packed/` | §7.6 |
 | `conformance/frame/` | §7.7 |
 | `conformance/catalog/` | §8.6 |
+| `conformance/archive/` | §4.4: `attachments.json` an archive reply's attachment, its two forms told by their length, the compact form's bytes and its reading through the archive's catalog and a revision, and every refusal |
 | `scenarios/grammar.md` | §1.3, §1.6 |
 | `scenarios/state.md` | §4; §1 in-band stamps through a router that stamps nothing and one that stamps, and §8.2's session posture; §7 runs, a record's and a random draw's, the run before the seq wraps, and a consumer's and a tool's late joiner across two runs, after their seed and inside it; §8 a replay filtered and ordered by each event's time, against the seqs, an unknown time and a run change among them, and two puts that carry no event; §9 an archive within a run and across two; §10 a late joiner's seed; §11 its merge's open cases; §12 S4's check reads beside a router that is declaring, where its recorder can hear a read that freezes a node; §13 a stream key's seq wrapping, and kept across a takeover; §14 a collection's snapshot in pages, a member read, a page lost, `Latest`'s control, a delete beyond the window and two instances answering; §15 a stray `reply_del`, and an owner on an earlier revision whose state is per key; §16 a conditional read answered by the held stamp alone, and whole after a put, for another stamp, for a payload that is no held stamp, on every other kind of GET, after a delete and across a restart, and a reader's merge of each answer |
 | `scenarios/operations.md` | §5, §6; §9 a call's forms for each kind of type, the as-of mark, an owner's error beside a router's `Timeout`, a querier's and a malformed one, an earlier version's envelope read as the transport's, and a request under another `Encoding` refused |
@@ -6281,6 +6600,19 @@ brief:
   valid contracts, also the fingerprint and `<stem>.canonical.json`. The
   codes' meanings are §9.2's table (contracts and sets) and §3.3's
   (descriptors).
+- **`descriptors/compact/`**: each revision its cases read, by its
+  authoring file → its fingerprint, its resources in canonical order, the
+  capabilities it gates on and its `uses`. Named catalogs, each a JSON
+  value (`vectors.json`'s `revisions` and `catalogs`).
+  - A descriptor, its seq and its `minted` bit, with the catalog its owner
+    holds → the payload's bytes in hex (`writes`).
+  - A payload, the instance key it came on, the catalogs a reader holds
+    and the revisions it lacks → the decoded descriptor, its seq and its
+    `minted` bit, or the refusal's token, the first in §3.3's order
+    (`reads`). Every accepted read writes back to its bytes.
+  - **`checks.json`**: a payload read so, and the contracts a checker is
+    given → the decoded descriptor and its sorted codes. A twin names its
+    JSON case in `descriptors/`, whose codes it draws.
 - **`bundles/`, `history/`, `errors/`:** expected tags, or the decoded
   value. The tags' meanings are §9.6's and §9.7's, and `errors/`'s are
   §7.5's (below).
@@ -6415,6 +6747,18 @@ brief:
   and a record's bytes → the JSON reading, or the reader's refusal, the
   first in §7.6's order (`reads`). Every accepted write reads back under
   the type's tag, to its value or to the `reads_as` its case gives.
+- **`archive/attachments.json`**: each revision its cases read, by its
+  authoring file → its pair and its resources in canonical order, each
+  with its type object. Named catalogs, each a JSON value, and their ids.
+  - The archive's catalog or none, a revision, a resource and its
+    `confirmed` → the compact attachment's bytes in hex, or the JSON form
+    (`writes`).
+  - An attachment's bytes, the origin key, the catalog the archive's
+    descriptor names or none, the catalogs a reader holds and the
+    revisions it lacks → its form. A compact one reads to its `confirmed`
+    and its identity, the JSON form's members, or to the refusal's token,
+    the first in §4.4's order, with its `confirmed` where it was read
+    (`reads`).
 - **`catalog/`**: a catalog's text → its id, or the reader's refusal,
   the first in §8.6's order (`documents.json`). A catalog's text → its
   JCS bytes, their sha256 and its id (`ids.json`). Named catalogs, each a

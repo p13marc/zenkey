@@ -970,3 +970,113 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   handed `Some(Time::Ahead)`; `tests/profile_health.rs`'s
   `s4_clock_ahead` (health.v1 §4) reads the heartbeats through
   `health::Heard::heartbeat`, and its answers are as before.
+
+  The compact descriptor read (#980 C5b, core 0.120 §3.3; no writer
+  change, C5c's): every descriptor reader tells the two forms apart by the
+  reply's `Encoding` alone (`zenkey_model::descriptor::Form::of`:
+  `zenoh/bytes` exactly the compact form, any other JSON). In `presence`:
+  `Served { form, bytes }` (`of(sample)`, `names(catalogs)` the pairs a
+  compact head names through the catalogs, `read(addr, instance, catalogs,
+  revisions)` → `Found`, `decode` the descriptor and its no-contract
+  report), `Held` (catalogs, revisions, `retrieving()`), `descriptor_reply`,
+  `descriptor_held`, `read_held` (each revision named and not held
+  retrieved first where `Held` retrieves); `descriptor` holds nothing, so
+  a compact one is `Found::Unread` (new: `unknown_catalog`,
+  `unknown_index`, `unknown_revision`, the token first) and one refused
+  for its bytes `Found::Invalid`. `serving` takes a `Held`: a consumer's
+  is its catalogs and contract, retrieving (`Consumer::held`), a client's
+  its contract alone; an `Unread` leaves the address undescribed, `not
+  read: unknown_catalog …` in `errors`. `answer::owner_revision_held` and
+  `owner_catalog_held` read either form by a reply's instance key (the run
+  a compact one's envelope's), `owner_revision`/`owner_catalog` holding
+  nothing (a compact one no word, `Unread`); `runs_revision` and
+  `stray_reply_del` take a `Held` (the consumer's; the archive's holds
+  none). `retrieval::revisions(session, named, held, timeout)` the
+  revisions a compact descriptor names that a reader lacks. Not taught:
+  `timing`'s own descriptor read (JSON-sniffed for `meta.zid`, so a
+  compact one attributes nothing), `redundancy`, `arbitration` and
+  `ownership`, which read through `presence::descriptor` (a compact one
+  not read). `tests/compact_descriptor.rs` over
+  `tests/common/compact_owner.rs` (a raw owner answering either form, its
+  revisions held on their contract keys; the fleet's `zk2_core.rs` and
+  `zk2_doctor.rs` and zenctl's `live_zk2.rs` include it): both forms read
+  alike, `unknown_catalog` and `unknown_revision`, a revision retrieved,
+  `serving` and `owner_revision_held`. Test owners that hand-write a JSON
+  descriptor state `application/json` (`owner_heartbeat.rs`).
+
+  C5b2 (#980): every runtime descriptor reader goes through `presence::Held`.
+  `presence::heard(sample, held)` reads a descriptor put by its form, here
+  and now (no retrieval, a callback cannot wait), and `Found::zid` its
+  `meta.zid`: `timing`'s subscriber and `read_descriptors` (whose GET reads
+  each reply through `read_held`), `arbitration`'s `described` and
+  `describe` (`Inputs::held`, the consumer's), and `timing::Sources::held`.
+  `redundancy`'s `Driver::held` is `Service::held()` (the catalog it writes
+  under and the revisions it implements, retrieving). `ownership::split_brain_held`.
+  `Client::with_catalogs` and `Fleet::with_catalogs` (`Settings::catalogs`;
+  a role's client holds the service's catalog, `operation.rs`).
+  `Archive::start_through(session, config, catalogs)` (`Inner::held`: the
+  catalogs and the revisions it records), which `runs_revision` and
+  `entries_of`'s `stray_reply_del` read through; `start` holds none.
+  `desired`'s target (`TargetInner::held`: the service's catalog and the
+  author's revision) reads `owner_revisions` (now taking a `Held`),
+  `run_revision` (taking one too; `owner_revision_held` reads through it)
+  and `owner_catalog_held`. #987's follower (`follow`) reads through
+  `Consumer::held()`: a put by `heard`, `read_descriptors` each reply
+  through `read_held` (the arbitration fence's reads too), a holder's
+  descriptor by `descriptor_held`; `Found::json` is the read as the JSON
+  form's members, what `redundancy::read_descriptor` reads. Left
+  catalog-less: the pub `presence::descriptor`, `answer::owner_revision`
+  and `owner_catalog`, which read either form and leave a compact one
+  unread.
+  `tests/compact_descriptor.rs`' `a_client_and_a_put_read_the_compact_form`.
+
+  C5c (#980, core 0.120's §8.1 SHOULD): the owner writes the compact form.
+  `ServiceConfig::compact_descriptor: Option<bool>` (serde
+  `compact_descriptor`, builder `.compact_descriptor(bool)`) and
+  `writes_compact(catalog, role)`: `None` is the compact form on a first hop
+  given a catalog that holds no role, JSON otherwise. `Some(true)` without a
+  catalog or beside a role is refused at start (`descriptor_form`, step 2,
+  nothing declared). `Served` keeps `Bytes { bytes, form }` (the queryable
+  answers under its form's Encoding) and the minter: `encode_with(instance,
+  run, seq)` checks the JSON descriptor, then `descriptor::encode_compact`
+  (the catalog and the impls' revisions), a descriptor with no compact form
+  written as JSON and said once (`fell_back`). The seq is the as-of mark's,
+  `Minter::last_seq(run)` (0 for a run not written under now), read before
+  any `Served` lock (lock order: the minter's runs, then `putting`); at
+  `run_changed`, under the minter's lock, `publish_at(run, 0)`. A compact put
+  carries no Zenoh timestamp, the JSON one keeps its. The compact form
+  carries `meta.zid` (§3.3's SHOULD), 16 B: the probe device of
+  `constrained.md` §10 is 36 B (32-bit run), 47 B across the hop against
+  JSON's 695 B. `Service::descriptor_form()`; `descriptor_bytes()` is the
+  served form's bytes. The owner example's `--compact-descriptor` (needs
+  `--catalog`), and `--first-hop --catalog` writes it by default; the
+  consume example's `--catalog <path>` (the service's catalog, so its
+  consumer reads a compact descriptor). Tests: `constrained.rs`'s
+  `s10_a_first_hop_device_writes_its_descriptor_compact` (step 7: the bytes
+  across the hop, the tool and the consumer with the catalog and without)
+  and `the_compact_form_asked_for_needs_a_catalog_and_no_role`;
+  `owner_example.rs`'s `the_owner_example_writes_its_descriptor_compact`
+  (consume found it through `--catalog`); `config.rs`'s default.
+
+  C3 (#980, core 0.120 §4.4): the archive's compact attachment.
+  `Archive::start_under(session, config, catalog)` (`start_with`'s
+  `under`): the service is given the catalog (its descriptor names it), it
+  reads owners' compact descriptors through it, and `Inner::identity` keeps
+  each record's `Compact` (index, resource) where the catalog lists the
+  revision, so `answer` writes the 3 bytes with the record's `confirmed`, the
+  JSON form otherwise. Aligning from a peer reads `confirmed` in either form
+  (`attachment::read` with no catalog). `LastKnown::unresolved` (why the
+  identity is unknown, its token first; the identity's members then null);
+  `last_known_through` and `last_known_all_through` (a `Held`: the catalog
+  the archive's descriptor names, asked once of its instances when a compact
+  attachment came, `Through::catalog`); `last_known`/`last_known_all` hold
+  none. The archive example's `--catalog <path>`. Tests: `state.rs`'s
+  `s5_the_compact_attachment` (state.md §5 step 4: 3 B against 196 B of
+  JSON; the vehicle's archive, starting empty, aligns from the peer's
+  compact bit; the identity through the catalog equals the JSON twin's, and
+  `unknown_catalog` without). Its owner-side archives watch a router no
+  owner reaches, so they align only when asked: their own alignment at the
+  owner's token, still retrying when the owner went, read nothing and left
+  the key unconfirmed, the peer's bit 0, in about one run in four under
+  load. The vehicle's wait re-asks `align` too; `archive_example.rs`'s
+  `the_archive_example_writes_the_compact_attachment_under_a_catalog`.

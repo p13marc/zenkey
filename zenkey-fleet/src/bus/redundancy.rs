@@ -51,6 +51,11 @@ pub struct RedundancySpec {
     /// The address sits across a constrained face (§2.13), on the
     /// deployment's word: nothing is read.
     pub across_face: bool,
+    /// The deployment catalogs given (`--catalog`, core §8.6): what an
+    /// instance's compact descriptor (§3.3) is read through, its revisions
+    /// from the store. One not read lists nothing, and its instance's
+    /// listing is unread, never a guess.
+    pub catalogs: crate::model::deployment::Catalogs,
 }
 
 impl RedundancySpec {
@@ -61,6 +66,7 @@ impl RedundancySpec {
             grace: DEFAULT_GRACE,
             iface: None,
             across_face: false,
+            catalogs: crate::model::deployment::Catalogs::default(),
         }
     }
 }
@@ -115,8 +121,9 @@ pub async fn observe(
     let scope = target.map_or_else(Scope::all, Scope::service);
     obs.asked.push(scope.selector());
     let t = spec.timeout;
+    let describing = crate::bus::presence::Describing::new(&spec.catalogs, store);
     let read = || async {
-        crate::bus::presence::observe(session, &scope, t)
+        crate::bus::presence::observe_through(session, &scope, t, &describing)
             .await
             .map_err(|e| crate::one_line(&e))
     };

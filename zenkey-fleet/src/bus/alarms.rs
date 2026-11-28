@@ -269,6 +269,9 @@ pub struct AlarmRefresh {
     session: Session,
     scope: AlarmScope,
     spec: AlarmSpec,
+    /// What a descriptor is read through, a compact one included (core
+    /// §3.3): the feed's, so a revision is retrieved once.
+    describing: crate::bus::presence::Describing,
     /// The watch session's barrier, when the feed listens (#851).
     barrier: Option<zenkey::presence::Barrier>,
 }
@@ -324,10 +327,11 @@ impl AlarmRefresh {
                 Instant::now(),
                 match &cut {
                     Some(why) => Err(why.clone()),
-                    None => crate::bus::presence::observe(
+                    None => crate::bus::presence::observe_through(
                         &self.session,
                         &self.scope.presence_scope(),
                         t,
+                        &self.describing,
                     )
                     .await
                     .map(|mut o| {
@@ -360,7 +364,7 @@ impl AlarmRefresh {
         let archived = if self.spec.archives && self.spec.face.is_none() {
             Some(match &cut {
                 Some(why) => Err(why.clone()),
-                None => archived(&self.session, &self.scope, t).await,
+                None => archived(&self.session, &self.scope, t, &self.describing).await,
             })
         } else {
             None
@@ -588,7 +592,8 @@ pub async fn get(
     // key, so its `reply_del` is a deletion.
     let alarms = zenkey::alarms::implementation().shared_contract();
     let held = [&*alarms];
-    let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+    let mut revisions =
+        crate::bus::query::OwnerRevisions::new(session, timeout, &held, None, epochs.catalogs());
     let (entries, strays) =
         crate::bus::query::merged_without_strays(samples, &mut revisions, |s| {
             crate::bus::query::reply_entries_aged(s, epochs)
@@ -661,8 +666,9 @@ async fn archived(
     session: &Session,
     scope: &AlarmScope,
     timeout: Duration,
+    describing: &crate::bus::presence::Describing,
 ) -> Result<ArchivesRead, String> {
-    let all = crate::bus::presence::observe(session, &Scope::all(), timeout)
+    let all = crate::bus::presence::observe_through(session, &Scope::all(), timeout, describing)
         .await
         .map_err(|e| crate::one_line(&e))?;
     let archive = IfaceId::from_str(ARCHIVE).expect("archive.v1 is an interface id");
@@ -702,6 +708,9 @@ pub struct AlarmFeed {
     /// ([`zenkey::presence::Barrier::moves`]; 0.42, F-229).
     moves_seen: u64,
     spec: AlarmSpec,
+    /// What a descriptor is read through: `spec`'s catalogs, and a store
+    /// seeded with its contracts (core §3.3).
+    describing: crate::bus::presence::Describing,
     rx: Option<tokio::sync::mpsc::Receiver<Delivery>>,
     refused: Arc<AtomicU64>,
     _tokens: Option<zenoh::pubsub::Subscriber<()>>,
@@ -765,6 +774,11 @@ impl AlarmFeed {
             watch,
             barrier: None,
             moves_seen: 0,
+            describing: crate::bus::presence::Describing::retrieving(
+                &spec.catalogs,
+                &spec.contracts,
+                spec.timeout,
+            ),
             spec,
             rx: None,
             refused: Arc::default(),
@@ -994,6 +1008,7 @@ impl AlarmFeed {
             session: self.session.clone(),
             scope: self.book.scope().clone(),
             spec: self.spec.clone(),
+            describing: self.describing.clone(),
             barrier: self.barrier.clone(),
         }
     }

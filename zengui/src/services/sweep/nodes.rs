@@ -69,21 +69,26 @@ pub fn health(
 /// namespace — which holds no liveliness subscriber, the presence link's
 /// monitor being on a watch session of its own — two presence reads a
 /// grace apart, each with its descriptors, and the revisions they name
-/// from the window's own store. Every role is the fleet's judge's.
+/// from the window's own store. A compact descriptor (core §3.3) is read
+/// through `catalogs`, the window's `--catalog`. Every role is the fleet's
+/// judge's.
 pub fn redundancy(
     session: zenoh::Session,
     namespace: String,
     addr: Addr,
     store: zenkey_fleet::BundleStore,
+    catalogs: zenkey_fleet::Catalogs,
     timeout: Duration,
 ) -> Task<Message> {
     Task::perform(
         async move {
+            let mut spec = zenkey_fleet::RedundancySpec::new(timeout);
+            spec.catalogs = catalogs;
             let report = zenkey_fleet::run_redundancy(
                 &session,
                 &namespace,
                 Some(addr.clone()),
-                zenkey_fleet::RedundancySpec::new(timeout),
+                spec,
                 // The window's, seeded with the contracts held offline.
                 &store,
             )
@@ -124,18 +129,22 @@ fn arbitration_spec(
 /// role's deadline, its watch on the presence monitor's watch session (in
 /// no namespace on the wire keys). Without one, the deadline alone, as the
 /// report says. Every answer is the fleet's judge's.
+#[allow(clippy::too_many_arguments)]
 pub fn arbitration(
     session: zenoh::Session,
     watch: Option<zenkey_fleet::WatchSession>,
     namespace: String,
     addr: Addr,
     store: zenkey_fleet::BundleStore,
+    catalogs: zenkey_fleet::Catalogs,
     timeout: Duration,
     routers: zenkey_model::budget::Routers,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            let spec = arbitration_spec(timeout, routers);
+            let mut spec = arbitration_spec(timeout, routers);
+            // A compact descriptor reads through the window's catalogs.
+            spec.catalogs = catalogs;
             let offline = zenkey_fleet::ContractSet::new();
             let report = zenkey_fleet::run_arbitration(
                 &session,

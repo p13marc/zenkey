@@ -5,8 +5,13 @@
 //!   stamp and type identity (§7.1), and keeps tombstones for its window.
 //! - **Its key** is the archived key without its leading `zk2`, each chunk
 //!   slugged as a rest parameter, under its own `@state` token.
-//! - **It answers GETs only,** with a JSON attachment
-//!   `{"iface", "contract", "type", "confirmed"}`.
+//! - **It answers GETs only,** with an attachment in one of two forms
+//!   (core §4.4; #980 C3): JSON, `{"iface", "contract", "type",
+//!   "confirmed"}`, or under a catalog ([`Archive::start_under`]) the
+//!   compact form, 3 bytes ([`zenkey_model::attachment`]). A reader reads
+//!   both: [`last_known`] reads `confirmed` from either, and
+//!   [`last_known_through`] a compact one's identity through the catalog
+//!   the archive's descriptor names.
 //! - **It refuses a put older than what it holds**, a delete included: the
 //!   storage manager of zenoh 1.10.1 does not, and resurrects keys. A
 //!   mutation under a zk2c envelope (core §7.5) is ordered by its run and
@@ -132,6 +137,9 @@ struct Rec {
     stamp: Stamped,
     confirmed: bool,
     identity: Value,
+    /// The compact attachment's index and resource, where the archive
+    /// writes under a catalog that lists the value's revision (core §4.4).
+    compact: Option<zenkey_model::attachment::Compact>,
     at: Instant,
     /// When it last heard this mutation, by either path, a mutation heard
     /// again included: whether it came after an alignment's GET was asked,
@@ -178,6 +186,15 @@ struct Inner {
     window: Duration,
     horizon: Option<Duration>,
     refuse: AtomicU32,
+    /// What an owner's descriptor is read through when it aligns, a
+    /// compact one included (core §3.3): the catalogs it was given
+    /// ([`Archive::start_through`]) and the revisions it records, each
+    /// other one named retrieved.
+    held: crate::presence::Held,
+    /// The catalog it writes under ([`Archive::start_under`]): its
+    /// replies' attachments are compact where it lists the value's
+    /// revision (core §4.4).
+    under: Option<zenkey_model::catalog::Catalog>,
 }
 
 /// Where an alignment read from.
@@ -278,7 +295,10 @@ fn peer_origin(selector: &OwnedKeyExpr, reply_key: &str) -> Option<String> {
 }
 
 impl Inner {
-    fn identity(&self, origin: &str) -> Option<Value> {
+    /// A recorded value's type identity, as the JSON form states it, and
+    /// its compact attachment where the archive writes one (core §4.4): its
+    /// catalog lists the revision, and the resource is among its first 128.
+    fn identity(&self, origin: &str) -> Option<(Value, Option<zenkey_model::attachment::Compact>)> {
         let ZkKey::Data { kind, resource, .. } = parse(origin).ok()? else {
             return None;
         };
@@ -287,7 +307,12 @@ impl Inner {
             let c = s.rec.implementation.contract();
             let r = c.resources.iter().find(|r| r.token == kind && r.template.matches(&refs).is_some())?;
             let ty = type_of(&s.bundle, &kind.to_string(), r.template.as_str(), "type")?;
-            Some(json!({"iface": c.iface.to_string(), "contract": s.rec.implementation.fingerprint().to_string(), "type": ty}))
+            let compact = self.under.as_ref().and_then(|cat| {
+                let name = crate::implementation::resource_name(r);
+                let bytes = zenkey_model::attachment::encode(c, &name, false, cat)?;
+                zenkey_model::attachment::Compact::read(&bytes).ok()
+            });
+            Some((json!({"iface": c.iface.to_string(), "contract": s.rec.implementation.fingerprint().to_string(), "type": ty}), compact))
         })
     }
 
@@ -302,7 +327,7 @@ impl Inner {
         stamp: Stamped,
         confirmed: bool,
     ) -> bool {
-        let Some(identity) = self.identity(origin) else {
+        let Some((identity, compact)) = self.identity(origin) else {
             return false;
         };
         let mut store = self.store.lock().expect("not poisoned");
@@ -324,6 +349,7 @@ impl Inner {
                 stamp,
                 confirmed,
                 identity,
+                compact,
                 at: Instant::now(),
                 heard: Instant::now(),
             },
@@ -365,12 +391,25 @@ impl Inner {
             }
             let _ = match &r.value {
                 Some((bytes, enc)) => {
-                    let mut att = r.identity.clone();
-                    att["confirmed"] = Value::Bool(r.confirmed);
+                    // Core §4.4: the compact form under a catalog that
+                    // lists the revision, else the JSON form.
+                    let att = match r.compact {
+                        Some(c) => zenkey_model::attachment::Compact {
+                            confirmed: r.confirmed,
+                            ..c
+                        }
+                        .write()
+                        .to_vec(),
+                        None => {
+                            let mut att = r.identity.clone();
+                            att["confirmed"] = Value::Bool(r.confirmed);
+                            serde_json::to_vec(&att).expect("JSON")
+                        }
+                    };
                     q.reply(ke, bytes.clone())
                         .encoding(enc.clone())
                         .timestamp(r.stamp.ts)
-                        .attachment(serde_json::to_vec(&att).expect("JSON"))
+                        .attachment(att)
                         .wait()
                 }
                 // A delete's in-band stamp rides as the attachment it
@@ -465,6 +504,7 @@ impl Inner {
                 &from,
                 &src.selector,
                 src.rec.implementation.contract(),
+                &self.held,
             )
             .await;
             let mut seen = Vec::new();
@@ -473,10 +513,14 @@ impl Inner {
                 let (origin, confirmed) = match from {
                     AlignedFrom::Peer(_) => {
                         let Some(o) = origin_of(key) else { continue };
+                        // Core §4.4: the peer's `confirmed`, in either form;
+                        // a compact one's bit needs no catalog.
                         let c = s
                             .attachment()
-                            .and_then(|a| serde_json::from_slice::<Value>(&a.to_bytes()).ok())
-                            .and_then(|v| v["confirmed"].as_bool())
+                            .and_then(|a| {
+                                zenkey_model::attachment::read(&a.to_bytes(), &o, None, &[], &[])
+                                    .confirmed
+                            })
                             .unwrap_or(false);
                         (o, c || s.kind() == SampleKind::Delete)
                     }
@@ -532,6 +576,7 @@ impl Inner {
                         &h.key,
                         h.run,
                         contract,
+                        &self.held,
                         timeout,
                     )
                     .await
@@ -645,6 +690,7 @@ async fn entries_of(
     from: &AlignedFrom,
     selector: &OwnedKeyExpr,
     contract: &zenkey_model::contract::Contract,
+    held: &crate::presence::Held,
 ) -> Vec<Sample> {
     let mut out = Vec::with_capacity(replies.len());
     let mut owners = std::collections::BTreeMap::new();
@@ -657,6 +703,7 @@ async fn entries_of(
                 s.key_expr().as_str(),
                 stamp.run,
                 contract,
+                held,
                 timeout,
                 &mut owners,
             )
@@ -751,6 +798,41 @@ impl Archive {
     /// ([`Error::ReadBesideSubscriber`], #830): `align` reads presence on
     /// `session`.
     pub async fn start(session: &zenoh::Session, config: ArchiveConfig) -> Result<Self> {
+        Self::start_through(session, config, Vec::new()).await
+    }
+
+    /// [`Archive::start`], an owner's compact descriptor (core §3.3) read
+    /// through `catalogs`, the deployment's (§8.6), when it aligns: the
+    /// revision it names under a snapshot's run decides what the snapshot
+    /// omits (core §4.2). Without the catalog it names, the archive drops
+    /// nothing, never a guess. It writes under none of them.
+    pub async fn start_through(
+        session: &zenoh::Session,
+        config: ArchiveConfig,
+        catalogs: Vec<zenkey_model::catalog::Catalog>,
+    ) -> Result<Self> {
+        Self::start_with(session, config, catalogs, None).await
+    }
+
+    /// [`Archive::start_through`] under the deployment catalog `catalog`
+    /// (core §8.6; #980 C3): its descriptor names it, it reads an owner's
+    /// compact descriptor through it, and each reply's attachment is the
+    /// compact form where it lists the value's revision (core §4.4's
+    /// SHOULD), the JSON form otherwise.
+    pub async fn start_under(
+        session: &zenoh::Session,
+        config: ArchiveConfig,
+        catalog: zenkey_model::catalog::Catalog,
+    ) -> Result<Self> {
+        Self::start_with(session, config, vec![catalog.clone()], Some(catalog)).await
+    }
+
+    async fn start_with(
+        session: &zenoh::Session,
+        config: ArchiveConfig,
+        catalogs: Vec<zenkey_model::catalog::Catalog>,
+        under: Option<zenkey_model::catalog::Catalog>,
+    ) -> Result<Self> {
         let window = config
             .service
             .tombstone_window_s
@@ -758,6 +840,9 @@ impl Archive {
         // The archive's own address, resolved before anything is declared
         // (a minted one included, hostid.v1 §2.7).
         let mut b = ServiceBuilder::new(session, config.service);
+        if let Some(c) = &under {
+            b.catalog(c.clone())?;
+        }
         let me = b.address()?.clone();
         let sources = config
             .records
@@ -774,6 +859,14 @@ impl Archive {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let held = crate::presence::Held::new(
+            Arc::new(catalogs),
+            sources
+                .iter()
+                .map(|s| Arc::new(s.rec.implementation.contract().clone()))
+                .collect(),
+        )
+        .retrieving();
         let inner = Arc::new(Inner {
             session: session.clone(),
             me,
@@ -783,6 +876,8 @@ impl Archive {
             window,
             horizon: config.unconfirmed_horizon,
             refuse: AtomicU32::new(0),
+            held,
+            under,
         });
         let mut subs = Vec::new();
         for src in &inner.sources {
@@ -923,10 +1018,17 @@ pub struct LastKnown {
     /// CH's tag, when it came in an envelope: a packed record is read by it
     /// (core §7.6), as [`crate::inband::Read::tag`] says.
     pub tag: Option<zenkey_model::wire::Tag>,
-    /// `{"iface", "contract", "type"}`: the value's type identity (§7.1).
+    /// `{"iface", "contract", "type"}`: the value's type identity (§7.1),
+    /// each member null where [`LastKnown::unresolved`] says why.
     pub identity: Value,
-    /// `false` while alignment has not confirmed the key.
+    /// `false` while alignment has not confirmed the key, an unreadable
+    /// attachment included (§4.4).
     pub confirmed: bool,
+    /// Why its type identity is not known (core §4.4): a compact
+    /// attachment not read through the archive's catalog, its refusal's
+    /// token first (`unknown_catalog` where no catalog was held), or an
+    /// attachment that is neither form. `None` where it was read.
+    pub unresolved: Option<String>,
 }
 
 impl LastKnown {
@@ -949,6 +1051,29 @@ pub async fn last_known(
     origin: &str,
     timeout: Duration,
 ) -> Result<Option<LastKnown>> {
+    last_known_through(
+        session,
+        archive,
+        origin,
+        &crate::presence::Held::default(),
+        timeout,
+    )
+    .await
+}
+
+/// [`last_known`], a compact attachment's identity read through what
+/// `held` holds (core §4.4): the catalog the archive's descriptor names,
+/// asked of the archive's instances (§3.3) once one came, among the
+/// catalogs held, and the revision its index names among the revisions
+/// held. Holding none, its identity is unknown, never guessed
+/// ([`LastKnown::unresolved`]); its `confirmed` reads either way.
+pub async fn last_known_through(
+    session: &zenoh::Session,
+    archive: &Addr,
+    origin: &str,
+    held: &crate::presence::Held,
+    timeout: Duration,
+) -> Result<Option<LastKnown>> {
     // Consolidation `None` (core S4; #977's E3): an archive's records are
     // per key, and two replies on the origin (one archive reached twice)
     // keep the newer, the later where nothing orders them.
@@ -961,9 +1086,19 @@ pub async fn last_known(
         .await
         .map_err(zenoh)?;
     let mut kept: Option<(LastKnown, Option<Mark>)> = None;
+    let mut through = Through::new(held);
     while let Ok(r) = rx.recv_async().await {
         let Ok(s) = r.into_result() else { continue };
-        let Some((lk, mark)) = recorded(origin.to_owned(), s) else {
+        let Some((lk, mark)) = recorded(
+            origin.to_owned(),
+            s,
+            &mut through,
+            session,
+            archive,
+            timeout,
+        )
+        .await
+        else {
             continue;
         };
         if kept.as_ref().is_none_or(|(_, have)| newer(*have, mark)) {
@@ -996,6 +1131,25 @@ pub async fn last_known_all(
     pattern: &str,
     timeout: Duration,
 ) -> Result<Vec<LastKnown>> {
+    last_known_all_through(
+        session,
+        archive,
+        pattern,
+        &crate::presence::Held::default(),
+        timeout,
+    )
+    .await
+}
+
+/// [`last_known_all`], each compact attachment's identity read through
+/// what `held` holds, as [`last_known_through`] reads one.
+pub async fn last_known_all_through(
+    session: &zenoh::Session,
+    archive: &Addr,
+    pattern: &str,
+    held: &crate::presence::Held,
+    timeout: Duration,
+) -> Result<Vec<LastKnown>> {
     let selector = OwnedKeyExpr::try_from(pattern.to_owned()).map_err(zenoh)?;
     let rx = session
         .get(archive_key(archive, pattern))
@@ -1006,12 +1160,15 @@ pub async fn last_known_all(
         .await
         .map_err(zenoh)?;
     let mut out: BTreeMap<String, (LastKnown, Option<Mark>)> = BTreeMap::new();
+    let mut through = Through::new(held);
     while let Ok(r) = rx.recv_async().await {
         let Ok(s) = r.into_result() else { continue };
         let Some(origin) = peer_origin(&selector, s.key_expr().as_str()) else {
             continue;
         };
-        let Some((lk, mark)) = recorded(origin.clone(), s) else {
+        let Some((lk, mark)) =
+            recorded(origin.clone(), s, &mut through, session, archive, timeout).await
+        else {
             continue;
         };
         // Two archive replies for one origin (one archive reached twice):
@@ -1027,7 +1184,14 @@ pub async fn last_known_all(
 /// value under a zk2c envelope (core §7.5) as its record, by its in-band
 /// stamp. `None` for a reply whose envelope was refused: undecodable,
 /// never read as last-known.
-fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
+async fn recorded(
+    origin: String,
+    s: Sample,
+    through: &mut Through<'_>,
+    session: &zenoh::Session,
+    archive: &Addr,
+    timeout: Duration,
+) -> Option<(LastKnown, Option<Mark>)> {
     let read = crate::inband::read(s);
     if let Some(why) = read.undecodable() {
         tracing::warn!(key = %read.sample().key_expr(), reason = %why.reason(), "an undecodable last-known value");
@@ -1036,11 +1200,39 @@ fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
     let mark = read.mark();
     let (inband, tag) = (read.stamp(), read.tag());
     let s = read.into_sample();
-    let att: Value = s
-        .attachment()
-        .and_then(|a| serde_json::from_slice(&a.to_bytes()).ok())
-        .unwrap_or(Value::Null);
     let put = s.kind() == SampleKind::Put;
+    // Core §4.4: the attachment in either form. A delete's carries its
+    // in-band stamp (§7.5), no identity.
+    let bytes = s.attachment().map(|a| a.to_bytes().into_owned());
+    let (confirmed, identity, unresolved) = match (put, bytes) {
+        (true, Some(b)) => {
+            let named = if zenkey_model::attachment::Form::of(&b)
+                == zenkey_model::attachment::Form::Compact
+            {
+                through.catalog(session, archive, timeout).await
+            } else {
+                None
+            };
+            let revisions: Vec<&Contract> = through.held.revisions().iter().map(|c| &**c).collect();
+            let r = zenkey_model::attachment::read(
+                &b,
+                &origin,
+                named,
+                through.held.catalogs(),
+                &revisions,
+            );
+            match r.identity {
+                Ok(id) => (r.confirmed.unwrap_or(false), id, None),
+                Err(why) => (r.confirmed.unwrap_or(false), Value::Null, Some(why)),
+            }
+        }
+        _ => (false, Value::Null, None),
+    };
+    let identity = json!({
+        "iface": identity["iface"],
+        "contract": identity["contract"],
+        "type": identity["type"],
+    });
     let lk = LastKnown {
         origin,
         value: put.then(|| s.payload().to_bytes().into_owned()),
@@ -1048,10 +1240,66 @@ fn recorded(origin: String, s: Sample) -> Option<(LastKnown, Option<Mark>)> {
         timestamp: s.timestamp().copied(),
         inband,
         tag,
-        confirmed: att["confirmed"].as_bool().unwrap_or(false),
-        identity: json!({"iface": att["iface"], "contract": att["contract"], "type": att["type"]}),
+        confirmed,
+        identity,
+        unresolved,
     };
     Some((lk, mark))
+}
+
+/// What a last-known read resolves a compact attachment through (core
+/// §4.4): what the reader holds, and the catalog the archive's descriptor
+/// names, asked once, when the first compact attachment came and a catalog
+/// is held.
+struct Through<'h> {
+    held: &'h crate::presence::Held,
+    named: Option<Option<zenkey_model::catalog::CatalogId>>,
+}
+
+impl<'h> Through<'h> {
+    fn new(held: &'h crate::presence::Held) -> Self {
+        Through { held, named: None }
+    }
+
+    /// The catalog the archive's descriptor names: read from the first of
+    /// its instances whose descriptor states one (core §3.3), through what
+    /// is held; `None` with no catalog held, or none stated.
+    async fn catalog(
+        &mut self,
+        session: &zenoh::Session,
+        archive: &Addr,
+        timeout: Duration,
+    ) -> Option<zenkey_model::catalog::CatalogId> {
+        if self.held.catalogs().is_empty() {
+            return None;
+        }
+        if let Some(named) = self.named {
+            return named;
+        }
+        let mut named = None;
+        let keys = crate::presence::liveliness_keys(
+            session,
+            &format!("zk2/{}/{}/@zk/instance/*", archive.system, archive.service),
+            timeout,
+        )
+        .await
+        .unwrap_or_default();
+        for k in keys {
+            let Ok(ZkKey::Instance { instance, .. }) = parse(&k) else {
+                continue;
+            };
+            if let Ok(crate::presence::Found::Descriptor(d, _)) =
+                crate::presence::descriptor_held(session, archive, &instance, self.held, timeout)
+                    .await
+                && let Some(id) = d.stated_catalog()
+            {
+                named = Some(id);
+                break;
+            }
+        }
+        self.named = Some(named);
+        named
+    }
 }
 
 #[cfg(test)]

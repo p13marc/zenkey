@@ -3,6 +3,245 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
+## 0.120 — 2026-11-28: §3.3's compact descriptor, defined: its bytes, its decoding through a catalog and its revisions, its refusals, and the checks on what it decodes; then adopted: a reader reads both forms, and an owner on a first hop given a catalog writes it; and §4.4's archive attachment in two forms, the compact one 3 bytes (#980 C5a, C5c, C3)
+
+#980's C5 cuts a descriptor to a few bytes for an owner across a
+constrained first hop (#982). zenoh-modem's node descriptor, `modem.v3`,
+`config.v1`, `health.v1` and `freshness.v2`, is 1,344 B of JSON. That is
+8 RF SDUs, or 83.5 s of SF12's 864 s a day, each time it crosses. The
+design memo on #980, whose defaults the maintainer kept, names each
+revision by its catalog index (§8.6) and states capabilities as bits. The
+same descriptor is then 22 B, one SDU. C5a defines the form, and C5c
+adopts it (below): a reader reads both forms, and an owner on a first hop
+given a catalog writes the compact one. C5b and C5b2, between them, had
+the reference's readers read it, and changed no text.
+
+**What changed.**
+- **§3.3, "The compact form".** A descriptor's second form, a put's
+  payload or the GET's reply on the instance key under `zenoh/bytes`:
+  §7.5's mutation form, CH with tag 0, the run and the seq, then a body.
+  - **The body** opens with the catalog id (32 bits), then the count of
+    entries (4, 1 to 15), `minted`, `has_zid` and 2 extension bits.
+  - **Per entry** come its index (10), `token`, `standby`, `has_unav` and
+    `has_card`, then a bitmap over the capabilities its revision gates on.
+  - **Then** the unavailable lists, then the cardinality lists, each an
+    8-bit count and its items; the zid (128 bits) where `has_zid`; and the
+    pad.
+  - **An item** names a resource by its index in its revision's canonical
+    order, in ⌈log₂ n⌉ bits. An unavailable item adds its cause, coded as
+    §7.5's error byte codes one. A cardinality item adds its bound, a
+    snapshot's integer.
+  - **What it leaves out:** `minor`, `requires`, `profiles` (derived),
+    `meta` but its zid, each `reason`, and a capability no listed revision
+    gates on. A descriptor that lists a requirement, more than 15
+    interfaces, or a revision its catalog does not list has no compact
+    form.
+  - **Decoding** gives today's members, so the D-checks run unchanged.
+    `service` and `instance` come from the key, `run` from the envelope,
+    each entry's pair from the catalog, the resources' names from the
+    revision, `capabilities` from the bits, and `profiles` from the
+    revisions' `uses` and `minted`.
+  - **Reading** takes three steps, the head with no catalog, then the
+    catalog, then the rest with each revision. Fourteen refusals:
+    `short`, `form`, `count`, `extension`, `order`, `unknown_catalog`,
+    `unknown_index`, `unknown_revision`, `capability`, `resource`,
+    `cause`, `leb128`, `trailing`, `pad`. A writer writes the layout's
+    orders, and every accepted form writes back to its bytes.
+  - **The checks on a decoded descriptor.** D000 to D002, D008, D010 and
+    D003's malformed members cannot arise, and D009 has nothing to read.
+    D003 for an interface listed twice, D004 to D007, D011 and D012 arise
+    as on JSON, and each JSON case the form can carry has a twin with its
+    codes.
+- **§4.3, "What keeps its wire":** the descriptor's JSON form carries no
+  envelope; its compact form is the mutation form.
+- **§12** names §3.3's rules for a compact descriptor's bytes static, and
+  decoding or writing one an act a static rule binds. `RULES.md` gains
+  four rules, all an implementation's.
+- **Appendix C and E** index `descriptors/compact/`.
+
+**Decided where the memo left it open.**
+- **A revision the reader lacks** (`unknown_revision`). A bitmap's width
+  and an item's are its revision's, so a reader that holds the catalog but
+  not a revision cannot read past the entries. It refuses, as §8.6 refuses
+  an unknown catalog. The head and the catalog name every revision the
+  rest needs, so a reader learns which to retrieve (§8.4). The memo's
+  refusals assumed every revision held.
+- **The order of the refusals.** The memo listed them by kind. Reading by
+  steps, field by field, makes the order exact: a bitmap's width is
+  unknown until its entry's revision is read.
+- **Orders, for one set of bytes per value.** Entries are ordered by
+  index, lowest first, and an index may repeat: the memo's D003 for "an
+  index twice". A list's items are strictly ascending, so a cardinality
+  key never repeats, as a JSON object's cannot. Each is refused `order`
+  otherwise.
+- **A capability's bits agree** (`capability`). The memo kept a bitmap
+  per interface. Two revisions that gate on one capability each have a
+  bit for it, and the descriptor holds it or not, so the bits agree.
+- **Counts of 0 are unused** (`count`): an empty list writes its flag 0.
+  The extension bits are 0 (`extension`). A cause of 0 is unused
+  (`cause`), since an unavailable entry always gives one.
+- **An item's resource** takes ⌈log₂ n⌉ bits for n resources, as a
+  heartbeat's rank does, and is refused past them (`resource`). A bound
+  is §7.5's integer, so 2^32 − 1 at most (`leb128`).
+- **The seq** is the as-of mark's (§5.1): the last minted for state and
+  events, and the put mints none. So a descriptor orders against the
+  state it accompanies.
+- **`minted` is part of the decoded value.** A revision that lists
+  `hostid.v1` in `uses`, which hostid.v1 §2.8 advises against, puts it in
+  `profiles` either way. The bit still says whether the system is minted,
+  and the bytes write back from the descriptor, the seq and the bit.
+- **The zid** is the integer its hex spells, so a decoded `meta.zid` has
+  no leading zero.
+
+**What deliberately did not change.**
+- **C5a adopted no rule.** Under C5a alone the GET still answered JSON,
+  no owner wrote the compact form, and no reader was required to read it.
+  C5c's part, below, adopts it.
+- **The JSON form,** its schema, its checks and its size rule.
+- **No nonce, no requires, no minor** (the memo's questions 2 to 4): the
+  key holds the instance id, a first-hop device binds no role today, and
+  a bundle keeps no minor.
+
+**The cases.** `descriptors/compact/` holds five revisions of its own in
+`contracts/` and reuses `descriptors/contracts/nav.v2.toml`.
+- **`vectors.json`:** each revision's resources, bits and capabilities;
+  three catalogs, `second` succeeding `first`; 17 writes; and 77 reads,
+  the 17 written, 8 more accepted and 52 refused, every token at least
+  once and each order between two refusals that the text names.
+- **`checks.json`:** 26 cases. 18 are twins of the JSON cases a compact
+  form can carry, each drawing its case's codes. 8 are the compact form's
+  own: two revisions of one interface (D003, D004), a tokenless archive
+  standing by (D011, D012), a capability held through two revisions'
+  bits, an unbounded ceiling, and an interface the checker is not given.
+- **How they were made.** One reading of the text (Python, standard
+  library) wrote every case and its expectation. A revision's facts came
+  from lane P's canonicalizer, written from §9.3 to §9.6 alone, whose
+  fingerprints matched the reference's for all six. A second reading,
+  written from the finished text without the first, computed every case
+  again. Never blessed.
+
+**C5c: the form adopted.** The memo's questions 4 and 7 kept their
+defaults: an instance with a role writes JSON, and a first-hop owner
+SHOULD write the compact form, not MUST, since one with no catalog has to
+stay describable.
+- **§3.3, "Both forms are read".** A reader of descriptors MUST read both
+  forms, telling them apart by the `Encoding`, a compact one through the
+  catalogs and revisions it holds. It MUST NOT guess a catalog or a
+  revision it does not hold. A provider found by a descriptor it did not
+  read is unobservable, never absent (observer §3.6, unchanged).
+  `[F: descriptors/compact/]` `[Sc: constrained.md §10]`
+- **§3.3's opening** names §8.1 as where an owner is told to write the
+  form, in place of "no rule here has an owner write one, or a reader
+  read one". "What carries it" adds that a compact put needs no Zenoh
+  timestamp, the envelope's run and seq ordering an instance's puts (the
+  memo's default).
+- **§8.1, "On a first hop", "Its descriptor's form".** Such an owner,
+  given a catalog, SHOULD write its descriptor in the compact form: each
+  put of it, and each reply to its GET. `[Sc: constrained.md §10]`
+  - It writes JSON where it holds a role, which only JSON's `requires`
+    carries; where it was given no catalog; and where its descriptor has
+    no compact form (§3.3's list).
+  - Off a first hop, an owner given a catalog MAY write it. JSON stays the
+    default there: a near-side tool without the catalog would see no
+    compact owner at all (the memo's risk 1).
+  - Either form, the GET answers the form of the last put.
+- **`constrained.md` §10, step 7.** The device given the catalog of its
+  three revisions writes the compact form. The proxy counts each
+  descriptor put across the hop against step 3's JSON one, a quarter at
+  most. A tool and a consumer holding the catalog read it and find the
+  device; holding none, the tool's read is `unknown_catalog` and the
+  consumer's wait does not end. The reference measured 47 B against
+  695 B on the wire, the payload 36 B against 664 B.
+- **`RULES.md`** gains three rules: the reader's MUST and MUST NOT, under
+  observer marked *reader*, and §8.1's SHOULD under owner. Its "Where it
+  reads" lists gain core §3.3, which raises its mean words per sentence
+  from 12.19 to 12.25, a hand edit of `.prose-baseline.json`: the lists
+  are generated, one sentence each.
+
+**Decided where the memo left it open (C5c).**
+- **The zid stays.** §3.3's SHOULD that an owner state `meta.zid` binds
+  either form, so the reference's compact descriptor carries the zid, 16 B
+  of its 36. The memo's 22 B for zenoh-modem's node is without it.
+- **A seq for every put.** The seq is the as-of mark's (C5a's decision):
+  at start the last seq minted before the descriptor, the status and the
+  state put before the tokens included; at a new run 0, as at a re-mint.
+- **No new version.** C5c extends 0.120's entry, since the form was not
+  yet adopted and nothing merged between.
+
+**C3: the archive attachment's compact form.** Each archive reply's
+attachment named the value's type identity as JSON: `iface`, a 71-B
+fingerprint, the type object (its own 71-B schema id) and `confirmed`,
+248 B for zenoh-modem's `modem.v3/state/oper` (the memo's measurement).
+The memo's C3 row names the revision by its catalog index and the resource
+by its place: 3 bytes. Its questions 6 and 8 kept their defaults: the
+resource stays, a checked index, and an archive given a catalog SHOULD,
+not MUST, write the compact form.
+- **§4.4, "Each reply's attachment".** Two forms, told apart by their
+  length: exactly 3 bytes is the compact form, any other the JSON form,
+  unchanged. A JSON object holding the four members is never that short.
+  `[F: archive/attachments.json]`
+- **"Writing it".** An archive given a catalog SHOULD write the compact
+  form. `[Sc: state.md §5]` It writes JSON for a revision its catalog
+  does not list and a resource past the 128th, and with no catalog. The
+  archive's catalog is the one its descriptor names, or across a
+  constrained face the deployment's word, as §8.6 says of an owner's.
+- **"Reading it".** A reader of an archive's replies MUST read both forms.
+  `[F: archive/attachments.json]` `[Sc: state.md §5]` The `confirmed` bit
+  needs no catalog. The identity is read through the archive's catalog as
+  §8.6 reads an index, and decodes to the JSON form's three members.
+- **"What a reply confirms"** reads the peer's confirmation in either form.
+- **"The compact attachment".** The layout, index 10 · resource 7 ·
+  confirmed 1 · extension 1 · reserved 5, most significant bit first; the
+  writer's MUST; the decoding; and seven refusals in order: `extension`,
+  `reserved`, `unknown_catalog` (an archive naming no catalog too),
+  `unknown_index`, `unknown_revision`, `resource`, `origin`. The first two
+  leave nothing read, the key unconfirmed; a later one leaves `confirmed`
+  read and the identity unknown, never guessed.
+- **`state.md` §5, step 4.** Both archives given the catalog: each reply's
+  attachment is 3 bytes; the vehicle's archive, starting empty, aligns
+  from the owner-side archive and holds v4 confirmed as its compact
+  attachment says; a consumer holding the catalog reads the identity,
+  and one holding none reads `confirmed` alone.
+- **Appendix C and E** index `archive/`. `RULES.md` gains four rules: the
+  reader's MUST under observer marked *reader*, the archive's SHOULD
+  under owner, and the writer's and the refusals' MUSTs, static. Its
+  "Where it reads" lists gain §4.4, and its baseline mean moves from 12.25
+  to 12.31 by hand, as for C5c.
+
+**Decided where the memo left it open (C3).**
+- **The refusals and their order.** The memo had a mismatch with the
+  origin key "undecodable". The text names each: the bits, then the
+  catalog as §8.6 reads an index, the revision, the resource, the origin.
+- **A resource that is not a state** is refused `resource`: an archive
+  records only state (`state` and `@state`), so an index naming an
+  operation or a stream names nothing it could hold.
+- **The origin check** covers the interface as well as the resource: the
+  pair's interface must be the origin key's, a major included, and the
+  kind token and the chunks must match the resource's template.
+- **Which catalog.** The memo said the archive's catalog, the one its
+  descriptor names. Three bytes carry no id, so a reader learns it there;
+  a reader with no descriptor of the archive reads no identity.
+- **Where JSON stays.** A revision the catalog does not list, and a
+  resource past the 128th, which 7 bits cannot name.
+
+**The cases (C3).** `archive/attachments.json` reuses four revisions of
+`descriptors/` and holds two of its own in `archive/contracts/`: `log.v1`
+(a state, an explicit state under a template, a stream) and `wide.v1`
+(130 states). Three catalogs: `a`, `b` succeeding it and listing a
+`ghost.v1` no one holds, and `c`, unrelated, listing two of `a`'s
+revisions at other indices.
+- **`writes`:** 12, nine compact and three JSON (an unlisted revision,
+  the 129th resource, no catalog).
+- **`reads`:** 44: 12 accepted, through the archive's catalog and through
+  a successor, never through `c`; 29 refused, every token at least once
+  and each order between two refusals that the text names; 3 of the JSON
+  form by their length.
+- **How they were made.** One reading of the text (Python, standard
+  library) wrote every case and its expectation, a revision's facts from
+  lane P's canonicalizer. A second reading, written from the finished text
+  without the first, recomputed every write, read and catalog id from the
+  fixture alone. They agreed on every case. Never blessed.
+
 ## 0.119 — 2026-11-28: a candidate of either major of `redundancy` draws a 32-bit run and is refused a tokenless interface; only `redundancy.v1`'s session stamps, no keyword changed (#987)
 
 `redundancy.v2` text 0.1 restates `redundancy.v1` without the session's

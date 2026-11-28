@@ -11,6 +11,10 @@
 //!
 //! Replies are taken unconsolidated, because zenoh's `Latest` consolidation
 //! holds every reply until the query finalizes.
+//!
+//! [`revisions`] retrieves those a compact descriptor names that a reader
+//! lacks (core §3.3, "Reading"; #980 C5b): its head and its catalog name
+//! every revision the rest needs.
 
 use std::time::Duration;
 
@@ -63,4 +67,34 @@ pub async fn fetch_bundle(
         }
     }
     Ok(Retrieved::Unavailable { refused })
+}
+
+/// The revisions in `named` that `held` lacks, each retrieved from its
+/// holders and verified (§8.4), each GET waiting at most `timeout`: what a
+/// reader of a compact descriptor needs before it reads past the entries,
+/// since a bitmap's width and an item's are its revision's (core §3.3,
+/// "Reading": the head and the catalog name every revision the rest
+/// needs). One that cannot be had, or whose bundle does not read, is left
+/// out, so the descriptor's reading refuses it `unknown_revision`.
+pub async fn revisions(
+    session: &zenoh::Session,
+    named: &[(IfaceId, Fingerprint)],
+    held: &[std::sync::Arc<zenkey_model::contract::Contract>],
+    timeout: Duration,
+) -> Vec<std::sync::Arc<zenkey_model::contract::Contract>> {
+    let mut got = Vec::new();
+    for (iface, fp) in named {
+        if held
+            .iter()
+            .any(|c| c.iface == *iface && Fingerprint::of(c) == *fp)
+        {
+            continue;
+        }
+        if let Ok(Retrieved::Bundle(b, _)) = fetch_bundle(session, iface, fp, timeout).await
+            && let Ok(c) = zenkey_model::contract::Contract::from_bundle(&b)
+        {
+            got.push(std::sync::Arc::new(c));
+        }
+    }
+    got
 }

@@ -120,7 +120,7 @@ pub async fn take(cli: SnapshotArgs) -> Result<()> {
         None
     } else {
         let ns_session = dep.session().await?;
-        zk2::read_lens(&dep, &ns_session, &store).await
+        zk2::read_lens(&dep, &ns_session, &store, &catalogs).await
     };
     let held = store.held().len();
     let lens = Lens::new(&namespace, catalog.as_ref(), &store)

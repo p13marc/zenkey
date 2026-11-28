@@ -33,7 +33,8 @@ use anyhow::Result;
 use zenkey_model::authoring::Kind;
 
 use super::sample::{
-    Line, Payload, SampleLine, TOMBSTONE, attachment_display, attachment_json, format_sample, hex,
+    Line, Payload, SampleLine, TOMBSTONE, attachment_display_at, attachment_json_at, format_sample,
+    hex,
 };
 use crate::bus::Deployment;
 use crate::cmd::zk2;
@@ -89,7 +90,7 @@ pub async fn run(cli: crate::cli::GetArgs) -> Result<()> {
         None
     } else {
         let ns_session = dep.session().await?;
-        zk2::read_lens(&dep, &ns_session, &store).await
+        zk2::read_lens(&dep, &ns_session, &store, &catalogs).await
     };
     let lens = Lens::new(&namespace, catalog.as_ref(), &store)
         .offline(&contracts)
@@ -320,7 +321,7 @@ impl Human<'_> {
             .or_else(|| {
                 a.attachment
                     .as_ref()
-                    .map(|t| attachment_display(&t.to_bytes()))
+                    .map(|t| attachment_display_at(&a.key, &t.to_bytes()))
             });
         let answered = unchanged(a, self.carried);
         if let Some(fmt) = self.fmt {
@@ -436,7 +437,7 @@ fn value_row(a: &FleetAnswer, line: &Line) -> serde_json::Value {
     let attachment = a.attachment.as_ref().map(|t| t.to_bytes());
     line.fill(&mut row, attachment.as_deref());
     if let (None, Some(att)) = (&row.attachment, attachment.as_deref()) {
-        row.attachment = Some(attachment_json(att));
+        row.attachment = Some(attachment_json_at(&a.key, att));
     }
     serde_json::to_value(&row).expect("a sample row serializes")
 }
@@ -460,7 +461,8 @@ pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
     // Core §8.6: no descriptor is read here, so the catalogs given are the
     // deployment's word for the epoch a packed `time` field counts from,
     // and the catalog each date names (O8).
-    let epoch = zk2::load_catalogs(&cli.contracts)?.dating(zenkey_fleet::CatalogStated::Unread);
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
+    let epoch = catalogs.dating(zenkey_fleet::CatalogStated::Unread);
     let target = zenkey_fleet::ResolvedTarget::parse(&cli.address.to_string())?;
     let values = zk2::bindings(&cli.params);
     let mut session = None;
@@ -481,7 +483,12 @@ pub async fn state(cli: crate::cli::StateGetArgs) -> Result<()> {
     };
     let report = match &cli.last_known {
         None => zenkey_fleet::get_state_in(&session, read, epoch).await?,
-        Some(archive) => zenkey_fleet::last_known_state_in(&session, read, archive, epoch).await?,
+        // Core §4.4 (#980 C3): a compact attachment's identity through the
+        // catalogs given.
+        Some(archive) => {
+            zenkey_fleet::last_known_state_through(&session, read, archive, epoch, &catalogs)
+                .await?
+        }
     };
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     // Silence is no verdict (O5). A complete snapshot of no entry is the

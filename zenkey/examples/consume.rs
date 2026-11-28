@@ -3,7 +3,7 @@
 //! found.
 //!
 //! ```text
-//! cargo run -p zenkey --example consume -- <endpoint> <system>/<service> <contract.toml> <state resource> <operation resource>
+//! cargo run -p zenkey --example consume -- [--catalog <path>] <endpoint> <system>/<service> <contract.toml> <state resource> <operation resource>
 //! ```
 //!
 //! It connects as a client to `endpoint`, binds the role `p` to the given
@@ -21,6 +21,15 @@
 //! value form's CH and as-of mark; one the form's parse refuses is `call
 //! malformed <refusal>` (core §5.1). Exit 0 when every line was printed, 2
 //! on usage or setup errors.
+//!
+//! **`--catalog <path>`** is the deployment catalog (core §8.6) the
+//! consumer reads a compact descriptor through (§3.3; #980 C5c): a
+//! provider on a first hop holds no interface token, so the wait finds it
+//! by its instance token and its descriptor (observer §3.6). Without it a
+//! compact descriptor is not read (`unknown_catalog`), the provider is
+//! not found, and after 20 s the line is `no provider appeared` on standard
+//! error, exit 2. A revision the descriptor names and the consumer lacks
+//! is retrieved from its holders (§8.4).
 //!
 //! **`--timing`** (`timing.v1`, #908) is a reader of one timed stream, as
 //! `spec/profiles/timing/scenarios.md`'s C is, for a black-box runner to
@@ -78,11 +87,15 @@ use zenkey::{Outcome, ServiceBuilder, ServiceConfig};
 pub const HELP: &str = "\
 consume: a zk2 consumer to interoperate with (#609).
 
-usage: consume <endpoint> <system>/<service> <contract.toml> <state> <operation>
+usage: consume [--catalog <path>] <endpoint> <system>/<service> <contract.toml> <state> <operation>
        consume --timing [--clock-bound-ms <ms>] [--no-watch] [--param <name>=<value>]...
                [--for <s>] <endpoint> <system>/<service> <contract.toml> <resource>
        consume --follow [--descriptor-delay-ms <ms>] [--for <s>]
                <endpoint> <system>/<service> <contract.toml> <resource>
+
+--catalog <path>: the deployment catalog (core §8.6) a provider's compact
+  descriptor is read through (core §3.3). Without it a compact descriptor is not
+  read, so a provider on a first hop, which holds no interface token, is not found.
 
 --timing (timing.v1, spec/profiles/timing/v1.md): a reader of one timed stream
   through a role bound to <system>/<service> (R1), as scenarios.md's C.
@@ -180,9 +193,16 @@ pub async fn run(
     args: &[String],
     mut say: impl FnMut(String),
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Core §3.3, §8.6 (#980 C5c): the catalog a compact descriptor is
+    // read through.
+    let (catalog, args) = match args {
+        [flag, path, rest @ ..] if flag == "--catalog" => (Some(path), rest),
+        _ => (None, args),
+    };
     let [endpoint, provider, file, state, op] = args else {
         eprintln!(
-            "usage: consume <endpoint> <system>/<service> <contract.toml> <state> <operation>"
+            "usage: consume [--catalog <path>] <endpoint> <system>/<service> <contract.toml> \
+             <state> <operation>"
         );
         std::process::exit(2);
     };
@@ -204,6 +224,12 @@ pub async fn run(
         ServiceConfig::new("interop/consumer".parse()?).bind("p", &[provider]),
     );
     b.require("p", contract.iface.clone(), false);
+    if let Some(path) = catalog {
+        let bytes = std::fs::read(path).map_err(|e| format!("--catalog {path}: {e}"))?;
+        let c = zenkey::model::catalog::Catalog::parse_bytes(&bytes)
+            .map_err(|e| format!("--catalog {path}: refused [{}]: {e}", e.token()))?;
+        b.catalog(c)?;
+    }
     let svc = b.start().await?;
     let consumer = svc.consumer("p", Arc::clone(&contract))?;
     let client = svc.client("p", Arc::clone(&contract))?;

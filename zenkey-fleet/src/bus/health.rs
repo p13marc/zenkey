@@ -766,6 +766,10 @@ pub async fn observe(
 ) -> HealthObservation {
     let t = spec.timeout;
     let fresh = presence.is_none();
+    // An owner's compact descriptor (core §3.3) reads through the catalogs
+    // given, its revisions from `--contracts` or retrieved.
+    let describing =
+        crate::bus::presence::Describing::retrieving(&spec.catalogs, &spec.contracts, t);
     let window = match spec.window {
         Some(_) => {
             Some(Window::open(session, &target, t, spec.face.is_some(), &spec.catalogs).await)
@@ -776,7 +780,7 @@ pub async fn observe(
         (Some(_), _) => None,
         (None, Some(p)) => Some(Ok(p)),
         (None, None) => Some(
-            crate::bus::presence::observe(session, &target.scope(), t)
+            crate::bus::presence::observe_through(session, &target.scope(), t, &describing)
                 .await
                 .map_err(|e| crate::one_line(&e)),
         ),
@@ -836,7 +840,7 @@ pub async fn observe(
     });
     let archived = match (&target, &presence) {
         (HealthTarget::One(a), Some(Ok(p))) if p.complete && !Catalog::new(p).has_instance(a) => {
-            Some(archived(session, a, t, epochs).await)
+            Some(archived(session, a, t, epochs, &describing).await)
         }
         _ => None,
     };
@@ -1044,7 +1048,8 @@ pub async fn get_of(
     }
     .shared_contract();
     let held = [&*health];
-    let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+    let mut revisions =
+        crate::bus::query::OwnerRevisions::new(session, timeout, &held, None, epochs.catalogs());
     let (entries, strays) =
         crate::bus::query::merged_without_strays(samples, &mut revisions, |s| {
             crate::bus::query::reply_entries_aged(s, epochs)
@@ -1407,8 +1412,9 @@ async fn archived(
     owner: &Addr,
     timeout: Duration,
     epochs: &crate::bus::query::EntryEpochs,
+    describing: &crate::bus::presence::Describing,
 ) -> Result<Option<ArchivedStatus>, String> {
-    let all = crate::bus::presence::observe(session, &Scope::all(), timeout)
+    let all = crate::bus::presence::observe_through(session, &Scope::all(), timeout, describing)
         .await
         .map_err(|e| crate::one_line(&e))?;
     let archive = IfaceId::from_str(ARCHIVE).expect("archive.v1 is an interface id");

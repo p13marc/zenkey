@@ -72,6 +72,13 @@ fn clamp_document(s: &str) -> (&str, usize) {
     (&s[..end], s.len() - end)
 }
 
+/// An attachment's text: an archive's compact one by its fields (core §4.4;
+/// #980 C3), 3 bytes on its own key, never sniffed as text; any other the
+/// structural ladder's.
+fn attachment_text(key: &str, bytes: &[u8]) -> String {
+    zenkey_fleet::model::attachment::attachment_text(key, bytes)
+}
+
 /// The structural rendering of an attachment, bounded on both axes (#345).
 ///
 /// The decode used to run over the *whole* attachment on every redraw, with
@@ -79,7 +86,7 @@ fn clamp_document(s: &str) -> (&str, usize) {
 /// now, both stated: nothing over [`crate::echo::DECODE_LIMIT`] is decoded at
 /// all — the same limit the echo line stops at — and what
 /// is decoded is drawn up to [`DOCUMENT_VIEW_CHARS`].
-fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
+fn attachment_pane<'a>(key: &str, bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
     let mut col = Column::new().spacing(sp.xs);
     if bytes.len() > crate::echo::DECODE_LIMIT {
         col = col.push(kit::mono(format!(
@@ -88,7 +95,7 @@ fn attachment_pane<'a>(bytes: &[u8], sp: Spacing) -> Element<'a, Message> {
         )));
         return col.into();
     }
-    let rendered = zenkey_fleet::structural(bytes);
+    let rendered = attachment_text(key, bytes);
     let (shown, elided) = clamp_document(&rendered);
     col = col.push(kit::mono(shown.to_string()));
     if elided > 0 {
@@ -1400,7 +1407,13 @@ fn reply_body<'a>(reply: &'a Reply, data: &DetailData<'a>) -> Element<'a, Messag
             "attachment: {} bytes — rendered structurally",
             abytes.len()
         )));
-        col = col.push(row![hex_pane(&abytes, sp), attachment_pane(&abytes, sp)].spacing(sp.md));
+        col = col.push(
+            row![
+                hex_pane(&abytes, sp),
+                attachment_pane(&reply.key, &abytes, sp)
+            ]
+            .spacing(sp.md),
+        );
     }
     col.into()
 }
@@ -2003,6 +2016,23 @@ fn decoded_pane<'a>(
 mod tests {
     use super::*;
     use std::time::Instant;
+
+    /// Core §4.4 (#980 C3): the attachment pane shows an archive's compact
+    /// attachment by its fields, its JSON one as JSON, and 3 bytes on any
+    /// other key as the structural ladder reads them.
+    #[test]
+    fn the_attachment_pane_reads_an_archives_compact_attachment() {
+        let key = "zk2/v/archive/archive.v1/@state/g/s/nav.v2/state/x";
+        assert_eq!(
+            attachment_text(key, &[0x00, 0x41, 0x80]),
+            r#"{"confirmed":false,"form":"compact","index":1,"resource":3}"#
+        );
+        assert_eq!(
+            attachment_text(key, br#"{"confirmed":true}"#),
+            r#"{"confirmed":true}"#
+        );
+        assert_eq!(attachment_text("zk2/g/s/nav.v2/state/x", b"abc"), "abc");
+    }
 
     /// #977's E2: an owner GET answered by a snapshot of no entry is the
     /// owner's answer, not silence, and the strip says which seq it holds

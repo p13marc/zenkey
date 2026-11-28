@@ -21,6 +21,11 @@ use std::time::Duration;
 mod util;
 use util::zk2::{T, client, client_ns, config, eventually, example, iface};
 
+/// An owner answering core §3.3's compact descriptor (#980's C5b), the
+/// runtime's suites' and zenctl's too.
+#[path = "../../zenkey/tests/common/compact_owner.rs"]
+mod compact_owner;
+
 use serde_json::{Value, json};
 use zenkey::model::descriptor::Cause;
 use zenkey::model::template::Bindings;
@@ -218,7 +223,12 @@ async fn fake(session: &zenoh::Session, service: &str, instance: &str, descripto
     let q = session
         .declare_queryable(key.as_str())
         .callback(move |q| {
-            let _ = q.reply(q.key_expr().clone(), body.clone()).wait();
+            // The JSON form's Encoding (core §3.3): under `zenoh/bytes` it
+            // would be read as a compact descriptor.
+            let _ = q
+                .reply(q.key_expr().clone(), body.clone())
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                .wait();
         })
         .await
         .expect("a descriptor queryable");
@@ -578,6 +588,63 @@ async fn a_missing_token_and_an_invalid_descriptor_are_findings() {
     let f = found(&r, CheckId::DescriptorInvalid, &format!("h3/bad@{bad}"));
     assert!(f.evidence.starts_with("D005"), "{f:?}");
     assert_eq!(verdict(&r, CheckId::DescriptorInvalid).findings.len(), 1);
+}
+
+/// The D-checks on a compact descriptor's decoding (core §3.3, "The checks
+/// on a decoded descriptor"; #980 C5b): read through the catalog given,
+/// its revision retrieved, a required resource it lists unavailable is
+/// D005 as on its JSON twin; with no catalog given it is not read, and
+/// undecided, never guessed (§8.6).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_compact_descriptor_is_checked_on_its_decoding() {
+    use zenkey::model::descriptor::{Form, Unavailable, compact::resource_names};
+    let (_r, ep) = router(false).await;
+    let (tool, raw) = (client(&ep).await, client(&ep).await);
+    let netif = example("tcgui/tc.netif.v1");
+    let catalog = compact_owner::catalog(&[&netif]);
+    let required = netif
+        .resources
+        .iter()
+        .position(|r| !r.optional)
+        .expect("a required resource");
+    let named = resource_names(&netif)[required].clone();
+    let listing = |address: &str, instance: &str| {
+        let mut d =
+            compact_owner::descriptor(address, instance, &catalog, &[&netif], true, &[], None);
+        d.interfaces[0].unavailable = vec![Unavailable {
+            resource: named.clone(),
+            cause: Cause::Config,
+            reason: None,
+        }];
+        d
+    };
+    let (twin, compact) = ("00000000000000f6", "00000000000000f7");
+    let json = listing("h6/json", twin);
+    let _json = compact_owner::serve(&raw, &json, Form::Json, Vec::new()).await;
+    let d = listing("h7/compact", compact);
+    let bytes = compact_owner::compact(&d, &catalog, &[&netif]);
+    let mut owner = compact_owner::serve(&raw, &d, Form::Compact, bytes).await;
+    owner.hold(&netif).await;
+    tokens(&tool, "zk2/*/*/@zk/instance/*", 2).await;
+
+    let mut given = spec(&[CheckId::DescriptorInvalid]);
+    given.catalogs = zenkey_fleet::Catalogs::new(vec![catalog]);
+    let r = doctor(&bus(&tool, &tool, ""), &given).await;
+    for subject in [format!("h6/json@{twin}"), format!("h7/compact@{compact}")] {
+        let f = found(&r, CheckId::DescriptorInvalid, &subject);
+        assert!(f.evidence.starts_with("D005"), "{f:?}");
+    }
+
+    let r = doctor(&bus(&tool, &tool, ""), &spec(&[CheckId::DescriptorInvalid])).await;
+    let c = verdict(&r, CheckId::DescriptorInvalid);
+    assert_eq!(c.findings.len(), 1, "the JSON twin alone: {c:#?}");
+    assert!(
+        c.unjudged
+            .iter()
+            .any(|u| u.subject == format!("h7/compact@{compact}")
+                && u.reason.contains("not read (unknown_catalog")),
+        "{c:#?}"
+    );
 }
 
 /// A bundle that cannot be retrieved (§8.4): a descriptor naming a revision

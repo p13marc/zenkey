@@ -21,7 +21,7 @@
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
 //!     [--first-run <hex>] [--takeover-puts-nothing]
 //!     [--timing] [--frames] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
-//!     [--owner-heartbeat]
+//!     [--owner-heartbeat] [--compact-descriptor]
 //!     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
 //!     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
 //!     <address> <contract.toml>...
@@ -199,6 +199,12 @@
 //! implements in the tokenless set, so it holds its instance token alone,
 //! and no bundle held, its contract queryables left undeclared; one
 //! implementing `archive.v1` or a governed interface is refused at start.
+//! Given `--catalog` too, it writes its descriptor in the compact form
+//! (core §3.3, §8.1; #980 C5c), as `--compact-descriptor` has any owner
+//! given a catalog write it: its put and its GET's reply under
+//! `zenoh/bytes`, each revision named by its index in the catalog. The
+//! option needs `--catalog`, and is refused beside a role (`--arbitrate`,
+//! `--desired-target`), each before anything is opened.
 //!
 //! **`config.v1`** (`spec/profiles/config/v1.md`, #768) is implemented by
 //! the runtime ([`zenkey::config_v1`]) with `--config`, or when a contract
@@ -920,6 +926,9 @@ pub struct Options {
     /// under the catalog (`freshness.v2` §2.4; #1110), never without
     /// `--catalog`.
     pub owner_heartbeat: bool,
+    /// `--compact-descriptor`: the descriptor in its compact form (core
+    /// §3.3, §8.1; #980 C5c), never without `--catalog`.
+    pub compact_descriptor: bool,
     /// `--arbitrate <entry>,…`: `rudder.v1` implemented, its role `cmd`
     /// bound to the entries in their order and arbitrated
     /// (`arbitration.v1`, #909), unless a contract file implements it.
@@ -982,13 +991,19 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
     [--first-run <hex>] [--takeover-puts-nothing]
     [--timing] [--frames] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>]
-    [--owner-heartbeat]
+    [--owner-heartbeat] [--compact-descriptor]
     [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] [--watch-connect <endpoint>]
     [--clock-bound-ms <ms>] [--commander] [--commander-lead-ms <ms>]
     <system>/<service>|@hostid.v1/<service> <contract.toml>...
 
 --first-hop: an owner on a first hop (core §8.1, §8.4): every interface it
 implements tokenless, its instance token alone held, and no bundle held.
+With --catalog too, its descriptor is written in the compact form.
+
+--compact-descriptor: the descriptor written in its compact form (core §3.3,
+§8.1), its put and its GET's reply under zenoh/bytes, each revision named by
+its index in the catalog. It needs --catalog <path>, and is refused beside a
+role. The default is the JSON form, but on a first hop given a catalog.
 
 --owner-heartbeat: the owner confirms its interfaces by owner heartbeats
 (freshness.v2 §2.4): one put per class of exposure, on
@@ -1562,6 +1577,8 @@ timing.v1 (spec/profiles/timing/v1.md)
   --owner-heartbeat               with --catalog: one owner heartbeat per class in
                                   place of each listed interface's heartbeat
                                   (freshness.v2 §2.4)
+  --compact-descriptor            with --catalog: the descriptor in its compact
+                                  form, under zenoh/bytes (core §3.3, §8.1)
   --no-hlc                        with --connect, the session's HLC off (the
                                   default; with --standby the runtime refuses
                                   it, redundancy.v1 §2.10): the
@@ -1717,7 +1734,7 @@ impl Options {
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
              [--first-run <hex>] [--takeover-puts-nothing] \
              [--timing] [--no-hlc] [--hlc] [--run-file <path>] [--catalog <path>] \
-             [--owner-heartbeat] \
+             [--owner-heartbeat] [--compact-descriptor] \
              [--arbitrate <entry>[,<entry>...]] [--arbitrate-no-watch] \
              [--watch-connect <endpoint>] [--clock-bound-ms <ms>] \
              [--commander] [--commander-lead-ms <ms>] \
@@ -1787,6 +1804,7 @@ impl Options {
             run_file: None,
             catalog: None,
             owner_heartbeat: false,
+            compact_descriptor: false,
             arbitrate: None,
             arbitrate_watch: true,
             watch_connect: None,
@@ -1849,6 +1867,10 @@ impl Options {
                 }
                 [flag, tail @ ..] if flag == "--first-hop" => {
                     o.first_hop = true;
+                    rest = tail;
+                }
+                [flag, tail @ ..] if flag == "--compact-descriptor" => {
+                    o.compact_descriptor = true;
                     rest = tail;
                 }
                 [flag, value, tail @ ..] if flag == "--tokenless" => {
@@ -2252,6 +2274,15 @@ impl Options {
                     .to_owned(),
             );
         }
+        // Core §3.3: a compact descriptor names each revision by its index
+        // in the deployment catalog.
+        if o.compact_descriptor && o.catalog.is_none() {
+            return Err(
+                "--compact-descriptor: give --catalog <path>, the deployment catalog a \
+                 compact descriptor names each revision by its index in (core §3.3, §8.6)"
+                    .to_owned(),
+            );
+        }
         if o.arbitrate.is_none()
             && (!o.arbitrate_watch || o.watch_connect.is_some() || o.clock_bound_ms.is_some())
         {
@@ -2331,6 +2362,9 @@ pub async fn run_with(
     }
     if opts.owner_heartbeat {
         config = config.owner_heartbeat();
+    }
+    if opts.compact_descriptor {
+        config = config.compact_descriptor(true);
     }
     config.clock_reference = opts.clock_reference.clone();
     let mut imps = Vec::new();

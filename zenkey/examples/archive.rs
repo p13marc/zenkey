@@ -8,6 +8,7 @@
 //! cargo run -p zenkey --example archive -- [--connect <endpoint>] [--namespace <ns>]
 //!     [--system <system>] [--service <service>] [--window <s>] [--peer <system>/<service>]...
 //!     [--unconfirmed-horizon <s>] [--no-watch] [--hlc] [--timeout-ms <ms>] [--poll-ms <ms>]
+//!     [--catalog <path>]
 //!     --record <system>/<service> <selector> <contract.toml> [--record …]...
 //! ```
 //!
@@ -26,6 +27,10 @@
 //!   appear on a watch session of its own (core §8.1), a second client of
 //!   the same router, unless `--no-watch`, which reads presence on a
 //!   period instead.
+//! - **`--catalog <path>`** is the deployment catalog it writes under (core
+//!   §8.6; #980 C3): its descriptor names it, and each reply's attachment
+//!   is the compact form, 3 bytes, where it lists the value's revision
+//!   (core §4.4), the JSON form otherwise.
 //! - **Standard output**, one line per event: the session's line, `ready
 //!   <instance key>`, then one `aligned …` line for the alignment it runs
 //!   once up and for each `align`, and a `held`/`gone` line each time what
@@ -60,7 +65,7 @@ quit.
 usage: archive [--connect <endpoint>] [--namespace <ns>]
     [--system <system>] [--service <service>] [--window <s>]
     [--peer <system>/<service>]... [--unconfirmed-horizon <s>] [--no-watch] [--hlc]
-    [--timeout-ms <ms>] [--poll-ms <ms>]
+    [--timeout-ms <ms>] [--poll-ms <ms>] [--catalog <path>]
     --record <system>/<service> <selector> <contract.toml> [--record ...]...
 
 Flags:
@@ -88,6 +93,10 @@ Flags:
                               default 2000
   --poll-ms <ms>              how often it reads back what it holds, for the held and
                               gone lines; default 200, 0 for never
+  --catalog <path>            the deployment catalog it writes under (core §8.6): its
+                              descriptor names it, and each reply's attachment is the
+                              compact form, 3 bytes, where it lists the value's
+                              revision (core §4.4); default: none, the JSON form
 
 Alignment (§4.4): it re-reads each owner it records by a collection read (a
 member read for a selector naming one member), so the owner answers by
@@ -167,12 +176,14 @@ pub struct Options {
     pub hlc: bool,
     pub timeout: Duration,
     pub poll: Option<Duration>,
+    /// `--catalog <path>`: the catalog it writes under (core §4.4, §8.6).
+    pub catalog: Option<PathBuf>,
 }
 
 const USAGE: &str = "usage: archive [--connect <endpoint>] [--namespace <ns>] \
      [--system <system>] [--service <service>] [--window <s>] \
      [--peer <system>/<service>]... [--unconfirmed-horizon <s>] [--no-watch] [--hlc] \
-     [--timeout-ms <ms>] [--poll-ms <ms>] \
+     [--timeout-ms <ms>] [--poll-ms <ms>] [--catalog <path>] \
      --record <system>/<service> <selector> <contract.toml> [--record ...]...";
 
 impl Options {
@@ -192,6 +203,7 @@ impl Options {
             hlc: false,
             timeout: Duration::from_millis(2000),
             poll: Some(Duration::from_millis(200)),
+            catalog: None,
         };
         let mut it = args.iter();
         let value = |flag: &str, it: &mut std::slice::Iter<'_, String>| {
@@ -216,6 +228,7 @@ impl Options {
                 }
                 "--no-watch" => o.watch = false,
                 "--hlc" => o.hlc = true,
+                "--catalog" => o.catalog = Some(PathBuf::from(value(a, &mut it)?)),
                 "--timeout-ms" => {
                     o.timeout = Duration::from_millis(number(a, value(a, &mut it)?)?);
                 }
@@ -391,21 +404,29 @@ pub async fn run_with(
         });
     }
     let selectors: Vec<String> = records.iter().map(|r| r.selector.clone()).collect();
-    let archive = Archive::start(
-        &session,
-        ArchiveConfig {
-            service,
-            records,
-            peers: opts
-                .peers
-                .iter()
-                .map(|p| p.parse())
-                .collect::<Result<_, _>>()?,
-            unconfirmed_horizon: opts.unconfirmed_horizon_s.map(Duration::from_secs),
-            watch,
-        },
-    )
-    .await?;
+    let config = ArchiveConfig {
+        service,
+        records,
+        peers: opts
+            .peers
+            .iter()
+            .map(|p| p.parse())
+            .collect::<Result<_, _>>()?,
+        unconfirmed_horizon: opts.unconfirmed_horizon_s.map(Duration::from_secs),
+        watch,
+    };
+    // Core §4.4, §8.6: under a catalog, the compact attachment.
+    let archive = match &opts.catalog {
+        Some(path) => {
+            let bytes =
+                std::fs::read(path).map_err(|e| format!("--catalog {}: {e}", path.display()))?;
+            let catalog = zenkey::model::catalog::Catalog::parse_bytes(&bytes).map_err(|e| {
+                format!("--catalog {}: refused [{}]: {e}", path.display(), e.token())
+            })?;
+            Archive::start_under(&session, config, catalog).await?
+        }
+        None => Archive::start(&session, config).await?,
+    };
     say(format!("ready {}", archive.service().instance_key()?));
     match archive.align(opts.timeout).await {
         Ok(a) => say(aligned_line(&a)),

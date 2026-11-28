@@ -6,6 +6,53 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the archive's compact attachment (#980's C3), and the compact descriptor written (C5c)
+
+Core 0.120 §4.4: an archive given a catalog answers with a 3-byte
+attachment, its revision by its index in the catalog, its resource by its
+place, and `confirmed`. Core §8.1: an owner on a first hop given a catalog
+writes its descriptor compact, which C5b's readers already read. No flag
+or exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `get state --last-known <archive>`: the identity and `confirmed` from a JSON attachment | either form: `confirmed` from the compact form's bit, with no catalog; the identity through `--catalog`, the catalog the archive's descriptor names | given no catalog, a compact row states `confirmed` and an identity of nulls, never a guess |
+| `doctor`'s `archive-unaligned`: `confirmed` read from JSON | either form | an attachment neither form reads is unconfirmed, as before |
+| `why`'s last-known rung: `confirmed` from JSON | either form | |
+| `echo`, `get` (`raw`, `--format ndjson`): a 3-byte attachment sniffed as text | on an archive's own key, the compact form by its fields: `{"form": "compact", "index", "resource", "confirmed"}`, or its refusal | the same 3 bytes on any other key are sniffed as before |
+
+## Unreleased (`main`, zk2) — every reader reads the compact descriptor (#980's C5b2)
+
+Core 0.120 §3.3. C5b taught `service`, `echo`'s lens, `doctor`,
+`redundancy` and `timing`; every other verb that reads a descriptor now
+reads a compact one through its `--catalog` too, each revision it names
+held by `--contracts` or retrieved. Two flags are new on `admin graph`:
+`--contracts` and `--catalog`. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `health`, `config` (`show`, `watch`, `set`'s pre-check), `alarms`, `desired`, `telemetry`, `check conform`, `arbitration`, `why` and the windowed verbs' lens (`get`, `rate`, `field`, `snapshot`, `timeline`, `record`): a compact descriptor not read, whatever `--catalog` gave | read through `--catalog`: the answers its owner's JSON descriptor gives | given no catalog that is or succeeds the one it names, it is not read, never guessed: `health`'s service `unobservable`, `config`'s premise `descriptor_unread`, `telemetry` with no metric resource of it in scope, `why` stopped at the descriptor |
+| a stray `reply_del`, an omission: judged by the owner's revision its JSON descriptor names | its compact one's too, read through `--catalog` | one not read is no word: the `reply_del` merges as a deletion, as before |
+| `admin graph`: no `--catalog` | `--contracts`, `--catalog`: an instance whose descriptor is compact joins its router by its `meta.zid` | without, it attaches nothing |
+
+## Unreleased (`main`, zk2) — the compact descriptor read (#980's C5b)
+
+Core 0.120 §3.3's compact form, which no owner writes before C5c: a
+descriptor under `zenoh/bytes` names each revision by its index in the
+deployment catalog. Every reader below tells the two forms apart by the
+reply's `Encoding` alone, and reads a compact one through `--catalog` and
+each revision it names, held by `--contracts` or retrieved (§8.4). Two
+flags are new on `service list` and `service show`: `--contracts` and
+`--catalog`. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| a descriptor reply read as JSON whatever its `Encoding` | under `zenoh/bytes` exactly, the compact form, decoded to the JSON form's members: `service show --format json` shows it `served`, its `descriptor` as a JSON one's (no `minor`, no `requires`, `meta` its `zid` alone, `profiles` derived); under any other, JSON as before | `service list`, `echo`'s lens, `doctor`, `redundancy` and `timing` read it through their `--catalog` too. A JSON descriptor under `zenoh/bytes`, which no runtime owner writes, now reads as a compact one refused (`invalid`) |
+| — | a compact descriptor read with no catalog that is or succeeds the one it names, or a revision it names that cannot be had: the answer `unread`, its `reason` the refusal's token first (`unknown_catalog`, `unknown_index`, `unknown_revision`), and the table's `descriptor: compact, not read — …` | never guessed (§8.6): its interfaces are not listed, so a tokenless one's provider is not shown; the doctor's `descriptor-invalid` leaves it unjudged, never a finding |
+| a compact descriptor refused for its bytes | `invalid`, its `findings` the refusal's token first (`form`, `short`, `pad`, …) | as a JSON one that is D000 |
+| `doctor`'s `descriptor-invalid`: the JSON re-encoded and checked again | each descriptor read, a compact one's decoding included, checked against the revisions it names (§3.3, "The checks on a decoded descriptor") | same codes on a JSON descriptor |
+| `timing`'s lifespans: attributed by a JSON descriptor's `meta.zid` | a compact one's too, where it carries the zid; one without names none, so its owner's stamps are `unattributed` | `timing --catalog` |
+
 ## Unreleased (`main`, zk2) — `redundancy`, the doctor and `check conform` read `redundancy.v2` (#987's N3)
 
 `redundancy.v2` 0.1 §2.2, §2.10, §2.15, §2.17; `arbitration.v1` 0.7

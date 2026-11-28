@@ -256,7 +256,7 @@ pub use bus::admin::{
     AdminEntry, RouterVerification, UNDER_TABLES_LOCK, admin_doc_omits_loopback, admin_get,
     admin_get_within, declared_entities, declared_entities_within, declared_entity_selectors,
     mesh_links, reaches_tables_lock, render_dot, routers, storages, topology,
-    topology_with_instances,
+    topology_with_instances, topology_with_instances_through,
 };
 pub use bus::monitor::{
     EventStream, FleetEvent, Monitor, MonitorCore, MonitorSpec, SampleSource, SampleView,
@@ -293,7 +293,7 @@ pub use judge::doctor_delta::doctor_delta;
 // reads, the session-free judge, and the two in a row.
 pub use bus::why::{
     ArchiveRead, KeyAnswer, KeyReply, WhyObservation, WhySpec, WhyTarget, observe as observe_why,
-    run_why,
+    run_why, run_why_through,
 };
 pub use judge::why::judge as judge_why;
 // zk2's `check conform` (#703): one service against the revision it claims,
@@ -391,9 +391,10 @@ pub use model::structural::{OBSERVE_LIMIT, structural, structural_value};
 // alone would read as the crate's.
 pub use bus::contracts::{BundleStore, DEFAULT_MAX_CONTRACTS, UNAVAILABLE_TTL};
 pub use bus::presence::{
-    BARRIER_NOT_ESTABLISHED, CUT_OFF_DURING, DESCRIBE_CONCURRENCY, NAMESPACE_SELECTOR,
+    BARRIER_NOT_ESTABLISHED, CUT_OFF_DURING, DESCRIBE_CONCURRENCY, Describing, NAMESPACE_SELECTOR,
     Scope as PresenceScope, cut_off, describe as describe_instances, liveliness_read,
-    namespace_listing, observe as observe_presence, read_tokens, refuse_beside, service_listing,
+    namespace_listing, observe as observe_presence, observe_through as observe_presence_through,
+    read_tokens, refuse_beside, service_listing,
 };
 // Live presence, per address (#614, FL1): the session-free projection, and
 // the feed that seeds it and keeps it current from a monitor.
@@ -439,7 +440,9 @@ pub use model::namespace::{join as with_namespace, strip as strip_namespace};
 // The raw observers' lens (#612, FJ8b): a wire key resolved through the
 // namespace, presence and the contracts in hand, rung by rung (the tooling
 // guide's O2), and the read that keeps it current.
-pub use bus::lens::{LensFeed, REFRESH_MIN as LENS_REFRESH_MIN, read as read_lens};
+pub use bus::lens::{
+    LensFeed, REFRESH_MIN as LENS_REFRESH_MIN, read as read_lens, read_through as read_lens_through,
+};
 pub use model::lens::{
     Checked, Lens, Resolution, Resolved, check_payload, conformance, declared_qos, observed_qos,
     qos_mismatch, sample_conformance,
@@ -458,8 +461,9 @@ pub use model::skeleton::{
 // `Client`, `Fleet` and `Consumer` (`bus::operation`, `bus::consume`).
 pub use bus::consume::{
     Confirmations, StateRead, WATCH_BUFFER, Watch, WatchReads, get_state, get_state_in,
-    last_known as last_known_state, last_known_in as last_known_state_in, stamp,
-    watch as watch_resource, watch_across as watch_resource_across, watch_in as watch_resource_in,
+    last_known as last_known_state, last_known_in as last_known_state_in,
+    last_known_through as last_known_state_through, stamp, watch as watch_resource,
+    watch_across as watch_resource_across, watch_in as watch_resource_in,
 };
 pub use bus::operation::{OperationCall, call as call_operation};
 pub use model::target::{

@@ -146,6 +146,8 @@ pub async fn run(cli: TelemetryArgs) -> Result<()> {
     }
     let window = ASKING.ask(super::positive_secs("--for", for_secs));
     let mut spec = TelemetrySpec::new(dep.timeout(), window);
+    // An owner's compact descriptor reads through --catalog (core §3.3).
+    spec.catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
     // The routers' lease, keep-alives and wait_before_close: the flags,
     // else the `[transport]` of the face read across, else the binding's,
     // else zenoh 1.10.1's (#1011).

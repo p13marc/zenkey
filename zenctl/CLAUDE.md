@@ -645,3 +645,33 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   `health_v2_s8_*`, three face runs at once, about 240 s) and
   `health_v2_reads_an_owner_under_a_catalog_by_its_epoch`; `render.rs`
   pins `health_v2_report`.
+
+  The compact descriptor (#980 C5b, core 0.120 §3.3): `service list` and
+  `service show` take `ContractArgs` (`--contracts`, `--catalog`) and read
+  through `zk2::presence_through` with a `zenkey_fleet::Describing`
+  (`cmd/service.rs`'s `describing`): a compact descriptor shows as the
+  JSON form's members, `served`; one not read is `unread` (`reason`, the
+  token first), the table's `descriptor: compact, not read — …`
+  (`render/impls/zk2.rs`, the list's cell `descriptor not read`).
+  `echo`'s lens (`LensFeed::open_through`), `redundancy` and `timing`
+  (`spec.catalogs`) read through their `--catalog` too. `help-service.trycmd`
+  re-blessed; `live_zk2.rs`'s
+  `service_show_renders_a_compact_descriptor_through_the_catalog` over the
+  runtime's `compact_owner`; a test owner's hand-written JSON descriptor
+  states `application/json`.
+
+  C5b2 (#980): `health`, `config` (`set_v2`'s pre-check included),
+  `alarms`, `desired`, `telemetry` (`spec.catalogs`), `check conform`,
+  `arbitration` (`spec.catalogs`), `why` (`run_why_through`) and the
+  windowed verbs (`zk2::read_lens` takes the catalogs: `get`, `rate`,
+  `field`, `snapshot`, `timeline`, `record`) read a compact descriptor
+  through `--catalog`; `admin graph` takes `ContractArgs`
+  (`help-admin.trycmd` re-blessed). `live_zk2.rs`'s
+  `why_reads_a_compact_descriptor_through_the_catalog`.
+
+  C3 (#980): `get state --last-known` reads through `--catalog`
+  (`last_known_state_through`); `sample::attachment_display_at` and
+  `attachment_json_at` (the keyed renderers, which replaced the unkeyed
+  ones) show an archive's compact attachment by its fields (`get`'s raw and
+  ndjson rows, `echo`'s lines, a namespaced key stripped first).
+  `sample.rs`'s `an_archives_compact_attachment_renders_by_its_fields`.

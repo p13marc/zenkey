@@ -739,6 +739,7 @@ impl Redundancy {
                 token: Mutex::new(None),
                 reads: Mutex::default(),
                 startup: st.clone(),
+                held: svc.held(),
                 tx,
                 _watch: Mutex::new(watch),
                 task: Mutex::new(None),
@@ -932,6 +933,9 @@ pub(crate) struct Driver {
     token: Mutex<Option<LivelinessToken>>,
     reads: Mutex<Reads>,
     startup: RedundancyStartup,
+    /// What a peer's descriptor is read through, a compact one included
+    /// (core §3.3): the service's catalog and revisions.
+    held: presence::Held,
     tx: tokio::sync::mpsc::UnboundedSender<Ev>,
     _watch: Mutex<Option<zenoh::pubsub::Subscriber<()>>>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -1305,7 +1309,7 @@ impl Driver {
     /// states (v2 §2.10).
     async fn listing(&self, id: &InstanceId) -> (Listing, Option<Run>) {
         let st = &self.startup;
-        match presence::descriptor(&st.reader, &self.addr, id, st.timeout).await {
+        match presence::descriptor_held(&st.reader, &self.addr, id, &self.held, st.timeout).await {
             Ok(presence::Found::Descriptor(d, _)) => {
                 let want = self.iface.to_string();
                 let run = d.stated_run();

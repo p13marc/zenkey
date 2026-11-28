@@ -1,0 +1,39 @@
+# core §3.3's compact descriptor: another revision of nav.v2, the descriptor
+# fixtures' contract (`../../../contracts/nav.v2.toml`) with a sixth resource
+# and raw types, so its fingerprint is another.
+[interface]
+name    = "nav"
+major   = 2
+minor   = 2
+summary = "Navigation, another revision, for the compact descriptor's cases"
+
+[resources.position]
+kind = "state"
+type = { raw = "application/json" }
+
+[resources.heading]
+kind = "state"
+type = { raw = "application/json" }
+
+[resources.covariance]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "capability:imu"
+
+[resources.diagnostics]
+kind     = "state"
+type     = { raw = "application/json" }
+optional = true
+gate     = "config:diagnostics"
+
+[resources."tracks/{track}"]
+kind        = "state"
+type        = { raw = "application/json" }
+params      = { track = "string" }
+cardinality = 50
+
+[resources.arm]
+kind     = "operation"
+request  = { raw = "application/json" }
+response = { raw = "application/json" }

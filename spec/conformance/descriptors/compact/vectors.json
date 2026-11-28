@@ -1,0 +1,2254 @@
+{
+ "description": "core §3.3, the compact descriptor. Written by an independent reading of the text (Python, standard library), checked by a second, never blessed. `revisions` holds each revision the cases read, by name: its authoring file (relative to this directory), its interface and fingerprint, its resources in the canonical form's order (§9.5) with the bits one takes, ⌈log₂ n⌉ for n resources, the capabilities it gates on, sorted bytewise, and its `uses`. `catalogs` holds three deployment catalogs (§8.6): `first`; `second`, which succeeds it, and lists `ghost.v1` at a fingerprint no revision has; and `other`, apart. `ids` gives each one's id. A value is a descriptor, its envelope's seq and its `minted` bit. `writes`: a value and the catalog its owner holds → the payload's bytes in hex and their count. `reads`: a payload, the instance key it came on, the catalogs a reader holds and the revisions it lacks (`lacks`, none when absent; it holds every other) → the value, or the refusal's token, the first in §3.3's order. A decoded descriptor's `token` is written out, and an empty member left out. Every accepted read writes back to its bytes under the catalog its descriptor names, read through what the case holds.",
+ "revisions": {
+  "nav.v2": {
+   "file": "../contracts/nav.v2.toml",
+   "iface": "nav.v2",
+   "fingerprint": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+   "resources": [
+    "@op/arm",
+    "state/covariance",
+    "state/diagnostics",
+    "state/position",
+    "state/tracks/{track}"
+   ],
+   "resource_bits": 3,
+   "capabilities": [
+    "imu"
+   ],
+   "uses": []
+  },
+  "nav.v2 other": {
+   "file": "contracts/other/nav.v2.toml",
+   "iface": "nav.v2",
+   "fingerprint": "sha256:10051e570744d5fd1194bed052370b129d4749acc62a119474f56649283d8a3c",
+   "resources": [
+    "@op/arm",
+    "state/covariance",
+    "state/diagnostics",
+    "state/heading",
+    "state/position",
+    "state/tracks/{track}"
+   ],
+   "resource_bits": 3,
+   "capabilities": [
+    "imu"
+   ],
+   "uses": []
+  },
+  "geo.v1": {
+   "file": "contracts/geo.v1.toml",
+   "iface": "geo.v1",
+   "fingerprint": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+   "resources": [
+    "state/diagnostics",
+    "state/fence",
+    "state/tracks/{track}"
+   ],
+   "resource_bits": 2,
+   "capabilities": [],
+   "uses": []
+  },
+  "archive.v1": {
+   "file": "contracts/archive.v1.toml",
+   "iface": "archive.v1",
+   "fingerprint": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+   "resources": [
+    "state/index"
+   ],
+   "resource_bits": 0,
+   "capabilities": [],
+   "uses": []
+  },
+  "cap.v1": {
+   "file": "contracts/cap.v1.toml",
+   "iface": "cap.v1",
+   "fingerprint": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+   "resources": [
+    "@op/calibrate",
+    "state/baro",
+    "state/cam",
+    "state/depth",
+    "state/fix",
+    "state/heat",
+    "state/lidar",
+    "state/mag",
+    "state/odom",
+    "state/radar",
+    "state/samples/{sample}",
+    "state/zones/{zone}",
+    "stream/imu_raw"
+   ],
+   "resource_bits": 4,
+   "capabilities": [
+    "baro",
+    "camera",
+    "gnss",
+    "gpu",
+    "imu",
+    "lidar",
+    "mag",
+    "radar",
+    "sonar",
+    "thermal"
+   ],
+   "uses": [
+    "freshness.v1"
+   ]
+  },
+  "host.v1": {
+   "file": "contracts/host.v1.toml",
+   "iface": "host.v1",
+   "fingerprint": "sha256:9a050aadc6a70ec5340a366a74b8a64f1b5a7adb7b2d467743f22f13b88910fc",
+   "resources": [
+    "state/uptime"
+   ],
+   "resource_bits": 0,
+   "capabilities": [],
+   "uses": [
+    "hostid.v1"
+   ]
+  }
+ },
+ "catalogs": {
+  "first": {
+   "format": "zk2-catalog/1",
+   "epoch": 1767225600,
+   "entries": [
+    {
+     "index": 0,
+     "iface": "nav.v2",
+     "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd"
+    },
+    {
+     "index": 1,
+     "iface": "archive.v1",
+     "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749"
+    },
+    {
+     "index": 2,
+     "iface": "geo.v1",
+     "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6"
+    }
+   ]
+  },
+  "second": {
+   "format": "zk2-catalog/1",
+   "epoch": 1767225600,
+   "lineage": [
+    {
+     "id": "3598e3ec",
+     "entries": 3
+    }
+   ],
+   "entries": [
+    {
+     "index": 0,
+     "iface": "nav.v2",
+     "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd"
+    },
+    {
+     "index": 1,
+     "iface": "archive.v1",
+     "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749"
+    },
+    {
+     "index": 2,
+     "iface": "geo.v1",
+     "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6"
+    },
+    {
+     "index": 3,
+     "iface": "cap.v1",
+     "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26"
+    },
+    {
+     "index": 4,
+     "iface": "nav.v2",
+     "contract": "sha256:10051e570744d5fd1194bed052370b129d4749acc62a119474f56649283d8a3c"
+    },
+    {
+     "index": 5,
+     "iface": "host.v1",
+     "contract": "sha256:9a050aadc6a70ec5340a366a74b8a64f1b5a7adb7b2d467743f22f13b88910fc"
+    },
+    {
+     "index": 6,
+     "iface": "ghost.v1",
+     "contract": "sha256:abababababababababababababababababababababababababababababababab"
+    }
+   ]
+  },
+  "other": {
+   "format": "zk2-catalog/1",
+   "epoch": 1767225600,
+   "entries": [
+    {
+     "index": 0,
+     "iface": "cap.v1",
+     "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26"
+    }
+   ]
+  }
+ },
+ "ids": {
+  "first": "3598e3ec",
+  "second": "bc0004fe",
+  "other": "9551dcf6"
+ },
+ "writes": [
+  {
+   "note": "the smallest: one entry, nav.v2, nothing held, a 16-bit run: 6 bytes of envelope, 4 of catalog id, 1 of flags, then 14 bits of entry and 1 of bitmap, padded: 13 bytes",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000003000000bc0004fe100020",
+    "bytes": 13
+   }
+  },
+  {
+   "note": "one entry under a 32-bit run: 2 bytes more",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "000000a1",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "seq": 7,
+    "minted": false
+   },
+   "expect": {
+    "hex": "10000000a1000007bc0004fe100020",
+    "bytes": 15
+   }
+  },
+  {
+   "note": "nav.v2 holding imu, an unavailable list of one (state/diagnostics, config), a cardinality list of one (state/tracks/{track}, 20), and the zid, a 16-bit run at seq 41: a resource is 3 bits, five resources",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "seq": 41,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000003000029bc0004fe14002e02a01828000000000000000002468acf13579bde",
+    "bytes": 33
+   }
+  },
+  {
+   "note": "cap.v1 with every one of its ten capabilities held: ten bits set",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "baro",
+      "camera",
+      "gnss",
+      "gpu",
+      "imu",
+      "lidar",
+      "mag",
+      "radar",
+      "sonar",
+      "thermal"
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000001000000bc0004fe1000e3ff",
+    "bytes": 14
+   }
+  },
+  {
+   "note": "cap.v1 holding baro, gnss and thermal: the bitmap is 1010000001, by name sorted bytewise",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "baro",
+      "gnss",
+      "thermal"
+     ]
+    },
+    "seq": 5,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000001000005bc0004fe1000e281",
+    "bytes": 14
+   }
+  },
+  {
+   "note": "cap.v1, a bound of 4294967295 on state/samples/{sample}, LEB128's five bytes, and 300 on state/zones/{zone}, two: a resource is 4 bits, thirteen resources",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "cardinality": {
+        "state/zones/{zone}": 300,
+        "state/samples/{sample}": 4294967295
+       }
+      }
+     ]
+    },
+    "seq": 9,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000001000009bc0004fe1000e40002affffffff0fbac02",
+    "bytes": 23
+   }
+  },
+  {
+   "note": "cap.v1, an unavailable list of three, given out of order: written in ascending order of their resources, @op/calibrate (0), state/lidar (6), state/zones/{zone} (11)",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/zones/{zone}",
+         "cause": "build"
+        },
+        {
+         "resource": "@op/calibrate",
+         "cause": "capability"
+        },
+        {
+         "resource": "state/lidar",
+         "cause": "config"
+        }
+       ]
+      }
+     ],
+     "capabilities": [
+      "imu",
+      "lidar"
+     ]
+    },
+    "seq": 12,
+    "minted": false
+   },
+   "expect": {
+    "hex": "00000100000cbc0004fe1000e830030dab40",
+    "bytes": 18
+   }
+  },
+  {
+   "note": "four entries, given out of order, written in ascending order of their indices: cap.v1 (3), nav.v2 (0), archive.v1 (1), geo.v1 (2); imu held, so both its bits are 1",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true
+      },
+      {
+       "iface": "geo.v1",
+       "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ]
+    },
+    "seq": 3,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000001000003bc0004fe40002001800a00388400",
+    "bytes": 20
+   }
+  },
+  {
+   "note": "nav.v2 standing by, with its token, and archive.v1 tokenless: the bits of each",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "standby": true
+      },
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": false
+      }
+     ]
+    },
+    "seq": 2,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000003000002bc0004fe2000300100",
+    "bytes": 15
+   }
+  },
+  {
+   "note": "an interface listed twice: index 0 twice, each with its bitmap",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ]
+    },
+    "seq": 2,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000003000002bc0004fe200020008c",
+    "bytes": 15
+   }
+  },
+  {
+   "note": "minted: the system is minted, so the profiles hold hostid.v1 beside cap.v1's freshness.v1",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "h-bbd1aa1db10b/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": true
+   },
+   "expect": {
+    "hex": "000001000000bc0004fe1800e000",
+    "bytes": 14
+   }
+  },
+  {
+   "note": "host.v1 lists hostid.v1 in uses, and the system is literal: minted 0, the profiles hold hostid.v1 all the same",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "host.v1",
+       "contract": "sha256:9a050aadc6a70ec5340a366a74b8a64f1b5a7adb7b2d467743f22f13b88910fc",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000001000000bc0004fe100160",
+    "bytes": 13
+   }
+  },
+  {
+   "note": "host.v1 again, the system minted: minted 1, the same profiles, other bytes",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "h-bbd1aa1db10b/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "host.v1",
+       "contract": "sha256:9a050aadc6a70ec5340a366a74b8a64f1b5a7adb7b2d467743f22f13b88910fc",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": true
+   },
+   "expect": {
+    "hex": "000001000000bc0004fe180160",
+    "bytes": 13
+   }
+  },
+  {
+   "note": "under first's id, held through second: first's indices",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "3598e3ec",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "geo.v1",
+       "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+       "token": true
+      }
+     ]
+    },
+    "seq": 1,
+    "minted": false
+   },
+   "expect": {
+    "hex": "0000030000013598e3ec2000200280",
+    "bytes": 15
+   }
+  },
+  {
+   "note": "the zid 1: 127 zero bits and a one",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true
+      }
+     ],
+     "meta": {
+      "zid": "1"
+     }
+    },
+    "seq": 0,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000001000000bc0004fe14006000000000000000000000000000000004",
+    "bytes": 29
+   }
+  },
+  {
+   "note": "the largest zid, 32 digits",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true
+      }
+     ],
+     "meta": {
+      "zid": "ffffffffffffffffffffffffffffffff"
+     }
+    },
+    "seq": 16777215,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000001ffffffbc0004fe140063fffffffffffffffffffffffffffffffc",
+    "bytes": 29
+   }
+  },
+  {
+   "note": "fifteen entries, the most: nav.v2 fifteen times",
+   "catalog": "second",
+   "value": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   },
+   "expect": {
+    "hex": "000003000000bc0004fef00020008002000800200080020008002000800200080020008002000000",
+    "bytes": 40
+   }
+  }
+ ],
+ "reads": [
+  {
+   "note": "written: the smallest: one entry, nav.v2, nothing held, a 16-bit run: 6 bytes of envelope, 4 of catalog id, 1 of flags, then 14 bits of entry and 1 of bitmap, padded: 13 bytes",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe100020",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: one entry under a 32-bit run: 2 bytes more",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "10000000a1000007bc0004fe100020",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "000000a1",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "seq": 7,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: nav.v2 holding imu, an unavailable list of one (state/diagnostics, config), a cardinality list of one (state/tracks/{track}, 20), and the zid, a 16-bit run at seq 41: a resource is 3 bits, five resources",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000029bc0004fe14002e02a01828000000000000000002468acf13579bde",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/diagnostics",
+         "cause": "config"
+        }
+       ],
+       "cardinality": {
+        "state/tracks/{track}": 20
+       }
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ],
+     "meta": {
+      "zid": "123456789abcdef"
+     }
+    },
+    "seq": 41,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: cap.v1 with every one of its ten capabilities held: ten bits set",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001000000bc0004fe1000e3ff",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "baro",
+      "camera",
+      "gnss",
+      "gpu",
+      "imu",
+      "lidar",
+      "mag",
+      "radar",
+      "sonar",
+      "thermal"
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: cap.v1 holding baro, gnss and thermal: the bitmap is 1010000001, by name sorted bytewise",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001000005bc0004fe1000e281",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "baro",
+      "gnss",
+      "thermal"
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "seq": 5,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: cap.v1, a bound of 4294967295 on state/samples/{sample}, LEB128's five bytes, and 300 on state/zones/{zone}, two: a resource is 4 bits, thirteen resources",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001000009bc0004fe1000e40002affffffff0fbac02",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "cardinality": {
+        "state/samples/{sample}": 4294967295,
+        "state/zones/{zone}": 300
+       }
+      }
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "seq": 9,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: cap.v1, an unavailable list of three, given out of order: written in ascending order of their resources, @op/calibrate (0), state/lidar (6), state/zones/{zone} (11)",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "00000100000cbc0004fe1000e830030dab40",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "@op/calibrate",
+         "cause": "capability"
+        },
+        {
+         "resource": "state/lidar",
+         "cause": "config"
+        },
+        {
+         "resource": "state/zones/{zone}",
+         "cause": "build"
+        }
+       ]
+      }
+     ],
+     "capabilities": [
+      "imu",
+      "lidar"
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "seq": 12,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: four entries, given out of order, written in ascending order of their indices: cap.v1 (3), nav.v2 (0), archive.v1 (1), geo.v1 (2); imu held, so both its bits are 1",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001000003bc0004fe40002001800a00388400",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true
+      },
+      {
+       "iface": "geo.v1",
+       "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+       "token": true
+      },
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ],
+     "profiles": [
+      "freshness.v1"
+     ]
+    },
+    "seq": 3,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: nav.v2 standing by, with its token, and archive.v1 tokenless: the bits of each",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000002bc0004fe2000300100",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "standby": true
+      },
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": false
+      }
+     ]
+    },
+    "seq": 2,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: an interface listed twice: index 0 twice, each with its bitmap",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000002bc0004fe200020008c",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ]
+    },
+    "seq": 2,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: minted: the system is minted, so the profiles hold hostid.v1 beside cap.v1's freshness.v1",
+   "key": "zk2/h-bbd1aa1db10b/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001000000bc0004fe1800e000",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "h-bbd1aa1db10b/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "cap.v1",
+       "contract": "sha256:da43444361bc8d3ccd2b775c561f6bab402cd66bc40ad361ff7429fa4fe2fb26",
+       "token": true
+      }
+     ],
+     "profiles": [
+      "freshness.v1",
+      "hostid.v1"
+     ]
+    },
+    "seq": 0,
+    "minted": true
+   }
+  },
+  {
+   "note": "written: host.v1 lists hostid.v1 in uses, and the system is literal: minted 0, the profiles hold hostid.v1 all the same",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001000000bc0004fe100160",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "host.v1",
+       "contract": "sha256:9a050aadc6a70ec5340a366a74b8a64f1b5a7adb7b2d467743f22f13b88910fc",
+       "token": true
+      }
+     ],
+     "profiles": [
+      "hostid.v1"
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: host.v1 again, the system minted: minted 1, the same profiles, other bytes",
+   "key": "zk2/h-bbd1aa1db10b/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001000000bc0004fe180160",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "h-bbd1aa1db10b/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "host.v1",
+       "contract": "sha256:9a050aadc6a70ec5340a366a74b8a64f1b5a7adb7b2d467743f22f13b88910fc",
+       "token": true
+      }
+     ],
+     "profiles": [
+      "hostid.v1"
+     ]
+    },
+    "seq": 0,
+    "minted": true
+   }
+  },
+  {
+   "note": "written: under first's id, held through second: first's indices",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "0000030000013598e3ec2000200280",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "3598e3ec",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "geo.v1",
+       "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+       "token": true
+      }
+     ]
+    },
+    "seq": 1,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: the zid 1: 127 zero bits and a one",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001000000bc0004fe14006000000000000000000000000000000004",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true
+      }
+     ],
+     "meta": {
+      "zid": "1"
+     }
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: the largest zid, 32 digits",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000001ffffffbc0004fe140063fffffffffffffffffffffffffffffffc",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0001",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true
+      }
+     ],
+     "meta": {
+      "zid": "ffffffffffffffffffffffffffffffff"
+     }
+    },
+    "seq": 16777215,
+    "minted": false
+   }
+  },
+  {
+   "note": "written: fifteen entries, the most: nav.v2 fifteen times",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fef00020008002000800200080020008002000800200080020008002000000",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      },
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "no byte at all",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "CH alone",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "00",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "a delete's CH, form 1",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "200003000000bc0004fe100020",
+   "expect": {
+    "refused": "form"
+   }
+  },
+  {
+   "note": "a snapshot's CH, form 7, with a 32-bit run",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "f00003000000bc0004fe100020",
+   "expect": {
+    "refused": "form"
+   }
+  },
+  {
+   "note": "tag 3",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "030003000000bc0004fe100020",
+   "expect": {
+    "refused": "form"
+   }
+  },
+  {
+   "note": "a form of 1 and a cut payload: the form comes first",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "2000",
+   "expect": {
+    "refused": "form"
+   }
+  },
+  {
+   "note": "ten bytes: the flags' byte missing",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "a 32-bit run's CH over a 16-bit run's 12 bytes: two short",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "100003000000bc0004fe1000",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "a count of 0",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe00",
+   "expect": {
+    "refused": "count"
+   }
+  },
+  {
+   "note": "a count of 0 with an extension bit set: the count comes first",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe01",
+   "expect": {
+    "refused": "count"
+   }
+  },
+  {
+   "note": "the extension 01",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe110020",
+   "expect": {
+    "refused": "extension"
+   }
+  },
+  {
+   "note": "the extension 10",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe120020",
+   "expect": {
+    "refused": "extension"
+   }
+  },
+  {
+   "note": "the flags' byte and no entry",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "an entry cut short: one byte of its 14 bits",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1000",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "indices 1 then 0",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe2000600080",
+   "expect": {
+    "refused": "order"
+   }
+  },
+  {
+   "note": "indices 1 then 0, and a third entry cut short: the order comes first",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe3000600080",
+   "expect": {
+    "refused": "order"
+   }
+  },
+  {
+   "note": "an id no held catalog is or succeeds",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000deadbeef100020",
+   "expect": {
+    "refused": "unknown_catalog"
+   }
+  },
+  {
+   "note": "second's id, holding first alone: first does not succeed second",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "first"
+   ],
+   "hex": "000003000000bc0004fe100020",
+   "expect": {
+    "refused": "unknown_catalog"
+   }
+  },
+  {
+   "note": "other's id, holding first and second",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "first",
+    "second"
+   ],
+   "hex": "0000030000009551dcf610002000",
+   "expect": {
+    "refused": "unknown_catalog"
+   }
+  },
+  {
+   "note": "an unknown catalog and an unknown index: the catalog comes first",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000deadbeef10e120",
+   "expect": {
+    "refused": "unknown_catalog"
+   }
+  },
+  {
+   "note": "first's id through second: index 3 is cap.v1's in second, past first's 3 entries",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "0000030000003598e3ec1000e000",
+   "expect": {
+    "refused": "unknown_index"
+   }
+  },
+  {
+   "note": "index 7, past second's 7 entries",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1001e0",
+   "expect": {
+    "refused": "unknown_index"
+   }
+  },
+  {
+   "note": "index 1023",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10ffe0",
+   "expect": {
+    "refused": "unknown_index"
+   }
+  },
+  {
+   "note": "index 6, ghost.v1, catalogued but never held",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1001a0",
+   "expect": {
+    "refused": "unknown_revision"
+   }
+  },
+  {
+   "note": "cap.v1, its revision not held",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "lacks": [
+    "cap.v1"
+   ],
+   "hex": "000003000000bc0004fe1000e000",
+   "expect": {
+    "refused": "unknown_revision"
+   }
+  },
+  {
+   "note": "ghost.v1 then an index past the catalog: the entries in order, so the revision first",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe2001a00980",
+   "expect": {
+    "refused": "unknown_revision"
+   }
+  },
+  {
+   "note": "geo.v1 not held, then ghost.v1: the first entry decides",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "lacks": [
+    "geo.v1"
+   ],
+   "hex": "000003000000bc0004fe2000a00680",
+   "expect": {
+    "refused": "unknown_revision"
+   }
+  },
+  {
+   "note": "cap.v1's bitmap cut short: 10 bits, and the 2 pad bits are all there is",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1000e0",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "nav.v2's imu 1, cap.v1's imu 0",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe200020038800",
+   "expect": {
+    "refused": "capability"
+   }
+  },
+  {
+   "note": "nav.v2's imu 0, cap.v1's imu 1",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe200020038040",
+   "expect": {
+    "refused": "capability"
+   }
+  },
+  {
+   "note": "index 0 twice, its imu bits 1 then 0",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe2000200088",
+   "expect": {
+    "refused": "capability"
+   }
+  },
+  {
+   "note": "an unavailable list of 0 items",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002800",
+   "expect": {
+    "refused": "count"
+   }
+  },
+  {
+   "note": "a cardinality list of 0 items",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002400",
+   "expect": {
+    "refused": "count"
+   }
+  },
+  {
+   "note": "an unavailable list with no count",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe100028",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "nav.v2's resource 5, past its five",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1000280360",
+   "expect": {
+    "refused": "resource"
+   }
+  },
+  {
+   "note": "nav.v2's resource 7 in a cardinality list",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002403c500",
+   "expect": {
+    "refused": "resource"
+   }
+  },
+  {
+   "note": "geo.v1's resource 3, past its three, in 2 bits",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1000a80780",
+   "expect": {
+    "refused": "resource"
+   }
+  },
+  {
+   "note": "resources 2 then 2",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002804a500",
+   "expect": {
+    "refused": "order"
+   }
+  },
+  {
+   "note": "resources 2 then 1",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002804a300",
+   "expect": {
+    "refused": "order"
+   }
+  },
+  {
+   "note": "cardinality resources 4 then 4",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe100024050520a0",
+   "expect": {
+    "refused": "order"
+   }
+  },
+  {
+   "note": "a cause of 0",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1000280280",
+   "expect": {
+    "refused": "cause"
+   }
+  },
+  {
+   "note": "a cause of 0, then a bound refused: the cause comes first",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002c0280190000",
+   "expect": {
+    "refused": "cause"
+   }
+  },
+  {
+   "note": "a cause cut short: the second item's cause has one bit, the body's last",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002804a9",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "a bound not in its shortest form: 0x80 0x00",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002403200000",
+   "expect": {
+    "refused": "leb128"
+   }
+  },
+  {
+   "note": "a bound of 2^32, five bytes",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002403202020200400",
+   "expect": {
+    "refused": "leb128"
+   }
+  },
+  {
+   "note": "a bound whose fifth byte has its high bit set",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1000240320606060604040",
+   "expect": {
+    "refused": "leb128"
+   }
+  },
+  {
+   "note": "a bound cut short after one byte with its high bit set",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe100024032500",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "the zid cut short: 120 bits",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe1400e000ffffffffffffffffffffffffffffff",
+   "expect": {
+    "refused": "short"
+   }
+  },
+  {
+   "note": "a byte after the pad",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002000",
+   "expect": {
+    "refused": "trailing"
+   }
+  },
+  {
+   "note": "a pad bit set: the last",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe100021",
+   "expect": {
+    "refused": "pad"
+   }
+  },
+  {
+   "note": "a pad bit set and a byte after it: trailing first",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002100",
+   "expect": {
+    "refused": "trailing"
+   }
+  },
+  {
+   "note": "a zid where its flag is 0: 16 bytes after the pad",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002000000000000000000000000000000000",
+   "expect": {
+    "refused": "trailing"
+   }
+  },
+  {
+   "note": "ok: no pad, the fields end on a byte: archive.v1 (no bit, no resource bit) and the flags",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe100060",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "ok: second's own id, holding first, second and other",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "first",
+    "second",
+    "other"
+   ],
+   "hex": "000003000000bc0004fe100020",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "ok: first's id, holding first itself",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "first"
+   ],
+   "hex": "0000030000003598e3ec100020",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "3598e3ec",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "ok: first's id through second: index 2, geo.v1, below first's count of 3",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "0000030000003598e3ec1000a0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "3598e3ec",
+     "interfaces": [
+      {
+       "iface": "geo.v1",
+       "contract": "sha256:bc9050e6ccdd9ddf04d1f0a49a079986355ddbce8e584b5f97730b6c47f6f2a6",
+       "token": true
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "ok: an unavailable item on archive.v1, whose one resource takes no bit",
+   "key": "zk2/lab/rover/@zk/instance/00000000000000a1",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10006805",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "lab/rover",
+     "instance": "00000000000000a1",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "archive.v1",
+       "contract": "sha256:79df46d08fa62ac089db62daf03d4cdbd1b8a84550848b755f396854dc298749",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/index",
+         "cause": "build"
+        }
+       ]
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "ok: a bound of 0 reads; D007 is the checker's",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe100024030000",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "cardinality": {
+        "state/tracks/{track}": 0
+       }
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "ok: a required resource listed unavailable reads; D005 is the checker's",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe10002802d0",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": true,
+       "unavailable": [
+        {
+         "resource": "state/position",
+         "cause": "build"
+        }
+       ]
+      }
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  },
+  {
+   "note": "ok: a standby and tokenless entry reads; D012 is the checker's",
+   "key": "zk2/vehicle-01/navigation/@zk/instance/3fa9c2d41b7e0012",
+   "holds": [
+    "second"
+   ],
+   "hex": "000003000000bc0004fe100012",
+   "expect": {
+    "descriptor": {
+     "format": "zk2-descriptor/0.1",
+     "service": "vehicle-01/navigation",
+     "instance": "3fa9c2d41b7e0012",
+     "run": "0003",
+     "catalog": "bc0004fe",
+     "interfaces": [
+      {
+       "iface": "nav.v2",
+       "contract": "sha256:fea2520b2a3609e89638f61ae608540e5f5b5bdfefb48fde26d230fa2065bafd",
+       "token": false,
+       "standby": true
+      }
+     ],
+     "capabilities": [
+      "imu"
+     ]
+    },
+    "seq": 0,
+    "minted": false
+   }
+  }
+ ]
+}

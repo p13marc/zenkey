@@ -1153,3 +1153,80 @@ confirmation; `check conform` reads an unbound role's baseline record;
 `health` reads a `health.v2` record with no time from an owner whose
 catalog it lacks; `zk2 contract lint` prints the fingerprint after a
 profile's errors.
+
+**The compact descriptor, defined (#980 C5a, core 0.120; renumbered at
+merge behind two unmerged chunks).** §3.3's second form, adopted by no
+rule: C5b has the readers read both forms (the reader's MUST), C5c has a
+first-hop owner write it (§8.1's SHOULD), and C3 is §4.4's compact
+attachment. It is §7.5's mutation form on the instance key, under
+`zenoh/bytes`, the `Encoding` telling it from JSON. The body: the catalog
+id, a byte of flags (the count, 1–15, `minted`, `has_zid` and 2
+extension bits), a 14-bit entry per interface (index, `token`, `standby`, `has_unav`,
+`has_card`), a bitmap per entry over the capabilities its revision gates
+on (sorted bytewise), the unavailable lists then the cardinality lists
+(an 8-bit count, items of a resource in ⌈log₂ n⌉ bits and a cause coded
+as §7.5's error byte, or a bound as a snapshot's integer), the zid, the
+pad. It leaves out `minor`, `requires` (a descriptor with one has no
+compact form), `profiles` (derived from the revisions' `uses` and
+`minted`), `meta` but the zid, each `reason` and an ungated capability.
+The run and seq are the as-of mark (§5.1). Decisions the memo left open,
+recorded in the changelog: `unknown_revision` (a bitmap's width is its
+revision's), the three-step reading field by field, entries by index with
+an index allowed twice (D003) and lists strictly ascending (`order`), the
+bits of one capability agreeing (`capability`), counts of 0, a cause of 0
+and the extension bits refused, and `minted` part of the decoded value so
+the bytes write back. §12 names its rules static. The fixtures,
+`descriptors/compact/`: five revisions of their own in `contracts/`
+(`other/nav.v2.toml`, `geo.v1`, `archive.v1`, `cap.v1` with ten gated
+capabilities and an unbounded template, `host.v1` listing `hostid.v1`)
+beside `descriptors/contracts/nav.v2.toml`; `vectors.json` (three catalogs,
+`second` succeeding `first` and listing a `ghost.v1` no one holds; 17
+writes, 77 reads, all 14 tokens) and `checks.json` (26 cases, 18 twins of
+the JSON cases a compact form can carry, each drawing that case's codes).
+Both were computed by `/srv/dev/scratch/zenkey/py/980-c5a/a_gen.py` and
+again by `b_check.py`, written from the finished text, which agreed on
+every case; the revisions' fingerprints are lane P's canonicalizer's
+(`lib/canon.py`), which the reference matches. zenoh-modem's node is 22 B
+compact (`tests/examples.rs`), against 1,344 B of JSON.
+
+**The compact descriptor, adopted (#980 C5c, core 0.120's entry
+extended).** §3.3, "Both forms are read": a reader of descriptors MUST
+read both forms (`[F: descriptors/compact/]` `[Sc: constrained.md §10]`)
+and MUST NOT guess a catalog or a revision it lacks; a provider found by a
+descriptor it did not read is unobservable, never absent (observer §3.6);
+a compact put needs no Zenoh timestamp. §8.1, "On a first hop", "Its
+descriptor's form": such an owner given a catalog SHOULD write the compact
+form (`[Sc: constrained.md §10]`), its puts and its GET's replies; with a
+role (question 4), no catalog or no compact form it writes JSON; off a
+first hop an owner given a catalog MAY (question 7), JSON the near side's
+default; the GET answers the form of the last put. `constrained.md` §10
+step 7 counts the descriptor's put across the hop, under a quarter of step
+3's JSON one (the reference: 47 B against 695 B, the payload 36 B with the
+zid, which §3.3's SHOULD keeps, against 664 B), and reads it through the
+catalog and without. `RULES.md` gains three rules (306); its generated
+"Where it reads" lists gain core §3.3, so its baseline mean went from
+12.19 to 12.25 by hand.
+
+**The archive's compact attachment (#980 C3, core 0.120's entry
+extended).** §4.4: an archive reply's attachment has two forms, told by
+their length: exactly 3 bytes is the compact form, `index · resource ·
+confirmed · extension · reserved` (10, 7, 1, 1, 5 bits, MSB first), any
+other the JSON form. An archive given a catalog SHOULD write it (question
+8; `[Sc: state.md §5]`), JSON for a revision the catalog does not list or a
+resource past the 128th; the archive's catalog is the one its descriptor
+names, across a face the deployment's word. A reader of an archive's
+replies MUST read both: `confirmed` with no catalog, the identity through
+that catalog as §8.6 reads an index, decoded to the JSON form's members.
+Refusals in order: `extension`, `reserved`, `unknown_catalog`,
+`unknown_index`, `unknown_revision`, `resource` (past, or not a state),
+`origin` (the origin key's interface, kind token or chunks); the first two
+leave nothing read. Question 6 kept the resource as a checked index.
+`state.md` §5 step 4 (both archives given the catalog; the reference
+measured 3 B against 196 B). `archive/attachments.json`: revisions from
+`descriptors/` plus `archive/contracts/log.v1.toml` and `wide.v1.toml`
+(130 states), catalogs `a`, `b` (succeeds `a`, lists `ghost.v1`) and `c`
+(unrelated); 12 writes and 44 reads, computed by
+`/srv/dev/scratch/zenkey/py/980-c3/a_gen.py` and again by `b_check.py`,
+written from the finished text, which agreed on every case. `RULES.md`:
+310 rules, its baseline mean 12.25 → 12.31 by hand (the generated "Where it
+reads" lists gain §4.4).

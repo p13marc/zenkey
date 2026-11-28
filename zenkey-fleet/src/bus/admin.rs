@@ -750,11 +750,33 @@ pub async fn topology_with_instances(
     timeout: Duration,
     trust: bool,
 ) -> Result<TopologyReport> {
+    topology_with_instances_through(
+        raw,
+        deployment,
+        namespace,
+        timeout,
+        trust,
+        &crate::bus::presence::Describing::default(),
+    )
+    .await
+}
+
+/// [`topology_with_instances`], each descriptor read through `describing`
+/// (core §3.3): a compact one's `meta.zid` joins it, and one not read
+/// attaches nothing.
+pub async fn topology_with_instances_through(
+    raw: &Session,
+    deployment: &Session,
+    namespace: &str,
+    timeout: Duration,
+    trust: bool,
+    describing: &crate::bus::presence::Describing,
+) -> Result<TopologyReport> {
     let scope = crate::bus::presence::Scope::all();
     let (entries, here, observed) = tokio::join!(
         admin_get(raw, TOPOLOGY, timeout),
         here(raw),
-        crate::bus::presence::observe(deployment, &scope, timeout)
+        crate::bus::presence::observe_through(deployment, &scope, timeout, describing)
     );
     let entries = entries?;
     let mut report = topology_of(&entries, &raw.zid().to_string());

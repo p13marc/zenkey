@@ -1,0 +1,11 @@
+# core §3.3's compact descriptor: an archive.v1 revision for D011, with one
+# resource, so a resource takes no bit.
+[interface]
+name    = "archive"
+major   = 1
+minor   = 0
+summary = "An archive, for the compact descriptor's cases"
+
+[resources.index]
+kind = "state"
+type = { raw = "application/json" }

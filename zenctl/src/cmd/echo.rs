@@ -106,7 +106,9 @@ pub async fn run(cli: EchoArgs) -> Result<()> {
         None
     } else {
         let ns_session = dep.session().await?;
-        let (feed, error) = LensFeed::open(&ns_session, &store, dep.timeout()).await;
+        // An owner's compact descriptor reads through --catalog (core §3.3).
+        let (feed, error) =
+            LensFeed::open_through(&ns_session, &store, &catalogs, dep.timeout()).await;
         if let Some(e) = error {
             eprintln!(
                 "{}",
@@ -509,10 +511,11 @@ fn formatted(
         .as_ref()
         .map(crate::render::payload_text)
         .or_else(|| {
-            sample
-                .attachment
-                .as_ref()
-                .map(|a| super::sample::attachment_display(&a.to_bytes()))
+            sample.attachment.as_ref().map(|a| {
+                let key = zenkey_fleet::strip_namespace(namespace, &sample.key)
+                    .unwrap_or(sample.key.as_str());
+                super::sample::attachment_display_at(key, &a.to_bytes())
+            })
         });
     let declared = line.declared();
     format_sample(

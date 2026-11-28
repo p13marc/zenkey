@@ -46,10 +46,13 @@ pub async fn run(cli: WhyArgs) -> Result<()> {
         offline
     } else {
         let set = ASKING.ask(zk2::load_contracts(&contracts));
+        // An owner's compact descriptor reads through --catalog (core §3.3).
+        let catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
         let store = BundleStore::new(dep.timeout());
         store.seed(&set);
         let session = ASKING.ask(dep.session().await);
-        zenkey_fleet::run_why(&session, &store, dep.namespace(), target, spec).await
+        zenkey_fleet::run_why_through(&session, &store, &catalogs, dep.namespace(), target, spec)
+            .await
     };
     crate::render::emit_with(&mut std::io::stdout(), &report, dep.format(), dep.color())?;
     match &report.verdict {

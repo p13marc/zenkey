@@ -98,6 +98,7 @@ fn the_archive_example_documents_its_surface() {
         "--hlc",
         "--timeout-ms",
         "--poll-ms",
+        "--catalog <path>",
         "listening tcp/127.0.0.1:<port>",
         "connected <endpoint>",
         "ready zk2/<system>/<service>/@zk/instance/<instance>",
@@ -377,4 +378,81 @@ async fn the_archive_example_aligns_after_a_link_cut() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_archive_example_aligns_after_a_link_cut_in_a_namespace() {
     aligns_after_a_link_cut(Some("site")).await;
+}
+
+/// `--catalog <path>` (core §4.4, §8.6; #980 C3): the archive writes under
+/// the catalog, so its descriptor names it and each reply's attachment is
+/// the compact form, 3 bytes, its `confirmed` bit set once recorded; its
+/// own `last-known` line reads it so. A catalog that does not read stops
+/// it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_archive_example_writes_the_compact_attachment_under_a_catalog() {
+    use zenkey::model::canonical::Fingerprint;
+    let (_r1, ep) = router(None).await;
+    let owner_s = client(&ep).await;
+    let (_mgr, w) = fleet_mgr(&owner_s, &["a"]).await;
+    let put_a = w["a"].put("pa").await.unwrap();
+    let revision = common::contract("mission_plan.v1");
+    let mut catalog = zenkey::model::catalog::Catalog::new(0).unwrap();
+    catalog
+        .push(revision.iface.clone(), Fingerprint::of(&revision))
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("catalog.json");
+    std::fs::write(&file, catalog.to_jcs()).unwrap();
+    let contract =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contracts/mission_plan.v1.toml");
+    let args: Vec<String> = [
+        "--connect",
+        &ep,
+        "--system",
+        "ground",
+        "--service",
+        "archive",
+        "--catalog",
+        &file.display().to_string(),
+        "--record",
+        "ground/fleet-mgr",
+        &format!("{PLANS}/*"),
+        &contract.display().to_string(),
+    ]
+    .iter()
+    .map(|s| (*s).to_owned())
+    .collect();
+    let opts = archive_ex::Options::parse(&args).unwrap();
+    let (out, lines) = flume::unbounded::<String>();
+    let say: archive_ex::Say = Arc::new(move |l: String| {
+        let _ = out.send(l);
+    });
+    let (commands, input) = flume::unbounded::<String>();
+    let _run = tokio::spawn(archive_ex::run_with(
+        opts,
+        say,
+        input,
+        std::future::pending::<()>(),
+    ));
+    let a = format!("{PLANS}/a");
+    until(&lines, "a held, confirmed", |l| {
+        l == format!("held {a} confirmed=true")
+    })
+    .await;
+    let tool = client(&ep).await;
+    let key = zenkey::archive::archive_key(&"ground/archive".parse().unwrap(), &a);
+    let rx = tool.get(key.as_str()).await.unwrap();
+    let reply = rx.recv_async().await.unwrap();
+    let att = reply
+        .result()
+        .unwrap()
+        .attachment()
+        .unwrap()
+        .to_bytes()
+        .into_owned();
+    assert_eq!(att.len(), 3, "the compact form");
+    assert_eq!(
+        zenkey::model::attachment::Compact::read(&att).map(|c| c.confirmed),
+        Ok(true)
+    );
+    commands.send(format!("last-known {a}")).unwrap();
+    let lk = until(&lines, "a's last-known", |l| l.starts_with("last-known ")).await;
+    assert_last_known(&lk, &a, &put_a, "pa");
 }

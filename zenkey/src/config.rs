@@ -161,6 +161,23 @@ pub struct ServiceConfig {
     /// must keep its own heartbeat (§2.9), so an owner behind one leaves
     /// this off.
     pub owner_heartbeat: bool,
+    /// Which form its descriptor is written in (core §3.3, §8.1; #980
+    /// C5c): `Some(true)` the compact form, `Some(false)` the JSON form,
+    /// and `None` the default, which [`ServiceConfig::writes_compact`]
+    /// reads.
+    ///
+    /// - **The default** is the compact form for an owner on a first hop
+    ///   given a catalog that holds no role (§8.1's SHOULD), and the JSON
+    ///   form otherwise, the near side's default: a reader that holds no
+    ///   catalog reads no compact descriptor.
+    /// - **The compact form asked for** needs a catalog, since an entry
+    ///   names its revision by its index there, and no role, since the
+    ///   form has no `requires`: a service asking it without either does
+    ///   not start (§8.1's MAY).
+    /// - **A descriptor with no compact form** (§3.3, "Which descriptors
+    ///   have one": more than 15 interfaces, a revision the catalog does
+    ///   not list) is written as JSON, and the runtime says why once.
+    pub compact_descriptor: Option<bool>,
     /// The capabilities this instance holds (§3.3). A resource gated on one
     /// it does not hold is not exposed, and need not be listed unavailable.
     pub capabilities: BTreeSet<String>,
@@ -252,6 +269,8 @@ struct RawConfig {
     #[serde(default)]
     owner_heartbeat: bool,
     #[serde(default)]
+    compact_descriptor: Option<bool>,
+    #[serde(default)]
     capabilities: BTreeSet<String>,
     #[serde(default)]
     bindings: BTreeMap<String, Binding>,
@@ -289,6 +308,7 @@ impl TryFrom<RawConfig> for ServiceConfig {
             tokenless: raw.tokenless,
             first_hop: raw.first_hop,
             owner_heartbeat: raw.owner_heartbeat,
+            compact_descriptor: raw.compact_descriptor,
             capabilities: raw.capabilities,
             bindings: raw.bindings,
             tombstone_window_s: raw.tombstone_window_s,
@@ -314,6 +334,7 @@ impl ServiceConfig {
             tokenless: BTreeSet::new(),
             first_hop: false,
             owner_heartbeat: false,
+            compact_descriptor: None,
             capabilities: BTreeSet::new(),
             bindings: BTreeMap::new(),
             tombstone_window_s: None,
@@ -366,6 +387,24 @@ impl ServiceConfig {
     pub fn owner_heartbeat(mut self) -> Self {
         self.owner_heartbeat = true;
         self
+    }
+
+    /// Writes its descriptor in the compact form (`true`) or the JSON one
+    /// (`false`), whatever the default (core §3.3, §8.1): see
+    /// [`ServiceConfig::compact_descriptor`](struct.ServiceConfig.html#structfield.compact_descriptor).
+    #[must_use]
+    pub fn compact_descriptor(mut self, compact: bool) -> Self {
+        self.compact_descriptor = Some(compact);
+        self
+    }
+
+    /// Whether its descriptor is written in the compact form (core §3.3,
+    /// §8.1), given whether the service holds a catalog and a role: as
+    /// asked, else on a first hop with a catalog and no role.
+    #[must_use]
+    pub fn writes_compact(&self, catalog: bool, role: bool) -> bool {
+        self.compact_descriptor
+            .unwrap_or(self.first_hop && catalog && !role)
     }
 
     /// Adds a held capability.
@@ -428,6 +467,33 @@ mod tests {
                 .owner_heartbeat()
                 .owner_heartbeat
         );
+    }
+
+    /// Core §3.3, §8.1 (#980 C5c): the compact descriptor is the default
+    /// on a first hop with a catalog and no role, and the JSON form
+    /// anywhere else; a configuration that says either wins.
+    #[test]
+    fn the_compact_descriptor_is_a_first_hops_default_with_a_catalog() {
+        let c: ServiceConfig = serde_json::from_str(r#"{"address": "lab/d"}"#).unwrap();
+        assert_eq!(c.compact_descriptor, None);
+        assert!(!c.writes_compact(true, false), "off a first hop: JSON");
+        let hop = ServiceConfig::new("lab/d".parse().unwrap()).first_hop();
+        assert!(hop.writes_compact(true, false));
+        assert!(!hop.writes_compact(false, false), "no catalog: JSON");
+        assert!(!hop.writes_compact(true, true), "a role: JSON");
+        assert!(
+            !hop.clone()
+                .compact_descriptor(false)
+                .writes_compact(true, false)
+        );
+        assert!(
+            c.clone()
+                .compact_descriptor(true)
+                .writes_compact(true, false)
+        );
+        let c: ServiceConfig =
+            serde_json::from_str(r#"{"address": "lab/d", "compact_descriptor": true}"#).unwrap();
+        assert_eq!(c.compact_descriptor, Some(true));
     }
 
     /// `hostid.v1` §2.3: the recommended spelling, in TOML as the profile

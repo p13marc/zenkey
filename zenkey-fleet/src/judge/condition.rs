@@ -1818,7 +1818,7 @@ pub fn watchdog_across<'a>(
         // retrieval, because nothing attends the broadcast while one is in
         // flight. Each tick's sweep re-reads it beside the drain.
         let mut catalog: Option<Catalog> = if reads_presence {
-            crate::bus::lens::read(&bus.session, store, spec.timeout)
+            crate::bus::lens::read_through(&bus.session, store, &spec.catalogs, spec.timeout)
                 .await
                 .ok()
         } else {
@@ -1870,9 +1870,14 @@ pub fn watchdog_across<'a>(
                     None
                 };
                 let lens = if reads_presence {
-                    crate::bus::lens::read(&bus.session, store, spec.timeout)
-                        .await
-                        .ok()
+                    crate::bus::lens::read_through(
+                        &bus.session,
+                        store,
+                        &spec.catalogs,
+                        spec.timeout,
+                    )
+                    .await
+                    .ok()
                 } else {
                     None
                 };

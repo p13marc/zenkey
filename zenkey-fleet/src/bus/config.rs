@@ -230,7 +230,8 @@ pub async fn get(
     // owner's answer: undecodable, `form` (core §4.2, 0.102).
     let config = zenkey::config_v1::implementation().shared_contract();
     let held = [&*config];
-    let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+    let mut revisions =
+        crate::bus::query::OwnerRevisions::new(session, timeout, &held, None, epochs.catalogs());
     let (entries, strays) =
         crate::bus::query::merged_without_strays(samples, &mut revisions, |s| {
             crate::bus::query::reply_entries_aged(s, epochs)
@@ -340,6 +341,20 @@ pub struct ConfigSpec {
 }
 
 impl ConfigSpec {
+    /// What its presence read decodes a compact descriptor (core §3.3)
+    /// through: the catalogs given, and its store, or one of its own
+    /// seeded with `contracts`.
+    fn describing(&self) -> crate::bus::presence::Describing {
+        match &self.store {
+            Some(store) => crate::bus::presence::Describing::new(&self.catalogs, store),
+            None => crate::bus::presence::Describing::retrieving(
+                &self.catalogs,
+                &self.contracts,
+                self.timeout,
+            ),
+        }
+    }
+
     /// A reading of the view and the status, nothing more asked.
     pub fn new(timeout: Duration) -> ConfigSpec {
         ConfigSpec {
@@ -468,9 +483,14 @@ pub async fn observe(
         (true, _) => None,
         (false, Some(p)) => Some(Ok(p)),
         (false, None) => Some(
-            crate::bus::presence::observe(session, &Scope::service(&address), t)
-                .await
-                .map_err(|e| crate::one_line(&e)),
+            crate::bus::presence::observe_through(
+                session,
+                &Scope::service(&address),
+                t,
+                &spec.describing(),
+            )
+            .await
+            .map_err(|e| crate::one_line(&e)),
         ),
     };
     let v2 = match &spec.v2 {
@@ -506,7 +526,15 @@ pub async fn observe(
             );
             get(session, &selector, t, &epochs).await
         }
-        Some(Ok(target)) => get_records(session, &[(address.clone(), target.clone())], t).await,
+        Some(Ok(target)) => {
+            get_records(
+                session,
+                &[(address.clone(), target.clone())],
+                t,
+                &spec.catalogs,
+            )
+            .await
+        }
         Some(Err(u)) => Err(u.why.clone()),
     };
     let window = window.map(|w| w.map(|w| w.close(&address)));
@@ -542,9 +570,14 @@ pub async fn resolve(
         None
     } else {
         Some(
-            crate::bus::presence::observe(session, &Scope::service(address), spec.timeout)
-                .await
-                .map_err(|e| crate::one_line(&e)),
+            crate::bus::presence::observe_through(
+                session,
+                &Scope::service(address),
+                spec.timeout,
+                &spec.describing(),
+            )
+            .await
+            .map_err(|e| crate::one_line(&e)),
         )
     };
     find_v2(session, address, spec, presence.as_ref()).await
@@ -672,6 +705,7 @@ pub async fn get_records(
     session: &Session,
     owners: &[(Addr, V2Target)],
     timeout: Duration,
+    catalogs: &Catalogs,
 ) -> Result<ConfigGet, String> {
     let selector = match owners {
         [(a, t)] => t.record_key(a),
@@ -710,7 +744,8 @@ pub async fn get_records(
         // under the deletion's run answers it by snapshot, is no owner's
         // answer: undecodable, `form` (core §4.2, 0.102).
         let held = [&*target.contract];
-        let mut revisions = crate::bus::query::OwnerRevisions::new(session, timeout, &held, None);
+        let mut revisions =
+            crate::bus::query::OwnerRevisions::new(session, timeout, &held, None, catalogs);
         let (entries, strays) =
             crate::bus::query::merged_without_strays(samples, &mut revisions, |s| {
                 crate::bus::query::reply_entries_at(s, Some(target.epoch))

@@ -44,6 +44,13 @@
 //! change, which is what an [`IdentityCache`](crate::IdentityCache) keys
 //! its resolutions on.
 //!
+//! **A compact descriptor** (core §3.3, #980 C5b) is read through the
+//! catalogs a feed is given ([`LensFeed::open_through`], `--catalog`) and
+//! the revisions its entries name, each from the store; a feed given none
+//! reads it [`DescriptorRead::Unread`] (`unknown_catalog`), and its
+//! interfaces then resolve to nothing, never to a guess. A kept one is
+//! its decoding, kept and reused as a JSON one is.
+//!
 //! The session is the caller's, **in** the namespace: the presence and
 //! contract keys are base-relative (decided 2026-10-08). The observer's
 //! own subscription stays on a session in no namespace, which is what lets
@@ -64,7 +71,7 @@ use zenoh::Session;
 use crate::Result;
 use crate::bus::contracts::BundleStore;
 use crate::bus::monitor::SampleView;
-use crate::bus::presence::{Scope, describe_each, observe};
+use crate::bus::presence::{Describing, Scope, describe_each, observe_through};
 use crate::model::catalog::{Catalog, DescriptorRead, KeptDescriptors, Observed};
 use crate::report::{PresenceTransition, Unresolved};
 
@@ -78,18 +85,32 @@ pub const REFRESH_MIN: Duration = Duration::from_secs(5);
 /// failed is the store's to say (unavailable, or not held): the catalog is
 /// returned either way.
 pub async fn read(session: &Session, store: &BundleStore, timeout: Duration) -> Result<Catalog> {
-    read_observed(session, store, timeout)
+    read_through(session, store, &crate::Catalogs::default(), timeout).await
+}
+
+/// [`read`], an owner's compact descriptor (core §3.3) read through
+/// `catalogs`, the deployment's (`--catalog`, §8.6), and the revisions its
+/// entries name from `store`.
+pub async fn read_through(
+    session: &Session,
+    store: &BundleStore,
+    catalogs: &crate::Catalogs,
+    timeout: Duration,
+) -> Result<Catalog> {
+    read_observed(session, store, &Describing::new(catalogs, store), timeout)
         .await
         .map(|o| Catalog::new(&o))
 }
 
-/// [`read`], keeping the read itself: what a [`LensFeed`] patches.
+/// [`read`], keeping the read itself, each descriptor read through what
+/// `describing` holds: what a [`LensFeed`] patches.
 async fn read_observed(
     session: &Session,
     store: &BundleStore,
+    describing: &Describing,
     timeout: Duration,
 ) -> Result<Observed> {
-    let observed = observe(session, &Scope::all(), timeout).await?;
+    let observed = observe_through(session, &Scope::all(), timeout, describing).await?;
     let _ = store
         .fetch_all(session, &Catalog::new(&observed).wanted())
         .await;
@@ -126,6 +147,9 @@ type Describe = Arc<
 pub struct LensFeed {
     session: Session,
     store: BundleStore,
+    /// What each descriptor is read through: the catalogs given, and
+    /// `store`.
+    describing: Describing,
     timeout: Duration,
     current: Arc<ArcSwapOption<Catalog>>,
     /// The read the catalog is built from, and the descriptors kept of the
@@ -158,17 +182,35 @@ impl LensFeed {
         store: &BundleStore,
         timeout: Duration,
     ) -> (LensFeed, Option<crate::Error>) {
-        let (observed, error) = match read_observed(session, store, timeout).await {
+        LensFeed::open_through(session, store, &crate::Catalogs::default(), timeout).await
+    }
+
+    /// [`LensFeed::open`], an owner's compact descriptor (core §3.3) read
+    /// through `catalogs`, the deployment's (`--catalog`, §8.6), and the
+    /// revisions its entries name from `store`, at the first read and at
+    /// every one after.
+    pub async fn open_through(
+        session: &Session,
+        store: &BundleStore,
+        catalogs: &crate::Catalogs,
+        timeout: Duration,
+    ) -> (LensFeed, Option<crate::Error>) {
+        let describing = Describing::new(catalogs, store);
+        let (observed, error) = match read_observed(session, store, &describing, timeout).await {
             Ok(o) => (Some(o), None),
             Err(e) => (None, Some(e)),
         };
-        (LensFeed::over(session, store, timeout, observed), error)
+        (
+            LensFeed::over(session, store, describing, timeout, observed),
+            error,
+        )
     }
 
     /// A feed over `observed`, as [`LensFeed::open`] read it.
     fn over(
         session: &Session,
         store: &BundleStore,
+        describing: Describing,
         timeout: Duration,
         observed: Option<Observed>,
     ) -> LensFeed {
@@ -176,6 +218,7 @@ impl LensFeed {
         LensFeed {
             session: session.clone(),
             store: store.clone(),
+            describing,
             timeout,
             current: Arc::new(ArcSwapOption::new(catalog)),
             observed: Arc::new(tokio::sync::Mutex::new(FeedRead {
@@ -433,7 +476,9 @@ impl LensFeed {
         let feed = self.clone();
         tokio::spawn(async move {
             let mut guard = feed.observed.lock().await;
-            if let Ok(o) = read_observed(&feed.session, &feed.store, feed.timeout).await {
+            if let Ok(o) =
+                read_observed(&feed.session, &feed.store, &feed.describing, feed.timeout).await
+            {
                 feed.swap(Catalog::new(&o));
                 guard.kept.forget_described(&o);
                 feed.awaits(&guard.kept);
@@ -473,7 +518,7 @@ impl LensFeed {
         if let Some(describe) = &self.describe_with {
             return describe(wanted).await;
         }
-        describe_each(&self.session, wanted, self.timeout).await
+        describe_each(&self.session, wanted, self.timeout, &self.describing).await
     }
 }
 
@@ -644,7 +689,13 @@ mod tests {
         let timeout = Duration::from_secs(1);
         let mut read = Observed::from_keys("zk2/*/*/@zk/**", &[], true);
         read.descriptors = Some(BTreeMap::new());
-        let mut lens = LensFeed::over(&session, &BundleStore::new(timeout), timeout, Some(read));
+        let mut lens = LensFeed::over(
+            &session,
+            &BundleStore::new(timeout),
+            crate::bus::presence::Describing::default(),
+            timeout,
+            Some(read),
+        );
         lens.describe_with = Some(owners.describe());
         lens
     }

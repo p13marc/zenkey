@@ -151,3 +151,10 @@ Claude Code loads this file when working in `zenwatch/`; the root `CLAUDE.md` is
   `WatchdogSpec::routers` (`alert-firing`). No routers' face policy is
   read and no lease key exists.
   `zenwatch/CHANGELOG.md` carries the old→new tables.
+
+  The compact descriptor (#980 C5b2, core §3.3): the presence rules'
+  tokenless refusal reads its one presence read through `catalog` and the
+  store (`zenkey_fleet::Describing`, `observe_presence_through`); the
+  alarm, watchdog and doctor readers read through the fleet's. `tests/util/engine.rs`'s
+  `Options::catalogs`; `tests/liveliness.rs`'
+  `a_compact_descriptors_tokenless_interface_is_refused_through_the_catalog`.
