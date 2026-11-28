@@ -2229,15 +2229,13 @@ async fn s14_the_watch() {
     //    it alone. No further GET in the 10 s, though 4 heartbeats or more
     //    crossed.
     let session = client_as(&ep2, WORKER_ZID).await;
-    let w = worker_on(
-        session,
-        None,
-        true,
-        TargetStartup::default(),
-        false,
-        &tasking(4),
-    )
-    .await;
+    // The deployment's word that the target is across a face (§2.18): no
+    // descriptor reaches it, so a read drawing none takes the word.
+    let across = TargetStartup {
+        across_face: true,
+        ..TargetStartup::default()
+    };
+    let w = worker_on(session, None, true, across, false, &tasking(4)).await;
     s.until("converged on v1", |r| converged_on(r, s1, 1)).await;
     tokio::time::sleep(Duration::from_secs(10)).await;
     assert_eq!(
@@ -3248,6 +3246,109 @@ async fn s16_a_version_put_before_its_descriptor_waits_for_its_token() {
     s.until("converged on v2, held", |r| converged_on(r, s2, 2))
         .await;
     assert_eq!(d.with(|x| x.running.clone()), v(2), "v2 runs");
+    assert_eq!(target.acts(), acts + 1, "acted on v2 once");
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
+/// §16, the new run's hold where no descriptor has ever arrived (§2.18,
+/// text 0.3, round 127's mend, F-627 and F-628): where descriptors reach a
+/// target is the deployment's, never what a read drew, so a target that
+/// starts before its author, on the near side, holds too. The target
+/// starts, and no author has started. X, a session of the test's, plays
+/// the author, putting v1 under its run before anything else: the target's
+/// read draws no descriptor, and it holds v1, acting on nothing. X answers
+/// a descriptor stating the run: still nothing. X declares its instance
+/// token: the target reads, and acts on v1. Then X puts v2 under a second
+/// run, and declares a second instance token with no descriptor stating
+/// that run: the read at the token, made again a few times and soon,
+/// names none, and only then leaves the deployment's word: the target acts
+/// on v2.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_a_target_before_its_author_holds_a_version_put_before_its_descriptor() {
+    let bus = one_router().await;
+    let rec = records();
+    let s = record(&bus.ep1).await;
+    // The author's descriptor as X answers it, read from an author that
+    // runs alone, before the target starts, and is gone again.
+    let a = author_of(&bus.ep1, tasking(0), &rec).await;
+    author_seen(&bus.ep1, true).await;
+    let g = client(&bus.ep1).await;
+    let desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap();
+    a.kill().await;
+    author_seen(&bus.ep1, false).await;
+
+    // The target starts: no author yet, nor any descriptor.
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup::default(),
+    )
+    .await;
+    let target = target.expect("its word names a revision it can report");
+    let svc = b.start().await.expect("the target starts");
+    eventually("the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    s.until("the baseline's report", |r| *r == Report::baseline())
+        .await;
+    let acts = target.acts();
+
+    // X puts v1 under its run, before any descriptor: held.
+    let x = client(&bus.ep1).await;
+    let s1 = Stamp {
+        run: Run::U16(0x0a11),
+        seq: Seq::new(1).unwrap(),
+    };
+    let mark = s.mark();
+    put_as(&x, s1, &v(1)).await;
+    eventually("X's put at S", || async { !s.on(D, mark).is_empty() }).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(target.acts(), acts, "held: no descriptor states its run");
+    assert!(s.on(RP, mark).is_empty(), "Rp receives nothing");
+    assert!(s.on(RUN, mark).is_empty(), "Run receives nothing");
+    // Its descriptor, stating the run: no read before the token.
+    let (_descriptor, key) = answer_descriptor(&x, desc.clone(), "00000000000000dd", s1.run).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(target.acts(), acts, "held until the token");
+    // Its instance token: the target reads, and acts on the v1 it held.
+    let _token = x.liveliness().declare_token(key).await.unwrap();
+    s.until("converged on v1, held", |r| converged_on(r, s1, 1))
+        .await;
+    assert_eq!(d.with(|x| x.running.clone()), v(1), "v1 runs");
+    let acts = target.acts();
+
+    // v2 under a second run, then a second instance token, with no
+    // descriptor stating that run: the read at the token names none, and
+    // the deployment's word stands.
+    let s2 = Stamp {
+        run: Run::U16(0x0a12),
+        seq: Seq::new(1).unwrap(),
+    };
+    let mark = s.mark();
+    put_as(&x, s2, &v(2)).await;
+    eventually("X's second put at S", || async {
+        !s.on(D, mark).is_empty()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(target.acts(), acts, "held: no descriptor states the run");
+    let _second = x
+        .liveliness()
+        .declare_token("zk2/lab/author/@zk/instance/00000000000000de")
+        .await
+        .unwrap();
+    s.until("converged on v2, by the deployment's word", |r| {
+        converged_on(r, s2, 2)
+    })
+    .await;
     assert_eq!(target.acts(), acts + 1, "acted on v2 once");
     svc.close().await.unwrap();
     session.close().await.unwrap();

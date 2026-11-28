@@ -15,6 +15,7 @@
 //!     [--desired-target <system>/<service>] [--desired-unbound] [--desired-archive <system>/<service>]
 //!     [--desired-watch] [--desired-reread-ms <ms>] [--desired-hold]
 //!     [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>] [--desired-word-alone]
+//!     [--desired-across-face]
 //!     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
 //!     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
 //!     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
@@ -512,7 +513,11 @@
 //! `revision=stopped:<major>:<fingerprint>`, and the report stays as it
 //! was. `--desired-word-alone` plays a target built before `desired.v2`:
 //! the file given alone, never the descriptor (`scenarios-v2.md` §16's
-//! runs A and B).
+//! runs A and B). `--desired-across-face` is the deployment's word that
+//! the target is across a constrained face from its author, as
+//! `--first-hop` implies: a read that draws no descriptor takes the word.
+//! Anywhere else a version under a run no descriptor states waits for a
+//! read after its author's next instance token (`desired.v2` §2.18).
 //!
 //! Its commands, each answered by one line:
 //!
@@ -820,6 +825,9 @@ pub struct Options {
     /// the file given alone, never its descriptor, as a target built
     /// before desired.v2 does (desired.v2 §2.18).
     pub desired_word_alone: bool,
+    /// `--desired-across-face`: the target is across a constrained face
+    /// from its author (desired.v2 §2.18, core §8.1).
+    pub desired_across_face: bool,
     /// `--standby`, or implied by a redundancy option: `redundancy.v1` for
     /// every governed contract, on a reader and a watch session of the
     /// owner's own (#841).
@@ -938,7 +946,7 @@ usage: owner [--connect <endpoint>] [--hostid-root <dir>] [--hostid-ephemeral]
     [--desired-target <system>/<service>] [--desired-unbound]
     [--desired-archive <system>/<service>] [--desired-watch] [--desired-reread-ms <ms>]
     [--desired-hold] [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>]
-    [--desired-word-alone]
+    [--desired-word-alone] [--desired-across-face]
     [--standby] [--election claim|external] [--instance-id <id>] [--name <word>]
     [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>]
     [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go]
@@ -1367,6 +1375,11 @@ desired.v2 (spec/profiles/desired/v2.md)
   --desired-word-alone            the target reads its author's revision by the file given
                                   alone, never its descriptor: a target built before
                                   desired.v2 (v2.md §2.18, scenarios-v2.md §16)
+  --desired-across-face           the target is across a constrained face from its author
+                                  (--first-hop implies it): a read drawing no descriptor
+                                  takes the file given. Elsewhere a version under a run no
+                                  descriptor states waits for a read after the author's
+                                  next instance token (v2.md §2.18)
 
   Both majors (v2.md §2.18): a target reads its author's revision from its
   descriptor, the file given where none reaches it. Given an author's revision
@@ -1652,7 +1665,7 @@ impl Options {
              [--desired-archive <system>/<service>] [--desired-watch] \
              [--desired-reread-ms <ms>] [--desired-hold] \
              [--desired-v2] [--desired-ttl <s>] [--desired-timeout-ms <ms>] \
-             [--desired-word-alone] \
+             [--desired-word-alone] [--desired-across-face] \
              [--standby] [--election claim|external] [--instance-id <id>] [--name <word>] \
              [--retry-ms <ms>] [--grace-ms <ms>] [--poll-ms <ms>] [--lease-ms <ms>] \
              [--lock-file <path>] [--refuse-without-lock] [--hold-heal] [--peer] [--wait-go] \
@@ -1703,6 +1716,7 @@ impl Options {
             desired_timeout_ms: None,
             desired_hold: false,
             desired_word_alone: false,
+            desired_across_face: false,
             standby: false,
             election: None,
             instance_id: None,
@@ -1939,6 +1953,10 @@ impl Options {
                     o.desired_word_alone = true;
                     rest = tail;
                 }
+                [flag, tail @ ..] if flag == "--desired-across-face" => {
+                    o.desired_across_face = true;
+                    rest = tail;
+                }
                 [flag, value, tail @ ..] if flag == "--desired-ttl" => {
                     o.desired_ttl_s = value
                         .parse()
@@ -2119,12 +2137,13 @@ impl Options {
                 || o.desired_watch
                 || o.desired_hold
                 || o.desired_word_alone
+                || o.desired_across_face
                 || o.desired_timeout_ms.is_some()
                 || o.desired_reread_ms.is_some())
         {
             return Err("--desired-archive, --desired-watch, --desired-reread-ms, \
-                 --desired-timeout-ms, --desired-word-alone and --desired-hold are \
-                 the target's: give --desired-target or --desired-unbound"
+                 --desired-timeout-ms, --desired-word-alone, --desired-across-face and \
+                 --desired-hold are the target's: give --desired-target or --desired-unbound"
                 .to_owned());
         }
         if o.desired_v2 && !(o.desired_author || target) {
@@ -3199,6 +3218,7 @@ impl Ctx<'_> {
                     st.timeout = Duration::from_millis(ms);
                 }
                 st.word_alone = opts.desired_word_alone;
+                st.across_face = opts.desired_across_face;
                 st.watch = d.watch.clone();
                 target = Some(
                     b.desired_target(

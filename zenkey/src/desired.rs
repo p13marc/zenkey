@@ -1385,6 +1385,15 @@ pub struct TargetStartup {
     /// "Targets first"), which `scenarios-v2.md` §16's runs A and B play.
     /// Such a target is not `desired.v2`'s. `false` by default.
     pub word_alone: bool,
+    /// The deployment's word that the target is across a constrained face
+    /// from its author (core §8.1): no presence crosses, so no descriptor
+    /// reaches it, and a read that draws none takes the deployment's word
+    /// (`desired.v2` §2.18). Anywhere else descriptors reach the target,
+    /// whatever a read drew, and a read that draws none finds none stating
+    /// a run, so its versions wait (text 0.3, F-627). Set by
+    /// [`TargetStartup::across`], and by a service on a first hop. `false`
+    /// by default.
+    pub across_face: bool,
 }
 
 impl Default for TargetStartup {
@@ -1396,6 +1405,7 @@ impl Default for TargetStartup {
             timeout: Duration::from_secs(1),
             poll: PRESENCE_POLL,
             word_alone: false,
+            across_face: false,
         }
     }
 }
@@ -1433,10 +1443,12 @@ impl TargetStartup {
 
     /// Across a constrained face (core §8.1, `link.v2` §2.20): every GET and
     /// presence read waits at least the face's `reply_timeout_ms`, and so
-    /// does the archive's read. Over RF, a reply came back 3.3–7.4 s after
+    /// does the archive's read, and no descriptor reaches the target
+    /// ([`TargetStartup::across_face`]). Over RF, a reply came back 3.3–7.4 s after
     /// its GET, where the default [`TargetStartup::timeout`] is 1 s.
     #[must_use]
     pub fn across(mut self, far: &zenkey_model::link::FarSide) -> Self {
+        self.across_face = true;
         self.timeout = far.at_least(self.timeout);
         if let Some((_, timeout)) = &mut self.archive {
             *timeout = far.at_least(*timeout);
@@ -1581,6 +1593,11 @@ pub struct Seeded {
     /// one first.
     pub revision: AuthorRevision,
 }
+
+/// How many times the read at an author's instance token is made again
+/// while a run held before it is stated by none (`desired.v2` §2.18, text
+/// 0.3, F-628).
+const SEED_RETRIES_AT_TOKEN: u64 = 4;
 
 /// Why a seed is made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1755,9 +1772,6 @@ struct Revisions {
     /// The runs a read after that token found stated by none: the
     /// deployment's word, kept across reads.
     by_word: std::collections::BTreeSet<String>,
-    /// A descriptor of the author's has named a revision to this target:
-    /// descriptors reach it, as they never do across a face.
-    reached: bool,
 }
 
 /// A run's versions held while no descriptor states it (§2.18).
@@ -1819,8 +1833,11 @@ impl Target {
         resource: &str,
         report: Option<ReportAt>,
         handler: Arc<dyn Handler>,
-        startup: TargetStartup,
+        mut startup: TargetStartup,
     ) -> Result<Self> {
+        // A service on a first hop reaches its router only across a
+        // constrained face (core §8.1): no presence crosses to it.
+        startup.across_face |= b.config().first_hop;
         let own = b.address()?.clone();
         let (interface, optional) = b.role_of(role)?;
         let contract: &Contract = author.contract();
@@ -2179,13 +2196,39 @@ impl TargetInner {
         }
         let Some(author) = &self.author else { return };
         let seen = self.appearances.load(Ordering::Acquire);
-        let read = crate::answer::owner_revisions(
-            &self.session,
-            author,
-            &self.author_iface,
-            self.startup.timeout,
-        )
-        .await;
+        // The read at a token MAY be made again, a few times and soon, as
+        // v1 §2.5's seed is (text 0.3, F-628): a token can reach the target
+        // before the route to its author's queryable does. Made again while
+        // a run held before that token is stated by none, four times at
+        // most, 100 ms more apart each time.
+        let mut attempt = 0u64;
+        let read = loop {
+            let read = crate::answer::owner_revisions(
+                &self.session,
+                author,
+                &self.author_iface,
+                self.startup.timeout,
+            )
+            .await;
+            let stated = |run: &String| match &read {
+                crate::answer::OwnerRevisions::Named(named) => {
+                    named.iter().any(|(r, _)| r.as_ref() == Some(run))
+                }
+                _ => false,
+            };
+            let unstated = self
+                .revisions
+                .lock()
+                .await
+                .pending
+                .iter()
+                .any(|(run, p)| seen > p.since && !stated(run));
+            if !unstated || attempt == SEED_RETRIES_AT_TOKEN {
+                break read;
+            }
+            attempt += 1;
+            tokio::time::sleep(Duration::from_millis(100 * attempt)).await;
+        };
         let mut rv = self.revisions.lock().await;
         let mut runs = BTreeMap::new();
         let mut sweep = Vec::new();
@@ -2203,7 +2246,6 @@ impl TargetInner {
             crate::answer::OwnerRevisions::Unreached => sweep.push(Named::Word),
             crate::answer::OwnerRevisions::Unread => sweep.push(Named::Unread),
         }
-        rv.reached |= sweep.iter().any(|n| matches!(n, Named::Revision { .. }));
         let mut release = Vec::new();
         for (run, p) in std::mem::take(&mut rv.pending) {
             if runs.contains_key(&run) {
@@ -2234,10 +2276,13 @@ impl TargetInner {
     /// with no run, no descriptor reaching the target, and a read that
     /// failed take the deployment's word.
     ///
-    /// **None states the run yet** (text 0.3, F-621): where descriptors
-    /// reach the target, a read that finds none stating the run, no
-    /// descriptor at all among them, holds that run's versions, `held`
-    /// with them, until [`TargetInner::read_revisions`] releases them.
+    /// **None states the run yet** (text 0.3, F-621, F-627): where
+    /// descriptors reach the target, anywhere but across a face
+    /// ([`TargetStartup::across_face`]), a read that finds none stating the
+    /// run, no descriptor at all among them, holds that run's versions,
+    /// `held` with them, until [`TargetInner::read_revisions`] releases
+    /// them. A run first seen while its instance's token stood is read so
+    /// at once, and waits for the next appearance.
     async fn admits(&self, run: Option<zenkey_model::wire::Run>, held: Option<&Incoming>) -> bool {
         if self.startup.word_alone {
             return true;
@@ -2265,11 +2310,12 @@ impl TargetInner {
                 .await;
                 use crate::answer::{OwnerRevision, RunRevision};
                 // Descriptors answered and none states the run; or none
-                // answered where descriptors reach the target, as between
-                // an author's instances.
+                // answered where descriptors reach the target, which is the
+                // deployment's word, never what a read drew: anywhere but
+                // across a face (F-627), an author not started yet included.
                 let hold = match &read {
                     RunRevision::NotStated => true,
-                    RunRevision::Read(OwnerRevision::Unreached) => rv.reached,
+                    RunRevision::Read(OwnerRevision::Unreached) => !self.startup.across_face,
                     RunRevision::Read(_) => false,
                 };
                 if hold {
@@ -2285,7 +2331,6 @@ impl TargetInner {
                 }
                 let n = match read {
                     RunRevision::Read(OwnerRevision::Named(fingerprint)) => {
-                        rv.reached = true;
                         let major = self.major_named(&mut rv, &fingerprint).await;
                         Named::Revision { fingerprint, major }
                     }

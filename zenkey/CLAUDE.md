@@ -606,14 +606,19 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   logged once a run): the role is stopped while the descriptor names it,
   its report as it was. No descriptor, a read that failed or a revision
   not retrieved take the deployment's word. **None states the run yet**
-  (text 0.3, F-621): where descriptors reach the target (`Revisions::
-  reached`, sticky once any named a revision), a read that answers and
-  states not the run (`answer::run_revision`'s `NotStated`), or answers
-  nothing, holds the run (`Revisions::pending`, its samples and read
-  entries kept) until `read_revisions` states it, or reads after the
-  author's instance token appeared (`TargetInner::appearances`, counted
-  by the watch and the poll) and states it not, which leaves the word
-  (`by_word`, kept); the held versions are then sent again as samples. `Seeded::revision`
+  (text 0.3, F-621, F-627, F-628): where descriptors reach the target,
+  the deployment's word (anywhere but across a face:
+  `TargetStartup::across_face`, set by `across(far)`, by a first hop, and
+  by the owner example's `--desired-across-face`), a read that answers
+  and states not the run (`answer::run_revision`'s `NotStated`), or
+  answers nothing, holds the run (`Revisions::pending`, its samples and
+  read entries kept) until `read_revisions` states it, or reads after an
+  instance token of the author's appeared once the run was first seen
+  (`TargetInner::appearances`, counted by the watch and the poll) and
+  states it not, which leaves the word (`by_word`, kept); that read is
+  made again up to `SEED_RETRIES_AT_TOKEN` (4) times, 100 ms more apart
+  each, while a held run stays unstated. The held versions are then sent
+  again as samples. `Seeded::revision`
   (`AuthorRevision::{NotRead, Word, Given, Another, Stopped, Unread}`)
   says what it read, and the owner example's `desired seeds` writes it
   `revision=…`. `TargetStartup::word_alone` (`by_word_alone`, the owner
@@ -632,6 +637,10 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   the next instance: a put, then the descriptor, then the token, and the
   held put acted on only after the token; §2's step 4 plays a new instance
   so too, both through `answer_descriptor`),
+  `s16_a_target_before_its_author_holds_a_version_put_before_its_descriptor`
+  (no author yet: X's put held, released at its token; then a run no
+  descriptor states, the word at the next token), §14's target told
+  `across_face`,
   with `config_v2_as_a_target`; the owner example's `--desired-v2`,
   `--desired-ttl <s>` and `--desired-timeout-ms <ms>` drive it (`desired
   gets` listing `<held>=<unchanged|whole>`, `desired delete-unheld`,
