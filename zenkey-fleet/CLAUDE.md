@@ -367,6 +367,13 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   (`bus::stall`) or a watch transport move holds every owner unconfirmed
   and reads presence again, and a one-shot timer sits at the trackers'
   earliest due; the queue is drained before a tick or a read's answer.
+  Each read (the opening's, a withdrawal's, a reseed) carries the count
+  of tokens folded when it was asked, and `TimingBook::seed`/`owed_read`
+  take the keys folded since (observer 0.38 §3.6): one still held keeps
+  its owner present and its member seen, one told withdrawn is not
+  brought back and the withdrawal's read is owed again. `PresenceFeed`
+  and zenwatch's `TokenFeed` already fold what the watch told while a
+  read ran over the read (`seed_then`, `fold_reads`).
   `model::timing`'s `TimingBook` is session-free: a `Tracker` and a
   `LifespanReader` per provider address and resource (`TimedResource`,
   bound and `epoch` from the contract, a template without parameters the
@@ -415,7 +422,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   entry on the namespaced session (a sample two entries cover handed over
   once, by the first), each arrival's `Instant` read in the callback, one
   bounded queue, `bus::stall`, a read again 100 ms after a withdrawal
-  leaving none known held (one per burst), a move (the transport event,
+  leaving none known held (one per burst; asked once the queue is folded,
+  its answer carrying `ViewBook::ask`'s `ReadAsked`, so it decides no
+  token folded since: observer 0.38 §3.6, round 128's F-629, where the
+  view's fence read B gone at a takeover), a move (the transport event,
   or a withdrawal heard with no link, F-268) kept until the round trip
   asked after it stands (the barrier asking the one after an open
   `presence::OPEN_MARGIN` after it, core 0.56, #914), a governed

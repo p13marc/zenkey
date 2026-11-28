@@ -1108,7 +1108,20 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   beside A on `ledger.v1`, then both, no finding; the index's row);
   `scenarios-v2.md`'s "Who runs them" names `zenctl/tests/live_zk2.rs`'s
   `redundancy_v2_s12_…` for §12, and §12's hostid note says it is met.
-  No keyword sentence moved (298 rules).
+  No keyword sentence moved (298 rules). zk2py's round 128 (F-629 to
+  F-632) is answered by observer text 0.38 (§3.6: a read never undoes a
+  token heard since it was asked; its MUST is the 299th rule, observer
+  88, 28 of them a reader's), `redundancy.v2`'s "How often" and "Seed
+  again" (F-630, F-631; §13's Expected 2 and its new step over 39
+  takeovers) and the "Not verified" lines (F-632). The reference meets
+  0.38 in the model's fence and arbiter (`Fence::ask`, `Arbiter::ask`, an
+  `Asked` carried by each read), the runtime's follower, arbitration and
+  timing, and the fleet's arbitration and timing views; §13's step is
+  `zenkey/tests/profile_redundancy_v2.rs`'
+  `s13_k_never_reads_b_gone_over_the_takeovers`. F-630's reading was the
+  reference's already (`follow::merge_seed`: a `redundancy.v1`
+  incumbent's replies per key merged, the omission rule over complete
+  snapshots alone).
 
 **zk2py rounds 116 to 123, answered (#609, #986, #1165).** Core 0.116
 (298 rules: §4.3's new deployment MUST NOT, a run's record that was lost

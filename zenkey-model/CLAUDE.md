@@ -257,7 +257,15 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `Outcome<T> {accepted, discarded, held, superseded, asks_read}` (one
   read at a time, one held value per state member, a descriptor deciding
   the held samples whose run it states, a presence event none), and v1's
-  `described`/`accepts`/`undescribed` unchanged; `collection::per_key_in`
+  `described`/`accepts`/`undescribed` unchanged; observer 0.38 §3.6
+  (#987, round 128's F-629: a read never undoes a token heard since it
+  was asked): `Fence::ask` → `Asked`, carried back by
+  `Holding::Read(addr, asked, complete, held)`, each token heard numbered
+  as heard, kept through a move or not (`redundancy::Heard` per address:
+  every holder's and the last 64 others'), so a read applies to no
+  instance heard declared or withdrawn since its ask, and the arbiter
+  alike (`Arbiter::ask`, `Event::Read { asked, .. }`, its kept reads);
+  a fixture's read is asked as it is told; `collection::per_key_in`
   stays v1's; `tests/profiles/redundancy_v2.rs` runs the three
   `conformance/v2/` files as written, never blessed),
   `timing.v1`'s (`timing`, #908 MA: the vocabulary,

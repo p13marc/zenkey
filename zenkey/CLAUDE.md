@@ -753,7 +753,25 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `redundancy run|new-run` are v2's hooks, its session stamping only for
   a v1 candidate, and `consume --follow [--descriptor-delay-ms <ms>]` is
   K as a black box (one JSON line per `FollowEvent`; `values`, `counts`,
-  `incumbent <address>`).
+  `incumbent <address>`). Observer 0.38 §3.6 (round 128's F-629, a read
+  never undoes a token heard since it was asked): the follower lost its
+  incumbent in 6 of 39 takeovers because a complete read again replaced
+  the fence's holders whole, B's token included, which the watch's
+  callback had applied while the read ran; each presence read now asks
+  the fence first (`Fence::ask`) and carries the `Asked` back.
+  `FollowStartup::reread_hold` (hidden) holds a read again's answer for
+  `a_read_again_never_undoes_a_token_heard_since_it_was_asked`, which
+  fails without the rule, and `s13_k_never_reads_b_gone_over_the_takeovers`
+  is §13's step on `beacon-governed-run.v2` (`Opts::beacon`; heartbeats
+  accepted once K follows B, none discarded; `ZK2_S13_TAKEOVERS`, 3 in
+  the suite; 39 of 39 once, and in process 39 of 39 with the rule
+  turned off too, so the held read is the test that fails without it).
+  `arbitration` asks the arbiter and the incumbents
+  (`Core::ask`) and folds what its watch queued before a read again is
+  asked and again before its answer is applied (`read_presence`,
+  `apply_read`); `timing`'s presence follower the same (`Follower::drain`),
+  its seed and the read a withdrawal owes deciding no token key heard
+  while they ran, one heard withdrawn then owing its own read.
   `timing` (#908, MB) is `timing.v1`'s runtime over
   `zenkey_model::timing`, never re-deriving a verdict. Every `Delivery`
   carries its `arrival` (an `Instant` read in the subscriber's callback),
