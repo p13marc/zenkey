@@ -182,6 +182,7 @@
 
 pub mod alarms;
 pub mod arbitration;
+pub mod attachment;
 pub mod authoring;
 pub mod budget;
 pub mod bundle;

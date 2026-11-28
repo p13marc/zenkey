@@ -711,6 +711,159 @@ fn compact_read(
     )
 }
 
+/// `spec/conformance/archive/attachments.json` (core §4.4, "Each reply's
+/// attachment", "The compact attachment"; #980 C3): the archive's catalog,
+/// a revision, a resource and its `confirmed` → the compact attachment's
+/// bytes, or the JSON form; an attachment's bytes, its origin key, the
+/// archive's catalog, the catalogs held and the revisions lacked → its
+/// form, and a compact one's `confirmed` and identity or its refusal, the
+/// first in §4.4's order. Every accepted read writes back. Computed twice,
+/// by two readings of the text that shared no code, never blessed.
+#[test]
+fn archive_attachments() {
+    use zenkey_model::attachment::{self, Compact, Form, encode, resolve};
+    let dir = spec().join("conformance/archive");
+    let doc = read_json(&dir.join("attachments.json"));
+    let revisions: BTreeMap<String, zenkey_model::contract::Contract> = doc["revisions"]
+        .as_object()
+        .expect("revisions")
+        .iter()
+        .map(|(name, r)| {
+            let loaded =
+                zenkey_model::contract::load_path(&dir.join(r["file"].as_str().expect("file")));
+            let c = loaded
+                .contract
+                .unwrap_or_else(|| panic!("{name} does not load:\n{}", loaded.report));
+            let canon = zenkey_model::canonical::canonical(&c);
+            let resources: Vec<Value> = c
+                .resources
+                .iter()
+                .zip(canon["resources"].as_array().expect("resources"))
+                .map(|(res, k)| {
+                    json!({
+                        "name": format!("{}/{}", res.token.as_str(), res.template),
+                        "type": k.get("type").cloned().unwrap_or(Value::Null),
+                    })
+                })
+                .collect();
+            let got = json!({
+                "file": r["file"],
+                "iface": c.iface.to_string(),
+                "fingerprint": Fingerprint::of(&c).to_string(),
+                "resources": resources,
+            });
+            assert_eq!(*r, got, "revision {name}");
+            (name.clone(), c)
+        })
+        .collect();
+    let catalogs = compact_catalogs(&doc);
+    assert_eq!(
+        catalogs["b"].succeeds(&catalogs["a"]),
+        Ok(()),
+        "b succeeds a"
+    );
+
+    let writes = doc["writes"].as_array().expect("writes");
+    assert_eq!(writes.len(), 12, "writes");
+    for case in writes {
+        let note = &case["note"];
+        let rev = &revisions[case["revision"].as_str().expect("revision")];
+        let bytes = case["catalog"].as_str().and_then(|c| {
+            encode(
+                rev,
+                case["resource"].as_str().expect("resource"),
+                case["confirmed"].as_bool().expect("confirmed"),
+                &catalogs[c],
+            )
+        });
+        let got = match bytes {
+            Some(b) => json!({"form": "compact", "hex": hex(&b)}),
+            None => json!({"form": "json"}),
+        };
+        assert_eq!(case["expect"], got, "write: {note}");
+    }
+
+    let reads = doc["reads"].as_array().expect("reads");
+    assert_eq!(reads.len(), 44, "reads");
+    let mut refused = std::collections::BTreeSet::new();
+    let mut accepted = 0;
+    for case in reads {
+        let note = &case["note"];
+        let bytes = unhex(case["hex"].as_str().expect("hex"));
+        let origin = case["origin"].as_str().expect("origin");
+        let named = case["archive_catalog"].as_str().map(|n| catalogs[n].id());
+        let held: Vec<_> = case["holds"]
+            .as_array()
+            .expect("holds")
+            .iter()
+            .map(|n| catalogs[n.as_str().expect("a name")].clone())
+            .collect();
+        let lacks: Vec<&str> = case
+            .get("lacks")
+            .map(|l| {
+                l.as_array()
+                    .expect("lacks")
+                    .iter()
+                    .map(|n| n.as_str().expect("a name"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let given: Vec<&zenkey_model::contract::Contract> = revisions
+            .iter()
+            .filter(|(n, _)| !lacks.contains(&n.as_str()))
+            .map(|(_, c)| c)
+            .collect();
+        let got = match Form::of(&bytes) {
+            Form::Json => json!({"form": "json"}),
+            Form::Compact => match Compact::read(&bytes) {
+                Err(r) => {
+                    assert!(!r.leaves_confirmed(), "{note}");
+                    refused.insert(r.token());
+                    json!({"form": "compact", "refused": r.token()})
+                }
+                Ok(c) => match resolve(c, origin, named, &held, &given) {
+                    Ok(identity) => {
+                        accepted += 1;
+                        assert_eq!(hex(&c.write()), case["hex"].as_str().unwrap(), "{note}");
+                        json!({"form": "compact", "confirmed": c.confirmed,
+                               "identity": identity.to_json()})
+                    }
+                    Err(r) => {
+                        assert!(r.leaves_confirmed(), "{note}");
+                        refused.insert(r.token());
+                        json!({"form": "compact", "confirmed": c.confirmed,
+                               "refused": r.token()})
+                    }
+                },
+            },
+        };
+        assert_eq!(case["expect"], got, "read: {note}");
+        // `attachment::read` is the same reading, whole.
+        let whole = attachment::read(&bytes, origin, named, &held, &given);
+        assert_eq!(whole.form, Form::of(&bytes), "{note}");
+        if let Some(c) = got.get("confirmed") {
+            assert_eq!(whole.confirmed, c.as_bool(), "{note}");
+        }
+        if let Some(i) = got.get("identity") {
+            assert_eq!(whole.identity.as_ref().ok(), Some(i), "{note}");
+        }
+    }
+    assert_eq!(accepted, 12, "accepted");
+    assert_eq!(
+        refused.into_iter().collect::<Vec<_>>(),
+        [
+            "extension",
+            "origin",
+            "reserved",
+            "resource",
+            "unknown_catalog",
+            "unknown_index",
+            "unknown_revision"
+        ],
+        "every refusal pinned"
+    );
+}
+
 /// `spec/conformance/descriptors/compact/vectors.json` (core §3.3, "The
 /// compact form"; #980 C5a): a descriptor, its seq and its `minted` bit,
 /// with the catalog its owner holds → the payload's bytes; a payload on an
