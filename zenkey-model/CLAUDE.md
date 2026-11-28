@@ -386,6 +386,8 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   `spec/conformance/descriptors/compact/` as written, never blessed;
   `tests/examples.rs`'s `the_zenoh_modem_node_descriptor_is_22_bytes_compact`
   holds the modem node at 22 B (24 with a 32-bit run, 38 with the zid).
+  `descriptor::Form::of(encoding)` (#980 C5b) is how every reader tells the
+  two forms apart: `zenoh/bytes` exactly the compact form, any other JSON.
   A snapshot (#977 E1, core 0.97 §7.5's form 7, adopted by no rule):
   `collection`'s `Page` (`parse`, `read` after its envelope, `write`, `size`;
   `BodyRefusal`'s tokens in reading order), `Snapshot` (`paginate(page_bytes)`,
