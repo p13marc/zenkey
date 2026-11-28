@@ -16,6 +16,15 @@ identity (:class:`zk2py.alarms_v2.SlotReader`); a collection read of
 ``alarms/**`` answered by the alarms' snapshot; the owner's alarms
 established by §2.15; each slot named by the instance's table, read from the
 revisions its descriptor names that the reader holds; each judged by §2.14.
+
+**The horizon** (text 0.2, round 127; F-613): "A reader ages an alarm at the
+``freshness.ttl_s`` of the revision its owner's descriptor names (core
+§3.3) ... Across a face, the deployment's word names the revision (§2.11)."
+The reader holds the standard revision, and any it is given; it retrieves
+any other by fingerprint (core §8.4). "A reader that neither holds nor can
+retrieve the revision its owner names reads that owner's alarms' freshness
+as unobservable, never at 900 s": zk2py's reason is freshness.v1's
+``not_a_horizon`` (:func:`horizon_of`).
 """
 
 from __future__ import annotations
@@ -519,6 +528,11 @@ class OwnerReading:
     slots: dict[int, SlotJudged] = field(default_factory=dict)
     descriptor: dict[str, Any] | None = None
     words: dict[int, Any] = field(default_factory=dict)
+    #: §2.7 (0.2): the alarms' horizon in the revision the owner names, how
+    #: the reader had that revision (:func:`horizon_of`), and its fingerprint
+    horizon_s: int | None = None
+    revision: str = "not_named"
+    revision_fp: str | None = None
 
     def owner_read(self) -> v1.OwnerRead:
         return v1.OwnerRead(self.verdict.verdict,
@@ -536,6 +550,55 @@ def _presence(tool: Any, address: str, timeout: float) -> tuple[str, dict[str, A
     if len(d) == 1 and d[0].ok:
         return "present", json.loads(d[0].payload)
     return "present", None
+
+
+#: freshness.v1's reason for a horizon a reader cannot read (its §2.7 step 4,
+#: ``judgements.json``: "no horizon in the value: unobservable,
+#: not_a_horizon"), zk2py's for a revision not in hand (text 0.2, §2.7)
+NO_REVISION = ("unobservable", "not_a_horizon")
+
+
+def ttl_of(canonical: dict[str, Any] | None) -> int | None:
+    """The alarms' ``freshness.ttl_s`` in a revision's canonical form, or
+    None where it states none that is a horizon."""
+    for r in (canonical or {}).get("resources") or []:
+        if r.get("token") == "state" and r.get("template") == "alarms/{slot}":
+            t = (r.get("annotations") or {}).get(fr.KEY)
+            return t if isinstance(t, int) and not isinstance(t, bool) and t > 0 else None
+    return None
+
+
+def horizon_of(tool: Any, named: list[str] | None, held: dict[str, Any], *, retrieve: bool = True,
+               timeout: float = 1.0) -> tuple[int | None, str, str | None]:
+    """§2.7 (0.2), "The horizon is the revision's": the alarms' horizon in
+    the ``alarms.v2`` revision ``named`` holds (the descriptor's, or across a
+    face the deployment's word), as (seconds or None, how it was had, its
+    fingerprint): ``held``, ``retrieved`` (core §8.4, never across a face),
+    ``not_in_hand`` or ``not_named``. A fingerprint whose canonical form is
+    held but is another interface's names no alarms revision."""
+    from . import live
+
+    fps = [x for x in named or [] if isinstance(x, str)]
+    for fp in fps:
+        c = held.get(fp)
+        if c is not None and c.get("interface") == IFACE:
+            return ttl_of(c), "held", fp
+    unknown = [fp for fp in fps if fp not in held]
+    if not unknown:
+        return None, "not_named", None
+    if retrieve and tool is not None:
+        for fp in unknown:
+            got = live.retrieve_bundle(tool, IFACE, fp, timeout)
+            if got.available and got.verified is not None:
+                return ttl_of(got.verified.contract), "retrieved", fp
+    return None, "not_in_hand", unknown[0]
+
+
+def live_fp(desc: dict[str, Any]) -> str | None:
+    """The ``alarms.v2`` revision a descriptor names (core §3.3, §8.4)."""
+    from . import live
+
+    return live.fingerprint_of(desc, IFACE)
 
 
 def read_owner(tool: Any, address: str, held: dict[str, Any] | None = None, *, listener: Listener | None = None,
@@ -566,7 +629,15 @@ def read_owner(tool: Any, address: str, held: dict[str, Any] | None = None, *, l
     elif across is not None:
         r.major = IFACE
         r.named = named
-    r.table = a2.instance_table(r.named, held or {})
+    # the reader holds the standard revision, as it holds this text
+    std = a2.standard()
+    held = {std.fingerprint: std.canonical, **(held or {})}
+    r.table = a2.instance_table(r.named, held)
+    if desc is not None:
+        mine = [fp for fp in [live_fp(desc)] if fp is not None]
+        r.horizon_s, r.revision, r.revision_fp = horizon_of(tool, mine, held, timeout=timeout)
+    elif across is not None:
+        r.horizon_s, r.revision, r.revision_fp = horizon_of(tool, r.named, held, retrieve=False)
     face = None if across is None else {"reachable": across == "granted"}
     col = None
     if (presence == "present" and lists is not None and lists["lists"]) or (across == "granted"):
@@ -594,14 +665,18 @@ def read_owner(tool: Any, address: str, held: dict[str, Any] | None = None, *, l
             conf_ms = heartbeat.instant_of(e.get("conf"), epoch)
         else:
             conf_ms = None
-        if listener is not None:
-            v = fr.judge("state", v1.HORIZON, [listener.observation(e["slot"])])
+        if r.horizon_s is None:
+            # §2.7 (0.2): "A revision not in hand gives no horizon ... never
+            # at 900 s"
+            fv = NO_REVISION
+        elif listener is not None:
+            v = fr.judge("state", fr.horizon("state", {fr.KEY: r.horizon_s}), [listener.observation(e["slot"])])
             fv = (v.verdict, v.reason)
         elif conf_ms is None:
             fv = ("unobservable", "no_observation")
         else:
             age_s = (now - conf_ms) / 1000
-            fv = ("fresh", "within_horizon") if age_s <= a2.TTL_S else ("stale", "beyond_horizon")
+            fv = ("fresh", "within_horizon") if age_s <= r.horizon_s else ("stale", "beyond_horizon")
         latest = None if rec is None else rec["state"]
         if e["record"] and "undecodable" in e["record"]:
             latest = "undecodable"
