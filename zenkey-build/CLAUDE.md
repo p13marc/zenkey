@@ -102,3 +102,14 @@ v1's `zenkey-build` (0.11.x on crates.io) is the `v1` branch's, and that branch'
   and its `tests/desired_v2.rs` puts every record of
   `conformance/v2/reports.json` through the generated type, as the
   fixture says and as the model's codec reads it.
+- **redundancy** (#987's N1): `generate` runs `redundancy::lint_contract`
+  on every contract that loads, and each `Warning` is a `cargo:warning`
+  (`<file>: warning[redundancy.vN <token>] <at>: <says>`), never a
+  failure: a governed interface's invalid declaration of either major,
+  `value` (each resource), `disagrees` (the interface) and, under
+  `redundancy.v2`, `explicit_stream` (each `@stream`; v2.md §2.2). The
+  runtime refuses to start such an interface, and the core has no code
+  for any of them, so the text asks a linter to warn (v1 §2.2's SHOULD,
+  unmet before N1). No codegen moved. `tests/redundancy_v2.rs` builds a
+  clean `redundancy.v2` contract without a word, warns of its explicit
+  stream (none under `redundancy.v1`), and of `value` under either major.

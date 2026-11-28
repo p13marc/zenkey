@@ -189,7 +189,7 @@ def read(session: Any, watch: Any, consumer: str | None, offline: list[Any], *, 
                 if listen_s > 0 and isinstance(declared, ab.Declaration) and declared.valid and bindings:
                     revs = store.revisions_of(iface)
                     tv = ToolView(session, watch, iface, declared, bindings, params,
-                                  governed=ab.view_governed(revs.values()))
+                                  governed=ab.view_major(revs.values()) or False)
                     try:
                         time.sleep(listen_s)
                         view = tv.view()

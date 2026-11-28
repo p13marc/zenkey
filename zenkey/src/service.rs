@@ -75,6 +75,8 @@ use crate::state::{ClockGuard, DEFAULT_WINDOW, Minter, StateWriter, Store};
 use crate::telemetry::{Epochs, Meter, Metric, frame_series};
 use crate::writer::{EventWriter, Writer};
 use zenkey_model::catalog::{Catalog, EPOCH_WITHOUT_CATALOG};
+use zenkey_model::contract::Contract;
+use zenkey_model::redundancy::Major;
 use zenkey_model::telemetry::frames::FieldSeries;
 
 /// One implemented interface, and what this instance does with it.
@@ -233,15 +235,23 @@ const ONE_CONFIGURATION: &str = "an instance implements config.v1's standard con
      both: it has one configuration (config.v2 §1)";
 
 /// Why a profile's owner the runtime implements is refused on a governed
-/// interface (`redundancy.v1` §2.4, #841): it writes its keys before the
-/// instance is elected, at its start or its re-mint, and outside the gate a
-/// standby's writes go through, so a standby would write them.
-fn not_elected(what: &str, iface: &IfaceId) -> String {
+/// interface (`redundancy.v1` §2.4, #841; `redundancy.v2` §2.4, which keeps
+/// it): it writes its keys before the instance is elected, at its start or
+/// its re-mint, and outside the gate a standby's writes go through, so a
+/// standby would write them.
+fn not_elected(what: &str, iface: &IfaceId, major: Option<Major>) -> String {
+    let major = major.unwrap_or(Major::V1);
     format!(
-        "{what} on {iface}, which redundancy.v1 governs: it writes the interface's keys before \
+        "{what} on {iface}, which {major} governs: it writes the interface's keys before \
          any election and outside its gate, so a standby would write them; not at this version \
-         (redundancy.v1 §2.4)"
+         ({major} §2.4)"
     )
+}
+
+/// The major of `redundancy` that governs `c`'s interface, if either does
+/// (`redundancy.v2` §2.2): `None` where its `uses` lists neither.
+fn governing(c: &Contract) -> Option<Major> {
+    zenkey_model::redundancy::Major::of(&c.uses)
 }
 
 fn mint() -> InstanceId {
@@ -334,9 +344,11 @@ fn find_mut<'s>(impls: &'s mut [ImplState], iface: &IfaceId) -> Result<&'s mut I
 /// GET"; #977's E3): each `state` or `@state` resource, its index among its
 /// token's, its snapshot key, its tag, and whether it is a per-key
 /// resource, a state §4.3's table lists (`freshness.v1`'s horizon, a
-/// `desired.v1` desired resource, a metric resource, every state of a
-/// governed interface), or one with a horizon under `freshness.v2`. A
-/// `desired.v2` desired resource is no per-key resource (core 0.112).
+/// `desired.v1` desired resource, a metric resource, every state of an
+/// interface `redundancy.v1` governs), or one with a horizon under
+/// `freshness.v2`. A `desired.v2` desired resource is no per-key resource
+/// (core 0.112), nor a state of an interface `redundancy.v2` governs (core
+/// 0.119, `redundancy.v2` §2.6).
 fn answered(
     s: &ImplState,
     token: KindToken,
@@ -366,8 +378,11 @@ fn answered(
                 zenkey_model::desired::declaration_of(r),
                 zenkey_model::desired::Declaration::Declared(_)
             );
+        // redundancy.v1 §2.10: every state of a governed interface is per
+        // key; a `redundancy.v2` one's is answered by snapshot (v2 §2.6).
+        let governed_per_key = s.gate.is_some() && governing(c) == Some(Major::V1);
         let per_key =
-            (horizon && !v2) || desired || s.metrics.contains_key(&name) || s.gate.is_some();
+            (horizon && !v2) || desired || s.metrics.contains_key(&name) || governed_per_key;
         let chunks: Vec<&str> = r
             .template
             .segments()
@@ -520,10 +535,10 @@ impl ServiceBuilder {
             .map_or(EPOCH_WITHOUT_CATALOG, |c| c.epoch())
     }
 
-    /// Takes part in `redundancy.v1`'s election for every governed
-    /// interface this service implements, now or later
-    /// ([`crate::redundancy`], #841): an interface whose contract lists
-    /// `redundancy.v1` in `uses`. [`ServiceBuilder::start`] then claims
+    /// Takes part in `redundancy`'s election for every governed interface
+    /// this service implements, now or later ([`crate::redundancy`], #841,
+    /// #987's N2): an interface whose contract lists `redundancy.v1` or
+    /// `redundancy.v2` in `uses`. [`ServiceBuilder::start`] then claims
     /// (its descriptor marks each governed interface standby, its instance
     /// token), and elects on `startup`'s sessions: the instance serves an
     /// interface only once elected, and stands by otherwise, declaring
@@ -531,8 +546,11 @@ impl ServiceBuilder {
     /// returned says each interface's role.
     ///
     /// Refused when it is configured already, when this service's session
-    /// runs without timestamping (§2.10: a candidate's session stamps every
-    /// write, F-467), when `startup`'s reader is this service's session or
+    /// runs without timestamping and implements a `redundancy.v1`
+    /// interface (v1 §2.10: a candidate's session stamps every write,
+    /// F-467; [`ServiceBuilder::start`] refuses one implemented after; a
+    /// `redundancy.v2` candidate's session runs as any owner's, v2 §2.10),
+    /// when `startup`'s reader is this service's session or
     /// a watch session, or its watch is the service's session or the reader
     /// (§2.5 step 1, §2.7; text 0.2, F-204). A governed interface without
     /// it is refused at start.
@@ -545,6 +563,11 @@ impl ServiceBuilder {
                 "redundancy.v1 is configured twice on this service".to_owned(),
             ));
         }
+        let governs_v1 = self
+            .impls
+            .iter()
+            .any(|s| governing(s.imp.contract()) == Some(Major::V1));
+        crate::redundancy::stamps_for_v1(&self.session, governs_v1)?;
         let r = crate::redundancy::Redundancy::new(&self.session, startup)?;
         self.redundancy = Some(r.clone());
         Ok(r)
@@ -635,14 +658,23 @@ impl ServiceBuilder {
         find(&self.impls, iface).ok().and_then(|s| s.gate.clone())
     }
 
+    /// The major of `redundancy` governing `iface`, when it is implemented
+    /// and governed by either (`redundancy.v2` §2.2).
+    fn governing_of(&self, iface: &IfaceId) -> Option<Major> {
+        find(&self.impls, iface)
+            .ok()
+            .and_then(|s| governing(s.imp.contract()))
+    }
+
     /// Refuses a raw zenoh declaration on a governed interface, which the
     /// runtime could not undeclare while it stands by (`redundancy.v1`
-    /// §2.4).
+    /// §2.4, which `redundancy.v2` keeps).
     fn not_governed(&self, iface: &IfaceId, what: &str) -> Result<()> {
         if self.gate_of(iface).is_some() {
+            let major = self.governing_of(iface).unwrap_or(Major::V1);
             return Err(Error::Contract(format!(
-                "{iface} is governed by redundancy.v1: declare its {what} through the runtime's \
-                 writers and servers, which a standby holds undeclared (redundancy.v1 §2.4)"
+                "{iface} is governed by {major}: declare its {what} through the runtime's \
+                 writers and servers, which a standby holds undeclared ({major} §2.4)"
             )));
         }
         Ok(())
@@ -792,7 +824,11 @@ impl ServiceBuilder {
             return Err(Error::Duplicate(iface));
         }
         if zenkey_model::redundancy::is_governed(imp.contract()) {
-            return Err(Error::Contract(not_elected("alarms.v1's owner", &iface)));
+            return Err(Error::Contract(not_elected(
+                "alarms.v1's owner",
+                &iface,
+                governing(imp.contract()),
+            )));
         }
         crate::alarms::Alarms::declare(self, imp, startup).await
     }
@@ -838,7 +874,11 @@ impl ServiceBuilder {
             return Err(Error::Duplicate(iface));
         }
         if zenkey_model::redundancy::is_governed(imp.contract()) {
-            return Err(Error::Contract(not_elected("alarms.v2's owner", &iface)));
+            return Err(Error::Contract(not_elected(
+                "alarms.v2's owner",
+                &iface,
+                governing(imp.contract()),
+            )));
         }
         crate::alarms::v2::Alarms::declare(self, imp, startup).await
     }
@@ -882,7 +922,11 @@ impl ServiceBuilder {
             )));
         }
         if self.gate_of(iface).is_some() {
-            return Err(Error::Contract(not_elected("a desired.v1 author", iface)));
+            return Err(Error::Contract(not_elected(
+                "a desired.v1 author",
+                iface,
+                self.governing_of(iface),
+            )));
         }
         crate::desired::Author::declare(self, iface, resource, startup).await
     }
@@ -912,6 +956,7 @@ impl ServiceBuilder {
             return Err(Error::Contract(not_elected(
                 "a desired.v1 target's report",
                 &report.iface,
+                self.governing_of(&report.iface),
             )));
         }
         crate::desired::Target::declare(
@@ -953,6 +998,7 @@ impl ServiceBuilder {
             return Err(Error::Contract(not_elected(
                 "a desired.v1 target's report",
                 &r.iface,
+                self.governing_of(&r.iface),
             )));
         }
         let cfg = match (self.config_v1.clone(), self.config_v2.clone()) {
@@ -1131,8 +1177,9 @@ impl ServiceBuilder {
             .iter()
             .filter_map(|r| Some((resource_name(r), frame_series(imp.contract(), r)?)))
             .collect();
-        // redundancy.v1 §2.2: a contract listing the profile in `uses`
-        // governs its interface, whose resources are born standing by.
+        // redundancy.v1 §2.2, v2 §2.2: a contract listing either major in
+        // `uses` governs its interface, whose resources are born standing
+        // by.
         let gate = zenkey_model::redundancy::is_governed(imp.contract())
             .then(|| Gate::new(imp.iface().clone()));
         // freshness.v2 §2.4 (#978's F3): its collections are vouched for by
@@ -1575,20 +1622,28 @@ impl ServiceBuilder {
                     .to_owned(),
             ));
         }
-        // redundancy.v1 §2.2, §2.14 (#841): every governed interface's
-        // declaration valid, and taking part in an election; under
-        // `external`, a lock to ask, and with `refuse_without_lock` the lock
-        // held (§2.11). Nothing is declared before.
+        // redundancy.v1 §2.2, §2.14 (#841), v2 §2.2: every governed
+        // interface's declaration valid, read as a reader of both majors
+        // reads it, and taking part in an election; under `external`, a
+        // lock to ask, and with `refuse_without_lock` the lock held
+        // (§2.11). Nothing is declared before.
         let governed = crate::redundancy::elections(
             &self.impls,
             &self.config.tokenless,
             self.redundancy.is_some(),
         )?;
+        // v1 §2.10 (F-467): a `redundancy.v1` candidate's session stamps,
+        // for an interface implemented after `redundancy()` too.
+        let governs_v1 = governed.iter().any(|g| g.4 == Major::V1);
+        if self.redundancy.is_some() {
+            crate::redundancy::stamps_for_v1(&self.session, governs_v1)
+                .map_err(|e| Error::NotExposed(e.to_string()))?;
+        }
         // Core §4.3: a candidate of a governed interface draws 32-bit runs,
         // so a run store beside it is refused, nothing declared.
         if self.redundancy.is_some() && self.minter.has_store() {
             return Err(Error::NotExposed(
-                "a redundancy.v1 candidate takes random 32-bit runs (core §4.3): \
+                "a redundancy candidate takes random 32-bit runs (core §4.3): \
                  ServiceBuilder::run_store is refused beside ServiceBuilder::redundancy"
                     .to_owned(),
             ));
@@ -1635,10 +1690,11 @@ impl ServiceBuilder {
             &addr,
         )?;
         // Core §8.2's posture: an owner's session runs without
-        // timestamping, a candidate of a governed interface excepted. Not
+        // timestamping, a candidate of a `redundancy.v1` interface excepted
+        // (a `redundancy.v2` one is any owner, v2 §2.10). Not
         // a refusal: the session then stamps what the runtime gives no
         // timestamp, so the runtime gives every write its own (S2).
-        if self.minter.session_timestamping() && self.redundancy.is_none() {
+        if self.minter.session_timestamping() && !governs_v1 {
             tracing::warn!(
                 address = %addr,
                 "this owner's session runs with timestamping enabled, which stamps every put and \
@@ -1775,16 +1831,20 @@ impl ServiceBuilder {
 }
 
 /// Core §8.1's first hop at step 2 (#982 H2): `archive.v1` and an
-/// interface whose contract uses `redundancy.v1` each need presence on
-/// their peers' side of the face, so an owner on a first hop implementing
-/// either is refused, nothing declared.
+/// interface whose contract uses either major of `redundancy` each need
+/// presence on their peers' side of the face, so an owner on a first hop
+/// implementing either is refused, nothing declared (`redundancy.v2`
+/// §2.13).
 fn first_hop(impls: &[ImplState]) -> Result<()> {
     for s in impls {
         let iface = s.imp.iface();
         let why = if *iface == crate::archive::iface() {
             Some("an archive is found by its interface token (§4.4)")
-        } else if zenkey_model::redundancy::is_governed(s.imp.contract()) {
-            Some("its contract uses redundancy.v1, whose election needs presence (§6)")
+        } else if let Some(major) = governing(s.imp.contract()) {
+            Some(match major {
+                Major::V1 => "its contract uses redundancy.v1, whose election needs presence (§6)",
+                Major::V2 => "its contract uses redundancy.v2, whose election needs presence (§6)",
+            })
         } else {
             None
         };

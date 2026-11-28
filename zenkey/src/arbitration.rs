@@ -31,9 +31,10 @@
 //! | §2.4 the binding's order | the consumer's providers in their configured order, `self.system` spelled out ([`Binding`]) |
 //! | §2.5 who sent it, from the key; R6 first | [`Arbiter::identify`], over the delivery's key, base-relative |
 //! | §2.5 `expired` | `timing.v1` §2.6, by [`crate::consumer::Consumer::subscribe_timed`]'s engine, its deadline left to the arbiter: on the binding's `clock_bound_ms` |
-//! | §2.5 `not_incumbent` | a governed required interface (`redundancy.v1` §2.2): a sample whose stamp's id is not the incumbent's `meta.zid` (`redundancy.v1` §2.10), the incumbent the lowest instance holding the interface's token, as the watch and the reads show it, and its descriptor |
+//! | §2.5 `not_incumbent` (text 0.7) | a governed required interface, its revision held listing either major of `redundancy` (`redundancy.v2` §2.2): a sample that major's follower does not accept now, by `zenkey_model::redundancy`'s fence (`redundancy.v1` §2.10 by the incumbent's `meta.zid`, `redundancy.v2` §2.10 by its runs; an unattributed one counted so, while one read of the address's descriptors runs), the incumbent the lowest instance holding the interface's token, as the watch and the reads show it, and its descriptors, heard put and read |
 //! | §2.7 withdrawals on a watch session, never polled | a liveliness subscriber per entry on [`crate::consumer::Consumer::with_watch`]'s session, its round trip made after declaring it; without one, the deadline alone, said so ([`Arbitration::watching`]) |
 //! | §2.7 read again | 0.1 s after the first withdrawal of a burst ([`crate::timing::REREAD`]), one read per address, on the consumer's session, which holds no liveliness subscriber ([`Arbitration::reads`]) |
+//! | observer §3.6 (0.38): a read never undoes a token heard since it was asked | the arbiter and the incumbents asked when each read is ([`Arbiter::ask`], [`Incumbents::ask`]), what the watch heard before it applied first; what it hears while the read runs is applied before the read's answer, which applies to none of it |
 //! | §2.8 a move | `Moved` at the watch session's transport event, or at a withdrawal heard while it holds no link, whichever comes first (text 0.2, F-268; core §8.1, 0.56); `Stood` when the round trip asked after it stands ([`crate::presence::Barrier`], which asks the one after an open [`crate::presence::OPEN_MARGIN`] after it, core §8.1, 0.56, #914), asked again until one does |
 //! | §2.9 decided at every event; the timer | a one-shot timer at [`Arbiter::due`], re-armed at every step; every event's instant on this host's monotonic clock, never earlier than the last |
 //! | §2.9 only the active provider's arrivals delivered | [`ArbitrationEvent::Delivered`], from the subscriber's lock, in decision order |
@@ -108,14 +109,41 @@ struct Core {
     rearm: Arc<tokio::sync::Notify>,
     /// Addresses to read again (§2.7).
     reread: tokio::sync::mpsc::UnboundedSender<Addr>,
-    /// A governed interface's incumbents (`redundancy.v1` §2.10).
+    /// A governed interface's incumbents (`redundancy.v1` §2.10,
+    /// `redundancy.v2` §2.10).
     incumbents: Option<Incumbents>,
-    /// Descriptors to GET: a holder whose `meta.zid` is not held.
+    /// The major of `redundancy` the revision held lists (text 0.7): what
+    /// each holder's descriptor is read under.
+    major: zenkey_model::redundancy::Major,
+    /// Descriptors to GET: a holder of which none is held.
     describe: tokio::sync::mpsc::UnboundedSender<(Addr, InstanceId)>,
+    /// Addresses whose descriptors to read, for a sample the fence holds
+    /// (`redundancy.v2` §2.10): one read at a time, the fence's.
+    descriptors: tokio::sync::mpsc::UnboundedSender<Addr>,
     asked: BTreeSet<(Addr, InstanceId)>,
 }
 
+/// When a presence read was asked, to the arbiter and to the incumbents
+/// (observer §3.6): its answer applies to no token either heard since.
+#[derive(Debug, Clone, Copy)]
+struct Asked {
+    arbiter: zenkey_model::arbitration::Asked,
+    incumbents: zenkey_model::arbitration::Asked,
+}
+
 impl Core {
+    /// A presence read is asked now.
+    fn ask(&self) -> Asked {
+        Asked {
+            arbiter: self.arbiter.ask(),
+            incumbents: self
+                .incumbents
+                .as_ref()
+                .map(Incumbents::ask)
+                .unwrap_or_default(),
+        }
+    }
+
     fn mono(&self, at: Instant) -> Mono {
         Mono::after(at.saturating_duration_since(self.origin))
     }
@@ -432,9 +460,12 @@ where
         zenkey_model::contract::Body::Operation(_) => None,
     };
     let governed = zenkey_model::redundancy::is_governed(i.required);
+    let major = zenkey_model::redundancy::Major::of(&i.required.uses)
+        .unwrap_or(zenkey_model::redundancy::Major::V1);
     let (events, mut rx) = tokio::sync::mpsc::unbounded_channel::<ArbitrationEvent>();
     let (reread_tx, reread_rx) = tokio::sync::mpsc::unbounded_channel::<Addr>();
     let (describe_tx, describe_rx) = tokio::sync::mpsc::unbounded_channel::<(Addr, InstanceId)>();
+    let (descriptors_tx, descriptors_rx) = tokio::sync::mpsc::unbounded_channel::<Addr>();
     let rearm = Arc::new(tokio::sync::Notify::new());
     let mut tasks = Tasks::default();
     // The dispatcher: every event, in the order decided.
@@ -465,7 +496,9 @@ where
         rearm: Arc::clone(&rearm),
         reread: reread_tx,
         incumbents: governed.then(Incumbents::default),
+        major,
         describe: describe_tx,
+        descriptors: descriptors_tx,
         asked: BTreeSet::new(),
     }));
     // §2.5's `expired`: timing.v1's lifespan engine, its deadline the
@@ -550,10 +583,27 @@ where
                     }
                     _ => Some(premise),
                 };
-                let not_incumbent = !delete
-                    && c.incumbents.as_ref().is_some_and(|inc| {
-                        !inc.accepts(&addr, sample.timestamp().and_then(timing::stamp_id))
-                    });
+                // §2.5 outcome 6 (text 0.7): what the major's follower
+                // accepts now. One it holds, unattributed, is counted
+                // not_incumbent, and its read asked.
+                let not_incumbent = !delete && {
+                    let core = &mut *c;
+                    match core.incumbents.as_mut() {
+                        None => false,
+                        Some(inc) => {
+                            let fs = zenkey_model::redundancy::Sample {
+                                stamp: inband,
+                                timestamp_id: sample.timestamp().and_then(timing::stamp_id),
+                            };
+                            let out =
+                                inc.offer(&addr, fs, zenkey_model::redundancy::Member::Alone, ());
+                            if out.asks_read {
+                                let _ = core.descriptors.send(addr.clone());
+                            }
+                            out.accepted.is_empty()
+                        }
+                    }
+                };
                 let outcome = c.observe(
                     arrival,
                     Event::Sample(zenkey_model::arbitration::Sample {
@@ -603,8 +653,9 @@ where
         ),
         None => None,
     };
-    // A governed interface's descriptors: each holder's `meta.zid`, from
-    // its descriptor's puts (core §3.3: before its tokens) and a GET.
+    // A governed interface's descriptors: each holder's `meta.zid` and
+    // runs, from its descriptor's puts (core §3.3: before its tokens, and
+    // before it writes under a new run) and a GET.
     if governed {
         for p in i.providers {
             let (sys, svc) = p.chunks();
@@ -613,10 +664,12 @@ where
                 .session
                 .declare_subscriber(format!("zk2/{sys}/{svc}/@zk/instance/*"))
                 .callback(move |s: Sample| {
-                    if let Some((addr, instance, zid)) = described(&s)
-                        && let Some(inc) = lock(&c).incumbents.as_mut()
+                    let mut core = lock(&c);
+                    let major = core.major;
+                    if let Some((addr, instance, d)) = described(&s, &core.iface, major)
+                        && let Some(inc) = core.incumbents.as_mut()
                     {
-                        inc.described(addr, instance, zid);
+                        inc.describe(&addr, instance, d);
                     }
                 })
                 .await
@@ -627,6 +680,11 @@ where
             i.session.clone(),
             Arc::clone(&core),
             describe_rx,
+        )));
+        tasks.push(tokio::spawn(read_descriptors(
+            i.session.clone(),
+            Arc::clone(&core),
+            descriptors_rx,
         )));
     }
     // §2.7: the watch, its round trip made after declaring it.
@@ -729,8 +787,12 @@ where
     })
 }
 
-/// A descriptor put's address, instance and `meta.zid`.
-fn described(s: &Sample) -> Option<(Addr, InstanceId, u128)> {
+/// A descriptor put's address, instance, and what it says to the fence.
+fn described(
+    s: &Sample,
+    iface: &IfaceId,
+    major: zenkey_model::redundancy::Major,
+) -> Option<(Addr, InstanceId, zenkey_model::redundancy::Described)> {
     if s.kind() != SampleKind::Put {
         return None;
     }
@@ -738,13 +800,59 @@ fn described(s: &Sample) -> Option<(Addr, InstanceId, u128)> {
         return None;
     };
     let v: serde_json::Value = serde_json::from_slice(&s.payload().to_bytes()).ok()?;
-    let zid = timing::zid_value(v.get("meta")?.get("zid")?.as_str()?)?;
-    Some((addr, instance, zid))
+    Some((addr, instance, describe_value(&v, iface, major)))
 }
 
-/// GETs the descriptor of each holder whose `meta.zid` is not held
-/// (`redundancy.v1` §2.10): a holder heard before its descriptor's put
-/// reached this session.
+/// What one descriptor says to the fence (text 0.7): its run, as
+/// `redundancy.v2` §2.10 reads it, its `meta.zid`, and the major the
+/// revision held lists.
+fn describe_value(
+    v: &serde_json::Value,
+    iface: &IfaceId,
+    major: zenkey_model::redundancy::Major,
+) -> zenkey_model::redundancy::Described {
+    use zenkey_model::redundancy::{Election, Governance, read_descriptor};
+    let run = read_descriptor(v, &iface.to_string(), Governance::Governed(Election::Claim)).run;
+    let zid = v
+        .get("meta")
+        .and_then(|m| m.get("zid"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(timing::zid_value);
+    zenkey_model::redundancy::Described {
+        major: Some(major),
+        run,
+        zid,
+    }
+}
+
+/// The reads of an address's descriptors the fence asks for a sample it
+/// holds (`redundancy.v2` §2.10), one at a time: each end handed back.
+async fn read_descriptors(
+    session: zenoh::Session,
+    core: Arc<Mutex<Core>>,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<Addr>,
+) {
+    while let Some(addr) = rx.recv().await {
+        let read = crate::follow::read_descriptors(&session, &addr, READ_TIMEOUT).await;
+        let mut c = lock(&core);
+        let (iface, major) = (c.iface.clone(), c.major);
+        let Some(inc) = c.incumbents.as_mut() else {
+            continue;
+        };
+        let descriptors: Vec<_> = read
+            .iter()
+            .map(|(i, v)| (i.clone(), describe_value(v, &iface, major)))
+            .collect();
+        let out = inc.read_ended(&addr, descriptors);
+        if out.asks_read {
+            let _ = c.descriptors.send(addr);
+        }
+    }
+}
+
+/// GETs the descriptor of each holder of which none is held
+/// (`redundancy.v1` §2.10, `redundancy.v2` §2.10): a holder heard before
+/// its descriptor's put reached this session.
 async fn describe(
     session: zenoh::Session,
     core: Arc<Mutex<Core>>,
@@ -752,22 +860,29 @@ async fn describe(
 ) {
     while let Some((addr, instance)) = rx.recv().await {
         let found = crate::presence::descriptor(&session, &addr, &instance, READ_TIMEOUT).await;
-        let zid = match found {
-            Ok(crate::presence::Found::Descriptor(d, _)) => d
-                .meta
-                .get("zid")
-                .and_then(|z| z.as_str())
-                .and_then(timing::zid_value),
+        let v = match found {
+            Ok(crate::presence::Found::Descriptor(_, bytes)) => {
+                serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+            }
             _ => None,
         };
         let mut c = lock(&core);
-        match zid {
-            Some(z) => {
+        let (iface, major) = (c.iface.clone(), c.major);
+        // A descriptor stating neither a `meta.zid` a v1 incumbent is
+        // followed by nor a run a v2 one is: none held, asked again at the
+        // holder's next sight.
+        let d = v
+            .map(|v| describe_value(&v, &iface, major))
+            .filter(|d| match major {
+                zenkey_model::redundancy::Major::V1 => d.zid.is_some(),
+                zenkey_model::redundancy::Major::V2 => d.run.is_some(),
+            });
+        match d {
+            Some(d) => {
                 if let Some(inc) = c.incumbents.as_mut() {
-                    inc.described(addr, instance, z);
+                    inc.describe(&addr, instance, d);
                 }
             }
-            // Asked again at the holder's next sight.
             None => {
                 c.asked.remove(&(addr, instance));
             }
@@ -777,9 +892,7 @@ async fn describe(
 
 /// Reads `selector`'s interface tokens on `session`, which holds no
 /// liveliness subscriber (core §8.1, 0.37), and hands the arbiter a read
-/// of each bound address the selector covers, counted in `made`; with
-/// `exact`, of the selector's one address, none held included. A read
-/// refused, through a session cut off, is not made, and counted so.
+/// of each bound address the selector covers ([`apply_read`]).
 async fn read_into_core(
     session: &zenoh::Session,
     core: &Arc<Mutex<Core>>,
@@ -789,15 +902,45 @@ async fn read_into_core(
     not_made: &AtomicU64,
     exact: bool,
 ) {
-    let read = match crate::presence::liveliness_read(session, selector, READ_TIMEOUT).await {
-        Ok(r) => r,
+    let asked = lock(core).ask();
+    if let Some(read) = read_presence(session, selector, made, not_made).await {
+        apply_read(core, iface, selector, exact, asked, &read);
+    }
+}
+
+/// One read of `selector`'s interface tokens, counted in `made`. A read
+/// refused, through a session cut off, is not made, and counted so.
+async fn read_presence(
+    session: &zenoh::Session,
+    selector: &str,
+    made: &AtomicU64,
+    not_made: &AtomicU64,
+) -> Option<crate::presence::PresenceRead> {
+    match crate::presence::liveliness_read(session, selector, READ_TIMEOUT).await {
+        Ok(r) => {
+            made.fetch_add(1, Ordering::Relaxed);
+            Some(r)
+        }
         Err(e) => {
             not_made.fetch_add(1, Ordering::Relaxed);
             tracing::debug!("arbitration.v1: a read of {selector} was not made: {e}");
-            return;
+            None
         }
-    };
-    made.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// A read asked at `asked`, handed to the arbiter and the incumbents: each
+/// bound address the selector covers, and with `exact` the selector's one
+/// address, none held included. It applies to no token heard since it was
+/// asked (observer §3.6).
+fn apply_read(
+    core: &Arc<Mutex<Core>>,
+    iface: &IfaceId,
+    selector: &str,
+    exact: bool,
+    asked: Asked,
+    read: &crate::presence::PresenceRead,
+) {
     let now = Instant::now();
     let mut by: BTreeMap<Addr, BTreeSet<InstanceId>> = BTreeMap::new();
     for k in &read.keys {
@@ -822,10 +965,16 @@ async fn read_into_core(
             now,
             Event::Read {
                 address: address.clone(),
+                asked: asked.arbiter,
                 complete: read.complete,
                 held: held.clone(),
             },
-            Some(Holding::Read(address, read.complete, held)),
+            Some(Holding::Read(
+                address,
+                asked.incumbents,
+                read.complete,
+                held,
+            )),
         );
     }
 }
@@ -911,8 +1060,22 @@ impl Follower {
                 () = read_due => {
                     burst_due = None;
                     for a in std::mem::take(&mut burst) {
+                        // Observer §3.6: what the watch heard before the
+                        // read is asked precedes it, and what it hears
+                        // while the read runs is applied before the read's
+                        // answer, which applies to none of it.
+                        while let Ok(h) = heard.try_recv() {
+                            self.heard(h).await;
+                        }
                         let sel = format!("zk2/{}/{}/@zk/alive/{}/**", a.system, a.service, self.iface);
-                        read_into_core(&self.session, &self.core, &self.iface, &sel, &self.reads, &self.not_made, true).await;
+                        let asked = lock(&self.core).ask();
+                        let read = read_presence(&self.session, &sel, &self.reads, &self.not_made).await;
+                        while let Ok(h) = heard.try_recv() {
+                            self.heard(h).await;
+                        }
+                        if let Some(read) = read {
+                            apply_read(&self.core, &self.iface, &sel, true, asked, &read);
+                        }
                     }
                 }
                 // §2.8: the watch session's transport closed or opened.

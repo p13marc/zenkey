@@ -240,7 +240,7 @@ zenctl timing 'zk2/robot/**' --namespace prod --for 10      # no --clock-bound: 
 zenctl desired --namespace prod --for 30               # every target's roles, read again while an answer may move
 zenctl desired lab/worker --role task --namespace prod --clocks-synced   # one target's role, its report's age on the deployment's word
 
-# Who serves, redundancy.v1: exit 1 on a split, a twin or a lasting vacancy.
+# Who serves, redundancy (either major): exit 1 on a split, a twin or a lasting vacancy.
 zenctl redundancy --namespace prod                     # every governed interface, two reads 2 s apart
 zenctl redundancy fleet/catalog --iface zs.catalog.v1 --namespace prod --contracts contracts/   # one, its contract offline
 
@@ -773,7 +773,7 @@ none.
 
 | check | the question | spec |
 |---|---|---|
-| `split-brain` | do two instances of one service hold one interface's token past the grace period, with two exposing an exclusive resource? Of an interface `redundancy.v1` governs, two holders in both reads whatever their marks, its first question's `split` | §6, redundancy.v1 §2.15 |
+| `split-brain` | do two instances of one service hold one interface's token past the grace period, with two exposing an exclusive resource? Of an interface either major of `redundancy` governs, two holders in both reads whatever their marks, its first question's `split` | §6, redundancy.v1 §2.15, redundancy.v2 §2.15 |
 | `binding-unsatisfied` | does a role's binding select no provider visible to this reader? | §3.2 R5 |
 | `contract-drift` | do providers of one interface serve revisions the classifier calls review or breaking against each other? | §9.8 |
 | `contract-unavailable` | does a descriptor name a revision no holder serves verified? | §8.4 |
@@ -803,7 +803,7 @@ none.
 | `desired-refused` | was a desired.v1 or desired.v2 target's last act on its author's document refused, or did it fail partway, by its report? (warning) | desired.v1 §2.7 |
 | `desired-behind` | is a desired.v1 target not yet converged on a version its author stamped longer ago than `--desired-behind` (60 s)? (warning; `--clocks-synced` only: one reading never finds a target behind, and a desired.v2 version has no time, so such a target is unjudged) | desired.v1 §2.17 |
 | `desired-last-known` | does a desired.v1 or desired.v2 target run a document it read from an archive, its author not answering for it? (info) | desired.v1 §2.9 |
-| `redundancy-vacancy` | does an interface redundancy.v1 governs have candidates and no incumbent, in both of two complete presence reads? (warning; one read's vacancy is a takeover due) | redundancy.v1 §2.15 |
+| `redundancy-vacancy` | does an interface a major of redundancy governs have candidates and no incumbent, in both of two complete presence reads? (warning; one read's vacancy is a takeover due) | redundancy.v1 §2.15, redundancy.v2 §2.15 |
 | `timing-declaration` | does a contract an owner implements declare timing.v1 values a reader cannot judge: an invalid one, a deadline below its period, or timing keys on a resource that is not a stream or on a requirement? (warning) | timing.v1 §2.2 |
 | `arbitration-declaration` | does a running consumer hold a role carrying `arbitration.policy` whose declaration is invalid over every revision of the required interface in hand (error: its consumer cannot start on it), or whose binding has a wildcard or a shadowed entry, a priority nobody chose (warning)? | arbitration.v1 §2.14 |
 | `catalog-missing` | does a running instance list a revision the deployment's catalog lacks (the one its descriptor names, or every `--catalog` where it names none), or name a catalog no `--catalog` is or succeeds? (warning; asked only with `doctor --catalog <file>`, since a catalog is provisioned, never served) | §8.6 |
@@ -1217,14 +1217,20 @@ target; `desired-author` checks an author's declaration.
 
 ## `redundancy` — who serves each governed interface?
 
-`redundancy` (#841) reads `redundancy.v1` (`spec/profiles/redundancy/v1.md`)
-as its §2.15 tool does: two reads of each address's `@zk/**` a grace apart
+`redundancy` (#841, #987) reads either major of the profile,
+`redundancy.v1` (`spec/profiles/redundancy/v1.md`) and `redundancy.v2`
+(`v2.md`), as its §2.15 tool does: two reads of each address's `@zk/**` a grace apart
 (`--grace`, 2 s), on a session that holds no liveliness subscriber and no
 claim, each with the descriptor of every instance it found, and the
 revisions they name, retrieved from their holders or held by `--contracts`
 — which a vacancy needs, since no instance then serves the bundle. An
-interface is governed when its contract lists `redundancy.v1` in `uses`;
-every one in scope is asked, one not governed only when `--iface` names it.
+interface is governed when its contract lists `redundancy.v1` or
+`redundancy.v2` in `uses`, read from every candidate's revision: a
+`redundancy.v1` candidate and a `redundancy.v2` one with one election are
+one election, and the row names both majors. Every one in scope is asked,
+one not governed only when `--iface` names it. Each instance is shown with
+the run and the zid its descriptor states: a `redundancy.v2` follower
+fences by the run (v2 §2.15).
 Per address and interface, §5's four questions in the profile's tokens:
 exactly one incumbent (`one`; no: `split`, `vacant`), a vacancy (yes:
 `lasting`, or `vacant`, a takeover due), how many stand by (exact or a lower
@@ -1238,8 +1244,8 @@ redundancy.v1 in namespace "acme", lab/ledger — 1 interface(s), two reads 2.0s
     governance claim — ledger.v1's revision(s) sha256:… use redundancy.v1, election claim
     vacancy: no (held) — a holder of its token in the second read
     standbys: yes (standing_by, 1 exact) — marked standby, holding none of its tokens
-    000000000000000a the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
-    000000000000000b a standby: no (standby) — marked standby, no token, the read complete
+    000000000000000a (run 8b035ad7, zid 5e0c…) the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
+    000000000000000b (run fabc5f2c, zid 91d2…) a standby: no (standby) — marked standby, no token, the read complete
 ```
 
 Exit 1 a split, a twin or a lasting vacancy; 0 every governed interface

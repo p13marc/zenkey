@@ -79,8 +79,8 @@ wire, and so do operations, the descriptor and bundles.
   descriptor's ``run`` (§3.3). With ``run_record`` it is a 16-bit counter
   in that file, written durably before the first sample under the run (0.74,
   F-416); with none, with a record it cannot use, with the counter spent at
-  0xFFFF, or for a candidate of a governed interface (``redundancy.v1``), a
-  32-bit random draw, drawn again while it equals a run this owner used,
+  0xFFFF, or for a candidate of a governed interface of either major
+  (``redundancy.v1``, ``redundancy.v2``, core 0.119), a 32-bit random draw, drawn again while it equals a run this owner used,
   which meets no reuse, the chance of a repeat accepted (0.74, F-417). A
   re-mint takes a new run; a takeover does not.
 - **The seq.** One count per run over every state mutation and event
@@ -95,7 +95,8 @@ wire, and so do operations, the descriptor and bundles.
   resource, a ``telemetry.v1`` metric state, a stream declaring a
   ``timing.v1`` lifespan, a ``health.v1`` fault where its owner sets one,
   and every put of a ``redundancy.v1`` candidate, whose session runs its
-  HLC (§8.2's exception). Every other session runs with timestamping
+  HLC (§8.2's exception, ``redundancy.v1``'s alone since core 0.119: a
+  ``redundancy.v2`` candidate's session runs as any owner's). Every other session runs with timestamping
   disabled (§8.2, "Session posture"), unless a test rig asks for ``hlc``:
   a stamp that session adds is its posture, the SHOULD's, never the MUST
   NOT's (0.74, F-414). Each descriptor put carries a Zenoh timestamp the
@@ -875,10 +876,18 @@ class Owner:
         self._docs: dict[str, bytes] = {}
         #: core §8.1's member tokens held, (iface, member) -> (key, token)
         self._member_tokens: dict[tuple[str, str], tuple[str, Any]] = {}
-        #: redundancy.v1: a candidate of a governed interface draws 32-bit
-        #: runs and runs its session's HLC (core §4.3, §8.2's exception)
-        self.candidate = any("redundancy.v1" in c.canonical["uses"] for c in contracts)
-        self.hlc = self.candidate if hlc is None else hlc
+        #: core 0.119 §4.3: a candidate of a governed interface "under either
+        #: major of the profile" draws 32-bit runs; only a redundancy.v1
+        #: candidate runs its session's HLC (§8.2's exception, "No exception
+        #: under redundancy.v2", redundancy.v2 §2.10)
+        from .redundancy_v2 import governing_major
+
+        self.candidate = any(governing_major(c.canonical["uses"]) is not None for c in contracts)
+        self.stamping_candidate = any(governing_major(c.canonical["uses"]) == 1 for c in contracts)
+        self.hlc = self.stamping_candidate if hlc is None else hlc
+        #: a test hook (redundancy.v2 scenarios §14's "A test hook can choose an
+        #: instance's first run"): the run the next take_run takes, once
+        self.first_run: tuple[int, int] | None = None
         #: core §4.2's MUST to set a Zenoh timestamp on §4.3's table: False
         #: is a test rig's break of it ("sets no stamp on its puts: it breaks
         #: §2.6's MUST, as this section means it to", timing.v1 scenarios
@@ -1021,7 +1030,9 @@ class Owner:
 
         with self._seq_lock:
             run: tuple[int, int] | None = None
-            if self.run_record is not None and not self.candidate:
+            if self.first_run is not None:
+                run, self.first_run = self.first_run, None
+            elif self.run_record is not None and not self.candidate:
                 nxt = self._next_counter(os.fspath(self.run_record))
                 if nxt is not None:
                     run = (16, nxt)
@@ -1199,7 +1210,7 @@ class Owner:
         :func:`keeps_timestamp`."""
         if not self.stamp_table:
             return False
-        if self.candidate:
+        if self.stamping_candidate:
             return True
         cr = self._resource_of.get(key) or self._member_of.get(key)
         return cr is not None and keeps_timestamp(*cr)
@@ -1261,12 +1272,18 @@ class Owner:
         # §8.2 step 2 (0.39), redundancy.v1 §2.2 and §2.14: "A runtime MUST
         # refuse to start an instance whose interface's declaration is
         # invalid", a governed interface in the tokenless set among them.
-        from . import redundancy
+        # Core 0.119: "it refuses one whose tokenless set names an interface
+        # it implements whose contract uses redundancy.v1 or redundancy.v2";
+        # redundancy.v2 §2.2: "A runtime refuses an invalid declaration of
+        # this major as v1 §2.2 refuses one", explicit_stream and majors among
+        # them.
+        from . import redundancy_v2
         for c in self.contracts:
-            d = redundancy.declaration_of(c.canonical, tokenless=c.interface in self.tokenless)
+            major, d = redundancy_v2.either_declaration(c.canonical, tokenless=c.interface in self.tokenless)
             if d.declaration == "invalid":
-                raise OwnerRefused(f"{c.interface}: its redundancy.v1 declaration is invalid "
-                                   f"({', '.join(d.reasons)}): §2.2, core §8.2 step 2")
+                text = "redundancy.v2" if major == 2 else "redundancy.v1"
+                raise OwnerRefused(f"{c.interface}: its {text} declaration is invalid: "
+                                   f"{', '.join(d.reasons)} ({text} §2.2, core §8.2 step 2)")
         known = {c.interface for c in self.contracts}
         for iface in sorted(self.standing_by):
             if iface not in known:
@@ -1512,6 +1529,18 @@ class Owner:
             if c.interface == iface:
                 return c
         raise KeyError(f"{iface}: not an interface this owner implements")
+
+    def new_run(self) -> str:
+        """A new run within the instance (core §4.3: "A new run is core §4.3's:
+        the candidate puts its descriptor again before it writes under it",
+        redundancy.v2 §2.10): taken, its descriptor put stating it, then the
+        seqs from 0. Returns it as the descriptor states it."""
+        with self._writes:
+            with self._seq_lock:
+                self.take_run()
+                if self.session is not None and self._plan_made:
+                    self._put_descriptor()
+            return self.run_hex()
 
     def _put_descriptor(self) -> None:
         """The current instance's descriptor put again (§3.3 "Updates"), and
@@ -2097,7 +2126,7 @@ class Owner:
             # record`, CH's width bit the key's run's and its tag the
             # record's type's, under zenoh/bytes.
             wire, enc = zk2c.event(ib.width, when, payload, self._tag_for(c, r)), zk2c.ENCODING
-            ts = {"timestamp": self.mint()} if self.candidate else {}
+            ts = {"timestamp": self.mint()} if self.stamping_candidate else {}
             if r["reliability"] == "reliable":
                 self.session.put(key, wire, encoding=enc, congestion_control=qos["congestion_control"],
                                  priority=qos["priority"], express=qos["express"], **ts)

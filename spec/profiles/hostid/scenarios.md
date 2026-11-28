@@ -6,8 +6,8 @@ a setup, steps, and expected observations. The reference runtime runs §1
 to §5 (`zenkey/tests/profile_hostid.rs`, one test per section, named after
 it). §6 is a tool's: the reference doctor's `hostid-duplicate` asks its
 question (`zenkey-fleet/tests/zk2_doctor.rs`,
-`hostid_s6_what_a_tool_concludes`), and its step 6 with the doctor that
-reads the standby mark.
+`hostid_s6_what_a_tool_concludes`), and its steps 6 and 7 with the doctor
+that reads the standby mark.
 
 **Conventions.**
 - **Section numbers** in parentheses (§2.4) are v1.md's rules; core
@@ -256,6 +256,10 @@ core §6 recommends (under 1 s).
    A's serving, B's standing by, its descriptor marking `ledger.v1`
    `"standby": true` (core §3.3). The tool reads both contracts
    (core §8.4).
+7. As step 6, with B on `ledger-run.v1` of `redundancy.v2`'s scenarios.
+   That is `ledger.v1` at minor 1, which `redundancy.v2` governs under
+   `claim`. A runs `ledger.v1`: one election of two majors
+   (`redundancy.v2` §2.17). Then both run `ledger-run.v1`.
 
 **Expected.**
 1. Both services have the system `h-bbd1aa1db10b`. The tool sees two
@@ -276,3 +280,6 @@ core §6 recommends (under 1 s).
    the one counted `meta.zid` (§2.12). The tool says beside its answer
    that B stands by. Core §6's split-brain does not fire either: B holds
    no interface token.
+7. As step 6, both times. B is a recognised standby by `redundancy.v2`
+   §2.15's fourth question. The governance is read from both majors: one
+   election (§2.12). No finding.

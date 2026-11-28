@@ -43,6 +43,28 @@
 //! subscribed, on its monotonic clock. A line on standard input `state
 //! <system>/<service>` is answered with what it holds of that provider. It
 //! runs until standard input closes, or `--for` seconds.
+//!
+//! **`--follow`** (`redundancy.v2` §2.10, §2.17, #987's N2) is a follower
+//! of a governed interface, as `spec/profiles/redundancy/scenarios-v2.md`'s
+//! K is, for a black-box runner to read (`consume --help` prints its
+//! interface):
+//!
+//! ```text
+//! cargo run -p zenkey --example consume -- --follow [--descriptor-delay-ms <ms>] [--for <s>]
+//!     <endpoint> <system>/<service> <contract.toml> <resource>
+//! ```
+//!
+//! It runs a service, `interop/follower`, whose role `p` binds the provider
+//! (R1), on two client sessions of `endpoint` with no HLC: one that reads,
+//! and a watch session of its own where it follows the provider's interface
+//! tokens. It follows `resource` with `Consumer::follow_with`, and prints
+//! one JSON line per thing the follower tells: its incumbent, each sample
+//! accepted, discarded (with the rule's reason), held or superseded, each
+//! seed and each reply of a seed's discarded, and each member a complete
+//! snapshot of the incumbent's dropped. `--descriptor-delay-ms` delays its
+//! handling of each descriptor put it hears (scenarios-v2.md §14's hook);
+//! its reads are not delayed. Lines on standard input: `values`, `counts`,
+//! `incumbent <system>/<service>`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,6 +81,8 @@ consume: a zk2 consumer to interoperate with (#609).
 usage: consume <endpoint> <system>/<service> <contract.toml> <state> <operation>
        consume --timing [--clock-bound-ms <ms>] [--no-watch] [--param <name>=<value>]...
                [--for <s>] <endpoint> <system>/<service> <contract.toml> <resource>
+       consume --follow [--descriptor-delay-ms <ms>] [--for <s>]
+               <endpoint> <system>/<service> <contract.toml> <resource>
 
 --timing (timing.v1, spec/profiles/timing/v1.md): a reader of one timed stream
   through a role bound to <system>/<service> (R1), as scenarios.md's C.
@@ -94,6 +118,44 @@ usage: consume <endpoint> <system>/<service> <contract.toml> <state> <operation>
   Standard input:
     state <system>/<service>  {\"timing\": \"state\", \"provider\", \"owner\": <state>,
                               \"owner_zids\": [<zid>...], \"expired\": <n>}
+
+--follow (redundancy.v2 §2.10, §2.17; spec/profiles/redundancy/v2.md): a follower of a
+  governed interface's resource through a role bound to <system>/<service> (R1),
+  as scenarios-v2.md's K: it accepts a sample only under its incumbent's runs
+  (by meta.zid under a redundancy.v1 incumbent), holds an unattributed one for
+  one read of the address's descriptors, and for a state seeds again by core S4
+  each time its incumbent changes, merging only the incumbent's snapshots. The
+  contract's uses must list a major of redundancy.
+  --descriptor-delay-ms <ms> each descriptor put it hears handled <ms> after it
+                            arrived (scenarios-v2.md §14's hook); its reads are not
+  --for <s>                 stop after <s> seconds (default: when stdin closes)
+  Its sessions are clients of <endpoint>, with no HLC: one reads, one watches.
+
+  Standard output, one JSON line each, every at_ms since the follower's origin
+  (just before it followed), on its monotonic clock; <run> is 4 or 8 lowercase
+  hex digits as a descriptor writes it, null for none; <record> lossy UTF-8:
+    {\"follow\": \"started\", \"resource\": <name>, \"zid\": <zid>, \"watch\": <zid>}
+    {\"follow\": \"incumbent\", \"provider\", \"incumbent\": <id>|null, \"at_ms\"}
+    {\"follow\": \"accepted\"|\"discarded\"|\"held\"|\"superseded\", \"provider\", \"key\",
+      \"record\", \"delete\": <bool>, \"run\", \"seq\": <n>|null, \"at_ms\",
+      \"seeded\": <bool> (accepted), \"reason\": <reason> (discarded)}
+    {\"follow\": \"seed_discarded\", \"provider\", \"key\", \"snapshot\": <bool>, \"run\",
+      \"reason\", \"at_ms\"}
+    {\"follow\": \"omitted\", \"provider\", \"key\", \"at_ms\"}
+    {\"follow\": \"seeded\", \"provider\", \"incumbent\": <id>|null, \"complete\": <bool>,
+      \"snapshots\": <n>, \"at_ms\"}
+    {\"follow\": \"heartbeat\"|\"heartbeat_discarded\"|\"heartbeat_held\", \"provider\",
+      \"key\", \"run\", \"seq\": <n>, \"at_ms\", \"reason\": <reason> (discarded)}: a
+      heartbeat covering the interface, or an owner heartbeat, read into the view only
+      under the incumbent's runs (redundancy.v2 §2.10)
+    <reason>: no_incumbent, no_run, not_incumbent, unattributed, no_stamp, as
+      redundancy.v2's fences.json writes them
+
+  Standard input:
+    values                    {\"follow\": \"values\", \"values\": {<key>: {\"record\", \"run\", \"seq\"}}}
+    counts                    {\"follow\": \"counts\", \"accepted\", \"discarded\": {<reason>: <n>},
+                              \"held\", \"superseded\", \"omitted\", \"reads\", \"seeds\"}
+    incumbent <system>/<service>  {\"follow\": \"incumbent?\", \"provider\", \"incumbent\": <id>|null}
 ";
 
 #[tokio::main]
@@ -105,6 +167,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     if args.first().map(String::as_str) == Some("--timing") {
         return timing::run(&args[1..]).await;
+    }
+    if args.first().map(String::as_str) == Some("--follow") {
+        return follow::run(&args[1..]).await;
     }
     run(&args, |l| println!("{l}")).await
 }
@@ -450,5 +515,302 @@ pub mod timing {
         }
         main.close().await?;
         Ok(())
+    }
+}
+
+/// `--follow`: a follower of a governed interface (`redundancy.v2` §2.10,
+/// #987's N2).
+pub mod follow {
+    use std::io::BufRead;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use zenkey::consumer::Delivery;
+    use zenkey::follow::{FollowEvent, FollowStartup};
+    use zenkey::model::contract::load_path;
+    use zenkey::model::grammar::Addr;
+    use zenkey::{ServiceBuilder, ServiceConfig};
+
+    type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+    struct Opts {
+        delay_ms: u64,
+        for_s: Option<f64>,
+        endpoint: String,
+        provider: String,
+        file: String,
+        resource: String,
+    }
+
+    fn parse(args: &[String]) -> Result<Opts, String> {
+        let usage = || {
+            "usage: consume --follow [--descriptor-delay-ms <ms>] [--for <s>] \
+             <endpoint> <system>/<service> <contract.toml> <resource>"
+                .to_owned()
+        };
+        let mut o = Opts {
+            delay_ms: 0,
+            for_s: None,
+            endpoint: String::new(),
+            provider: String::new(),
+            file: String::new(),
+            resource: String::new(),
+        };
+        let mut rest = args;
+        loop {
+            match rest {
+                [f, v, tail @ ..] if f == "--descriptor-delay-ms" => {
+                    o.delay_ms = v.parse().map_err(|e| format!("{f} {v:?}: {e}"))?;
+                    rest = tail;
+                }
+                [f, v, tail @ ..] if f == "--for" => {
+                    o.for_s = Some(v.parse().map_err(|e| format!("{f} {v:?}: {e}"))?);
+                    rest = tail;
+                }
+                [f, ..] if f.starts_with("--") => return Err(usage()),
+                _ => break,
+            }
+        }
+        let [endpoint, provider, file, resource] = rest else {
+            return Err(usage());
+        };
+        o.endpoint = endpoint.clone();
+        o.provider = provider.clone();
+        o.file = file.clone();
+        o.resource = resource.clone();
+        Ok(o)
+    }
+
+    fn ms(origin: Instant, at: Instant) -> f64 {
+        at.saturating_duration_since(origin).as_nanos() as f64 / 1e6
+    }
+
+    /// A delivery's members of its line: its provider, key, record, run
+    /// and seq.
+    fn delivery(d: &Delivery) -> serde_json::Value {
+        serde_json::json!({
+            "provider": d.provider.to_string(),
+            "key": d.sample.key_expr().as_str(),
+            "record": String::from_utf8_lossy(&d.sample.payload().to_bytes()),
+            "delete": d.sample.kind() == zenoh::sample::SampleKind::Delete,
+            "run": d.inband.map(|s| s.run.hex()),
+            "seq": d.inband.map(|s| s.seq.get()),
+        })
+    }
+
+    /// One event's line, as `--help` writes it, its instant from `origin`.
+    pub fn event_line(origin: Instant, at: Instant, e: &FollowEvent) -> serde_json::Value {
+        let at_ms = ms(origin, at);
+        let with = |kind: &str, d: &Delivery| {
+            let mut v = delivery(d);
+            v["follow"] = kind.into();
+            v["at_ms"] = at_ms.into();
+            v
+        };
+        match e {
+            FollowEvent::Incumbent {
+                provider,
+                incumbent,
+            } => serde_json::json!({
+                "follow": "incumbent", "provider": provider.to_string(),
+                "incumbent": incumbent.as_ref().map(|i| i.as_str().to_owned()), "at_ms": at_ms,
+            }),
+            FollowEvent::Accepted { delivery, seeded } => {
+                let mut v = with("accepted", delivery);
+                v["seeded"] = (*seeded).into();
+                v
+            }
+            FollowEvent::Discarded { delivery, why } => {
+                let mut v = with("discarded", delivery);
+                v["reason"] = why.as_str().into();
+                v
+            }
+            FollowEvent::Held { delivery } => with("held", delivery),
+            FollowEvent::Superseded { delivery } => with("superseded", delivery),
+            FollowEvent::SeedDiscarded {
+                provider,
+                key,
+                snapshot,
+                run,
+                why,
+            } => serde_json::json!({
+                "follow": "seed_discarded", "provider": provider.to_string(), "key": key,
+                "snapshot": snapshot, "run": run.map(|r| r.hex()), "reason": why.as_str(),
+                "at_ms": at_ms,
+            }),
+            FollowEvent::Omitted { provider, key } => serde_json::json!({
+                "follow": "omitted", "provider": provider.to_string(), "key": key, "at_ms": at_ms,
+            }),
+            FollowEvent::Seeded {
+                provider,
+                incumbent,
+                complete,
+                snapshots,
+            } => serde_json::json!({
+                "follow": "seeded", "provider": provider.to_string(),
+                "incumbent": incumbent.as_ref().map(|i| i.as_str().to_owned()),
+                "complete": complete, "snapshots": snapshots, "at_ms": at_ms,
+            }),
+            FollowEvent::Heartbeat {
+                provider,
+                key,
+                stamp,
+            } => serde_json::json!({
+                "follow": "heartbeat", "provider": provider.to_string(), "key": key,
+                "run": stamp.run.hex(), "seq": stamp.seq.get(), "at_ms": at_ms,
+            }),
+            FollowEvent::HeartbeatDiscarded {
+                provider,
+                key,
+                stamp,
+                why,
+            } => serde_json::json!({
+                "follow": "heartbeat_discarded", "provider": provider.to_string(), "key": key,
+                "run": stamp.run.hex(), "seq": stamp.seq.get(), "reason": why.as_str(),
+                "at_ms": at_ms,
+            }),
+            FollowEvent::HeartbeatHeld {
+                provider,
+                key,
+                stamp,
+            } => serde_json::json!({
+                "follow": "heartbeat_held", "provider": provider.to_string(), "key": key,
+                "run": stamp.run.hex(), "seq": stamp.seq.get(), "at_ms": at_ms,
+            }),
+        }
+    }
+
+    async fn session(endpoint: &str) -> Result<zenoh::Session, BoxError> {
+        let mut z = zenoh::Config::default();
+        z.insert_json5("mode", "\"client\"")?;
+        z.insert_json5("connect/endpoints", &serde_json::to_string(&[endpoint])?)?;
+        z.insert_json5("scouting/multicast/enabled", "false")?;
+        zenoh::open(z).await
+    }
+
+    pub async fn run(args: &[String]) -> Result<(), BoxError> {
+        let o = match parse(args) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        };
+        let l = load_path(std::path::Path::new(&o.file));
+        let Some(contract) = l.contract else {
+            eprintln!("{}:\n{}", o.file, l.report);
+            std::process::exit(2);
+        };
+        let contract = Arc::new(contract);
+        let main = session(&o.endpoint).await?;
+        let watch = session(&o.endpoint).await?;
+        let cfg = ServiceConfig::new("interop/follower".parse()?).bind("p", &[&o.provider]);
+        let mut b = ServiceBuilder::new(&main, cfg);
+        b.require("p", contract.iface.clone(), false);
+        let svc = b.start().await?;
+        let consumer = svc
+            .consumer("p", Arc::clone(&contract))?
+            .with_watch(watch.clone());
+        let origin = Instant::now();
+        let st = FollowStartup {
+            descriptor_delay: Duration::from_millis(o.delay_ms),
+            ..FollowStartup::default()
+        };
+        let following = match consumer
+            .follow_with(&o.resource, st, move |e| {
+                println!("{}", event_line(origin, Instant::now(), &e));
+            })
+            .await
+        {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("not followed: {e}");
+                std::process::exit(2);
+            }
+        };
+        println!(
+            "{}",
+            serde_json::json!({
+                "follow": "started",
+                "resource": o.resource,
+                "zid": main.zid().to_string(),
+                "watch": watch.zid().to_string(),
+            })
+        );
+        let (tx, rx) = flume::unbounded::<String>();
+        std::thread::spawn(move || {
+            for line in std::io::stdin().lock().lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let deadline = o
+            .for_s
+            .map(|s| tokio::time::Instant::now() + Duration::from_secs_f64(s));
+        loop {
+            let stop = async {
+                match deadline {
+                    Some(d) => tokio::time::sleep_until(d).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            tokio::select! {
+                () = stop => break,
+                line = rx.recv_async() => match line {
+                    Ok(line) => println!("{}", answer(&line, &following)),
+                    Err(_) => break,
+                },
+            }
+        }
+        drop(following);
+        svc.close().await?;
+        watch.close().await?;
+        main.close().await?;
+        Ok(())
+    }
+
+    /// A line of standard input's answer, as `--help` writes it.
+    fn answer(line: &str, f: &zenkey::follow::Following) -> String {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            ["values"] => {
+                let values: serde_json::Map<String, serde_json::Value> = f
+                    .values()
+                    .iter()
+                    .map(|(k, d)| {
+                        (
+                            k.clone(),
+                            serde_json::json!({
+                                "record": String::from_utf8_lossy(&d.sample.payload().to_bytes()),
+                                "run": d.inband.map(|s| s.run.hex()),
+                                "seq": d.inband.map(|s| s.seq.get()),
+                            }),
+                        )
+                    })
+                    .collect();
+                serde_json::json!({"follow": "values", "values": values}).to_string()
+            }
+            ["counts"] => {
+                let c = f.counts();
+                serde_json::json!({
+                    "follow": "counts", "accepted": c.accepted, "discarded": c.discarded,
+                    "held": c.held, "superseded": c.superseded, "omitted": c.omitted,
+                    "reads": c.reads, "seeds": c.seeds,
+                })
+                .to_string()
+            }
+            ["incumbent", p] => match p.parse::<Addr>() {
+                Ok(a) => serde_json::json!({
+                    "follow": "incumbent?",
+                    "provider": a.to_string(),
+                    "incumbent": f.incumbent(&a).map(|i| i.as_str().to_owned()),
+                })
+                .to_string(),
+                Err(e) => format!("refused {line}: {e}"),
+            },
+            _ => format!("refused {line}: values | counts | incumbent <system>/<service>"),
+        }
     }
 }

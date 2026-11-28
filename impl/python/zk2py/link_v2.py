@@ -841,10 +841,11 @@ def plan(policy_text: str, implements: dict[str, list[str]], interfaces: dict[st
     for f in policy.faces:
         for d in f.devices or []:
             for i in implements.get(d) or []:
-                # §2.5 (0.7): "A generator MUST refuse a device that implements
-                # archive.v1, or an interface a revision given of which uses
-                # redundancy.v1 (presence_required)".
-                if i == "archive.v1" or (i in interfaces and any("redundancy.v1" in u
+                # §2.5 (0.7; 0.29, round 128): "A generator MUST refuse a device
+                # that implements archive.v1, or an interface a revision given
+                # of which uses redundancy.v1 or redundancy.v2
+                # (presence_required)", the second by redundancy.v2 §2.13.
+                if i == "archive.v1" or (i in interfaces and any({"redundancy.v1", "redundancy.v2"} & set(u)
                                                                  for u in link.uses_of(interfaces[i]))):
                     errors.append(link.finding("presence_required", f.face.name, i))
     if errors:

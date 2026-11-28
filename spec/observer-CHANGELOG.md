@@ -13,6 +13,35 @@ profile has a directory because it carries its own fixtures and
 scenarios; this text carries none: its evidence is the core's
 `conformance/` and `scenarios/`, and the profiles'.
 
+## 0.38 — 2026-11-29: §3.6: a read never undoes a token heard since it was asked (#987)
+
+zk2py's round 128 (F-629) measured the reference's follower of a
+`redundancy.v2` address losing its incumbent in 6 of 39 takeovers. It
+read again after the old holder's withdrawal, as §3.6 says. The read,
+asked before the watch heard the new holder's interface token, came
+back without it, and its absence was applied after the watch had heard
+the token. The follower then discarded every later sample,
+`no_incumbent`.
+
+**What changed.**
+- **§3.6, "A read never undoes a token heard since it was asked."** The
+  read and the watch ride two sessions, which no router orders (§3.7).
+  A token the watch hears declared after a read is asked stands,
+  whatever that read shows. A reader MUST NOT apply the read's absence
+  to it. `[Sc: profiles/redundancy/scenarios-v2.md §13]` gains the
+  step.
+- **And a withdrawal heard since** (round 128's mend, F-635): a read
+  that shows a token the watch heard withdrawn after the read was asked
+  does not bring it back. It is unconfirmed, and owes a read. Both
+  implementations already read it so.
+
+**What deliberately did not change.** The read again after a
+withdrawal, its SHOULD and what it establishes of every token the watch
+heard nothing of since.
+
+**Not verified.** The reference's follower is changed with this entry;
+zk2py's follower already read it so (0 of 54).
+
 ## 0.37 — 2026-11-27: editorial: §7.3's tag 0 is no packed type's, after core 0.117's E051, no keyword rule changed (#1152)
 
 Core 0.117 makes a packed type whose layout tag is 0 a lint error, E051

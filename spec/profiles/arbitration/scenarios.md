@@ -363,7 +363,7 @@ and says each selection is its own view:
 5. The declaration and the selection: unobservable, `revisions_disagree`.
 6. The selection: unobservable, `listening`.
 
-## §11 A governed commander's standby (§2.5's `not_incumbent`; `redundancy.v1` §2.10)
+## §11 A governed commander's standby (§2.5's `not_incumbent`; `redundancy.v1` §2.10, `redundancy.v2` §2.10)
 
 A sample `redundancy.v1` §2.10 does not accept is no
 arrival, so a standby's writes cannot keep its address eligible.
@@ -398,3 +398,17 @@ bound to `["lab/safety", "lab/teleop"]`.
    keep nothing eligible.
 3. At `C_s1`'s first arrival, each switches to `lab/safety`, cause
    `sample`.
+
+**Under `redundancy.v2`.** The section runs again, the commanders'
+contract `steer.v1` minor 2, which lists `redundancy.v2` where minor 1
+lists `redundancy.v1` (the reference keeps it as
+`zenkey/tests/contracts/steer-governed-run.v1.toml`). These change:
+- **Setup.** No candidate's session stamps (`redundancy.v2` §2.10). Each
+  actuator holds minor 2.
+- **Step 1.** `X` puts each sample in an envelope, under `C_s2`'s run,
+  which `C_s2`'s descriptor states while it stands by.
+- **Expected 1.** Each actuator learns `C_s1`'s runs from its
+  descriptor, where it read its `meta.zid`. `X`'s samples are under a
+  run of `C_s2`'s, so each is `not_incumbent` (§2.5 outcome 6): by run,
+  or unattributed until a read of the descriptors states it.
+- **Expected 2 and 3** are as above.

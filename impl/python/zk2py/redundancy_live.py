@@ -160,6 +160,13 @@ def read_address(session: zenoh.Session, address: str, iface: str, *, below: str
 
 def governance_of(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
                   offline: dict[str, dict[str, Any]] | None = None) -> tuple[str, list[str]]:
+    """:func:`governance_detail`'s governance and reasons."""
+    gov, reasons, _ = governance_detail(session, iface, docs, offline)
+    return gov, reasons
+
+
+def governance_detail(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
+                      offline: dict[str, dict[str, Any]] | None = None) -> tuple[str, list[str], list[str]]:
     """§2.15's third premise (0.3): the governance "read from the contract
     each candidate's descriptor names (§2.2)": ``claim``/``external``,
     ``not_governed``, ``no_contract`` (a contract not read, or one whose
@@ -167,9 +174,19 @@ def governance_of(session: zenoh.Session, iface: str, docs: list[dict[str, Any]]
     reasons beside the answer"), or ``disagree``. Returns it with those
     reasons. ``offline`` holds canonical contracts by fingerprint: "A tool
     that holds the contract offline reads governance from it whatever the
-    bus serves"; any other is retrieved (core §8.4)."""
+    bus serves"; any other is retrieved (core §8.4).
+
+    ``redundancy.v2`` §2.15 (round 128): "A tool reads it from every
+    candidate's revision, as §2.2 says. A redundancy.v1 candidate and a
+    redundancy.v2 one, with one election, are one election": each revision's
+    declaration is read by the major it lists
+    (:func:`zk2py.redundancy_v2.either_declaration`). Returns too the majors
+    the governed revisions use."""
+    from . import redundancy_v2 as rv2
+
     seen: set[str] = set()
     reasons: list[str] = []
+    majors: set[int] = set()
     for doc in docs:
         for e in doc.get("interfaces") or []:
             if not isinstance(e, dict) or e.get("iface") != iface:
@@ -179,21 +196,24 @@ def governance_of(session: zenoh.Session, iface: str, docs: list[dict[str, Any]]
             if canonical is None:
                 r = live.retrieve_bundle(session, iface, fp)
                 if not r.verified:
-                    return "no_contract", []
+                    return "no_contract", [], []
                 canonical = r.verified.contract
-            d = rd.declaration_of(canonical)
+            major, d = rv2.either_declaration(canonical)
+            if d.governed and major is not None:
+                majors.add(major)
             if d.declaration == "invalid":
                 seen.add("invalid")
                 reasons += [x for x in d.reasons if x not in reasons]
             else:
                 seen.add(d.election if d.governed else "not_governed")
+    names = [f"redundancy.v{m}" for m in sorted(majors)]
     if not seen:
-        return "no_contract", []
+        return "no_contract", [], names
     if "invalid" in seen:
-        return "no_contract", reasons
+        return "no_contract", reasons, names
     if len(seen) > 1:
-        return "disagree", []
-    return seen.pop(), []
+        return "disagree", [], names
+    return seen.pop(), [], names
 
 
 def governance(session: zenoh.Session, iface: str, docs: list[dict[str, Any]],
@@ -324,6 +344,19 @@ class ToolReading:
     findings: list[tuple[str, str]] = field(default_factory=list)
     #: by operation, why the probe left it out (F-221)
     not_probed: dict[str, str] = field(default_factory=dict)
+    #: redundancy.v2 §2.15 (round 128): the majors the governed revisions use
+    majors: list[str] = field(default_factory=list)
+
+    def runs(self) -> dict[str, str | None]:
+        """redundancy.v2 §2.15: "A tool SHOULD show each candidate's run
+        beside its instance, as the candidate's descriptor states it"."""
+        from .redundancy_v2 import Run
+
+        out = {}
+        for i, d in sorted(self.docs.items()):
+            r = Run.parse(d.get("run"))
+            out[i] = None if r is None else str(r)
+        return out
 
     @property
     def exposure(self) -> str | None:
@@ -390,10 +423,10 @@ def read_tool(session: zenoh.Session, address: str, iface: str, grace_s: float =
     time.sleep(max(0.0, grace_s - (time.monotonic() - t)))
     r2, p2, d2 = read_address(session, address, iface)
     docs = {**d1, **d2}
-    gov, reasons = governance_of(session, iface, list(docs.values()), offline)
+    gov, reasons, majors = governance_detail(session, iface, list(docs.values()), offline)
     reading = rd.Reading(gov, r1, r2, across_face)
     found = probe_findings(reading, docs, answered) if answered is not None else []
-    return ToolReading(reading, [p1, p2], docs, reasons, answered, found, skipped)
+    return ToolReading(reading, [p1, p2], docs, reasons, answered, found, skipped, majors)
 
 
 def split_findings(session: zenoh.Session, address: str, ifaces: Iterable[str], grace_s: float = 2.0,
@@ -408,10 +441,14 @@ def split_findings(session: zenoh.Session, address: str, ifaces: Iterable[str], 
     out = []
     contracts = list(contracts)
     for iface in ifaces:
-        r = read_tool(session, address, iface, grace_s, contracts=contracts).reading
+        tr = read_tool(session, address, iface, grace_s, contracts=contracts)
+        r = tr.reading
         if r.governance in (rd.CLAIM, rd.EXTERNAL):
             if rd.one_incumbent(r).reason == "split":
-                out.append((iface, sorted(r.second.holders(), key=rd.id_key), "redundancy.v1"))
+                # whose rule: the major the governed revisions use, v1's
+                # where both are (round 128)
+                who = "redundancy.v2" if tr.majors == ["redundancy.v2"] else "redundancy.v1"
+                out.append((iface, sorted(r.second.holders(), key=rd.id_key), who))
         elif r.governance == "not_governed":
             def exposing(read: rd.Read) -> set[str]:
                 return {i.id for i in read.instances if i.token and i.descriptor == rd.SERVING}
@@ -443,7 +480,8 @@ class Candidate:
                  refuse_without_lock: bool = False, tokenless: tuple[str, ...] = (), peer: bool = False,
                  timeout: float = 1.0, hold_heal: bool = False, auth: tuple[str, str] | None = None,
                  poll_s: float | None = None, lease_ms: int | None = None,
-                 reader_endpoint: str | None = None, hostid_root: str | None = None) -> None:
+                 reader_endpoint: str | None = None, hostid_root: str | None = None,
+                 first_run: str | None = None, takeover_puts_nothing: bool = False) -> None:
         #: hostid.v1 §2.7: an address of a minted system, ``@hostid.v1/<svc>``,
         #: minted from ``hostid_root`` (a directory standing in for /) before
         #: anything opens; its owner mints the same and lists hostid.v1
@@ -459,8 +497,21 @@ class Candidate:
         self.contract = contract_at(contract)
         self.iface = self.contract.interface
         self.tokenless = set(tokenless)
-        decl = rd.declaration_of(self.contract.canonical, tokenless=self.iface in self.tokenless)
+        # redundancy.v2 §2.17: a candidate of either major, its declaration
+        # read by the major its revision lists (§2.2)
+        from . import redundancy_v2 as rv2
+
+        self.major, decl = rv2.either_declaration(self.contract.canonical, tokenless=self.iface in self.tokenless)
         self.declaration = decl
+        #: scenarios-v2.md's hooks: the first instance's run, 8 lowercase hex
+        #: digits (§14), and a takeover that puts no value (§13 step 3)
+        self.first_run = rv2.Run.parse(first_run) if first_run is not None else None
+        if first_run is not None and (self.first_run is None or self.first_run.width != 32):
+            raise ValueError(f"--first-run {first_run!r}: 8 lowercase hex digits (core §4.3's 32-bit run)")
+        self.takeover_puts_nothing = takeover_puts_nothing
+        #: redundancy.v2 §2.10 "A run no other states": each draw again, (the
+        #: run read in a lower id's descriptor, the instance, the new run)
+        self.redraws: list[tuple[str, str, str]] = []
         self.election = decl.election or rd.CLAIM
         self.instance = instance or secrets.token_hex(8)
         self.machine = rd.Machine(self.instance, self.election)
@@ -552,6 +603,8 @@ class Candidate:
                       standby={self.iface}, handlers=handlers, tokenless=self.tokenless, auth=self.auth,
                       lease_ms=self.lease_ms, hostid=self.hostid)
         owner.instance = self.instance
+        if self.first_run is not None:
+            owner.first_run = (self.first_run.width, self.first_run.value)
         try:
             owner._plan()
         except Exception as e:
@@ -797,8 +850,10 @@ class Candidate:
     def _read(self) -> rd.Read:
         assert self.owner is not None and self.reader is not None
         own = (self.instance, rd.STANDBY if self.iface in self.owner.standing_by else rd.SERVING)
-        r, p, _ = read_address(self.reader, self.address, self.iface, below=self.instance, own=own,
-                               timeout=self.timeout)
+        r, p, docs = read_address(self.reader, self.address, self.iface, below=self.instance, own=own,
+                                  timeout=self.timeout)
+        if self.major == 2 and self.owner.run is not None:
+            self._draw_again(docs)
         with self.lock:
             # as the owner example counts them: "made" the reads made, a read
             # not made counted apart
@@ -816,6 +871,26 @@ class Candidate:
         self.reads.append((time.monotonic(), r, p.kind, reason))
         return r
 
+    def _draw_again(self, docs: dict[str, dict[str, Any]]) -> None:
+        """redundancy.v2 §2.10: "A candidate SHOULD draw a new run before it
+        serves, when it reads its own run in the descriptor of another
+        instance of its address. It reads the lower ids' descriptors at each
+        campaign anyway (v1 §2.5 step 3)." "A new run is core §4.3's: the
+        candidate puts its descriptor again before it writes under it." It
+        draws while the new run is still one it read."""
+        from . import redundancy_v2 as rv2
+
+        assert self.owner is not None
+        read = {i: rv2.Run.parse(d.get("run")) for i, d in docs.items() if i != self.instance}
+        for _ in range(8):
+            mine = rv2.Run(self.owner.run[0], self.owner.run[1]) if self.owner.run is not None else None
+            if mine is None or not rv2.draw_again(mine, read.values()):
+                return
+            who = next(i for i, x in read.items() if x == mine)
+            new = self.owner.new_run()
+            with self.lock:
+                self.redraws.append((str(mine), who, new))
+
     # -- the application (scenarios.md, "The instances") ----------------------------
     def _append(self, call: Any) -> None:
         with self.lock:
@@ -825,7 +900,13 @@ class Candidate:
     def _puts(self, owner: Owner) -> None:
         """"puts balance with its own name as the value when it takes over"
         (scenarios.md; a valve's position the same)."""
-        rid = "balance" if self.iface.startswith("ledger.") else "position"
+        if self.takeover_puts_nothing:
+            return
+        rid = "balance" if self.iface.startswith("ledger.") else "position" if self.iface.startswith("valve.") \
+            else next((r["template"] for r in self.contract.canonical["resources"]
+                       if r["kind"] == "state" and "{" not in r["template"]), None)
+        if rid is None:
+            return
         owner.set_state(f"zk2/{self.address}/{self.iface}/state/{rid}", self.name.encode())
 
     def put(self, rid: str, value: str) -> str:

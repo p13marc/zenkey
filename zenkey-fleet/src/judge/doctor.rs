@@ -2398,13 +2398,19 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
     let refs: Vec<&Contract> = held.iter().map(|c| &**c).collect();
     let mut d = zenkey::ownership::compare(&before.tokens, &p.after.tokens, &descriptors, &refs);
     let candidates = zenkey::ownership::candidates(&before.tokens, &p.after.tokens);
-    // redundancy.v1 §2.15 (#841, RC): of a governed interface, a holder is
-    // an incumbent whatever its mark or its exposure, so the first
-    // question, the model's own judge over the same two reads, decides:
-    // its no, `split`, is the finding; core §6's exposure rule decides the
-    // rest.
+    // redundancy.v1 §2.15 (#841, RC), either major (redundancy.v2 §2.15,
+    // #987's N3): of a governed interface, a holder is an incumbent
+    // whatever its mark or its exposure, so the first question, the
+    // model's own judge over the same two reads, decides: its no, `split`,
+    // is the finding; core §6's exposure rule decides the rest.
     use zenkey_model::redundancy::{self as rm, Election, Governance};
-    let governed: Vec<(zenkey::ownership::SplitBrain, Election, rm::Judged)> = candidates
+    type Ruled = (
+        zenkey::ownership::SplitBrain,
+        Election,
+        rm::Judged,
+        crate::model::redundancy::Governed,
+    );
+    let governed: Vec<Ruled> = candidates
         .iter()
         .filter_map(|c| {
             let g = crate::model::redundancy::governance(
@@ -2412,9 +2418,8 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
                 &c.service,
                 &c.iface,
                 &p.obs.contracts,
-            )
-            .governance;
-            let Governance::Governed(e) = g else {
+            );
+            let Governance::Governed(e) = g.governance else {
                 return None;
             };
             let reading = crate::model::redundancy::reading(
@@ -2422,16 +2427,16 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
                 Some(p.after),
                 &c.service,
                 &c.iface,
-                g,
+                g.governance,
                 false,
             );
-            Some((c.clone(), e, rm::one_incumbent(&reading)))
+            Some((c.clone(), e, rm::one_incumbent(&reading), g))
         })
         .collect();
     let is_governed = |svc: &Addr, iface: &IfaceId| {
         governed
             .iter()
-            .any(|(c, _, _)| c.service == *svc && c.iface == *iface)
+            .any(|(c, ..)| c.service == *svc && c.iface == *iface)
     };
     d.findings.retain(|sb| !is_governed(&sb.service, &sb.iface));
     d.undecided
@@ -2440,22 +2445,25 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
     let candidates = candidates.len() - governed.len();
     let mut governed_undecided: Vec<Unjudged> = governed
         .iter()
-        .filter(|(_, _, j)| j.answer == rm::Answer::Unobservable)
-        .map(|(sb, _, j)| {
+        .filter(|(_, _, j, _)| j.answer == rm::Answer::Unobservable)
+        .map(|(sb, _, j, g)| {
             unjudged(
                 format!("{} {}", sb.service, sb.iface),
                 format!(
-                    "redundancy.v1 governs it, and \"is the address served by exactly one \
-                     incumbent?\" is unobservable: {} (redundancy.v1 §2.15)",
-                    j.reason.as_str()
+                    "{} {} it, and \"is the address served by exactly one incumbent?\" is \
+                     unobservable: {} ({})",
+                    g.profile(),
+                    g.governs(),
+                    j.reason.as_str(),
+                    g.cite("§2.15")
                 ),
             )
         })
         .collect();
     let mut findings: Vec<DoctorFinding> = governed
         .iter()
-        .filter(|(_, _, j)| j.answer == rm::Answer::No && j.reason == rm::Reason::Split)
-        .map(|(sb, election, _)| {
+        .filter(|(_, _, j, _)| j.answer == rm::Answer::No && j.reason == rm::Reason::Split)
+        .map(|(sb, election, _, g)| {
             let instances: Vec<String> = sb.instances.iter().map(ToString::to_string).collect();
             finding(
                 C,
@@ -2463,11 +2471,14 @@ fn split_brain(p: &Presence<'_>) -> CheckReport {
                 format!("{} {}", sb.service, sb.iface),
                 format!(
                     "{} instances hold its interface token in two presence reads {:.1}s apart \
-                     ({}), and redundancy.v1 governs it (election {election}): a split, \
-                     whatever their marks (redundancy.v1 §2.15). {}",
+                     ({}), and {} {} it (election {election}): a split, whatever their marks \
+                     ({}). {}",
                     instances.len(),
                     p.grace_s(),
                     instances.join(", "),
+                    g.profile(),
+                    g.governs(),
+                    g.cite("§2.15"),
                     if *election == Election::Claim {
                         "Its heal leaves the lowest serving; until then a call runs on each side"
                     } else {
@@ -4341,7 +4352,8 @@ struct ZidRead {
 /// reads of the scope's `@zk/**` (instance and interface tokens, 0.7), not
 /// necessarily the same instances. Only instances whose system is known to
 /// be minted are counted (§5's first question), and a recognised standby
-/// (0.6, `redundancy.v1` §2.15) is not. The finding's
+/// (0.6; 0.10: of either major, `redundancy.v1` or `redundancy.v2` §2.15)
+/// is not. The finding's
 /// cause is undecided — a collision, a cloned machine id and a second
 /// process look alike on the bus, and so does a standby not recognised — so
 /// the evidence names none of them as the cause, and shows each instance's
@@ -4380,10 +4392,10 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
     let mut undecided = Vec::new();
     let (mut counted, mut literal) = (0usize, 0usize);
     let mut recognised: Vec<String> = Vec::new();
-    // hostid.v1 §2.12 (0.6, 0.7): a recognised standby, `redundancy.v1`'s
-    // fourth question answering no, standby, of every interface it lists,
-    // all governed, from the same two reads of the address's @zk/**, is not
-    // counted.
+    // hostid.v1 §2.12 (0.6, 0.7, 0.10): a recognised standby, the fourth
+    // question of the major governing each interface it lists answering
+    // no, standby, of every one, all governed by a major of redundancy,
+    // from the same two reads of the address's @zk/**, is not counted.
     use crate::judge::redundancy::Standby;
     let standby = |addr: &Addr, id: &InstanceId| {
         crate::judge::redundancy::recognised_standby(
@@ -4553,8 +4565,9 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
                 String::new()
             } else {
                 format!(
-                    "; not counted, {} recognised standby(s), redundancy.v1 §2.15's \"no, \
-                     standby\" of every interface each lists: {}",
+                    "; not counted, {} recognised standby(s), redundancy §2.15's \"no, \
+                     standby\" of every interface each lists, each governed by a major of \
+                     redundancy: {}",
                     recognised.len(),
                     recognised.join(", ")
                 )
@@ -4571,9 +4584,10 @@ fn hostid_duplicate(p: &Presence<'_>) -> CheckReport {
     )
 }
 
-// ─── redundancy.v1 (#841, RC) ───────────────────────────────────────────────
+// ─── redundancy (#841, RC; #987's N3) ───────────────────────────────────────
 
-/// `redundancy-vacancy` (`redundancy.v1` §2.15, §5): an address and
+/// `redundancy-vacancy` (`redundancy.v1` §2.15, §5; `redundancy.v2`
+/// §2.15, governance read from either major): an address and
 /// governed interface whose candidates hold no incumbent in both of two
 /// complete reads a grace apart, §5's *yes*, `lasting`, from the model's
 /// own judge over the doctor's two reads. A warning: the election did not
@@ -4593,6 +4607,7 @@ fn redundancy_vacancy(p: &Presence<'_>) -> CheckReport {
     let mut findings = Vec::new();
     let mut undecided = Vec::new();
     let mut asked = 0usize;
+    let mut majors = BTreeSet::new();
     for (addr, iface) in crate::model::redundancy::subjects(&reads, None, None) {
         let governed =
             crate::model::redundancy::governance(&reads, &addr, &iface, &p.obs.contracts);
@@ -4606,6 +4621,7 @@ fn redundancy_vacancy(p: &Presence<'_>) -> CheckReport {
             Governance::NotGoverned => {}
             Governance::Governed(e) => {
                 asked += 1;
+                majors.extend(governed.majors.iter().copied());
                 let j = rm::vacancy(&reading(governed.governance));
                 if lasting(j) {
                     findings.push(finding(
@@ -4614,9 +4630,9 @@ fn redundancy_vacancy(p: &Presence<'_>) -> CheckReport {
                         subject,
                         format!(
                             "no instance holds its token in two complete presence reads {:.1}s \
-                             apart, and a candidate lists it: a lasting vacancy (redundancy.v1 \
-                             §2.15). {}",
+                             apart, and a candidate lists it: a lasting vacancy ({}). {}",
                             p.grace_s(),
+                            governed.cite("§2.15"),
                             if e == Election::Claim {
                                 "The election did not end: a candidate's reads may be refused, or \
                                  not complete"
@@ -4652,8 +4668,13 @@ fn redundancy_vacancy(p: &Presence<'_>) -> CheckReport {
         findings,
         undecided,
         format!(
-            "{asked} interface(s) redundancy.v1 governs, none without an incumbent in both reads \
-             {:.1}s apart",
+            "{asked} interface(s) {} {}, none without an incumbent in both reads {:.1}s apart",
+            crate::model::redundancy::profile_words(&majors.iter().copied().collect::<Vec<_>>()),
+            if majors.len() > 1 {
+                "govern"
+            } else {
+                "governs"
+            },
             p.grace_s()
         ),
     )
@@ -8407,6 +8428,82 @@ mod tests {
         assert!(unseen(&check(&o, CheckId::RedundancyVacancy)).contains("unavailable"));
     }
 
+    /// `ledger-run.v1`, `ledger.v1` at minor 1 governed by
+    /// `redundancy.v2` (election `claim`), as `zenkey`'s scenarios hold it.
+    fn ledger_run() -> Contract {
+        load(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../zenkey/tests/contracts/ledger-run.v1.toml"),
+            )
+            .unwrap(),
+        )
+    }
+
+    /// `lab/ledger`'s A on `la`, serving, and B on `lb`, marked standby,
+    /// each holding its interface token when told.
+    fn pair(la: &Contract, lb: &Contract, a_holds: bool, b_holds: bool) -> Observed {
+        let mut keys = vec![inst(LEDGER, A), inst(LEDGER, B)];
+        if a_holds {
+            keys.push(alive(LEDGER, "ledger.v1", A, la));
+        }
+        if b_holds {
+            keys.push(alive(LEDGER, "ledger.v1", B, lb));
+        }
+        observed(
+            &keys,
+            vec![
+                ((LEDGER, A), descriptor(LEDGER, A, &[entry(la)], &[])),
+                (
+                    (LEDGER, B),
+                    descriptor(LEDGER, B, &[standby_entry(lb)], &[]),
+                ),
+            ],
+        )
+    }
+
+    /// `redundancy.v2` §2.2, §2.15 (#987's N3): the split and the vacancy
+    /// of an interface either major governs, the finding naming the major,
+    /// and a `redundancy.v1` candidate beside a `redundancy.v2` one one
+    /// election, never `disagree`.
+    #[test]
+    fn split_brain_and_a_vacancy_read_governance_from_either_major() {
+        let (v1, v2) = (ledger(true), ledger_run());
+        let o = obs(candidates(&v2, true, true), &[&v2], &[]);
+        let r = check(&o, CheckId::SplitBrain);
+        let f = found(&r);
+        assert!(
+            f.evidence.contains("redundancy.v2 governs it")
+                && f.evidence.contains("redundancy.v2 §2.15"),
+            "{f:?}"
+        );
+        // Two majors, one election: one split, both named.
+        let o = obs(pair(&v1, &v2, true, true), &[&v1, &v2], &[]);
+        let r = check(&o, CheckId::SplitBrain);
+        let f = found(&r);
+        assert!(
+            f.evidence
+                .contains("redundancy.v1 and redundancy.v2 govern it (election claim)"),
+            "{f:?}"
+        );
+        // A v1 incumbent and a v2 standby: no split, no vacancy.
+        let o = obs(pair(&v1, &v2, true, false), &[&v1, &v2], &[]);
+        clean(&check(&o, CheckId::SplitBrain));
+        let why = clean(&check(&o, CheckId::RedundancyVacancy));
+        assert!(
+            why.starts_with("1 interface(s) redundancy.v1 and redundancy.v2 govern,"),
+            "{why}"
+        );
+        // A lasting vacancy under v2.
+        let o = obs(candidates(&v2, false, false), &[&v2], &[]);
+        let r = check(&o, CheckId::RedundancyVacancy);
+        let f = found(&r);
+        assert!(
+            f.evidence.contains("lasting vacancy (redundancy.v2 §2.15)"),
+            "{f:?}"
+        );
+    }
+
     #[test]
     fn a_recognised_standby_is_not_counted_by_hostid_duplicate() {
         // hostid.v1 §2.12 (0.6, 0.7), scenarios §12 step 6.
@@ -8450,5 +8547,34 @@ mod tests {
             why.contains("whether it is a standby is unobservable"),
             "{why}"
         );
+        // hostid.v1 0.10, scenarios §6 step 7: a standby of redundancy.v2 is
+        // recognised as one of redundancy.v1 is, and so is one of either
+        // major beside an incumbent of the other.
+        let v2 = ledger_run();
+        let o = obs(on(&v2, standby_entry(&v2)), &[&v2], &[]);
+        let why = clean(&check(&o, CheckId::HostidDuplicate));
+        assert!(why.contains("1 recognised standby"), "{why}");
+        let mixed = observed(
+            &[
+                inst(SYSINFO, A),
+                inst(SYSINFO, B),
+                alive(SYSINFO, "ledger.v1", A, &l),
+            ],
+            vec![
+                (
+                    (SYSINFO, A),
+                    minted_descriptor(A, Some("aa01"), &[entry(&l)]),
+                ),
+                (
+                    (SYSINFO, B),
+                    minted_descriptor(B, Some("bb02"), &[standby_entry(&v2)]),
+                ),
+            ],
+        );
+        let why = clean(&check(
+            &obs(mixed, &[&l, &v2], &[]),
+            CheckId::HostidDuplicate,
+        ));
+        assert!(why.contains("1 recognised standby"), "{why}");
     }
 }

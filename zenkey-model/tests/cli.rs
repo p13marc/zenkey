@@ -443,3 +443,68 @@ fn contract_lint_reads_health_v2s_tables() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `zk2 contract lint` warns of a governed interface's invalid declaration
+/// (redundancy.v1 §2.2, redundancy.v2 §2.2; #987's N1): an explicit stream
+/// under `redundancy.v2` (`explicit_stream`), and an election outside the
+/// vocabulary under either major (`value`). Its runtime refuses to start
+/// it, and the core has no code for either, so they are warnings: the
+/// contract loads, its fingerprint is printed, and the exit is 0.
+#[test]
+fn contract_lint_warns_of_a_governed_declaration() {
+    let dir = std::env::temp_dir().join(format!("zk2-cli-redundancy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let contract = |name: &str, uses: &str, election: &str, explicit: bool| {
+        let path = dir.join(format!("{name}.toml"));
+        let text = format!(
+            "[interface]\nname = \"ledger\"\nmajor = 1\nminor = 0\nuses = [\"{uses}\"]\n\n\
+             [defaults]\nannotations = {{ \"redundancy.election\" = \"{election}\" }}\n\n\
+             [resources.balance]\nkind = \"state\"\ntype = {{ raw = \"text/plain\" }}\n\n\
+             [resources.feed]\nkind = \"stream\"\nexplicit = {explicit}\ntype = {{ raw = \"text/plain\" }}\n"
+        );
+        std::fs::write(&path, text).unwrap();
+        path.display().to_string()
+    };
+    let lint = |file: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_zk2"))
+            .args(["contract", "lint", file])
+            .output()
+            .expect("runs");
+        (
+            out.status.code().expect("exits"),
+            String::from_utf8(out.stdout).expect("UTF-8"),
+            String::from_utf8(out.stderr).expect("UTF-8"),
+        )
+    };
+    let clean = contract("clean", "redundancy.v2", "claim", false);
+    let (code, stdout, stderr) = lint(&clean);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(!stderr.contains("redundancy."), "{stderr}");
+    assert!(stdout.contains("ledger.v1 sha256:"), "{stdout}");
+    let explicit = contract("explicit", "redundancy.v2", "claim", true);
+    let (code, stdout, stderr) = lint(&explicit);
+    assert_eq!(code, 0, "a warning moves no exit: {stderr}");
+    assert!(
+        stderr.contains("  warning[redundancy.v2 explicit_stream] @stream/feed: "),
+        "{stderr}"
+    );
+    assert!(stdout.contains("ledger.v1 sha256:"), "{stdout}");
+    let v1 = contract("v1-explicit", "redundancy.v1", "claim", true);
+    let (code, _, stderr) = lint(&v1);
+    assert_eq!(code, 0, "{stderr}");
+    assert!(
+        !stderr.contains("redundancy."),
+        "v1 fences an explicit stream: {stderr}"
+    );
+    for uses in ["redundancy.v1", "redundancy.v2"] {
+        let value = contract(&format!("value-{uses}"), uses, "quorum", false);
+        let (code, _, stderr) = lint(&value);
+        assert_eq!(code, 0, "{stderr}");
+        assert!(
+            stderr.contains(&format!("  warning[{uses} value] state/balance: ")),
+            "{stderr}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

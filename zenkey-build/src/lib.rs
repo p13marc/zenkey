@@ -22,7 +22,10 @@
 //! authored:
 //! - on **every lint error** of `zenkey-model` (stable codes; warnings go to
 //!   `cargo:warning`), a `config.v2` contract's findings (its §2.2), and
-//!   the set's checks (E035, E036);
+//!   the set's checks (E035, E036). A governed interface's invalid
+//!   declaration, of either major of `redundancy` (`value`, `disagrees`,
+//!   and `explicit_stream` under `redundancy.v2`, its §2.2), is a
+//!   `cargo:warning`: its runtime refuses to start it;
 //! - **with a history**, on a candidate that is `breaking` against any
 //!   published revision (`zenkey_model::compat::check_history`, the rules
 //!   of `zk2 contract compat --history`), itself published or not: publishing
@@ -337,6 +340,13 @@ impl Config {
                                 file: shown,
                                 report: findings.join("\n"),
                             });
+                        }
+                        // redundancy.v1 §2.2, redundancy.v2 §2.2: a
+                        // governed interface's invalid declaration, which
+                        // its runtime refuses to start, is a linter's
+                        // warning (`value`, `disagrees`, `explicit_stream`).
+                        for w in zenkey_model::redundancy::lint_contract(&c) {
+                            warnings.push(format!("{shown}: {w}"));
                         }
                         out.push((f, c));
                     }

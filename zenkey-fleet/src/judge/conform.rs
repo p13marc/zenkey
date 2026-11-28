@@ -1928,9 +1928,12 @@ fn alarm_cases(obs: &ConformObservation) -> [ConformCase; 2] {
     [key, document]
 }
 
-// ─── redundancy.v1 (#841, RC) ───────────────────────────────────────────────
+// ─── redundancy (#841, RC; #987's N3) ───────────────────────────────────────
 
-/// `redundancy-declaration` (§2.2, §2.14) and `redundancy-standby` (§2.4).
+/// `redundancy-declaration` (§2.2, §2.14) and `redundancy-standby` (§2.4),
+/// of either major: the declaration read as a reader of both majors reads
+/// it (`redundancy.v2` §2.2), and the standby by the rules both share
+/// (`redundancy.v2` §2.4 restates v1's word for word).
 ///
 /// Left out, each with why: an operation runs on the incumbent alone
 /// (§2.4: no standby holds a queryable, which `redundancy-standby` probes,
@@ -1946,7 +1949,7 @@ fn redundancy_cases(obs: &ConformObservation) -> Vec<ConformCase> {
 }
 
 fn redundancy_declaration(obs: &ConformObservation) -> ConformCase {
-    use zenkey_model::redundancy::{Declaration, Invalid, declaration_of};
+    use zenkey_model::redundancy::{Declaration, Invalid, Major, either_declaration_of};
     const C: CaseId = CaseId::RedundancyDeclaration;
     let subject = obs.iface.to_string();
     let Some(rev) = &obs.revision else {
@@ -1968,20 +1971,21 @@ fn redundancy_declaration(obs: &ConformObservation) -> ConformCase {
         .filter(|(_, _, d)| d.interfaces.iter().any(|e| e.iface == want && !e.token))
         .map(|(a, i, _)| format!("{a}@{i}"))
         .collect();
-    let d = declaration_of(rev.contract(), !tokenless.is_empty());
+    let d = either_declaration_of(rev.contract(), !tokenless.is_empty());
+    let major = Major::of(&rev.contract().uses).unwrap_or(Major::V1);
     match d {
         Declaration::NotGoverned => ConformCase::not_asked(
             C,
             subject,
-            "its revision lists no redundancy.v1 in uses and carries no redundancy.election: \
-             not this profile's (§2.2)",
+            "its revision lists neither redundancy.v1 nor redundancy.v2 in uses and carries no \
+             redundancy.election: not this profile's (§2.2)",
         ),
         Declaration::Governed(e) => ConformCase::passed(
             C,
             subject,
             format!(
-                "governed, election {e}, every resource resolving to it; no descriptor puts the \
-                 interface in a tokenless set"
+                "governed by {major}, election {e}, every resource resolving to it; no \
+                 descriptor puts the interface in a tokenless set"
             ),
         ),
         Declaration::Invalid(why) => {
@@ -1993,8 +1997,8 @@ fn redundancy_declaration(obs: &ConformObservation) -> ConformCase {
             let mut said = Vec::new();
             if !contract.is_empty() {
                 said.push(format!(
-                    "the contract's declaration is invalid ({}): a runtime refuses to start an \
-                     instance of it, and this one runs (§2.2)",
+                    "the contract's {major} declaration is invalid ({}): a runtime refuses to \
+                     start an instance of it, and this one runs ({major} §2.2)",
                     contract.join(", ")
                 ));
             }
@@ -2019,16 +2023,17 @@ fn redundancy_standby(obs: &ConformObservation) -> ConformCase {
         return ConformCase::unobservable(
             C,
             subject,
-            "its claimed revision is not in hand: whether redundancy.v1 governs it cannot be read",
+            "its claimed revision is not in hand: whether a major of redundancy governs it \
+             cannot be read",
         );
     };
-    let election = match rm::declaration_of(rev.contract(), false) {
+    let election = match rm::either_declaration_of(rev.contract(), false) {
         rm::Declaration::Governed(e) => e,
         rm::Declaration::NotGoverned => {
             return ConformCase::not_asked(
                 C,
                 subject,
-                "redundancy.v1 does not govern its revision: no instance of it stands by (§2.1)",
+                "no major of redundancy governs its revision: no instance of it stands by (§2.1)",
             );
         }
         rm::Declaration::Invalid(_) => {
@@ -6657,7 +6662,7 @@ mod tests {
         o.presence = Ok(p.clone());
         let t0 = Instant::now();
         let mut book = TimingBook::new(timed_resources(&addr, &rev), None, false, t0);
-        book.seed(&p, true, t0);
+        book.seed(&p, true, t0, &BTreeSet::new());
         book.start(t0);
         let ms = Duration::from_millis;
         for n in 1..50u64 {
@@ -7078,6 +7083,63 @@ mod tests {
         )
         .clone();
         assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
+    }
+
+    /// `ledger-run.v1` (`redundancy.v2`), as `zenkey`'s scenarios hold it,
+    /// its text changed by `edit`.
+    fn ledger_run(edit: impl Fn(String) -> String) -> Arc<Revision> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts/ledger-run.v1.toml");
+        let text = edit(std::fs::read_to_string(&path).unwrap());
+        let l = zenkey_model::contract::load_str(&text, path.parent().unwrap(), None);
+        Arc::new(Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            crate::report::ContractSource::Bus,
+        ))
+    }
+
+    /// `redundancy.v2` §2.2, §2.4 (#987's N3): a revision of that major is
+    /// read by its own declaration, `explicit_stream` among its reasons,
+    /// and its standby by the rules both majors share.
+    #[test]
+    fn a_redundancy_v2_revision_is_read_by_its_own_major() {
+        let rev = ledger_run(|t| t);
+        let r = judge(&ledger_obs(
+            Arc::clone(&rev),
+            SERVING,
+            STANDBY,
+            vec![probe("@op/append", true, &[&format!("{A}0")])],
+        ));
+        let c = case(&r, CaseId::RedundancyDeclaration, "ledger.v1");
+        assert!(
+            matches!(&c.verdict, Judgement::NotEstablished { reason }
+                if reason.contains("governed by redundancy.v2, election claim")),
+            "{c:#?}"
+        );
+        let c = case(&r, CaseId::RedundancyStandby, "service");
+        assert!(
+            matches!(&c.verdict, Judgement::NotEstablished { reason } if reason.contains("1 standby(s)")),
+            "{c:#?}"
+        );
+        // An explicit stream in a governed contract of this major: invalid.
+        let explicit = ledger_run(|t| {
+            t.replace(
+                "[resources.entries]\nkind = \"stream\"\n",
+                "[resources.entries]\nkind = \"stream\"\nexplicit = true\n",
+            )
+        });
+        let r = judge(&ledger_obs(explicit, SERVING, STANDBY, vec![]));
+        let c = case(&r, CaseId::RedundancyDeclaration, "ledger.v1");
+        assert_eq!(c.verdict, Judgement::Established, "{c:#?}");
+        let detail = c.detail.as_deref().unwrap();
+        assert!(
+            detail.contains("(explicit_stream)") && detail.contains("redundancy.v2 §2.2"),
+            "{detail}"
+        );
+        assert_eq!(
+            case(&r, CaseId::RedundancyStandby, "service").verdict,
+            Judgement::NotAsked
+        );
     }
 
     #[test]

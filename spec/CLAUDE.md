@@ -1057,6 +1057,71 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   after one was acted on (the model sends none). `watch.json` gives its
   one `no_entry` answer no run, which is no verdict only because that
   target holds nothing.
+- **`redundancy.v2`** (#987's N1, text 0.1, `experimental`, written
+  against core 0.119) sits beside `redundancy.v1` in
+  `spec/profiles/redundancy/`: `v2.md`, `scenarios-v2.md`,
+  `conformance/v2/{declarations,descriptors,fences}.json` with a
+  `README.md`, and the one `CHANGELOG.md`, its entries headed
+  `redundancy.v2 0.N`. It restates `redundancy.v1` 0.11 by reference and
+  replaces its stamps: a candidate's session runs without timestamping, a
+  follower accepts a sample only under one of its incumbent's runs (by
+  form: a put's envelope, a delete's attachment, a snapshot's header for
+  every entry, an event's chunk, a reply's as-of mark), holds one it
+  cannot attribute until one read of the descriptors asked after it has
+  ended, and seeds again when its incumbent changes; a governed state is
+  answered by snapshot; §2.2 adds `majors` before v1's reasons and
+  `explicit_stream` after them; no candidate on a first hop (§2.13); a
+  follower of a v1 incumbent reads its `meta.zid` (§2.17). Core 0.119:
+  §4.3's draw and §8.2's step 2 read either major, the posture's
+  exception and §4.3's table row stay v1's, no keyword (298 rules).
+  `freshness.v2` 0.14 and `link.v2` 0.29 cite either major, and
+  `v2/plan.json`'s case 55 (case 25's device on a `redundancy.v2`
+  revision, `presence_required`; 56 cases) was written by reading the
+  text. The fixtures (153 cases: 38 contracts and 16 addresses, 29
+  descriptors, 49 samples, 13 sequences, 8 draws) were computed twice by
+  two scripts of the drafter's (`/srv/dev/scratch/zenkey/py/987-n1/`),
+  never blessed. The model ran every case as written
+  (`zenkey-model/tests/profiles/redundancy_v2.rs`, a runner per file, none
+  able to bless) and all pass, case 55 too, no case, sentence or count
+  moved. Six answers only the fixtures gave are in 0.1's text since
+  (`a5299e3a`): §2.10's step 2, a v1 incumbent decided by its stamp
+  before `no_run`, `no_stamp` before an unheld `meta.zid` (sample 49,
+  written by hand), an incumbent of unknown major read by run, a held
+  member kept at an equal seq and every other sample held alone, a token
+  deciding no held sample, and the entry read. A linter's `value` and
+  `disagrees`, v1 §2.2's SHOULD, were warned of by no linter before N1.
+  N2 (the runtime, #987): scenarios-v2.md's "Who runs them" names
+  `zenkey/tests/profile_redundancy_v2.rs` (§1–§11, §13–§15; §12 waits for
+  N3's tools), and `arbitration.v1` 0.7 reads §2.5's outcome 6 by either
+  major (by run under `redundancy.v2`, an unattributed sample
+  `not_incumbent`, the read it asks attributing the next), §2.12's view by
+  the one major its revisions list, its header naming both majors and
+  written against core 0.119, the index's row following; scenarios §11
+  runs again under `redundancy.v2` on `steer.v1` minor 2;
+  `arbitrations.json` is unchanged (`incumbent: false` is the fence's
+  word, either major's). N3 (the tools, #987): `hostid.v1` 0.10 (§2.12's
+  recognised standby lists interfaces whose contracts use a major of
+  `redundancy`, each read by §2.15 of either, governance from both
+  majors; "Undecided" and §5's last row name `redundancy`'s standby
+  question; the header reads the mark through either major, still
+  written against core 0.40; scenarios §6 step 7: B on `ledger-run.v1`
+  beside A on `ledger.v1`, then both, no finding; the index's row);
+  `scenarios-v2.md`'s "Who runs them" names `zenctl/tests/live_zk2.rs`'s
+  `redundancy_v2_s12_…` for §12, and §12's hostid note says it is met.
+  No keyword sentence moved (298 rules). zk2py's round 128 (F-629 to
+  F-632) is answered by observer text 0.38 (§3.6: a read never undoes a
+  token heard since it was asked; its MUST is the 299th rule, observer
+  88, 28 of them a reader's), `redundancy.v2`'s "How often" and "Seed
+  again" (F-630, F-631; §13's Expected 2 and its new step over 39
+  takeovers) and the "Not verified" lines (F-632). The reference meets
+  0.38 in the model's fence and arbiter (`Fence::ask`, `Arbiter::ask`, an
+  `Asked` carried by each read), the runtime's follower, arbitration and
+  timing, and the fleet's arbitration and timing views; §13's step is
+  `zenkey/tests/profile_redundancy_v2.rs`'
+  `s13_k_never_reads_b_gone_over_the_takeovers`. F-630's reading was the
+  reference's already (`follow::merge_seed`: a `redundancy.v1`
+  incumbent's replies per key merged, the omission rule over complete
+  snapshots alone).
 
 **zk2py rounds 116 to 123, answered (#609, #986, #1165).** Core 0.116
 (298 rules: §4.3's new deployment MUST NOT, a run's record that was lost

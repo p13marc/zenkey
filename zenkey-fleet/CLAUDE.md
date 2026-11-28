@@ -328,6 +328,23 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   mock}` elect through `GenSpec::elect` / `ServeSpec::elect`, and `gen`
   follows a governed interface's standing through
   `Redundancy::subscribe`, each member declared once per incumbency.
+  **Either major (#987's N3, `redundancy.v2` §2.2, §2.15, §2.17).**
+  `model::redundancy::governance` reads each listing revision with
+  `either_declaration_of`/`Revision::of` and takes its token from
+  `zenkey_model::redundancy::governance`, so a v1 candidate beside a v2
+  one with one election is one election
+  (`every_address_reads_its_governance_as_v2_declarations_json` runs
+  `v2/declarations.json`'s `addresses` through it); `Governed::majors`
+  names the majors, and `profile()`/`governs()`/`cite()` word the
+  doctor's findings (`redundancy.v2 governs it`, `redundancy.v1 and
+  redundancy.v2 govern it`, `(redundancy.v2 §2.15)`), v1-only words
+  unchanged. `RedundancyRow::majors` and `RedundancyInstance::run`
+  (`model::redundancy::run_of`, the later read's descriptor) are new.
+  `recognised_standby` reads either major through the same governance
+  (`hostid.v1` 0.10). `check conform`'s cases and `bus::conform`'s probe
+  gate, and `tape::{generate, mock}`'s election, read
+  `either_declaration_of`; `bus::session::open_owner_in_namespace`'s
+  `governed` is "stamps", which zenctl passes for a v1 candidate alone.
   `Lens::check_sample` and `sample_conformance` run the profile's `check`
   after the JSON Schema's, so a Point whose tag, unit, range or bounds
   disagree is `invalid`, its reasons named: what replaced v1's
@@ -350,6 +367,13 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   (`bus::stall`) or a watch transport move holds every owner unconfirmed
   and reads presence again, and a one-shot timer sits at the trackers'
   earliest due; the queue is drained before a tick or a read's answer.
+  Each read (the opening's, a withdrawal's, a reseed) carries the count
+  of tokens folded when it was asked, and `TimingBook::seed`/`owed_read`
+  take the keys folded since (observer 0.38 §3.6): one still held keeps
+  its owner present and its member seen, one told withdrawn is not
+  brought back and the withdrawal's read is owed again. `PresenceFeed`
+  and zenwatch's `TokenFeed` already fold what the watch told while a
+  read ran over the read (`seed_then`, `fold_reads`).
   `model::timing`'s `TimingBook` is session-free: a `Tracker` and a
   `LifespanReader` per provider address and resource (`TimedResource`,
   bound and `epoch` from the contract, a template without parameters the
@@ -389,7 +413,8 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   or `--role` names it; with `--role` and no descriptor listing it, each
   contract in hand declaring the role is read with no descriptor (F-272).
   `read_role` is §2.2 over every revision of the required interface the
-  store holds (`held_over`; governed when every one lists redundancy.v1).
+  store holds (`held_over`; governed when every one lists a major of
+  redundancy, `RoleRead::majors` the major of each by fingerprint).
   Then the tool's own view of every arbitrated, bound role at once, each
   over `ArbitrationSpec::listen` (or `deadlines` × its own deadline): one
   liveliness subscriber per entry on the `WatchSession`
@@ -397,7 +422,10 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   entry on the namespaced session (a sample two entries cover handed over
   once, by the first), each arrival's `Instant` read in the callback, one
   bounded queue, `bus::stall`, a read again 100 ms after a withdrawal
-  leaving none known held (one per burst), a move (the transport event,
+  leaving none known held (one per burst; asked once the queue is folded,
+  its answer carrying `ViewBook::ask`'s `ReadAsked`, so it decides no
+  token folded since: observer 0.38 §3.6, round 128's F-629, where the
+  view's fence read B gone at a takeover), a move (the transport event,
   or a withdrawal heard with no link, F-268) kept until the round trip
   asked after it stands (the barrier asking the one after an open
   `presence::OPEN_MARGIN` after it, core 0.56, #914), a governed
@@ -407,8 +435,17 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   of its last stream subscription (text 0.3). `model::arbitration`'s
   `ViewBook` is session-free: the `Arbiter` over the tool's instants,
   never going back, `zenkey_model::arbitration::Incumbents` beside it (moved
-  out of the runtime at BC), its switches (64 kept), and `lost` (a
-  refusal or a stall within the last deadline); `roles_in` reads a
+  out of the runtime at BC; the model's `redundancy::Fence` since #987's
+  N1), its switches (64 kept), and `lost` (a refusal or a stall within the
+  last deadline). Outcome 6 (text 0.7, #987's N3) is the fence's `offer`
+  of each sample's in-band stamp and Zenoh timestamp id
+  (`ViewBook::sample(.., stamp, inband)`): by `meta.zid` under a v1
+  holder, by its runs under v2, one held unattributed counted
+  `not_incumbent` with a read of the address's descriptors asked
+  (`take_reads`, made by `bus::arbitration` one at a time per address,
+  `read_ended`); each holder's descriptor is `model::arbitration::
+  described` (its run, `meta.zid`, and the major of the revision its
+  entry names by `RoleRead::majors`, else its `profiles`' one major); `roles_in` reads a
   presence read already made with no view (the doctor's, zengui's).
   `judge::arbitration` maps `judge_declaration`, `judge_selection` and
   `judge_binding` onto `report::arbitration` (every `conclusions.json` case

@@ -690,6 +690,88 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `Service::holds_member` (#841, RD) says whether a member token is held,
   so an application declaring members at each takeover never cycles one
   by declaring it twice.
+  `redundancy.v2` (#987's N2) is the same candidate for a contract
+  listing it: `elections()` reads every contract by
+  `either_declaration_of` (`majors` and `explicit_stream` refuse the
+  start, nothing declared), each `Governed` carrying its `Major`. F-467
+  is v1's alone: `redundancy()` refuses a session without timestamping
+  only when a v1 interface is implemented already, `start()` when one is
+  implemented after (`redundancy::stamps_for_v1`); a v2 candidate's
+  session runs as any owner's, so its puts carry the in-band stamp alone,
+  and its states are no per-key resource (`answered`, snapshot answers,
+  v2 §2.6). Each campaign's read of the lower ids' descriptors compares
+  their runs with its own, and a match takes `Minter::new_run` (its
+  descriptor put first) before the election decides (v2 §2.10's draw).
+  `Minter::simulate_run` (hidden) chooses an instance's first run. The
+  refusals and messages on a governed interface name its major.
+  `follow` (#987's N2) is the follower either major asks for:
+  `Consumer::follow(resource, on_event)` / `follow_with(resource,
+  FollowStartup, …)` → `Following` (`incumbent`, `value`/`values`, the
+  address's word for a state, `counts`), over N1's
+  `zenkey_model::redundancy::Fence`, deciding nothing itself; refused
+  without `Consumer::with_watch` and for a revision neither major
+  governs. A watch on each provider's `@zk/alive/<iface>/**` (round trip,
+  then a read on the consumer's session; a read again `BURST` after a
+  withdrawal), each holder's descriptor GET when none is held, every
+  descriptor put heard (`FollowStartup::descriptor_delay`, hidden, is
+  scenarios-v2 §14's hook), its major the consumer's own revision's where
+  the fingerprints agree, else the one major its `profiles` lists, else
+  unknown and read by run; each sample of the subscription to
+  `Fence::offer` (a state by key), a held one's read of the address's
+  `@zk/instance/*` one at a time (`follow::read_descriptors`); and, for a
+  state, a seed at each change of incumbent: `Consumer::get_gated`, the
+  state read through a `ReplyGate` that judges each GET's replies once
+  it ended (a snapshot page by its header's run and asof, an
+  unattributed one after one descriptor read, discarded so), the
+  admitted merged into the view by core §4.3's consumer rule, then the
+  omission rule over each complete snapshot of the incumbent's (a member
+  put under its run past its asof stays). `FollowEvent::{Incumbent,
+  Accepted{seeded}, Discarded, Held, Superseded, SeedDiscarded, Omitted,
+  Seeded}` in decision order from a task of its own. Heartbeats (#987's
+  N3, v2 §2.10 "A heartbeat"): the follower subscribes through
+  `Consumer::subscribe_gated` (crate-private), whose `BeatGate` gets each
+  admitted heartbeat covering the interface and each owner heartbeat
+  before the view reads it, with a closure that reads it; `follow`'s
+  `FollowGate` offers it to the same fence (`Member::Alone`, its
+  envelope's stamp, `follow::beat_sample`), the fence's item now
+  `Item::{Data, Beat}`, so the view reads only the incumbent's, now or
+  once a read of the descriptors attributes it
+  (`FollowEvent::{Heartbeat, HeartbeatDiscarded, HeartbeatHeld}`,
+  `FollowCounts::{heartbeats, heartbeats_discarded, heartbeats_held}`;
+  `consume --follow` prints them). Without a gate nothing moved.
+  `profile_redundancy_v2.rs`'s `a_follower_reads_its_incumbents_heartbeats_alone`
+  over `tests/contracts/beacon-governed-run.v2.toml` (hand-built
+  holders: another holder's two heartbeats discarded and never read, so
+  K's view is not due a read where P's is; one under no stated run held
+  then discarded `unattributed`; the incumbent's new run read after its
+  descriptor's GET). scenarios-v2.md §1–§11 and §13–§15 are
+  `tests/profile_redundancy_v2.rs` (v1's harness restated over
+  `tests/contracts/{ledger-run,valve-run}.v1.toml`, no session stamping,
+  S recording runs and stamp ids; K is `Consumer::follow`, §15's K1 the
+  model's fence read as v1's); v1's suite is unchanged. The owner
+  example's `--first-run <hex>`, `--takeover-puts-nothing` and
+  `redundancy run|new-run` are v2's hooks, its session stamping only for
+  a v1 candidate, and `consume --follow [--descriptor-delay-ms <ms>]` is
+  K as a black box (one JSON line per `FollowEvent`; `values`, `counts`,
+  `incumbent <address>`). Observer 0.38 §3.6 (round 128's F-629, a read
+  never undoes a token heard since it was asked): the follower lost its
+  incumbent in 6 of 39 takeovers because a complete read again replaced
+  the fence's holders whole, B's token included, which the watch's
+  callback had applied while the read ran; each presence read now asks
+  the fence first (`Fence::ask`) and carries the `Asked` back.
+  `FollowStartup::reread_hold` (hidden) holds a read again's answer for
+  `a_read_again_never_undoes_a_token_heard_since_it_was_asked`, which
+  fails without the rule, and `s13_k_never_reads_b_gone_over_the_takeovers`
+  is §13's step on `beacon-governed-run.v2` (`Opts::beacon`; heartbeats
+  accepted once K follows B, none discarded; `ZK2_S13_TAKEOVERS`, 3 in
+  the suite; 39 of 39 once, and in process 39 of 39 with the rule
+  turned off too, so the held read is the test that fails without it).
+  `arbitration` asks the arbiter and the incumbents
+  (`Core::ask`) and folds what its watch queued before a read again is
+  asked and again before its answer is applied (`read_presence`,
+  `apply_read`); `timing`'s presence follower the same (`Follower::drain`),
+  its seed and the read a withdrawal owes deciding no token key heard
+  while they ran, one heard withdrawn then owing its own read.
   `timing` (#908, MB) is `timing.v1`'s runtime over
   `zenkey_model::timing`, never re-deriving a verdict. Every `Delivery`
   carries its `arrival` (an `Instant` read in the subscriber's callback),
@@ -740,7 +822,11 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   than the last event's), `timing.v1`'s expiry from `subscribe_timed`'s
   engine with its deadline left to the arbiter, a governed interface's
   sample not the incumbent's `not_incumbent` (the lowest holder's
-  `meta.zid`, its holders read once at start, redundancy.v1 §2.10), and
+  `meta.zid`, its holders read once at start, redundancy.v1 §2.10; since
+  arbitration.v1 0.7, #987's N2, through `Fence::offer` under the major
+  the revision held lists, by run under redundancy.v2, an unattributed
+  sample counted `not_incumbent` and its descriptor read asked on a task
+  of its own), and
   tells `ArbitrationEvent::{Switched{from, to, cause, at, last},
   Delivered{source, delivery}}` in decision order from a task of its own,
   the `start` switch to the dead-man first. Withdrawals and declarations
@@ -758,7 +844,9 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `discards`, `reads`, `round_trips`, `moving`, `watching`. Scenarios
   §1–§9 and §11 are `tests/profile_arbitration.rs` over
   `tests/contracts/{steer,rudder,steer-governed}.v1.toml`, §7 with its
-  control; `tests/walkthrough.rs`'s `w4_2_a_control_loop_arbitrated` is
+  control, §11 again under redundancy.v2 over
+  `steer-governed-run.v1.toml` (no stamping session, X's samples in an
+  envelope under C_s2's run); `tests/walkthrough.rs`'s `w4_2_a_control_loop_arbitrated` is
   architecture §4.2. The owner example's `--arbitrate <entry>,...` is an
   actuator printing its switches as JSON lines and answering `arbitrate
   counts|state|reads`, refused before anything of it is declared or put

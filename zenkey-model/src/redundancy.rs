@@ -1,5 +1,7 @@
-//! `redundancy.v1`: one instance serves, the others stand by
-//! (`spec/profiles/redundancy/v1.md`, #841).
+//! `redundancy`: one instance serves, the others stand by. `redundancy.v1`
+//! (`spec/profiles/redundancy/v1.md`, #841), and `redundancy.v2` (`v2.md`,
+//! #987's N1), which keeps v1's election whole and replaces its stamps:
+//! no session HLC, and a follower that fences by the incumbent's runs.
 //!
 //! The profile's session-free half: the declaration read from a contract
 //! (§2.2), how instance ids compare (§2.3), the descriptor's standby mark
@@ -8,10 +10,23 @@
 //! election as a pure state machine, two-phase like
 //! [`crate::config::Owner`] (§2.5 to §2.11), and §5's four questions as
 //! judgements that never fold an unestablished answer into no (§2.15).
+//! Both majors share all of it: v2 restates §2.3 to §2.9 and §2.11 to §2.15
+//! by reference. What v2 replaces is beside it: its declaration
+//! ([`v2::declaration`]), a follower's read of a descriptor
+//! ([`read_descriptor`]), the fence over either major ([`Fence`]), the draw
+//! ([`draw_again`]), and an address's governance from its candidates'
+//! revisions of either major ([`governance`]).
 //!
 //! | Rule | Item |
 //! |---|---|
 //! | §2.2 the declaration: governed, the election, invalid | [`declaration`], [`declaration_of`], [`Declaration`], [`Invalid`] |
+//! | v2 §2.2 the declaration of either major, `majors`, `explicit_stream` | [`Major`], [`is_governed`], [`v2::declaration`], [`v2::declaration_of`], [`either_declaration_of`] |
+//! | v2 §2.2 a linter's warnings, either major | [`lint_contract`], [`Warning`] |
+//! | v2 §2.2, §2.15 an address's governance from its revisions | [`governance`], [`Revision`] |
+//! | v2 §2.10, §2.14 a follower's read of a descriptor: its run and the mark | [`read_descriptor`], [`DescriptorRead`] |
+//! | v2 §2.10 the fence by run, v1 §2.10's by zid, the hold for one read | [`Fence`], [`Holding`], [`Sample`], [`Fenced`], [`Discard`], [`Outcome`] |
+//! | observer §3.6 (0.38): a read never undoes a token heard since it was asked | [`Fence::ask`], [`Asked`], carried by [`Holding::Read`] |
+//! | v2 §2.10 a run no other states: the draw | [`draw_again`] |
 //! | §2.3 the claim set, the incumbent, ids compared | [`Read`], [`Seen`], [`Listing`], [`Read::holders`], [`lower`] |
 //! | §2.4, §2.14 the standby mark and its checks | [`Mark`], [`mark`], [`read_mark`], [`MarkFinding`] |
 //! | §2.5 the election under `claim` | [`elect`], [`Decision`], [`Why`] |
@@ -52,9 +67,16 @@ use serde_json::Value;
 
 use crate::contract::Contract;
 use crate::descriptor::InterfaceEntry;
-use crate::grammar::{IfaceId, InstanceId};
+use crate::grammar::{IfaceId, InstanceId, KindToken};
+use crate::wire::Run;
 
-/// The profile's id, as a contract lists it in `uses`.
+mod fence;
+pub mod v2;
+
+pub(crate) use fence::Heard;
+pub use fence::{Asked, Described, Discard, Fence, Fenced, Holding, Member, Outcome, Sample};
+
+/// `redundancy.v1`'s id, as a contract lists it in `uses`.
 pub const PROFILE: &str = "redundancy.v1";
 
 /// The profile's name, as an annotation key's prefix carries it.
@@ -67,6 +89,79 @@ pub const ELECTION: &str = "redundancy.election";
 /// reads in place of core Appendix D's interim row (core 0.39), the same
 /// key.
 pub const VOCABULARY: &[&str] = &["election"];
+
+/// A major of the profile (v2 §2.17). The election is one text, which both
+/// share; each candidate stamps, answers a GET and is followed as its own
+/// revision's major says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Major {
+    /// `redundancy.v1`: the candidate's session stamps every write, and a
+    /// follower reads the stamp's id against `meta.zid` (v1 §2.10).
+    V1,
+    /// `redundancy.v2`: no session stamp, and a follower reads the run its
+    /// descriptors state (v2 §2.10).
+    V2,
+}
+
+impl Major {
+    /// Both, in order.
+    pub const ALL: [Major; 2] = [Major::V1, Major::V2];
+
+    /// The major's id, as a contract lists it in `uses`.
+    #[must_use]
+    pub const fn profile(self) -> &'static str {
+        match self {
+            Major::V1 => PROFILE,
+            Major::V2 => v2::PROFILE,
+        }
+    }
+
+    /// The major's number.
+    #[must_use]
+    pub const fn number(self) -> u32 {
+        match self {
+            Major::V1 => 1,
+            Major::V2 => 2,
+        }
+    }
+
+    /// The major numbered `n`, `None` for any this crate does not read.
+    #[must_use]
+    pub const fn from_number(n: u32) -> Option<Major> {
+        match n {
+            1 => Some(Major::V1),
+            2 => Some(Major::V2),
+            _ => None,
+        }
+    }
+
+    /// The major a contract's `uses` is read by, as a reader of both reads
+    /// it (v2 §2.2): `redundancy.v2` where it lists it, `redundancy.v1`
+    /// where it lists that and not `redundancy.v2`, `None` where it lists
+    /// neither. One that lists both is `redundancy.v2`'s, which reads it
+    /// `majors`.
+    #[must_use]
+    pub fn of<'a>(uses: impl IntoIterator<Item = &'a IfaceId>) -> Option<Major> {
+        let mut found = None;
+        for u in uses {
+            if u.name() != NAME {
+                continue;
+            }
+            match Major::from_number(u.major()) {
+                Some(Major::V2) => return Some(Major::V2),
+                Some(Major::V1) => found = Some(Major::V1),
+                None => {}
+            }
+        }
+        found
+    }
+}
+
+impl fmt::Display for Major {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.profile())
+    }
+}
 
 // --- §2.2: the declaration -----------------------------------------------------
 
@@ -107,9 +202,15 @@ impl fmt::Display for Election {
     }
 }
 
-/// Why a declaration is invalid (§2.2), in the order checked.
+/// Why a declaration is invalid (§2.2), in the order checked. `Majors` and
+/// `ExplicitStream` are `redundancy.v2`'s alone (v2 §2.2): the first before
+/// v1's four, the second after them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Invalid {
+    /// `uses` lists `redundancy.v2` and another major of the profile (v2
+    /// §2.2; core E002 to a linter). The interface is read as governed for
+    /// the checks after it.
+    Majors,
     /// `redundancy.election` carried, and `uses` names no major of the
     /// profile (core E020's).
     NotUsed,
@@ -120,6 +221,10 @@ pub enum Invalid {
     /// The interface is governed, and the deployment's tokenless set names
     /// it (§2.14).
     Tokenless,
+    /// The interface is governed by `redundancy.v2`, and declares a
+    /// `stream` resource with `explicit = true`: its samples carry no
+    /// envelope, so no run a follower can fence (v2 §2.2).
+    ExplicitStream,
 }
 
 impl Invalid {
@@ -127,10 +232,12 @@ impl Invalid {
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Majors => "majors",
             Self::NotUsed => "not_used",
             Self::Value => "value",
             Self::Disagrees => "disagrees",
             Self::Tokenless => "tokenless",
+            Self::ExplicitStream => "explicit_stream",
         }
     }
 
@@ -138,11 +245,16 @@ impl Invalid {
     #[must_use]
     pub fn says(self) -> &'static str {
         match self {
+            Self::Majors => "uses lists redundancy.v2 and another major of redundancy",
             Self::NotUsed => "redundancy.election is written, and uses does not list redundancy.v1",
             Self::Value => "redundancy.election is the string claim or external",
             Self::Disagrees => "every resource of a governed interface resolves to one election",
             Self::Tokenless => {
                 "a governed interface is never tokenless: its incumbent is the holder of its token"
+            }
+            Self::ExplicitStream => {
+                "an explicit stream's samples carry no envelope, so no run a follower can fence: \
+                 a redundancy.v2 interface declares none"
             }
         }
     }
@@ -186,11 +298,14 @@ impl Declaration {
     }
 }
 
-/// Reads an interface's declaration (§2.2) from its contract's `uses`, the
+/// Reads an interface's declaration as `redundancy.v1` alone reads it
+/// (§2.2; v1's `declarations.json`) from its contract's `uses`, the
 /// resolved annotations of each of its resources (core §9.3, in any
 /// order), and whether the deployment's tokenless set names it. Each check
 /// runs alone; a resource whose value is found wrong takes no part in
-/// `disagrees`, and one carrying none reads as `claim`.
+/// `disagrees`, and one carrying none reads as `claim`. A contract listing
+/// `redundancy.v1` beside another major is v1's here; a reader of both
+/// majors reads it `majors` ([`either_declaration_of`]).
 #[must_use]
 pub fn declaration<'a, U, A>(uses: U, annotations: A, tokenless: bool) -> Declaration
 where
@@ -221,9 +336,25 @@ where
     if !governed {
         why.push(Invalid::NotUsed);
     }
+    let election = elections(&values, &mut why);
+    if governed && tokenless {
+        why.push(Invalid::Tokenless);
+    }
+    if why.is_empty() {
+        Declaration::Governed(election)
+    } else {
+        Declaration::Invalid(why)
+    }
+}
+
+/// §2.2's `value` and `disagrees`, which both majors check alike, pushed
+/// onto `why` in that order: a resource carrying none reads as `claim`, and
+/// one found `value` takes no part in `disagrees`. Returns the one election
+/// the valid resources resolve to, `claim` with none.
+pub(crate) fn elections(values: &[Option<&Value>], why: &mut Vec<Invalid>) -> Election {
     let mut elections = BTreeSet::new();
     let mut wrong = false;
-    for v in &values {
+    for v in values {
         match v {
             None => {
                 elections.insert(Election::Claim);
@@ -242,18 +373,12 @@ where
     if elections.len() > 1 {
         why.push(Invalid::Disagrees);
     }
-    if governed && tokenless {
-        why.push(Invalid::Tokenless);
-    }
-    if why.is_empty() {
-        Declaration::Governed(elections.into_iter().next().unwrap_or(Election::Claim))
-    } else {
-        Declaration::Invalid(why)
-    }
+    elections.into_iter().next().unwrap_or(Election::Claim)
 }
 
 /// [`declaration`] of a contract, `tokenless` saying whether the
-/// deployment's tokenless set names its interface.
+/// deployment's tokenless set names its interface: `redundancy.v1`'s
+/// reading alone.
 #[must_use]
 pub fn declaration_of(c: &Contract, tokenless: bool) -> Declaration {
     declaration(
@@ -263,11 +388,95 @@ pub fn declaration_of(c: &Contract, tokenless: bool) -> Declaration {
     )
 }
 
+/// A contract's declaration as a reader of both majors reads it (v2 §2.2):
+/// [`v2::declaration_of`] where its `uses` lists `redundancy.v2`, and
+/// [`declaration_of`], `redundancy.v1`'s, otherwise. The major of a
+/// governed one is [`Major::of`] its `uses`.
+#[must_use]
+pub fn either_declaration_of(c: &Contract, tokenless: bool) -> Declaration {
+    if Major::of(&c.uses) == Some(Major::V2) {
+        v2::declaration_of(c, tokenless)
+    } else {
+        declaration_of(c, tokenless)
+    }
+}
+
 /// Whether a contract governs its interface: its `uses` lists
-/// `redundancy.v1` (§2.2).
+/// `redundancy.v1` or `redundancy.v2` (§2.2, v2 §2.2), governed by either
+/// major. [`Major::of`] says which.
 #[must_use]
 pub fn is_governed(c: &Contract) -> bool {
-    c.uses.iter().any(|u| u.name() == NAME && u.major() == 1)
+    Major::of(&c.uses).is_some()
+}
+
+/// One finding a contract linter warns of (v1 §2.2, v2 §2.2): `value`,
+/// `disagrees`, and under `redundancy.v2` `explicit_stream`. Each is an
+/// invalid declaration, which a runtime refuses to start; the core has no
+/// code for any, so a linter warns. `majors` and `not_used` are core E002
+/// and E020, which refuse the contract's load, and `tokenless` is the
+/// deployment's, never the contract's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Warning {
+    /// The major whose text the reason is under.
+    pub major: Major,
+    /// The resource it is of, as [`crate::words::Lint::place`] names one,
+    /// or the interface id for `disagrees`.
+    pub at: String,
+    pub reason: Invalid,
+}
+
+impl fmt::Display for Warning {
+    /// A linter's line: `warning[<profile> <token>] <at>: <says>`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "warning[{} {}] {}: {}",
+            self.major.profile(),
+            self.reason.as_str(),
+            self.at,
+            self.reason.says()
+        )
+    }
+}
+
+/// A contract's declaration findings a linter warns of (v1 §2.2, v2 §2.2),
+/// read by the major [`Major::of`] its `uses` names: each resource whose
+/// `redundancy.election` is `value`, the interface once for `disagrees`,
+/// and each explicit stream of a `redundancy.v2` one. None for a contract
+/// governed by neither major.
+#[must_use]
+pub fn lint_contract(c: &Contract) -> Vec<Warning> {
+    let Some(major) = Major::of(&c.uses) else {
+        return Vec::new();
+    };
+    let Declaration::Invalid(why) = either_declaration_of(c, false) else {
+        return Vec::new();
+    };
+    let warn = |at: String, reason| Warning { major, at, reason };
+    let mut out = Vec::new();
+    for reason in why {
+        match reason {
+            Invalid::Value => out.extend(
+                c.resources
+                    .iter()
+                    .filter(|r| {
+                        r.annotations
+                            .get(ELECTION)
+                            .is_some_and(|v| Election::parse(v).is_none())
+                    })
+                    .map(|r| warn(crate::words::Lint::place(r), reason)),
+            ),
+            Invalid::Disagrees => out.push(warn(c.iface.to_string(), reason)),
+            Invalid::ExplicitStream => out.extend(
+                c.resources
+                    .iter()
+                    .filter(|r| r.token == KindToken::ExplicitStream)
+                    .map(|r| warn(crate::words::Lint::place(r), reason)),
+            ),
+            Invalid::Majors | Invalid::NotUsed | Invalid::Tokenless => {}
+        }
+    }
+    out
 }
 
 // --- §2.3: ids, the claim set, the incumbent ----------------------------------------
@@ -487,6 +696,133 @@ pub fn read_mark(entry: &Value, governance: Governance) -> MarkRead {
             Mark::Serving
         }),
         findings,
+    }
+}
+
+/// What a follower reads of one descriptor (v2 §2.10, §2.14;
+/// `v2/descriptors.json`): the instance's run, and the governed
+/// interface's entry, its mark and the findings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DescriptorRead {
+    /// The run the descriptor states, `None` where it states none or
+    /// spells it otherwise than 4 or 8 lowercase hexadecimal digits (core
+    /// D000, D002): the follower then holds no run from it. Read whatever
+    /// the governance and the listing.
+    pub run: Option<Run>,
+    /// Whether an entry of `interfaces` is the interface's. An entry that
+    /// is not an object is read as the interface's, malformed.
+    pub listed: bool,
+    /// The entry's mark ([`read_mark`]), `None` unlisted or malformed.
+    pub mark: Option<Mark>,
+    /// [`read_mark`]'s findings, none unlisted.
+    pub findings: Vec<MarkFinding>,
+}
+
+/// Reads a descriptor, as JSON, for the interface `iface` whose governance
+/// the reader knows as `governance` (v2 §2.10, §2.14): its run, and the
+/// first entry of `interfaces` that is `iface`'s or is not an object, read
+/// by [`read_mark`]. `meta.zid` is not read: `redundancy.v2`'s fence reads
+/// no zid.
+#[must_use]
+pub fn read_descriptor(descriptor: &Value, iface: &str, governance: Governance) -> DescriptorRead {
+    let run = descriptor
+        .get("run")
+        .and_then(Value::as_str)
+        .and_then(Run::from_hex);
+    let entry = descriptor
+        .get("interfaces")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|e| {
+            e.as_object()
+                .is_none_or(|o| o.get("iface").and_then(Value::as_str) == Some(iface))
+        });
+    match entry {
+        Some(e) => {
+            let m = read_mark(e, governance);
+            DescriptorRead {
+                run,
+                listed: true,
+                mark: m.mark,
+                findings: m.findings,
+            }
+        }
+        None => DescriptorRead {
+            run,
+            listed: false,
+            mark: None,
+            findings: Vec::new(),
+        },
+    }
+}
+
+/// Whether a candidate draws a new run before it serves (v2 §2.10, a
+/// SHOULD): its own run, by width and value, is among the runs it read in
+/// other instances' descriptors of its address. A new run is core §4.3's:
+/// the candidate puts its descriptor again before it writes under it.
+#[must_use]
+pub fn draw_again(own: Run, read: impl IntoIterator<Item = Run>) -> bool {
+    read.into_iter().any(|r| r == own)
+}
+
+/// What one candidate's revision of the interface declares, as a tool
+/// reads it for an address's governance (v2 §2.2 "Across revisions",
+/// §2.15; `v2/declarations.json`'s `addresses`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Revision {
+    /// Governed by `major`, with its election.
+    Governed(Major, Election),
+    NotGoverned,
+    /// Invalid: it gives no election.
+    Invalid,
+    /// Its contract not read.
+    Unread,
+}
+
+impl Revision {
+    /// The revision of `c`, as a reader of both majors reads it
+    /// ([`either_declaration_of`], no tokenless set).
+    #[must_use]
+    pub fn of(c: &Contract) -> Revision {
+        match (either_declaration_of(c, false), Major::of(&c.uses)) {
+            (Declaration::Governed(e), Some(m)) => Revision::Governed(m, e),
+            (Declaration::Governed(_) | Declaration::NotGoverned, _) => Revision::NotGoverned,
+            (Declaration::Invalid(_), _) => Revision::Invalid,
+        }
+    }
+}
+
+/// The governance a tool reads of an address from the revisions its
+/// candidates' descriptors name, one entry a revision (v2 §2.2, §2.15):
+/// `no_contract` where none is given, or one is unread or invalid; else
+/// `not_governed` where none is governed; else `disagree` where one is not
+/// governed, or the governed ones give two elections; else their one
+/// election. The major of a governed revision takes no part: a
+/// `redundancy.v1` candidate and a `redundancy.v2` one with one election
+/// are one election.
+#[must_use]
+pub fn governance(revisions: impl IntoIterator<Item = Revision>) -> Governance {
+    let mut any = false;
+    let mut elections = BTreeSet::new();
+    let mut not_governed = false;
+    for r in revisions {
+        any = true;
+        match r {
+            Revision::Unread | Revision::Invalid => return Governance::NoContract,
+            Revision::NotGoverned => not_governed = true,
+            Revision::Governed(_, e) => {
+                elections.insert(e);
+            }
+        }
+    }
+    if !any {
+        return Governance::NoContract;
+    }
+    match (elections.len(), not_governed) {
+        (0, _) => Governance::NotGoverned,
+        (1, false) => Governance::Governed(*elections.iter().next().expect("one")),
+        _ => Governance::Disagree,
     }
 }
 

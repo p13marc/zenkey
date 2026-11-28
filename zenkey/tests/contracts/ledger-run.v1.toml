@@ -1,0 +1,25 @@
+# redundancy.v2's scenarios (#987 N2; spec/profiles/redundancy/scenarios-v2.md):
+# ledger.v1's revision 1.1, a single writer fenced by run. Its `uses` moved
+# from redundancy.v1 to redundancy.v2, a review (core §9.8); everything else
+# is ledger.v1.toml's.
+[interface]
+name  = "ledger"
+major = 1
+minor = 1
+uses  = ["redundancy.v2"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.balance]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.entries]
+kind = "stream"
+type = { raw = "text/plain" }
+
+[resources.append]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }

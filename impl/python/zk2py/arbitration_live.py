@@ -99,6 +99,7 @@ class Actuator:
         import zenoh
 
         from .owner import Owner, resolve_providers
+        from .redundancy_v2 import governing_major
 
         system, service = address.split("/", 1)
         canon, prov = contract.canonical, held.canonical
@@ -119,9 +120,12 @@ class Actuator:
         self._init_runtime(
             address=address, iface=prov["interface"], decl=decl,
             bindings=resolve_providers(list(bindings), system), params=ab.resolve_params(params, address),
-            # §2.5 outcome 6: "Which revision governs is the one the consumer
-            # holds (§2.3): governed when its contract's uses lists redundancy.v1"
-            governed="redundancy.v1" in prov.get("uses", []),
+            # §2.5 outcome 6 (0.7): "Which revision governs is the one the
+            # consumer holds (§2.3). It is governed when its contract's uses
+            # lists redundancy.v1 or redundancy.v2, and read by the major it
+            # lists (redundancy.v2 §2.2)."
+            governed=governing_major(prov.get("uses", [])) is not None,
+            major=governing_major(prov.get("uses", [])) or 1,
             lifespan=tm.LifespanReading(td, epsilon_ms) if epsilon_ms is not None and td.lifespan_ms else None,
             angle_key=(f"zk2/{address}/{canon['interface']}/{state[0]['token']}/{state[0]['template']}"
                        if state else None),
@@ -171,15 +175,22 @@ class Actuator:
                       params: dict[str, str], governed: bool, lifespan: tm.LifespanReading | None,
                       angle_key: str | None, emit: Callable[[str], None], warn: Callable[[str], None],
                       deliver: Callable[[str, bytes], None] | None, reread_delay_s: float,
-                      infer_moves: bool) -> None:
+                      infer_moves: bool, major: int = 1) -> None:
         """Every attribute the runtime's methods read, set in one place, for
         an actuator and for a tool's view alike (review-bot on PR #919):
         ``bindings`` and ``params`` already resolved, the sessions and
         subscriptions empty until the caller declares them."""
         self.address = address
         self.governed = governed
+        #: the major of redundancy that governs (0.7): 1 by meta.zid, 2 by run
+        self.major = major
         #: each holder's meta.zid, by (address, instance), from its descriptor
         self.zids: dict[tuple[str, str], str] = {}
+        #: redundancy.v2 §2.10: every run each instance's descriptors stated,
+        #: by (address, instance), kept for as long as it follows
+        self.runs: dict[tuple[str, str], set[Any]] = {}
+        #: what outcome 6 counted unattributed under redundancy.v2 (0.7)
+        self.unattributed = 0
         self._getting: set[tuple[str, str]] = set()
         #: the margin after an open before its round trip (observer §3.7, 0.56)
         self.open_margin_s = 0.1
@@ -229,6 +240,29 @@ class Actuator:
         self.selectors = [f"zk2/{e}/@zk/alive/{iface}/**" for e in self.bindings]
 
     # -- the events ---------------------------------------------------------------------------
+
+    def _incumbent_by_run(self, key: str, run: Any) -> bool:
+        """§2.5 outcome 6 under ``redundancy.v2`` (text 0.7): "its run is not
+        one of the incumbent's"; "An unattributed sample is not_incumbent ...
+        An arbiter does not wait: it counts the sample now, and the read it
+        asks attributes the samples after it" (the lock held)."""
+        from . import keys
+
+        p = keys.parse(key)
+        if p is None or p["form"] != "data":
+            return True  # an earlier outcome decides it
+        address = f"{p['system']}/{p['service']}"
+        lowest = self.incumbent_of(address)
+        if lowest is None or run is None:
+            return False
+        if run in self.runs.get((address, lowest), set()):
+            return True
+        if not any(run in rs for (a, _), rs in self.runs.items() if a == address):
+            # unattributed: counted now, and a read of the holder's descriptor
+            # asked, which attributes the samples after it
+            self.unattributed += 1
+            self._get_descriptor(address, lowest, again=True)
+        return False
 
     def _incumbent(self, key: str, stamp_id: str | None) -> bool:
         """``redundancy.v1`` §2.10, as §2.5's outcome 6 reads it: a sample is
@@ -303,11 +337,12 @@ class Actuator:
                 for inst in held:
                     self._get_descriptor(address, inst, wait=True)
 
-    def _get_descriptor(self, address: str, inst: str, wait: bool = False) -> None:
+    def _get_descriptor(self, address: str, inst: str, wait: bool = False, again: bool = False) -> None:
         """A holder's descriptor, for its ``meta.zid``, by a GET on the
         reader (core §3.3), once at a time."""
         with self.lock:
-            if (address, inst) in self.zids or (address, inst) in self._getting or self.closed:
+            held = (address, inst) in (self.runs if self.major == 2 else self.zids)
+            if (held and not again) or (address, inst) in self._getting or self.closed:
                 return
             self._getting.add((address, inst))
 
@@ -353,7 +388,14 @@ class Actuator:
             if self.lifespan is not None and not delete:
                 st = None if ts is None else tm.Stamp(wall - ts.get_time_as_ntp64().as_nanos(), str(ts.get_id()))
                 expired = self.lifespan.judge(st).verdict == tm.EXPIRED
-            incumbent = delete or self._incumbent(key, None if ts is None else str(ts.get_id()))
+            if delete:
+                incumbent = True
+            elif self.governed and self.major == 2:
+                from .redundancy_v2 import Run
+
+                incumbent = self._incumbent_by_run(key, Run.of(read.stamp))
+            else:
+                incumbent = self._incumbent(key, None if ts is None else str(ts.get_id()))
             d = self.arb.sample(time.monotonic_ns(), key, delete=delete, expired=expired, incumbent=incumbent)
             self._handle(d)
             if d.outcome == ab.DELIVERED:
@@ -465,6 +507,14 @@ class Actuator:
     def _take_descriptor(self, doc: Any) -> None:
         if not isinstance(doc, dict):
             return
+        from .redundancy_v2 import Run
+
+        run = Run.parse(doc.get("run"))
+        if run is not None and isinstance(doc.get("service"), str) and isinstance(doc.get("instance"), str):
+            with self.lock:
+                # redundancy.v2 §2.10: "It keeps each run it read for as long
+                # as it follows the address."
+                self.runs.setdefault((doc["service"], doc["instance"]), set()).add(run)
         zid = (doc.get("meta") or {}).get("zid")
         if not isinstance(zid, str):
             return
@@ -738,7 +788,7 @@ class ToolView(Actuator):
     of its receive path within the last deadline is ``lost`` (observer §5.2)."""
 
     def __init__(self, session: Any, watch: Any, interface: str, decl: ab.Declaration, bindings: list[str],
-                 params: dict[str, str], *, reader: Any = None, governed: bool = False,
+                 params: dict[str, str], *, reader: Any = None, governed: bool | int = False,
                  warn: Callable[[str], None] | None = None) -> None:
         import zenoh
 
@@ -748,9 +798,13 @@ class ToolView(Actuator):
         # the actuator's own initialiser, with what a tool has: no address of
         # its own, no application, and (§2.14, text 0.3) "the tool's view
         # states no ε, and no sample is expired"
+        # §2.12 (0.7): governed by the one major every revision held lists;
+        # ``governed`` is that major (True is text 0.3's, redundancy.v1)
+        major = 2 if governed == 2 else 1
         self._init_runtime(address="", iface=interface, decl=decl, bindings=bindings, params=params,
-                           governed=governed, lifespan=None, angle_key=None, emit=lambda line: None,
-                           warn=warn or (lambda line: None), deliver=None, reread_delay_s=0.1, infer_moves=True)
+                           governed=bool(governed), lifespan=None, angle_key=None, emit=lambda line: None,
+                           warn=warn or (lambda line: None), deliver=None, reread_delay_s=0.1, infer_moves=True,
+                           major=major)
         self.session = session
         self.watch = watch
         self.reader = reader if reader is not None else session

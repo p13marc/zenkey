@@ -2082,6 +2082,100 @@ def _redundancy_conclusions(path: Path) -> list[Result]:
     return out
 
 
+def _redundancy_v2_declarations(path: Path) -> list[Result]:
+    """redundancy.v2 §2.2 (#609, round 128): a contract's uses and resources,
+    and the tokenless set -> its declaration; an address's candidates'
+    revisions -> the governance a tool reads (§2.2 "Across revisions",
+    §2.15)."""
+    from . import redundancy_v2 as r2
+
+    doc = _load_json(path)
+    out = []
+    for i, c in enumerate(doc["cases"]):
+        got = r2.declaration(c["contract"]["uses"], c["contract"]["resources"], c["tokenless"]).as_json()
+        out.append(_check(f"v2 declarations #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(doc["addresses"]):
+        got = {"governance": r2.governance(c["revisions"])}
+        out.append(_check(f"v2 addresses #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _redundancy_v2_descriptors(path: Path) -> list[Result]:
+    """redundancy.v2 §2.10, §2.14 (#609, round 128): a descriptor, the
+    governed interface and its governance -> its run, listing, mark and
+    findings."""
+    from . import redundancy_v2 as r2
+
+    out = []
+    for i, c in enumerate(_load_json(path)["cases"]):
+        got = r2.read_descriptor(c["descriptor"], c["iface"], c["governance"]).as_json()
+        out.append(_check(f"v2 descriptors #{i}: {c['note']}", got, c["expect"]))
+    return out
+
+
+def _redundancy_v2_fences(path: Path) -> list[Result]:
+    """redundancy.v2 §2.10, §2.17 (#609, round 128): one sample against a
+    follower's state -> the rule's decision; a follower's arrivals -> what
+    each does under the hold for one read; a candidate's own run and the
+    runs it read -> whether it draws again."""
+    from . import redundancy_v2 as r2
+
+    doc = _load_json(path)
+    out = []
+    for i, c in enumerate(doc["samples"]):
+        smp = c["sample"]
+        run = r2.sample_run(smp["form"], bytes.fromhex(smp["bytes"]) if "bytes" in smp else None, smp.get("chunk"))
+        got = r2.decide(r2.View.of(c["follower"]), run, smp.get("stamp"), bool(c["read_ended"])).as_json()
+        out.append(_check(f"v2 fences samples #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(doc["sequences"]):
+        start = c["start"]
+        view = r2.View(set(start.get("holders") or []),
+                       {k: r2.Known(2, {r for r in (r2.Run.parse(x) for x in v) if r is not None})
+                        for k, v in (start.get("runs") or {}).items()})
+        h = r2.Hold(view)
+        got = []
+        for st in c["steps"]:
+            if "sample" in st:
+                x = st["sample"]
+                got.append(h.sample(x["id"], x["key"], x["kind"], r2.Run.parse(x["run"]), x["seq"]).as_json())
+            elif "token" in st:
+                got.append(h.token(st["token"]["instance"], bool(st["token"]["held"])).as_json())
+            elif "descriptor" in st:
+                got.append(h.descriptor(st["descriptor"]["instance"], r2.Run.parse(st["descriptor"]["run"]))
+                           .as_json())
+            elif "read_ends" in st:
+                got.append(h.read_ends([(d["instance"], r2.Run.parse(d["run"]), None, None)
+                                        for d in st["read_ends"]["descriptors"]]).as_json())
+            else:
+                got.append({"unknown step": sorted(st)})
+        out.append(_check(f"v2 fences sequences #{i}: {c['note']}", got, c["expect"]))
+    for i, c in enumerate(doc["draws"]):
+        out.append(_check(f"v2 fences draws #{i}: {c['note']}", {"draw_again": r2.draw_again(c["own"], c["read"])},
+                          c["expect"]))
+    return out
+
+
+#: redundancy.v2's fixtures (``conformance/v2/``), by file name; an unknown
+#: file fails, as in :data:`PROFILE_FIXTURES`.
+REDUNDANCY_V2_FIXTURES: dict[str, Callable[[Path], list[Result]]] = {
+    "declarations.json": _redundancy_v2_declarations, "descriptors.json": _redundancy_v2_descriptors,
+    "fences.json": _redundancy_v2_fences,
+}
+
+
+def _redundancy_v2(directory: Path) -> list[Result]:
+    out: list[Result] = []
+    for path in sorted(directory.iterdir()):
+        if path.name == "README.md":
+            continue
+        run = REDUNDANCY_V2_FIXTURES.get(path.name)
+        if run is None:
+            out.append((f"v2/{path.name}", False, "an unknown fixture file: the runner does not read it"))
+            continue
+        out += run(path)
+    return out
+
+
 def _timing_declarations(path: Path) -> list[Result]:
     """timing.v1 §2.2, §2.3, §2.5: a resolved resource (or its layers), or a
     requirement -> its declaration."""
@@ -2247,7 +2341,7 @@ PROFILE_FIXTURES: dict[str, dict[str, Callable[[Path], list[Result]]]] = {
     "redundancy": {"declarations.json": _redundancy_declarations, "descriptors.json": _redundancy_descriptors,
                    "elections.json": _redundancy_elections, "heals.json": _redundancy_heals,
                    "lifecycle.json": _redundancy_lifecycle, "conclusions.json": _redundancy_conclusions,
-                   "polls.json": _redundancy_polls},
+                   "polls.json": _redundancy_polls, "v2": _redundancy_v2},
     "timing": {"declarations.json": _timing_declarations, "deadlines.json": _timing_deadlines,
                "lifespans.json": _timing_lifespans, "periods.json": _timing_periods,
                "conclusions.json": _timing_conclusions},
@@ -4355,7 +4449,8 @@ def family_readings(root: Path) -> list[Result]:
         + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
         + _round123_readings(root) + _round124_readings(root) + _round125_readings(root) \
         + _round126_readings(root) + _round127_readings(root) + _round127b_readings(root) \
-        + _round127c_readings(root)
+        + _round127c_readings(root) \
+        + _round128_readings(root) + _round128b_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -5172,15 +5267,15 @@ def _round122_readings(root: Path) -> list[tuple[str, Any, Any]]:
                   "wait_under_lease transport.wait_before_close_ms"], [stock, two], True, True, 6]))
     out.append(("link.v2 0.25's plan case (zk2py agrees): 51 is case 0's router on zenoh-1.10.2, its policy case 0's "
                 "but the binding, its plan case 0's but the plan's binding, and each principal narrowed over the "
-                "same nine; 52 cases, 53 since 0.26 (round 125), 54 since 0.27 (round 126) and 55 since 0.28 "
-                "(round 127)",
+                "same nine; 52 cases, 53 since 0.26 (round 125), 54 since 0.27 (round 126), 55 since 0.28 "
+                "(round 127) and 56 since 0.29 (round 128)",
                 [len(plan), moved(plan[0]["policy"], plan[51]["policy"]),
                  differs(plan[0]["expect"], plan[51]["expect"]), plan[51]["expect"].get("binding"),
                  plan[51]["expect"]["narrowed"] == plan[0]["expect"]["narrowed"],
                  [c for c in ("contracts", "implements", "narrow") if plan[0].get(c) != plan[51].get(c)]]
                 + missing(llog, "Case 51 is case 0's router on `zenoh-1.10.2`. Its plan is case 0's but for its "
                                 "`binding`, and each principal is narrowed over the same nine. 52 cases."),
-                [55, [stock, two], ["/binding"], "zenoh-1.10.2", True, []]))
+                [56, [stock, two], ["/binding"], "zenoh-1.10.2", True, []]))
     return out
 
 
@@ -5714,7 +5809,8 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "0.112; the index's rows; F-624, resolved by the renumbering (round 127's mend): core's entries go "
                 "from 0.117 to 0.118 and link's from link.v2 0.27 to 0.28, and no 0.119 or link.v2 0.29 entry is "
                 "round 127's; F-626, resolved by link.v2 0.28's last renumbering: v2/plan.json's case 54 and its "
-                "description say \"link.v2 0.28\", never 0.29",
+                "description say \"link.v2 0.28\", never 0.29; since link.v2 0.29 (round 128) the description names "
+                "0.29 for its case 55 alone",
                 [core_at is not None and _at_least(core_at.group(1), "0.118"),
                  _at_least(at("profiles/link/v2.md"), "0.28"), _at_least(at("profiles/alarms/v2.md"), "0.2"),
                  _at_least(at("profiles/desired/v2.md"), "0.3"),
@@ -5727,7 +5823,7 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  "## 0.119 — 2026-11-28: editorial: §9.2's cascades 7 and 8" in log,
                  "## link.v2 0.29 — 2026-11-28: editorial: `v2/plan.json`'s case 54" in llog,
                  ["link.v2 0.29" in plan_doc["cases"][54]["note"], "link.v2 0.29" in plan_doc["cases"][54]["policy"],
-                  "link.v2 0.29" in plan_doc["description"]]]
+                  "link.v2 0.29" in plan_doc["description"].split("Case 55,")[0]]]
                 + missing(log, "## 0.118 — 2026-11-28: editorial: §9.2's cascades 7 and 8 read E044 as a type's "
                                "placement, never its declaration, as both linters do, no keyword changed (#1152)")
                 + missing(llog, "## link.v2 0.28 — 2026-11-28: editorial: `v2/plan.json`'s case 54, a collection two "
@@ -5771,7 +5867,7 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "`host`, as `link.v1` §2.3 reads it. The plan gives it no section and weighs no horizon of "
                           "it (below, §2.16). `[F: v2/plan.json]`")
                 + missing(llog, "**Counted `link`,** it would fail twice."),
-                [55, [1211, 160, 60], [1211, 160, 60], [1267, 167, 30],
+                [56, [1211, 160, 60], [1211, 160, 60], [1267, 167, 30],
                  [("block_over_batch", "freshness.v2/stream/heartbeats/link"),
                   ("horizon_under_face", "freshness.v2/stream/heartbeat/quiet.v1"),
                   ("horizon_under_face", "freshness.v2/stream/heartbeats/link")],
@@ -5882,6 +5978,386 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "so, and acts on neither put. `Rp` and `Run` receive nothing."),
                 [[], ["0007"], [("sample", "0007/1", stop), ("sample", "0007/0", stop), ("no_entry", "0007", stop),
                                 ("sample", "0008/0", "given")]]))
+    return out
+
+
+def _round128_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Core 0.119, redundancy.v2 0.1, freshness.v2 0.14, link.v2 0.29,
+    arbitration.v1 0.7 and hostid.v1 0.10 (#609, round 128; #987): each
+    text at its version with its entry; the sentences that now read either
+    major, as zk2py's owner, its arbitration view and its device check read
+    them; and the reference's five new contracts as zk2py lints them. No
+    session is opened."""
+    import re
+
+    from . import arbitration as ab, link_v2, redundancy_v2 as r2
+    from .contract import load_contract
+    from .owner import Owner, OwnerRefused
+
+    spec = root.parent
+    repo = spec.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    def at(rel: str) -> str | None:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", flat(rel))
+        return m.group(1) if m else None
+
+    core, index = flat("core.md"), flat("profiles/README.md")
+    core_at = re.search(r"\*\*Version (\d+\.\d+)\*\*", core)
+    log, rlog = flat("CHANGELOG.md"), flat("profiles/redundancy/CHANGELOG.md")
+    flog, llog = flat("profiles/freshness/CHANGELOG.md"), flat("profiles/link/CHANGELOG.md")
+    alog, hlog = flat("profiles/arbitration/CHANGELOG.md"), flat("profiles/hostid/CHANGELOG.md")
+    r2t, r2s = flat("profiles/redundancy/v2.md"), flat("profiles/redundancy/scenarios-v2.md")
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("round 128's texts at their versions or later, each with its entry: core 0.119, redundancy.v2 "
+                "0.1 (experimental, written against core 0.119, 15 scenario sections), freshness.v2 0.14, link.v2 "
+                "0.29, arbitration.v1 0.7 (written against core 0.119) and hostid.v1 0.10; the index's row",
+                [core_at is not None and _at_least(core_at.group(1), "0.119"),
+                 _at_least(at("profiles/redundancy/v2.md"), "0.1"), _at_least(at("profiles/freshness/v2.md"), "0.14"),
+                 _at_least(at("profiles/link/v2.md"), "0.29"), _at_least(at("profiles/arbitration/v1.md"), "0.7"),
+                 _at_least(at("profiles/hostid/v1.md"), "0.10"),
+                 re.search(r"\| \[`redundancy\.v2`\]\(redundancy/v2\.md\) \| 0\.1 \| experimental \| none \| 0\.119 \|",
+                           index) is not None,
+                 len(re.findall(r"## §(\d+) ", (spec / "profiles/redundancy/scenarios-v2.md").read_text()))]
+                + missing(log, "## 0.119 — 2026-11-28: a candidate of either major of `redundancy` draws a 32-bit "
+                               "run and is refused a tokenless interface; only `redundancy.v1`'s session stamps, no "
+                               "keyword changed (#987)")
+                + missing(rlog, "## redundancy.v2 0.1 — 2026-11-28: a new major: no session stamp, the fence by the "
+                                "incumbent's run, the state answered by snapshot (#987)")
+                + missing(flog, "## `v2.md` 0.14 — 2026-11-28: editorial: a standby of either major of `redundancy` "
+                                "sends no heartbeat")
+                + missing(llog, "## link.v2 0.29 — 2026-11-28: §2.5: a device implementing an interface whose "
+                                "revision uses `redundancy.v2` is refused, `presence_required`")
+                + missing(alog, "## 0.7 — 2026-11-28: §2.5's outcome 6 reads either major of redundancy (#987)")
+                + missing(hlog, "## 0.10 — 2026-11-28: a recognised standby is one of either major of `redundancy` "
+                                "(#987)")
+                + missing(r2t, "| **Written against** | core 0.119 (")
+                + missing(flat("profiles/arbitration/v1.md"), "| **Written against** | core 0.119 ("),
+                [True] * 7 + [15]))
+
+    # -- core 0.119's three sentences, as zk2py's owner reads them -------------------------------
+    cdir = repo / "zenkey" / "tests" / "contracts"
+    ledger_run = load_contract(cdir / "ledger-run.v1.toml", spec_dir=spec)
+    ledger_v1 = load_contract(cdir / "ledger.v1.toml", spec_dir=spec)
+
+    def posture(c: Any, **kw: Any) -> list[Any]:
+        o = Owner("lab", "ledger", [c], connect="tcp/127.0.0.1:1", standby={c.interface}, **kw)
+        try:
+            o._plan()
+            refusal = None
+        except OwnerRefused as e:
+            refusal = str(e).split(": ", 1)[1].split(" (")[0]
+        o.session = None
+        run = o.take_run()
+        return [o.candidate, o.stamping_candidate, o.hlc, run[0], refusal]
+
+    out.append(("core 0.119 §4.3, §8.2 step 2 and the posture's exception, as zk2py's owner reads them: a "
+                "candidate of either major draws a 32-bit run; only a redundancy.v1 candidate's session stamps; "
+                "step 2 refuses a governed interface of either major in the tokenless set, and a first hop's",
+                [posture(ledger_v1), posture(ledger_run), posture(ledger_run, tokenless=["ledger.v1"])[4],
+                 posture(ledger_v1, tokenless=["ledger.v1"])[4]]
+                + missing(core, "when it is a candidate of a governed interface, under either major of the profile",
+                          "And it refuses one whose tokenless set names an interface it implements whose contract "
+                          "uses `redundancy.v1` or `redundancy.v2`.",
+                          "**No exception under `redundancy.v2`.** Its candidate's session runs as any owner's"),
+                [[True, True, True, 32, None], [True, False, False, 32, None],
+                 "its redundancy.v2 declaration is invalid: tokenless",
+                 "its redundancy.v1 declaration is invalid: tokenless"]))
+
+    # -- the reference's five new contracts, as zk2py reads them ----------------------------------
+    # The fingerprints are the reference's `zk2 contract fingerprint` of 91c62f0e, run as a black box.
+    ref_fp = {"ledger-run.v1": "a2c4c2ef6b8d67f8", "ledger-run-appendall.v1": "20675b0368a25f31",
+              "beacon-governed-run.v2": "450f61d133e318e4", "steer-governed-run.v1": "7a39c6bfc74b0595",
+              "valve-run.v1": "19a5d56da2d87f84"}
+    got_c = {}
+    for name in ref_fp:
+        c = load_contract(cdir / f"{name}.toml", spec_dir=spec)
+        major, d = r2.either_declaration(c.canonical)
+        got_c[name] = [c.valid, c.fingerprint.removeprefix("sha256:")[:16] == ref_fp[name], major, d.as_json(),
+                       r2.lint(c.canonical)]
+    out.append(("the reference's five new contracts (zenkey/tests/contracts/): each lints clean, has the "
+                "reference's fingerprint, and is governed by redundancy.v2, under claim but valve-run.v1's external",
+                got_c,
+                {"ledger-run.v1": [True, True, 2, {"declaration": "governed", "election": "claim"}, []],
+                 "ledger-run-appendall.v1": [True, True, 2, {"declaration": "governed", "election": "claim"}, []],
+                 "beacon-governed-run.v2": [True, True, 2, {"declaration": "governed", "election": "claim"}, []],
+                 "steer-governed-run.v1": [True, True, 2, {"declaration": "governed", "election": "claim"}, []],
+                 "valve-run.v1": [True, True, 2, {"declaration": "governed", "election": "external"}, []]}))
+
+    # -- redundancy.v2 §2.2's lint, either major ---------------------------------------------------
+    def canon(uses: list[str], election: Any, explicit: bool) -> dict[str, Any]:
+        return {"uses": uses, "resources": [
+            {"kind": "state", "token": "state", "template": "balance", "annotations": {"redundancy.election": election}},
+            {"kind": "stream", "token": "@stream" if explicit else "stream", "template": "entries",
+             "explicit": explicit, "annotations": {"redundancy.election": election}}]}
+
+    out.append(("redundancy.v2 §2.2: \"A contract linter SHOULD warn of explicit_stream, as v1 §2.2 says of value "
+                "and disagrees\": zk2py's lint, either major, as the reference's `zk2 contract lint` warns (live, "
+                "round 128): an explicit stream under v2 alone; value on each resource under either",
+                [r2.lint(canon(["redundancy.v2"], "claim", True)), r2.lint(canon(["redundancy.v1"], "claim", True)),
+                 r2.lint(canon(["redundancy.v2"], "bogus", False)), r2.lint(canon(["redundancy.v1"], "bogus", False))]
+                + missing(r2t, "A contract linter SHOULD warn of `explicit_stream`, as v1 §2.2 says of `value` and "
+                               "`disagrees`."),
+                [[("explicit_stream", "@stream/entries")], [],
+                 [("value", "state/balance"), ("value", "stream/entries")],
+                 [("value", "state/balance"), ("value", "stream/entries")]]))
+
+    # -- link.v2 0.29's case 55 ------------------------------------------------------------------
+    plan = _load_json(spec / "profiles" / "link" / "conformance" / "v2" / "plan.json")["cases"]
+    c55 = plan[55]
+    variant = {**c55, "interfaces": {"gov.v1": {**c55["interfaces"]["gov.v1"], "uses": ["freshness.v2"]}}}
+    out.append(("link.v2 0.29 §2.5: case 55, case 25's device on gov.v1 under redundancy.v2, is refused "
+                "presence_required by zk2py's plan; the same interface using no major of redundancy plans",
+                [link_v2.plan(c55["policy"], c55["implements"], _link_interfaces(c55), c55.get("catalog")),
+                 "refused" in link_v2.plan(variant["policy"], variant["implements"], _link_interfaces(variant),
+                                           variant.get("catalog"))]
+                + missing(flat("profiles/link/v2.md"), "A device implements `archive.v1`, or an interface a revision "
+                                                       "given of which uses `redundancy.v1` or `redundancy.v2` (§2.5)."),
+                [c55["expect"], False]))
+
+    # -- arbitration.v1 0.7 §2.12's view -----------------------------------------------------------
+    v1u, v2u, nou = {"uses": ["timing.v1", "redundancy.v1"]}, {"uses": ["timing.v1", "redundancy.v2"]}, \
+        {"uses": ["timing.v1"]}
+    out.append(("arbitration.v1 0.7 §2.12: the tool's view reads outcome 6 \"governed when every revision of it "
+                "the tool holds lists one major of redundancy, and by that major\": zk2py's view_major",
+                [ab.view_major([v1u]), ab.view_major([v2u, v2u]), ab.view_major([v1u, v2u]), ab.view_major([v2u, nou]),
+                 ab.view_major([])]
+                + missing(flat("profiles/arbitration/v1.md"),
+                          "governed when every revision of it the tool holds lists one major of `redundancy`, and by "
+                          "that major.",
+                          "**An unattributed sample** is `not_incumbent`."),
+                [1, 2, None, None, None]))
+    return out
+
+
+def _round128b_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Round 128's mend (#609; #987): observer 0.38 §3.6's new rule (F-629),
+    redundancy.v2 §2.10's "How often" (F-631) and "Seed again" (F-630),
+    §13's Expected 2, and the entries' lines on what is now verified
+    (F-632), each sentence as the mend words it; and the new rule over
+    zk2py's presence view, session-free. No session is opened."""
+    import re
+
+    from . import presence as pr
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    def at(rel: str) -> str | None:
+        m = re.search(r"\| \*\*Text version\*\* \| (\d+\.\d+) \(", flat(rel))
+        return m.group(1) if m else None
+
+    obs, olog, rules = flat("observer.md"), flat("observer-CHANGELOG.md"), flat("RULES.md")
+    r2t, r2s, rlog, clog = (flat("profiles/redundancy/v2.md"), flat("profiles/redundancy/scenarios-v2.md"),
+                            flat("profiles/redundancy/CHANGELOG.md"), flat("CHANGELOG.md"))
+    once = re.search(r"\| Every rule, once \| (\d+) \|", rules)
+    reader = re.search(r"\| \[Observer: the tool role, and a reader\]\([^)]*\) \| (\d+), (\d+) of them a reader's \|",
+                       rules)
+    out: list[tuple[str, Any, Any]] = []
+    out.append(("observer 0.38 or later, with its entry: §3.6's new reader rule, \"A read never undoes a token heard "
+                "since it was asked\", its row in RULES.md citing scenarios-v2.md §13, 299 rules, the observer 88 and "
+                "28 of them a reader's; what did not change, and the entry's \"Not verified\"",
+                [_at_least(at("observer.md"), "0.38"), int(once.group(1)) if once else None,
+                 [int(reader.group(1)), int(reader.group(2))] if reader else None]
+                + missing(obs, "- **A read never undoes a token heard since it was asked.** The read and the watch "
+                               "ride two sessions, which no router orders (§3.7). A token the watch hears declared "
+                               "or withdrawn after the read is asked stands as the watch heard it: the read "
+                               "establishes nothing of it. A reader MUST NOT apply such a read's absence to a token "
+                               "heard declared since, nor its showing to one heard withdrawn since. "
+                               "`[Sc: profiles/redundancy/scenarios-v2.md §13]` That one is unconfirmed, and owes "
+                               "a read.")
+                + missing(rules, "| [§3.6](observer.md#36-absence), *reader* | **A read never undoes a token heard "
+                                 "since it was asked.** … A reader MUST NOT apply such a read's absence to a token "
+                                 "heard declared since, nor its showing to one heard withdrawn since. | "
+                                 "`[Sc: profiles/redundancy/scenarios-v2.md §13]` |")
+                + missing(olog, "## 0.38 — 2026-11-29: §3.6: a read never undoes a token heard since it was asked "
+                                "(#987)",
+                          "**What deliberately did not change.** The read again after a withdrawal, its SHOULD and "
+                          "what it establishes of every token the watch heard nothing of since.",
+                          "**Not verified.** The reference's follower is changed with this entry; zk2py's follower "
+                          "already read it so (0 of 54)."),
+                [True, 299, [88, 28]]))
+
+    # -- the new rule over zk2py's presence view ---------------------------------------------
+    a = "zk2/lab/beacon/@zk/alive/beacon.v2/00000000000000aa/0000000000000001"
+    b = "zk2/lab/beacon/@zk/alive/beacon.v2/00000000000000bb/0000000000000001"
+    h = ("alive", "lab", "beacon", "beacon.v2")
+    complete = lambda *ks: ("read", ("complete", list(ks)))  # noqa: E731
+    cases = {
+        # F-629's shape: A withdrawn, the read again asked, B heard declared
+        # meanwhile, the read answered without B
+        "B heard since the ask, the read without it": [("put", a), ("delete", a), ("ask", None), ("put", b),
+                                                      complete()],
+        # the read's absence applied: B heard before the ask
+        "B heard before the ask, the read without it": [("put", a), ("put", b), ("delete", a), ("ask", None),
+                                                       complete()],
+        # nothing heard since: the read establishes absence
+        "nothing heard since, the read empty": [("put", a), ("delete", a), ("ask", None), complete()],
+        # a reply sent before a withdrawal heard since brings nothing back
+        "B heard declared and withdrawn since, the read showing it": [("put", a), ("delete", a), ("ask", None),
+                                                                     ("put", b), ("delete", b), complete(b)],
+    }
+    got = {}
+    for name, ev in cases.items():
+        v = pr.fold(ev)
+        got[name] = [v.state(h)[0], sorted(v.holders[h].held) if h in v.holders else [], v.owes_read]
+    out.append(("observer 0.38 §3.6, \"A reader MUST NOT apply such a read's absence to a token heard since\": "
+                "zk2py's PresenceView folds a read as of when it was asked, so a token heard declared after the ask "
+                "stands over the read's absence (up), one heard before it is undone by a complete read (down), and "
+                "a withdrawal heard since stands over the read's showing (unobservable, a read owed again)",
+                got,
+                {"B heard since the ask, the read without it": [pr.UP, [b], False],
+                 "B heard before the ask, the read without it": [pr.DOWN, [], False],
+                 "nothing heard since, the read empty": [pr.DOWN, [], False],
+                 "B heard declared and withdrawn since, the read showing it": [pr.UNOBSERVABLE, [], True]}))
+
+    # -- redundancy.v2 §2.10 and §13, as the mend words them ---------------------------------
+    out.append(("redundancy.v2 §2.10 (round 128's mend): \"How often\" (F-631), a follower started after a "
+                "standby's claim learns its run at the takeover from its descriptor, read at its token, and holds a "
+                "sample between the two; \"Seed again\" (F-630), the new incumbent's answers, a redundancy.v1 "
+                "incumbent's replies per key among them, with no omission rule over those; \"Never at a takeover\" "
+                "gone; §13's Expected 2, the run learnt at B's token and the step over 39 takeovers",
+                missing(r2t, "- **How often.** At a takeover, only for a follower that holds none of the new holder's "
+                             "runs. A standby states its run from its claim on (Appendix B). A follower started "
+                             "after that claim heard none of it, and a standby holds no interface token. So it "
+                             "learns the run from the new holder's descriptor, read at its token. A sample between "
+                             "the two is held. Otherwise, only at an incumbent's new run within its instance:",
+                        "- **Seed again.** A follower whose incumbent changes SHOULD read the interface's state "
+                        "again by core S4, and merge only the new incumbent's answers. `[Sc: §13, §15]` They are "
+                        "its snapshots, or its replies per key: a `redundancy.v1` incumbent's (v1 §2.10), and a per-key "
+                        "resource's (§2.6).",
+                        "leaves the follower's view. `[Sc: §13]` No omission rule applies to replies per key. For "
+                        "those members the follower keeps what the last incumbent held, as v1 §2.10's does.")
+                + ["Never at a takeover" in r2t, "merge only the new incumbent's snapshots" in r2t]
+                + missing(r2s, "After it, K accepts it under B's run. K learns that run from B's descriptor, read at "
+                               "B's token. A put between the two is held.",
+                          "- **K reads again after A's withdrawal** (observer §3.6). The read may come back without "
+                          "B's token, which K's watch heard after the read was asked. K keeps B as its incumbent: "
+                          "the read says nothing of that token. Over 39 takeovers, K never reads B gone. It accepts "
+                          "each later heartbeat of B's.")
+                + ["which B's descriptor stated from its claim on" in r2s],
+                [False, False, False]))
+
+    # -- F-632: the entries' lines on what is now verified -------------------------------------
+    out.append(("F-632 (round 128's mend): redundancy.v2 0.1's \"Not verified\" says two implementations ran it, "
+                "and its \"After zk2py's round 128\" names F-629 to F-631's answers; core 0.119's says what is "
+                "verified, and no longer that the reference refuses a candidate without timestamping",
+                missing(rlog, "- **Two implementations ran it, after the text.** The reference runs the fixtures and "
+                              "scenarios §1 to §15 as tests (#987's N2 and N3), and zk2py's round 128 ran all 153 "
+                              "fixture cases and §1, §9 and §13 to §15 live in both pairings (F-629 to F-632).",
+                        "**After zk2py's round 128.**",
+                        "- **\"How often\"** (F-631): a follower that holds none of the new holder's runs, started "
+                        "after its claim, learns the run at the takeover from its descriptor. A sample between the "
+                        "token and that read is held. \"Never at a takeover\" held only for a follower that had read "
+                        "the standby's descriptor. §13's Expected 2 says so.",
+                        "- **\"Seed again\"** (F-630) merges the new incumbent's answers: snapshots, or a "
+                        "`redundancy.v1` incumbent's replies per key. No omission rule applies to the latter.",
+                        "- **observer 0.38 §3.6** (F-629): a read never undoes a token heard since it was asked. §13 "
+                        "gains the step, over 39 takeovers.")
+                + ["No implementation has run a fixture or a scenario." in rlog]
+                + missing(clog, "**Verified.** The reference's `redundancy.v2` candidate runs its session without "
+                                "timestamping, and only a `redundancy.v1` candidate's stamps (#987's N2). zk2py's "
+                                "round 128 read this entry cold and ran both majors' candidates live.")
+                + ["The reference still refuses a candidate whose session runs without timestamping" in clog],
+                [False, False]))
+
+    # -- the new rule over zk2py's redundancy.v2 follower, its read again stood in -----------------
+    import queue
+    import threading
+    import time
+    import types
+
+    import zenoh
+
+    from . import live, redundancy_v2 as r2, redundancy_v2_live as rl
+
+    a_id, b_id = "00000000000000a1", "00000000000000b2"
+
+    def tok(inst: str, put: bool) -> Any:
+        return types.SimpleNamespace(key_expr=f"zk2/lab/beacon/@zk/alive/beacon.v2/{inst}/0000000000000001",
+                                     kind=zenoh.SampleKind.PUT if put else zenoh.SampleKind.DELETE)
+
+    def follower() -> Any:
+        f = rl.Follower.__new__(rl.Follower)
+        f.lock, f.view = threading.RLock(), r2.View()
+        f.hold = rl._Hold(f.view, f)
+        f._heard_at, f._gone_at, f._samples = {}, {}, {}
+        f.counts = {"accepted": 0, "discarded": {}, "held": 0, "superseded": 0, "omitted": 0, "reads": 0,
+                    "seeds": 0}
+        f.address, f.iface, f.kind, f._incumbent = "lab/beacon", "beacon.v2", "state", None
+        f._work, f.reader, f.t0 = queue.Queue(), None, time.monotonic()
+        f._rereading = True  # the read again is made here, by hand, never by its timer
+        f._again, f._started, f._early = False, True, {}
+        f.emit_fn = lambda j: None
+        f._get_descriptor = lambda inst: None
+        return f
+
+    def reread(f: Any, during: list[tuple[str, bool, str]], shows: list[str]) -> list[Any]:
+        """A's token heard then withdrawn; the read again asked, the watch
+        hearing ``during`` meanwhile ("since", stamped after the ask, or
+        "before", stamped before it but taken up after); the read complete,
+        showing ``shows``. What the follower then holds, and its counts."""
+        f._token((tok(a_id, True), time.monotonic()))
+        before = time.monotonic()
+        f._token((tok(a_id, False), time.monotonic()))
+        for inst, put, when in during:
+            if when == "before":
+                f._token((tok(inst, put), time.monotonic()))
+        presence = live.Presence(alive=[{"system": "lab", "service": "beacon", "iface": "beacon.v2",
+                                         "instance": i} for i in shows], complete=True)
+
+        def stood_in(session: Any, selector: str, timeout: float) -> Any:
+            for inst, put, when in during:
+                if when == "since":
+                    f._token((tok(inst, put), time.monotonic()))
+                elif when == "late":
+                    # heard by the watch before the ask, taken up by the
+                    # worker after it
+                    f._token((tok(inst, put), before))
+            return presence
+
+        real = live.list_presence
+        live.list_presence = stood_in  # type: ignore[assignment]
+        f._again = False  # A's withdrawal asked this read
+        try:
+            f._reread()
+        finally:
+            live.list_presence = real  # type: ignore[assignment]
+        return [sorted(f.view.holders), f.view.incumbent(),
+                {k: f.counts.get(k, 0) for k in ("kept_heard_since", "kept_withdrawn")}, f._again]
+
+    got_f = {
+        "B heard since the ask, the read without it": reread(follower(), [(b_id, True, "since")], []),
+        "B heard before the ask, the read without it": reread(follower(), [(b_id, True, "before")], []),
+        "B heard before the ask, taken up after it, the read without it":
+            reread(follower(), [(b_id, True, "late")], []),
+        "B heard declared and withdrawn since, the read showing it":
+            reread(follower(), [(b_id, True, "since"), (b_id, False, "since")], [b_id]),
+        "B never heard, the read showing it": reread(follower(), [], [b_id]),
+    }
+    out.append(("observer 0.38 §3.6 over zk2py's redundancy.v2 follower (redundancy_v2_live.Follower, round 128's "
+                "mend), its read again stood in: a token heard declared after the ask stands over the read's "
+                "absence, B kept as the incumbent (F-629); one heard before the ask is undone, by the time the "
+                "watch heard it even where the worker takes it up after the ask; a withdrawal heard since the ask "
+                "stands over the read's showing, and owes another read, the one in flight asked before it (zk2py's "
+                "reading, F-635); a token the watch missed is added",
+                got_f,
+                {"B heard since the ask, the read without it":
+                     [[b_id], b_id, {"kept_heard_since": 1, "kept_withdrawn": 0}, False],
+                 "B heard before the ask, the read without it":
+                     [[], None, {"kept_heard_since": 0, "kept_withdrawn": 0}, False],
+                 "B heard before the ask, taken up after it, the read without it":
+                     [[], None, {"kept_heard_since": 0, "kept_withdrawn": 0}, False],
+                 "B heard declared and withdrawn since, the read showing it":
+                     [[], None, {"kept_heard_since": 0, "kept_withdrawn": 1}, True],
+                 "B never heard, the read showing it":
+                     [[b_id], b_id, {"kept_heard_since": 0, "kept_withdrawn": 0}, False]}))
     return out
 
 
@@ -6854,12 +7330,13 @@ def _round99_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("F-461 answered (core 0.90 §4.3 \"A candidate's\", freshness.v2 0.5 §2.10): the guard holds a "
          "candidate's freshness.v2 members' writes, and a held write clears the member's bit until a write of it "
          "goes on; zk2py's owner since round 98 (Owner._unvouch_held), its re-put path too since round 99 "
-         "(freshness_v2_scenarios §2 step 6, live)",
+         "(freshness_v2_scenarios §2 step 6, live); since freshness.v2 0.14 (round 128) the parenthesis names "
+         "a redundancy.v1 candidate's session",
          missing(core, "A `redundancy.v1` candidate's session stamps every write (§8.2), so the guard holds every "
                        "write of its `freshness.v2` members too.",
                  "On a session without timestamping, a state of a contract that uses `freshness.v2` is one")
-         + missing(fv2, "Where the guard holds a member's write (a candidate's session stamps every write), the "
-                        "owner clears its bit until a write of it goes on."), []),
+         + missing(fv2, "Where the guard holds a member's write (a `redundancy.v1` candidate's session stamps every "
+                        "write), the owner clears its bit until a write of it goes on."), []),
         ("F-463 answered (core 0.90 §10 point 2): W105 reads the table of the major the contract uses; zk2py since "
          "round 98 (contracts' w105-telemetry-series and ok-telemetry-v2-series)",
          missing(core, "W105 reads the table of the major the contract uses"), []),
@@ -7498,11 +7975,12 @@ def _round103_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "and the static rules 75 since core 0.109's two, the owner still 88 (round 114); 295, the static rules "
                 "79 and the owner 90 since core 0.110's nine, the conditional read's (round 116); 297 and the static rules "
                 "81 since core 0.113's two, the ahead time's (round 120); 298 since core 0.115's one, a deployment's, the "
-                "static rules and the owner unmoved (round 125)",
+                "static rules and the owner unmoved (round 125); 299 since observer 0.38's one, a reader's, the static "
+                "rules and the owner unmoved (round 128's mend)",
                 missing(log, "`RULES.md` lists 250 rules, 4 more", "The owner class counts 76 where it counted 78",
                         "[`RULES.md`](RULES.md) lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more")
                 + [int(once.group(1)) if once else None, counted.get("Implementation: the static rules"),
-                   counted.get("Owner")], [298, 81, 90]))
+                   counted.get("Owner")], [299, 81, 90]))
     # §7.5's "Sizes", by zk2py's own writer.
     base = {"tag": 0, "run_width": 16, "run": 1, "asof": 9, "time": {"s": 3600, "ms": 250}, "index": 0,
             "more": False, "coll": 0, "live": [], "tombs": []}
@@ -8312,10 +8790,10 @@ def _round109_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "place (consumer 32); the row names a delete; 277 since core 0.107 (round 111); 283 since core 0.108 "
                 "(round 112); 284 since observer 0.34 (round 113); 286 since core 0.109 (round 114); 295 and the consumer "
                 "35 since core 0.110's three reader rules (round 116); 297 since core 0.113 (round 120); 298 since core "
-                "0.115 (round 125)",
+                "0.115 (round 125); 299 since observer 0.38, the consumer unmoved (round 128's mend)",
                 [int(every.group(1)) if every else None, counts.get("Consumer"),
                  "or a delete on an events key, whether a subscription heard it" in rules],
-                [298, "35", True]))
+                [299, "35", True]))
     # Round 109's findings, each text as it quotes it, so an answer moves it
     from .contract import load_contract
     from .owner import keeps_timestamp
@@ -8492,7 +8970,8 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
     once = re.search(r"^\| Every rule, once \| (\d+) \|", rules, re.M)
     out.append(("core 0.107's figures: RULES.md listed 277 rules, 274 in 0.106 (283 since core 0.108, round 112; 284 "
                 "since observer 0.34, round 113; 286 since core 0.109, round 114; 295 since core 0.110, round 116; 297 since core "
-                "0.113, round 120; 298 since core 0.115, round 125), the owner's the MUST NOT on `minor` and the two SHOULDs of a descriptor over 1 KB, of which core "
+                "0.113, round 120; 298 since core 0.115, round 125; 299 since observer 0.38, round 128's mend), the "
+                "owner's the MUST NOT on `minor` and the two SHOULDs of a descriptor over 1 KB, of which core "
                 "0.109 rewords the first and folds the second into the 1 KB SHOULD's MAY; the 1 KB "
                 "SHOULD's row shows the MAY that excepts it, as 0.109 words it",
                 missing(log, "`RULES.md` lists 277 rules, 274 in 0.106 (owner 88, 85 before)")
@@ -8503,7 +8982,7 @@ def _round111_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    sum(1 for t in owner33 if "That owner SHOULD also keep every member but" in t),
                    sum(1 for t in owner33 if "SHOULD stay within 1 KB" in t
                        and "So an owner MAY exceed 1 KB while the rest of its descriptor is within 512 B" in t)],
-                [298, 1, 1, 0, 1]))
+                [299, 1, 1, 0, 1]))
     # The checker, by §3.3's sentences and the schema: `minor` optional, an
     # integer of the record's uint64 where stated.
     nav = load_contract(dd / "contracts" / "nav.v2.toml", spec_dir=spec)
@@ -8762,7 +9241,8 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out: list[tuple[str, Any, Any]] = [
         ("freshness.v2 0.11 or later, link.v2 0.22 or later and observer 0.35 or later, each still written against "
          "core 0.108, and core 0.111 or later, each with its entry, each editorial; RULES.md listed 295 rules, as "
-         "core 0.110 left it (297 since core 0.113, round 120; 298 since core 0.115, round 125)",
+         "core 0.110 left it (297 since core 0.113, round 120; 298 since core 0.115, round 125; 299 since observer "
+         "0.38, round 128's mend)",
          [_at_least(header("profiles/freshness/v2.md")[0], "0.11"), header("profiles/freshness/v2.md")[1],
           _at_least(header("profiles/link/v2.md")[0], "0.22"), header("profiles/link/v2.md")[1],
           _at_least(header("observer.md")[0], "0.35"), header("observer.md")[1],
@@ -8771,7 +9251,7 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.22", "no keyword changed")
          + entry("observer-CHANGELOG.md", "0.35", "no keyword rule changed")
          + entry("CHANGELOG.md", "0.111", "no rule changed"),
-         [True, "0.108", True, "0.108", True, "0.108", True, 298]),
+         [True, "0.108", True, "0.108", True, "0.108", True, 299]),
     ]
 
     # -- apply.json's five cases, each under a reader changed where the entry says it pins --
@@ -9051,7 +9531,8 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "so none held such a collection: a plan "
                 "that counted it `link`, for the horizon or for the longest put, passed the file whole; link.v1's "
                 "plan.json draws the code, in cases that weigh no owner heartbeat; since link.v2 0.28 (round 127) "
-                "case 54, of 55, draws it, and F-573 is resolved: :func:`_round127_readings`",
+                "case 54, of 55, draws it, and F-573 is resolved: :func:`_round127_readings`; of 56 since link.v2 "
+                "0.29's case 55 (round 128), which draws no finding but its refusal",
                 [len(plan), [i for i, c in enumerate(plan) if "exposure_disagrees" in codes(c["expect"])],
                  bool([i for i, c in enumerate(plan1) if "exposure_disagrees" in codes(c["expect"])])]
                 + missing(l2, "- **A collection the revisions disagree on** is read `host`, as `link.v1` §2.3 reads "
@@ -9060,7 +9541,7 @@ def _round117_readings(root: Path) -> list[tuple[str, Any, Any]]:
                               "heartbeat is above `batch_bytes` (`block_over_batch`). `[F: v2/plan.json]`")
                 + missing(llog, "- **Now:** the plan reads it `host`, for the horizon and for the longest put. Both "
                                 "implementations do."),
-                [55, [54], True]))
+                [56, [54], True]))
 
     # -- scope/faces.json's four cases, v2/transport.json's five, carries.json's three ------
     faces = _load_json(root / "scope" / "faces.json")["cases"]
@@ -9179,8 +9660,9 @@ def _round116_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out: list[tuple[str, Any, Any]] = [
         ("core 0.110 or later, with its entry; observer.md 0.34 or later; RULES.md listed 295 rules, the owner 90, the "
          "consumer 35 and the static rules 79 (297 and 81 since core 0.113, round 120; 298 since core 0.115, round "
-         "125); envelope/held.json holds 9 writes, 34 gets, 22 replies and 23 answers, "
-         "88 cases; seed/held.json 12 asks and 29 cases, 41 (30 and 42 since core 0.115's case 29, round 125); carries.json 46 reads, the last nine a held stamp's "
+         "125; 299 since observer 0.38, round 128's mend); envelope/held.json holds 9 writes, 34 gets, 22 replies "
+         "and 23 answers, 88 cases; seed/held.json 12 asks and 29 cases, 41 (30 and 42 since core 0.115's case 29, "
+         "round 125); carries.json 46 reads, the last nine a held stamp's "
          "bytes on a put's key; seed/snapshot.json 45 cases, of which 42 state `collections` and 41 give one (the "
          "entry counts \"the 41 cases … that give `collections`\")",
          [m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.110"),
@@ -9198,7 +9680,7 @@ def _round116_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    "`conformance/envelope/carries.json` gains 9 reads",
                    "- **Four rules**, all static: the writer's, the GET's parse, the reply's tag, and the round "
                    "trip.", "`observer.md` stays 0.34."),
-         [True, True, 298, 90, 35, 81, [9, 34, 22, 23], [12, 30], 46, 9, [45, 42, 41]]),
+         [True, True, 299, 90, 35, 81, [9, 34, 22, 23], [12, 30], 46, 9, [45, 42, 41]]),
         ("core 0.110, §7.5 and §4.2: the nine rules as the texts state them, and S2's and the member read's one "
          "exception",
          missing(core,
@@ -9424,13 +9906,13 @@ def _round115_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out: list[tuple[str, Any, Any]] = [
         ("freshness.v2 0.10 or later and link.v2 0.21 or later, both still written against core 0.108, each with its "
          "entry, both editorial; RULES.md listed 286 rules, as round 114 left it (295 since core 0.110, round 116; 297 since core "
-         "0.113, round 120; 298 since core 0.115, round 125)",
+         "0.113, round 120; 298 since core 0.115, round 125; 299 since observer 0.38, round 128's mend)",
          [_at_least(header("profiles/freshness/v2.md")[0], "0.10"), header("profiles/freshness/v2.md")[1],
           _at_least(header("profiles/link/v2.md")[0], "0.21"), header("profiles/link/v2.md")[1],
           int(once.group(1)) if once else None]
          + entry("profiles/freshness/CHANGELOG.md", "`v2.md` 0.10", "no rule changed")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.21", "what a horizon costs a medium, no rule changed"),
-         [True, "0.108", True, "0.108", 298]),
+         [True, "0.108", True, "0.108", 299]),
     ]
     out += _s8_readings(spec)
     out += _appendix_b_cost_readings(spec)
@@ -9752,7 +10234,8 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
         ("core 0.109 or later, desired.v1 0.14 or later and redundancy.v1 0.11 or later, both still written against "
          "core 0.73, and link.v2 0.20 or later, against 0.108, each with its entry; RULES.md listed 286 rules, the "
          "static rules 75 and the owner 88 (295, 79 and 90 since core 0.110, round 116; 297, 81 and 90 since core 0.113, "
-         "round 120; 298, 81 and 90 since core 0.115, round 125)",
+         "round 120; 298, 81 and 90 since core 0.115, round 125; 299, 81 and 90 since observer 0.38, round 128's "
+         "mend)",
          [m is not None and _at_least(f"{m.group(1)}.{m.group(2)}", "0.109"),
           _at_least(header("profiles/desired/v1.md")[0], "0.14"), header("profiles/desired/v1.md")[1],
           _at_least(header("profiles/redundancy/v1.md")[0], "0.11"), header("profiles/redundancy/v1.md")[1],
@@ -9762,7 +10245,7 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + entry("profiles/desired/CHANGELOG.md", "0.14", "two reports on one key are merged")
          + entry("profiles/redundancy/CHANGELOG.md", "0.11", "a split's seed under consolidation `None`")
          + entry("profiles/link/CHANGELOG.md", "link.v2 0.20", "a file zenoh refuses"),
-         [True, True, "0.73", True, "0.73", True, "0.108", 298, 81, 90]),
+         [True, True, "0.73", True, "0.73", True, "0.108", 299, 81, 90]),
     ]
     # -- core 0.109 §3.3: F-535 to F-538 answered ----------------------------------------
     out.append(("core 0.109 §3.3, F-535 to F-538 answered, each as the text states it: what is counted and 1 KB's "
@@ -10193,8 +10676,8 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
     appe = core[core.find("## Appendix E. Fixture formats"):]
     out.append(("round 114's findings, answered by core 0.111 (round 117), each as its text states it: F-560, core "
                 "0.109's entry stands as a record, 285 rules and observer 0.33, and 0.111's corrects it, 286 rules "
-                "and 284 before, on a tree whose RULES.md lists 298 since core 0.115 (297 since core 0.113, 295 since "
-                "core 0.110); F-561, profiles/README.md says "
+                "and 284 before, on a tree whose RULES.md lists 299 since observer 0.38 (298 since core 0.115, 297 "
+                "since core 0.113, 295 since core 0.110); F-561, profiles/README.md says "
                 "what a header's \"written against\" is, the core a text's rules were last read whole against, and "
                 "that an entry restating one sentence over a later core names that core, which desired.v1 0.14's and "
                 "redundancy.v1 0.11's do; F-563, §7.5 says what a put with no envelope is and where a reader of one "
@@ -10226,7 +10709,7 @@ def _round114_readings(root: Path) -> list[tuple[str, Any, Any]]:
                    sorted(p.name for p in hb_dir.glob("*.json")),
                    "| [`heartbeat/`](heartbeat/) |" in flat("conformance/README.md"),
                    "| [`packed/`](packed/) |" in flat("conformance/README.md")],
-                [298, True, True, True, True, True, [],
+                [299, True, True, True, True, True, [],
                  ["bodies.json", "digests.json", "layouts.json", "owner.json", "times.json"], True, True]))
     return out
 
@@ -10276,7 +10759,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
          "0.20 or later, still against 0.32, each with its entry; RULES.md listed 283 rules as before, core's three "
          "adopted places being no keyword rule, 284 since observer 0.34's one, and 286 since core 0.109's two "
          "(round 114), 295 since core 0.110's nine (round 116), 297 since core 0.113's two (round 120), 298 since "
-         "core 0.115's one (round 125)",
+         "core 0.115's one (round 125), 299 since observer 0.38's one (round 128's mend)",
          [_at_least(header("profiles/freshness/v2.md")[0], "0.9"), header("profiles/freshness/v2.md")[1],
           _at_least(header("profiles/link/v2.md")[0], "0.19"), header("profiles/link/v2.md")[1],
           _at_least(header("profiles/link/v1.md")[0], "0.20"), header("profiles/link/v1.md")[1],
@@ -10286,7 +10769,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
          + entry("profiles/link/CHANGELOG.md", "0.20", "no owner heartbeat crosses a face")
          + missing(flat("CHANGELOG.md"), "**Adopted, with `freshness.v2` 0.9: three places that name a heartbeat.** "
                                          "None is a keyword rule."),
-         [True, "0.108", True, "0.108", True, "0.32", 298]),
+         [True, "0.108", True, "0.108", True, "0.32", 299]),
     ]
 
     # -- the fixtures the entries name ---------------------------------------------------
@@ -10537,8 +11020,9 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     v1_cases = sorted({i for i, _ in crossing if plan2[i]["expect"]["transport"] is None})
     out.append(("link.v2 0.19's entry, its evidence: v2/plan.json held 48 cases then, 49 since link.v2 0.22's case "
                 "48 (round 117), 50 since 0.23's case 49 (round 118), 51 since 0.24's case 50 (round 121), 52 since 0.25's "
-                "case 51 (round 122), 53 since 0.26's case 52 (round 125), 54 since 0.27's case 53 (round 126) and 55 "
-                "since 0.28's case 54 (round 127); fourteen "
+                "case 51 (round 122), 53 since 0.26's case 52 (round 125), 54 since 0.27's case 53 (round 126), 55 "
+                "since 0.28's case 54 (round 127) and 56 since 0.29's case 55 (round 128), a refusal no heartbeat "
+                "crosses; fourteen "
                 "faces let a heartbeat cross, in the twelve cases the entry names and in "
                 "cases 46 and 47, and case 48's one more, and case 53's, case 46's face (round 126), and case 54's, "
                 "case 48's face (round 127); each under a link.v2 policy "
@@ -10552,7 +11036,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                 for x in f["findings"])]]
                 + missing(llog, "**Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8, 9, 10, 12, 19, "
                                 "20, 22, 23, 44 and 45."),
-                [55, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48, 53, 54], 14, [10],
+                [56, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48, 53, 54], 14, [10],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/host/**",), True)],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/**",), False)], [6]]))
     c46 = plan2[46]
@@ -10703,7 +11187,7 @@ def _observer034_readings(root: Path, layouts_contracts: dict[str, Any]) -> list
     out: list[tuple[str, Any, Any]] = [
         ("observer 0.34 or later, written against core 0.108, with its entry; RULES.md listed 284 rules (286 since "
          "core 0.109, round 114; 295 since core 0.110, round 116; 297 since core 0.113, round 120; 298 since core "
-         "0.115, round 125), its one new "
+         "0.115, round 125; 299 since observer 0.38, round 128's mend), its one new "
          "row §7.5's, citing heartbeat/owner.json; scope/faces.json held 29 cases then, the last ten stating "
          "`catalog`, two of them false, none under a link.v1 policy and none a GET; 33 since observer 0.35 (round "
          "117), fourteen stating `catalog`, two of the four new ones a GET, and still none under a link.v1 policy",
@@ -10717,7 +11201,7 @@ def _observer034_readings(root: Path, layouts_contracts: dict[str, Any]) -> list
          + missing(olog, "## 0.34 — 2026-11-21: an owner heartbeat's scope across a face, and its groups' revisions",
                    "`conformance/scope/faces.json` gains ten cases, each stating whether the tool was given a "
                    "catalog. Its 19 cases state none and stand as they were."),
-         [True, "0.108", 298, 1, 33, list(range(19, 33)), [23, 25], ["rf.face.toml", "zenohd-rf0.face.toml"],
+         [True, "0.108", 299, 1, 33, list(range(19, 33)), [23, 25], ["rf.face.toml", "zenohd-rf0.face.toml"],
           [29, 30]]),
     ]
     # zk2py's scope where no case of faces.json goes.
@@ -10917,7 +11401,8 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "286 and 75 since core 0.109's two static rules, both citing owner.json, nine rows (round 114); 295 and "
                 "79 since core 0.110's four static rules, none citing owner.json (round 116); 297 and 81 since core 0.113's "
                 "two, citing times.json and bodies.json (round 120), owner.json then holding 14 writes and 47 reads; 298 "
-                "and 81 since core 0.115's one, a deployment's (round 125); the "
+                "and 81 since core 0.115's one, a deployment's (round 125); 299 and 81 since observer 0.38's one, "
+                "citing scenarios-v2.md (round 128's mend); the "
                 "three lists and `either` hold what they held",
                 [len(own["writes"]), len(own["reads"]), len(own["groups"]), len(own["either"]),
                  sorted(own["catalogs"]), sorted(c["contract"] for c in lay["layouts"]),
@@ -10927,7 +11412,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                "three catalogs, and one body that reads both ways.",
                           "- **Six rules**, all static"),
                 [14, 47, 32, 1, ["first", "other", "second"],
-                 ["alert.v1", "bare.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1"], 298, 81, 9]))
+                 ["alert.v1", "bare.v1", "hb.v1", "knob.v1", "mixed.v1", "vital.v1"], 299, 81, 9]))
     # A file with no write holds nothing here: the row then disagrees, and
     # the family goes on (review-bot on #1138; the mend, round 113).
     w2 = own["writes"][0] if own["writes"] else {"value": {"groups": []}}
@@ -11209,7 +11694,8 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases then, 48 since "
                 "0.19 (round 113), 49 since 0.22 (round 117), 50 since 0.23 (round 118), 51 since 0.24 (round 121), 52 since "
-                "0.25 (round 122), 53 since 0.26 (round 125), 54 since 0.27 (round 126) and 55 since 0.28 (round 127), "
+                "0.25 (round 122), 53 since 0.26 (round 125), 54 since 0.27 (round 126), 55 since 0.28 (round 127) and 56 "
+                "since 0.29 (round 128), "
                 "v2/transport.json 27 then, 32 since 0.22, 34 since 0.25 "
                 "and 36 since 0.26; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
                 "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
@@ -11221,7 +11707,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  lease_of(case(5)), draws(case(5)), with_null,
                  [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
                 + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
-                [55, 36, True, False, False, True, 240_001, False, 240_000, True,
+                [56, 36, True, False, False, True, 240_001, False, 240_000, True,
                  {24: ["transport/link/tx/lease"], 25: ["routing/interests/timeout"],
                   26: ["routing/interests/timeout"]},
                  [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
@@ -11230,10 +11716,10 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
                 "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
                 "then SBD, in that order, of 46 then, 48 since 0.19, 49 since 0.22, 50 since 0.23, 51 since 0.24, "
-                "52 since 0.25, 53 since 0.26, 54 since 0.27 and 55 since 0.28",
+                "52 since 0.25, 53 since 0.26, 54 since 0.27, 55 since 0.28 and 56 since 0.29",
                 ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
                  [medium(plan[i]["note"]) for i in modem], len(plan)],
-                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 55]))
+                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 56]))
     zm = repo / "examples" / "zk2" / "zenoh-modem"
     zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
     # link.md's notes are block quotes: their lines' "> " is no word of theirs.
@@ -11503,10 +11989,10 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "above their intervals as before, and by the eleven the entry names, each at its interval; "
                 "v2/plan.json held 45 cases then, 46 since 0.18, 48 since 0.19 (round 113), 49 since 0.22 (round "
                 "117), 50 since 0.23 (round 118), 51 since 0.24 (round 121), 52 since 0.25 (round 122), 53 since 0.26 "
-                "(round 125), 54 since 0.27 (round 126) and 55 since 0.28 (round 127)",
+                "(round 125), 54 since 0.27 (round 126), 55 since 0.28 (round 127) and 56 since 0.29 (round 128)",
                 [len(plan), [i for i, c in enumerate(plan) if draws(c)]]
                 + missing(log, "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
-                [55, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
+                [56, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
     # review-bot's note 5 on #1121: stamps() reads a shape the text does not
     # name as stamping. No spec case hits it; zk2py's own cases pin it.
     shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731
@@ -12423,12 +12909,13 @@ def _core096_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "five (round 107); 274 since core 0.104's one (round 108); 277 since core 0.107's three (round 111); 283 "
                 "since core 0.108's six (round 112); 284 since observer 0.34's one (round 113); 286 since core 0.109's two "
                 "(round 114); 295 since core 0.110's nine (round 116); 297 since core 0.113's two (round 120); 298 since "
-                "core 0.115's one, a deployment's (round 125)",
+                "core 0.115's one, a deployment's (round 125); 299 since observer 0.38's one, a reader's (round "
+                "128's mend)",
                 missing(flat("CHANGELOG.md"), "lists 246 rules: 0.95's 239, these four and observer 0.26's three",
                         "`RULES.md` lists 250 rules, 4 more", "the index still lists 250 rules",
                         "lists 249 rules, 1 fewer", "`RULES.md` lists 262 rules, 13 more than 0.99's")
                 + missing(flat("observer-CHANGELOG.md"), "**`RULES.md`** counts 267 rules, 82 of them the observer's.")
-                + [int(once.group(1)) if once else None], [298]))
+                + [int(once.group(1)) if once else None], [299]))
     out.append(("core 0.96 §8.1, §8.4, §8.5 and observer 0.26 §3.6, §3.11: the rules as their texts state them",
                 missing(core, "Such an owner SHOULD put every interface it implements in its tokenless set.",
                         "Such an owner MUST NOT implement `archive.v1`, nor an interface whose contract uses "

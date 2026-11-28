@@ -314,6 +314,36 @@ pub struct Refused {
 /// What [`Consumer::with_refused`] hands each refused sample to.
 type OnRefused = Arc<dyn Fn(Refused) + Send + Sync>;
 
+/// What a gated read hands each GET's replies to, once the GET ended,
+/// before it merges any (`redundancy.v2` §2.10: a follower's fence over its
+/// seed, [`crate::follow`]). It returns those it admits, in their order.
+pub(crate) trait ReplyGate: Send + Sync {
+    fn admit<'a>(&'a self, replies: Vec<Sample>) -> crate::call::BoxFuture<'a, Vec<Sample>>;
+}
+
+/// One GET's replies, as a state read takes them: as they arrive, or once
+/// a gate admitted them.
+enum Replies {
+    Stream(flume::Receiver<zenoh::query::Reply>),
+    Held(std::vec::IntoIter<Sample>),
+}
+
+impl Replies {
+    /// The next reply's sample; an error reply makes the read incomplete.
+    async fn next(&mut self, complete: &mut bool) -> Option<Sample> {
+        match self {
+            Replies::Stream(rx) => loop {
+                let reply = rx.recv_async().await.ok()?;
+                match reply.into_result() {
+                    Ok(sample) => return Some(sample),
+                    Err(_) => *complete = false,
+                }
+            },
+            Replies::Held(it) => it.next(),
+        }
+    }
+}
+
 /// A role's consumer, compiled against the required interface's contract
 /// (R4: any revision of the major is fine).
 #[derive(Clone)]
@@ -430,6 +460,22 @@ struct Seen {
     last_reread: Mutex<Option<Instant>>,
     /// For a frame resource, each key's reader (core §7.7).
     frames: Mutex<BTreeMap<String, zenkey_model::frame::Reader>>,
+}
+
+/// What a follower makes of each heartbeat its subscription hears
+/// (`redundancy.v2` §2.10; [`crate::follow`]): a heartbeat covering the
+/// interface, and an owner heartbeat, whose group of the interface rides
+/// it, read only under one of the incumbent's runs. `read` folds the
+/// heartbeat into the subscription's view, in its turn; the gate calls it
+/// now, later once a read of the descriptors attributes it, or never.
+pub(crate) trait BeatGate: Send + Sync {
+    fn beat(
+        &self,
+        provider: Addr,
+        key: String,
+        sample: zenkey_model::redundancy::Sample,
+        read: Box<dyn FnOnce() + Send>,
+    );
 }
 
 /// What a heartbeat confirmed of a subscription's collection (#978's F2):
@@ -942,6 +988,38 @@ impl Consumer {
         &self.params
     }
 
+    /// The revision of the required interface it is compiled against (R4).
+    #[must_use]
+    pub fn contract(&self) -> &Contract {
+        &self.contract
+    }
+
+    /// Its watch session, if it holds one ([`Consumer::with_watch`]).
+    pub(crate) fn watch_session(&self) -> Option<&zenoh::Session> {
+        self.watch.as_ref()
+    }
+
+    /// The same consumer, bound to `addr` alone: a follower's seed of one
+    /// provider (`redundancy.v2` §2.10).
+    pub(crate) fn bound_to(&self, addr: &Addr) -> Self {
+        let mut c = self.clone();
+        c.providers = vec![Provider::exact(addr)];
+        c
+    }
+
+    /// The lifespan a delivery not judged by a timed subscription carries:
+    /// a seed's value (`timing.v1` §2.6's premise for `r`).
+    pub(crate) fn premise(&self, r: &Resource) -> LifespanSample {
+        timing::Plan::new(
+            r,
+            &self.contract.iface,
+            &self.providers,
+            &self.params,
+            self.epsilon,
+        )
+        .premise()
+    }
+
     pub(crate) fn resource(&self, name: &str) -> Result<&Resource> {
         name.split_once('/')
             .and_then(|(t, tpl)| self.contract.resource(t.parse().ok()?, tpl))
@@ -1026,7 +1104,7 @@ impl Consumer {
         C: Fn(Delivery) + Send + Sync + 'static,
         T: Fn(TimingEvent) + Send + Sync + 'static,
     {
-        self.subscribe_inner(resource, callback, on_timing, |_| {})
+        self.subscribe_inner(resource, callback, on_timing, |_| {}, None)
             .await
     }
 
@@ -1059,6 +1137,7 @@ impl Consumer {
                     });
                 }
             },
+            None,
         )
         .await
     }
@@ -1078,7 +1157,7 @@ impl Consumer {
         C: Fn(Delivery) + Send + Sync + 'static,
         F: Fn(HeartbeatRead) + Send + Sync + 'static,
     {
-        self.subscribe_inner(resource, callback, |_| {}, on_heartbeat)
+        self.subscribe_inner(resource, callback, |_| {}, on_heartbeat, None)
             .await
     }
 
@@ -1103,12 +1182,31 @@ impl Consumer {
         })
     }
 
+    /// [`Consumer::subscribe_heartbeats`], each heartbeat covering the
+    /// interface, and each owner heartbeat, handed to `gate` before its view
+    /// reads it: a follower's fence (`redundancy.v2` §2.10, [`BeatGate`]).
+    pub(crate) async fn subscribe_gated<C, F>(
+        &self,
+        resource: &str,
+        callback: C,
+        on_heartbeat: F,
+        gate: Arc<dyn BeatGate>,
+    ) -> Result<Subscription>
+    where
+        C: Fn(Delivery) + Send + Sync + 'static,
+        F: Fn(HeartbeatRead) + Send + Sync + 'static,
+    {
+        self.subscribe_inner(resource, callback, |_| {}, on_heartbeat, Some(gate))
+            .await
+    }
+
     async fn subscribe_inner<C, T, F>(
         &self,
         resource: &str,
         callback: C,
         on_timing: T,
         on_confirm: F,
+        gate: Option<Arc<dyn BeatGate>>,
     ) -> Result<Subscription>
     where
         C: Fn(Delivery) + Send + Sync + 'static,
@@ -1146,11 +1244,23 @@ impl Consumer {
             Some(f) => {
                 let on_confirm = Arc::new(on_confirm);
                 let mut subs = self
-                    .heartbeat_subscribers(f, &seen, &on_confirm, redeclaring.as_ref())
+                    .heartbeat_subscribers(
+                        f,
+                        &seen,
+                        &on_confirm,
+                        redeclaring.as_ref(),
+                        gate.as_ref(),
+                    )
                     .await?;
                 subs.extend(
-                    self.owner_heartbeat_subscribers(f, &seen, &on_confirm, redeclaring.as_ref())
-                        .await?,
+                    self.owner_heartbeat_subscribers(
+                        f,
+                        &seen,
+                        &on_confirm,
+                        redeclaring.as_ref(),
+                        gate.as_ref(),
+                    )
+                    .await?,
                 );
                 subs
             }
@@ -1376,12 +1486,17 @@ impl Consumer {
     /// Through `redeclaring` across a face (core §8.5), each is declared
     /// again after two of the heartbeat's horizons of silence, where the
     /// contract uses `freshness.v2`, and is not among those returned.
+    ///
+    /// With a `gate` (a follower's, `redundancy.v2` §2.10), each heartbeat
+    /// admitted is handed to it before the view reads it, and is read when
+    /// the gate says, if ever.
     async fn heartbeat_subscribers<F>(
         &self,
         f: &Arc<Followed>,
         seen: &Arc<Seen>,
         on_confirm: &Arc<F>,
         redeclaring: Option<&crate::redeclare::Redeclaring>,
+        gate: Option<&Arc<dyn BeatGate>>,
     ) -> Result<Vec<Subscriber<()>>>
     where
         F: Fn(HeartbeatRead) + Send + Sync + 'static,
@@ -1407,6 +1522,7 @@ impl Consumer {
             );
             let iface = self.contract.iface.clone();
             let (session, timeout, rt) = (self.session.clone(), self.reread_timeout, rt.clone());
+            let gate = gate.cloned();
             let on_sample: crate::redeclare::Callback = Arc::new(move |sample: Sample| {
                 let arrival = Instant::now();
                 let unread = || seen.heartbeats_unread.fetch_add(1, Ordering::Relaxed);
@@ -1432,45 +1548,64 @@ impl Consumer {
                         return;
                     }
                 };
-                let body = sample.payload().to_bytes();
-                let (applied, owner_time, due) = {
-                    let mut views = seen.views.lock().expect("not poisoned");
-                    let view = f.view_in(&mut views, &addr);
-                    let applied = view.apply(tag, stamp, &body, arrival);
-                    (
-                        applied,
-                        view.owner_time(),
-                        view.reread_due().contains(&f.index),
-                    )
-                };
-                if due {
-                    reread_once(rt.as_ref(), &session, &f, &seen, &addr, timeout);
-                }
-                let (lost, sections) = match applied {
-                    Applied::Read { gap, sections } => (gap, sections),
-                    Applied::Older => return,
-                    Applied::Revision | Applied::Refused(_) => {
-                        unread();
-                        return;
+                let body = sample.payload().to_bytes().into_owned();
+                let fenced = crate::follow::beat_sample(&sample, stamp);
+                let key = sample.key_expr().as_str().to_owned();
+                let (f, seen, on_confirm, session, rt) = (
+                    Arc::clone(&f),
+                    Arc::clone(&seen),
+                    Arc::clone(&on_confirm),
+                    session.clone(),
+                    rt.clone(),
+                );
+                let read_addr = addr.clone();
+                let read = move || {
+                    let addr = read_addr;
+                    let (applied, owner_time, due) = {
+                        let mut views = seen.views.lock().expect("not poisoned");
+                        let view = f.view_in(&mut views, &addr);
+                        let applied = view.apply(tag, stamp, &body, arrival);
+                        (
+                            applied,
+                            view.owner_time(),
+                            view.reread_due().contains(&f.index),
+                        )
+                    };
+                    if due {
+                        reread_once(rt.as_ref(), &session, &f, &seen, &addr, timeout);
                     }
+                    let (lost, sections) = match applied {
+                        Applied::Read { gap, sections } => (gap, sections),
+                        Applied::Older => return,
+                        Applied::Revision | Applied::Refused(_) => {
+                            seen.heartbeats_unread.fetch_add(1, Ordering::Relaxed);
+                            return;
+                        }
+                    };
+                    seen.heartbeats.fetch_add(1, Ordering::Relaxed);
+                    let section = match sections.get(f.index) {
+                        Some(SectionRead::Confirmed(keys)) => {
+                            HeartbeatSection::Confirmed(keys.clone())
+                        }
+                        Some(SectionRead::Diverged) => HeartbeatSection::Diverged,
+                        Some(SectionRead::Absent) => HeartbeatSection::Absent,
+                        // `OtherClass` is a group's reading alone, never a heartbeat's.
+                        Some(SectionRead::NotFollowed | SectionRead::OtherClass) | None => return,
+                    };
+                    on_confirm(HeartbeatRead {
+                        provider: addr,
+                        group: None,
+                        heartbeat: stamp,
+                        arrival,
+                        owner_time,
+                        lost,
+                        section,
+                    });
                 };
-                seen.heartbeats.fetch_add(1, Ordering::Relaxed);
-                let section = match sections.get(f.index) {
-                    Some(SectionRead::Confirmed(keys)) => HeartbeatSection::Confirmed(keys.clone()),
-                    Some(SectionRead::Diverged) => HeartbeatSection::Diverged,
-                    Some(SectionRead::Absent) => HeartbeatSection::Absent,
-                    // `OtherClass` is a group's reading alone, never a heartbeat's.
-                    Some(SectionRead::NotFollowed | SectionRead::OtherClass) | None => return,
-                };
-                on_confirm(HeartbeatRead {
-                    provider: addr,
-                    group: None,
-                    heartbeat: stamp,
-                    arrival,
-                    owner_time,
-                    lost,
-                    section,
-                });
+                match &gate {
+                    Some(g) => g.beat(addr, key, fenced, Box::new(read)),
+                    None => read(),
+                }
             });
             match (redeclaring, horizon) {
                 (Some(rd), Some(h)) => {
@@ -1524,12 +1659,17 @@ impl Consumer {
     /// which this consumer cannot see, and which is never longer: so its
     /// re-declaration is never early, and may come later than two of the
     /// key's own horizons.
+    ///
+    /// With a `gate` (a follower's, `redundancy.v2` §2.10), each owner
+    /// heartbeat admitted is handed to it before anything else reads it,
+    /// and is read, in its turn, when the gate says, if ever.
     async fn owner_heartbeat_subscribers<F>(
         &self,
         f: &Arc<Followed>,
         seen: &Arc<Seen>,
         on_confirm: &Arc<F>,
         redeclaring: Option<&crate::redeclare::Redeclaring>,
+        gate: Option<&Arc<dyn BeatGate>>,
     ) -> Result<Vec<Subscriber<()>>>
     where
         F: Fn(HeartbeatRead) + Send + Sync + 'static,
@@ -1571,6 +1711,7 @@ impl Consumer {
                 .map_err(zenoh)?;
             let (reader, waiting, providers) =
                 (Arc::clone(&reader), waiting.clone(), self.providers.clone());
+            let gate = gate.cloned();
             let on_sample: crate::redeclare::Callback = Arc::new(move |sample: Sample| {
                 let arrival = Instant::now();
                 let unread = || {
@@ -1602,6 +1743,7 @@ impl Consumer {
                         return;
                     }
                 };
+                let fenced = crate::follow::beat_sample(&sample, stamp);
                 let mut beat = OwnerBeat {
                     addr,
                     class,
@@ -1612,7 +1754,9 @@ impl Consumer {
                     arrival,
                     decided: None,
                 };
-                {
+                let (reader, waiting) = (Arc::clone(&reader), waiting.clone());
+                let (gate_addr, gate_key) = (beat.addr.clone(), beat.key.clone());
+                let read = move || {
                     let mut named = reader.seen.named.lock().expect("not poisoned");
                     let known = word.or_else(|| named.of(&beat.addr, stamp.run, arrival));
                     match (known, named.pending, &waiting) {
@@ -1644,8 +1788,13 @@ impl Consumer {
                         // and no group is read (core §8.6, never a guess).
                         (through, _, None) => reader.apply(&beat, through.flatten()),
                     }
+                    drop(named);
+                    reader.deliver();
+                };
+                match &gate {
+                    Some(g) => g.beat(gate_addr, gate_key, fenced, Box::new(read)),
+                    None => read(),
                 }
-                reader.deliver();
             });
             match (redeclaring, horizon) {
                 (Some(rd), Some(h)) => {
@@ -1887,7 +2036,22 @@ impl Consumer {
         values: Option<&Bindings>,
         timeout: Duration,
     ) -> Result<StateAnswer> {
-        self.read_state(resource, values, &BTreeMap::new(), timeout)
+        self.read_state(resource, values, &BTreeMap::new(), None, timeout)
+            .await
+            .map(|c| c.answer)
+    }
+
+    /// [`Consumer::get_answer`] of every member, its replies handed to
+    /// `gate` per GET, once each GET ended, and only those it admits merged
+    /// (`redundancy.v2` §2.10: a follower's seed merges its incumbent's
+    /// snapshots alone, [`crate::follow`]).
+    pub(crate) async fn get_gated(
+        &self,
+        resource: &str,
+        gate: &dyn ReplyGate,
+        timeout: Duration,
+    ) -> Result<StateAnswer> {
+        self.read_state(resource, None, &BTreeMap::new(), Some(gate), timeout)
             .await
             .map(|c| c.answer)
     }
@@ -1940,17 +2104,19 @@ impl Consumer {
         held: &BTreeMap<String, zenkey_model::wire::Stamp>,
         timeout: Duration,
     ) -> Result<ConditionalAnswer> {
-        self.read_state(resource, values, held, timeout).await
+        self.read_state(resource, values, held, None, timeout).await
     }
 
     /// [`Consumer::get_answer`] and [`Consumer::get_conditional`]: S4's
     /// GETs, each carrying the held stamp `held` names for its one concrete
-    /// key, and their replies merged.
+    /// key, and their replies merged; with a `gate`, each GET's replies
+    /// handed to it once the GET ended, and those it admits merged.
     async fn read_state(
         &self,
         resource: &str,
         values: Option<&Bindings>,
         held: &BTreeMap<String, zenkey_model::wire::Stamp>,
+        gate: Option<&dyn ReplyGate>,
         timeout: Duration,
     ) -> Result<ConditionalAnswer> {
         use zenkey_model::collection::{self, Heard, Page};
@@ -2016,11 +2182,20 @@ impl Consumer {
                 .with(flume::unbounded::<zenoh::query::Reply>())
                 .await
                 .map_err(zenoh)?;
-            while let Ok(reply) = rx.recv_async().await {
-                let Ok(sample) = reply.into_result() else {
-                    complete = false;
-                    continue;
-                };
+            let mut replies = match gate {
+                None => Replies::Stream(rx),
+                Some(g) => {
+                    let mut all = Vec::new();
+                    while let Ok(reply) = rx.recv_async().await {
+                        match reply.into_result() {
+                            Ok(sample) => all.push(sample),
+                            Err(_) => complete = false,
+                        }
+                    }
+                    Replies::Held(g.admit(all).await.into_iter())
+                }
+            };
+            while let Some(sample) = replies.next(&mut complete).await {
                 let key = sample.key_expr().as_str().to_owned();
                 if key.contains('*') {
                     continue;

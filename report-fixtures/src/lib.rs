@@ -1032,6 +1032,7 @@ pub fn timing_report() -> TimingReport {
         &Observed::from_keys("zk2/lab/pace/@zk/**", &[alive], true),
         true,
         t0,
+        &std::collections::BTreeSet::new(),
     );
     book.start(t0);
     let put = |key: &str, at: u64| TimedSample {
@@ -4859,45 +4860,56 @@ pub fn desired_v2_report() -> DesiredReport {
     report
 }
 
-/// `zenctl redundancy` (#841, RC): four addresses of `ledger.v1`, which
-/// `redundancy.v1` governs (election `claim`), judged by the engine from
-/// two reads a grace apart, so every word is the model's — one incumbent
-/// with its standby, a split whose second holder is marked standby, a
-/// lasting vacancy between two standbys, and an incumbent beside an
-/// unmarked twin.
+/// `zenctl redundancy` (#841, RC; #987's N3): five addresses of
+/// `ledger.v1`, judged by the engine from two reads a grace apart, so every
+/// word is the model's — one incumbent with its standby, a split whose
+/// second holder is marked standby, a lasting vacancy between two standbys,
+/// and an incumbent beside an unmarked twin, all four `redundancy.v1`'s
+/// (election `claim`); and an incumbent of `redundancy.v1` with a standby
+/// of `redundancy.v2`, one election of two majors. Every descriptor states
+/// its run.
 pub fn redundancy_report() -> RedundancyReport {
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
     use zenkey_fleet::model::catalog::{ContractState, DescriptorRead, Observed, Revision};
-    let text = "[interface]\nname = \"ledger\"\nmajor = 1\nminor = 0\nuses = [\"redundancy.v1\"]\n\
-                [defaults]\nannotations = { \"redundancy.election\" = \"claim\" }\n\
-                [resources.balance]\nkind = \"state\"\ntype = { raw = \"text/plain\" }\n\
-                [resources.append]\nkind = \"operation\"\nrequest = { raw = \"text/plain\" }\n\
-                response = { raw = \"text/plain\" }\n";
-    let l = zenkey_model::contract::load_str(text, std::path::Path::new("."), None);
-    let rev = Arc::new(Revision::from_contract(
-        l.contract.unwrap_or_else(|| panic!("{}", l.report)),
-        ContractSource::Bus,
-    ));
-    let fp = rev.fingerprint().clone();
+    let ledger = |minor: u32, uses: &str| {
+        let text = format!(
+            "[interface]\nname = \"ledger\"\nmajor = 1\nminor = {minor}\nuses = [\"{uses}\"]\n\
+             [defaults]\nannotations = {{ \"redundancy.election\" = \"claim\" }}\n\
+             [resources.balance]\nkind = \"state\"\ntype = {{ raw = \"text/plain\" }}\n\
+             [resources.append]\nkind = \"operation\"\nrequest = {{ raw = \"text/plain\" }}\n\
+             response = {{ raw = \"text/plain\" }}\n"
+        );
+        let l = zenkey_model::contract::load_str(&text, std::path::Path::new("."), None);
+        Arc::new(Revision::from_contract(
+            l.contract.unwrap_or_else(|| panic!("{}", l.report)),
+            ContractSource::Bus,
+        ))
+    };
+    let (rev, run_rev) = (ledger(0, "redundancy.v1"), ledger(1, "redundancy.v2"));
+    let (fp, run_fp) = (rev.fingerprint().clone(), run_rev.fingerprint().clone());
     let a = "3fa9c2d41b7e0012";
     let b = "3fa9c2d41b7e0013";
-    // (service, instance, holds, marked standby)
-    let shape: [(&str, &str, bool, bool); 8] = [
-        ("lab/ledger", a, true, false),
-        ("lab/ledger", b, false, true),
-        ("lab/split", a, true, false),
-        ("lab/split", b, true, true),
-        ("lab/vacant", a, false, true),
-        ("lab/vacant", b, false, true),
-        ("lab/twin", a, true, false),
-        ("lab/twin", b, false, false),
+    // (service, instance, holds, marked standby, on redundancy.v2's
+    // revision)
+    let shape: [(&str, &str, bool, bool, bool); 10] = [
+        ("lab/ledger", a, true, false, false),
+        ("lab/ledger", b, false, true, false),
+        ("lab/split", a, true, false, false),
+        ("lab/split", b, true, true, false),
+        ("lab/vacant", a, false, true, false),
+        ("lab/vacant", b, false, true, false),
+        ("lab/twin", a, true, false, false),
+        ("lab/twin", b, false, false, false),
+        ("lab/mixed", a, true, false, false),
+        ("lab/mixed", b, false, true, true),
     ];
     let read = || {
         let mut keys = Vec::new();
         let mut descriptors = BTreeMap::new();
-        for (svc, id, holds, standby) in shape {
+        for (n, (svc, id, holds, standby, v2)) in shape.into_iter().enumerate() {
+            let fp = if v2 { &run_fp } else { &fp };
             keys.push(format!("zk2/{svc}/@zk/instance/{id}"));
             if holds {
                 keys.push(format!(
@@ -4907,8 +4919,9 @@ pub fn redundancy_report() -> RedundancyReport {
             }
             let d = serde_json::from_value(serde_json::json!({
                 "format": "zk2-descriptor/0.1", "service": svc, "instance": id,
-                "interfaces": [{"iface": "ledger.v1", "contract": fp.to_string(), "minor": 0,
-                                "standby": standby}],
+                "run": format!("8b03{n:04x}"),
+                "interfaces": [{"iface": "ledger.v1", "contract": fp.to_string(),
+                                "minor": u32::from(v2), "standby": standby}],
                 "meta": {"zid": format!("{id}0")},
             }))
             .expect("a descriptor");
@@ -4922,10 +4935,15 @@ pub fn redundancy_report() -> RedundancyReport {
         o
     };
     let mut contracts = BTreeMap::new();
-    contracts.insert(
-        ("ledger.v1".parse().expect("an interface"), fp.clone()),
-        Ok(ContractState::Held(Arc::clone(&rev))),
-    );
+    for r in [&rev, &run_rev] {
+        contracts.insert(
+            (
+                "ledger.v1".parse().expect("an interface"),
+                r.fingerprint().clone(),
+            ),
+            Ok(ContractState::Held(Arc::clone(r))),
+        );
+    }
     let obs = zenkey_fleet::RedundancyObservation {
         cut_off: None,
         first: Some(Ok(read())),

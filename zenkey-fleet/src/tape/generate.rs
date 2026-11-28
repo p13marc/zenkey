@@ -27,9 +27,10 @@
 //! all the same is counted apart ([`GenReport::refused`]), never as a
 //! failure and never silently.
 //!
-//! **A governed interface elects** (`redundancy.v1`, #841, RC). With
-//! [`GenSpec::elect`], the mock owner is a candidate of every interface
-//! whose contract lists `redundancy.v1`: it claims, stands by and takes
+//! **A governed interface elects** (`redundancy.v1`, #841, RC; either
+//! major, #987's N3). With [`GenSpec::elect`], the mock owner is a
+//! candidate of every interface whose contract lists `redundancy.v1` or
+//! `redundancy.v2`: it claims, stands by and takes
 //! over through the runtime ([`zenkey::ServiceBuilder::redundancy`]), its
 //! writers and servers held undeclared while it stands by. A governed
 //! state's first value is put at the takeover (§2.6 step 3), never before
@@ -794,13 +795,14 @@ pub async fn run_gen(
         b.implement(implementation(rev)?)
             .map_err(|e| runtime_error(rev, e))?;
     }
-    // redundancy.v1 (#841, RC): every interface whose contract uses the
-    // profile, valid or not; the runtime refuses an invalid one at start.
+    // redundancy (#841, RC; either major, #987's N3): every interface
+    // whose contract uses a major of the profile, valid or not; the runtime
+    // refuses an invalid one at start.
     let governed: BTreeSet<IfaceId> = spec
         .revisions
         .iter()
         .filter(|r| {
-            zenkey_model::redundancy::declaration_of(r.contract(), false)
+            zenkey_model::redundancy::either_declaration_of(r.contract(), false)
                 != zenkey_model::redundancy::Declaration::NotGoverned
         })
         .map(|r| r.iface().clone())

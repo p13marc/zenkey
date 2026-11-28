@@ -33507,4 +33507,528 @@ branch.
 - **Both answers hold.**
 - **Open:** F-437 to F-441; F-633 and F-634.
 
+## At core 0.119, redundancy.v2 0.1, freshness.v2 0.14, link.v2 0.29, arbitration.v1 0.7 and hostid.v1 0.10
+
+Round 128 read this tree at fa49967a (#987 N1 to N3). Its black boxes
+are `owner`, `consume`, `zenctl` and `zk2` in
+`/srv/dev/scratch/zenkey/bin/91c62f0e/`, built from #987's Rust code, run
+and never read. Every router is zenoh-python's. Each changelog entry was
+read first, then each hunk it names.
+
+### The walk, before and after
+
+- **Re-keyed** (00c46e34): seven readings counted `v2/plan.json`'s cases
+  and now take 56. F-461's reading quotes `freshness.v2` 0.14's
+  parenthesis, "a `redundancy.v1` candidate's session". F-626's reading
+  reads the description before its case 55, which names link.v2 0.29.
+  **8692 of 8694.**
+- **The two failures** were the new work, as written:
+  - case 55 failed: zk2py's device check read `redundancy.v1` alone;
+  - `redundancy/conformance/v2/` was a directory the runner did not read.
+- **The reference's five new contracts** (`ledger-run.v1`,
+  `ledger-run-appendall.v1`, `beacon-governed-run.v2`,
+  `steer-governed-run.v1`, `valve-run.v1`): each lints clean in zk2py,
+  with the fingerprint `zk2 contract fingerprint` gives, and each is
+  governed by `redundancy.v2`, under `claim` but `valve-run.v1`'s
+  `external`.
+- **After the moves:** `just py-conformance` **8852 of 8852**, with
+  `_round128_readings` (6).
+
+### redundancy.v2, from the text first
+
+- **Written** (54e12ef8) from `v2.md` 0.1 and core 0.119 before the
+  fixtures were run. The three files' descriptions and first cases were
+  read for their format; no other expectation was.
+  - `zk2py.redundancy_v2`: §2.2's declaration, an address's governance,
+    a descriptor's run and mark, a sample's run by its form, the rule's
+    six steps, the hold for one read, and the draw again.
+  - The owner: a candidate of either major draws 32-bit runs, and only a
+    `redundancy.v1` candidate's session stamps.
+- **Run as written** (38eb6345): `declarations.json` 54 (38 contracts, 16
+  addresses), `descriptors.json` 29, `fences.json` 70 (49 samples, 13
+  sequences, 8 draws). **153 of 153 at the first run.** No case was
+  wrong, so no expectation moved the module.
+
+### The texts that read either major, read cold
+
+| Text | Holds | zk2py |
+|---|---|---|
+| Core §4.3: a candidate "under either major of the profile" draws a 32-bit run | yes | `Owner.candidate` reads either major (54e12ef8) |
+| Core §8.2 step 2: a tokenless set naming an interface "whose contract uses `redundancy.v1` or `redundancy.v2`" | yes | refused by its major's declaration, `tokenless`; a first hop's too (§11 step 4) |
+| Core §8.2: "No exception under `redundancy.v2`" | yes | `Owner.stamping_candidate`: only a v1 candidate's session stamps. Measured: S records R1's id on every v2 candidate's put, both implementations |
+| `freshness.v2` 0.14, editorial | yes | a standby of either major already sent no heartbeat |
+| `link.v2` 0.29 §2.5, case 55 | yes | `presence_required` for either major (2ae0aebe) |
+| `arbitration.v1` 0.7, outcome 6 and §2.12 | yes | the actuator keeps each holder's runs; a sample not under the incumbent's run, an unattributed one too, is `not_incumbent`, and the holder's descriptor is asked again. The view takes the one major every revision held lists |
+| `hostid.v1` 0.10 §2.12 | yes | a recognised standby lists only interfaces a major governs, its governance read from every instance's revision. Live: both shapes of scenarios §6 step 7, no finding at either tool |
+
+### Live
+
+- **The pairings:**
+  - `zk2py-cand`: zk2py's candidates, and the reference's `consume
+    --follow` as K;
+  - `ref-cand`: the reference's candidates, and zk2py's follower
+    (`redundancy_v2_live`, on `consume --follow`'s command line) as K.
+- **K1** of §15 is zk2py's `redundancy.v1` follower, by `meta.zid`, in
+  both pairings.
+
+| Run | zk2py-cand | ref-cand |
+|---|---|---|
+| §1, v1's section on `ledger-run.v1`, and Expected 1, 2 and 4's additions | 14 of 14 | 14 of 14 |
+| §9, a follower during a split | 6 of 6 | 6 of 6 |
+| §13, both runs | 9 of 9 | 9 of 9 |
+| §14 | 5 of 5 | 5 of 5 |
+| §15 | 8 of 8 | 8 of 8 |
+| Heartbeats, both followers on one `beacon-governed-run.v2` address | 3 of 3: the same lines, seqs aside | 3 of 3 |
+| Heartbeats at a takeover, both followers started after B's claim, three runs | 5 of 6 (F-631) | 5 of 6 (F-629) |
+| `zenctl redundancy` and the doctor on a v2 address, beside zk2py's tool | 11 of 11 | 11 of 11 |
+
+- **Every pairing, every section:** 61 of 62 each.
+- **zk2py's first follower** discarded A's sample `no_incumbent` in §9
+  (ref-cand). It counted a token only once it had read its descriptor.
+  The rule's step 1 then holds, but "An incumbent whose major is not
+  known, its descriptor not held yet, is read by run" says the token
+  counts first. zk2py's follower now counts it at once, and holds that
+  sample for a read.
+- **`zenctl` and zk2py's tool agree** on §5's four questions at every
+  shape: a standby, a split held at its heal, a vacancy under
+  `external`. Each shows each candidate's run, and both read `majors`.
+  The doctor's `redundancy-vacancy` row says `"section": "redundancy.v1
+  §2.15"` on a `redundancy.v2` address, where its evidence cites v2: the
+  reference's wording, not the text's.
+
+### F-629 · gap · observer §3.6, read by `redundancy.v2` §2.10: a read again after a withdrawal can be answered without a token the watch has heard since
+
+> Observer §3.6: "A reader that follows presence live SHOULD read again
+> soon after a withdrawal that leaves one of these with nothing held: ...
+> an interface, with none of its tokens." "The reader SHOULD report what
+> that read establishes: absent when the read is complete and shows no
+> such token held, present when it shows one."
+> Observer §3.7: "zenoh orders one session's messages at its router,
+> never two sessions'."
+> `redundancy.v2` §2.10: "The incumbent is learnt as v1 §2.10 learns it:
+> a watch on the provider's `@zk/**`, a complete read, and the holder's
+> descriptor."
+
+- **Measured.** The takeover of `beacon-governed-run.v2`: A serving, B
+  standing by, both followers started after B's claim, A killed. S
+  hears A's tokens go, then B's interface token about 0.11 s later.
+  - **The reference's follower,** with the reference's candidates, lost
+    its incumbent in 6 of 39 takeovers. It printed B incumbent, then up
+    to 5 ms later `"incumbent": null`, with no withdrawal at S.
+  - **Then it is inert.** It discarded every later heartbeat of B's
+    `no_incumbent`, and `incumbent lab/beacon` answered null for as long
+    as it ran.
+  - **With zk2py's candidates,** 0 of 15. **zk2py's follower,** 0 of
+    54, 15 of them with its read again (below).
+- **The gap.** The black box was not read, so its cause is a reading:
+  the timing fits a read asked 0.1 s after A's withdrawal, answered
+  without B's token, its absence applied after the watch heard B
+  declared.
+  - Nothing in the text says which stands when a complete read, asked
+    before the watch heard a token declared, shows none held.
+  - The two ride two sessions, which no router orders.
+- **zk2py's follower** reads again 0.1 s after a withdrawal that leaves
+  no holder, on its reading session. It adds a holder that read shows.
+  It removes one only where the read is complete and the watch heard
+  that holder before the read was asked.
+- **Fix:** observer §3.6 says that what the watch hears declared after a
+  read again was asked stands over that read's absence, until a later
+  read or a withdrawal.
+- **Changes:** whether a follower of either major keeps its incumbent
+  at a takeover. Every governed reader that reads again after a
+  withdrawal is exposed, a candidate's election included.
+
+### F-630 · minor · `redundancy.v2` §2.10, "Seed again": "merge only the new incumbent's snapshots" leaves out a `redundancy.v1` incumbent, which answers per key
+
+> §2.10: "A follower whose incumbent changes SHOULD read the interface's
+> state again by core S4, and merge only the new incumbent's snapshots."
+> "The omission rule applies (core §4.2)." "The address's word is its
+> incumbent's."
+> §2.17: "It follows a `redundancy.v1` incumbent by `meta.zid`, as v1
+> §2.10 says, and a `redundancy.v2` one by run. It changes as its
+> incumbent does."
+> Core §4.2's per-key list: "every state of an interface whose contract
+> uses `redundancy.v1`".
+
+- **A v1 incumbent sends no snapshot.** Its state answers a reply per
+  member, each with its stamp. Read as written, a follower merges
+  nothing of its seed.
+- **Measured** (§15, K started before A): at A's token both followers
+  seeded with no snapshot (`"snapshots": 0`). Each accepted A's one
+  reply, by its stamp. Both read "snapshots" as the new incumbent's
+  replies.
+- **No omission rule applies** to replies per key. So at a change to a
+  `redundancy.v1` incumbent the follower keeps what the last incumbent
+  held, as v1 §2.10's follower does. That differs from "The address's
+  word is its incumbent's", and the text does not say so.
+- **Fix:** "merge only the new incumbent's answers: its snapshots, or
+  under a `redundancy.v1` incumbent its replies per key, by v1 §2.10,
+  where no omission rule applies."
+
+### F-631 · minor · `redundancy.v2` §2.10, "How often": "Never at a takeover" holds only for a follower that read the standby's descriptor before it serves
+
+> §2.10: "**How often.** Never at a takeover, since a standby states its
+> run from its claim on (Appendix B). Only at an incumbent's new run
+> within its instance".
+> "Each instance's runs are learnt from its descriptors." "The incumbent
+> is learnt as v1 §2.10 learns it: ... the holder's descriptor."
+> `scenarios-v2.md` §13 Expected 2: "After it, K accepts it under B's run,
+> which B's descriptor stated from its claim on."
+
+- **A follower started after a standby's claim holds none of its runs.**
+  It heard none of its descriptor puts, and a standby holds no
+  interface token, so no holder's descriptor is its.
+  - **Measured:** X's heartbeat under B's standby run was held by both
+    followers, then discarded `not_incumbent` at the read's end. Neither
+    held B's run while B stood by.
+- **At the takeover,** the follower learns the run only from the new
+  holder's descriptor, read at its token. A sample between the token and
+  that read is held, or discarded `no_incumbent` where the follower
+  counts the token after the read.
+  - **Measured,** zk2py's candidates, whose first heartbeat follows the
+    interface token at once: zk2py's follower held it in 2 of 15
+    takeovers, and accepted it a millisecond later.
+  - With the reference's candidates, whose first heartbeat comes about
+    0.1 s after the token: no hold in 12.
+  - The reference's follower held none in 27. Where B's first heartbeat
+    overtook its token, either follower discarded it `no_incumbent`.
+- **No harm,** since the read attributes it at once. But "Never" is not
+  what a follower that learns as §2.10 says sees, and §13's "which B's
+  descriptor stated from its claim on" presumes a read the text does
+  not ask for.
+- **Fix:** either a follower reads each candidate's descriptor at its
+  instance token, or "How often" says that where the follower holds
+  none of the new incumbent's runs, its first samples after the token
+  wait for one descriptor read.
+
+### F-632 · index · the "Not verified" lines of `redundancy.v2` 0.1's and core 0.119's entries describe the reference before its runtime work
+
+> `redundancy/CHANGELOG.md`, `redundancy.v2` 0.1: "**No implementation
+> has run a fixture or a scenario.** The reference implements none of
+> this yet."
+> `CHANGELOG.md`, 0.119: "The reference still refuses a candidate whose
+> session runs without timestamping, whichever major its contract uses:
+> its change is #987's runtime work."
+> `scenarios-v2.md`: "The reference runs §1 to §11 and §13 to §15 as
+> tests of `zenkey`, one per section".
+
+- **This tree's black boxes do what the entries say they do not.** A
+  `redundancy.v2` candidate's session stamps nothing: S records R1's id
+  on its puts. `consume --follow` follows by run, and `zenctl redundancy`
+  reads both majors.
+- **So the tree says two things** of what the reference implements. A
+  reader of the entries cannot tell which holds.
+- **Fix:** a note in a later entry, N3's, saying what is now verified.
+
+### Not run
+
+- **`arbitration.v1` scenarios §11 under `redundancy.v2`:** zk2py's
+  actuator moved by the text, and its runner identifies commanders by
+  their stamps' ids.
+- **The probe's attribution by an error's run** (§2.15's MAY).
+- **A follower across a constrained face** (§2.13).
+- **A held snapshot:** no seed in these runs met an unattributed run.
+
+### Counts at core 0.119, redundancy.v2 0.1, freshness.v2 0.14, link.v2 0.29, arbitration.v1 0.7 and hostid.v1 0.10
+
+634 entries: F-633 and F-634, from round 127's second mend, merged first.
+- **New: F-629 to F-632:**
+  - one gap, F-629;
+  - two minor errors, F-630 and F-631;
+  - one index error, F-632.
+- **Settle first:** F-629. A follower that loses its incumbent so
+  discards every sample of the address until the next token event.
+- **Resolved:** F-626 to F-628, by the lead after the mend, as each
+  entry's status says. zk2py's walk reads F-626's answer.
+- **Open:** F-437 to F-441; F-629 to F-632.
+
+  F-365 stays open as #965's.
+
+## At observer 0.38 (round 128's mend)
+
+Round 128's mend read this tree at ea4f363c (#987), one spec commit on
+round 128's, f92783aa (`81ebc727` before the restack onto main, which
+merged round 127's two mends, F-633 and F-634). The black boxes are
+`owner`, `consume`, `zenctl` and `zk2` in
+`/srv/dev/scratch/zenkey/bin/ea4f363c/`, built from this branch's head,
+run and never read: the reference's follower is changed with observer
+0.38. Every router is zenoh-python's. Each changelog entry was read
+first, then each hunk it names.
+
+### The walk, before and after
+
+- **Re-keyed** (9fc73ea3): twelve readings pinned RULES.md's 298 rules,
+  8842 of 8854 before. Each now takes 299, since observer 0.38's one
+  reader rule. The classes walk gave the new §3.6 row its verdict, met.
+- **`_round128b_readings`** pins what the mend changed: §3.6's item, its
+  row and its entry; §2.10's "How often" and "Seed again"; §13's
+  Expected 2; the two entries' lines on what is verified. It folds the
+  new rule over zk2py's PresenceView, session-free.
+- **`just py-conformance`: 8858 of 8858** after the re-key, **8859 of
+  8859** after the moves, with one more reading: the follower's read
+  again, its presence read stood in.
+
+### The answers, read cold
+
+| Finding | Holds | The answer, quoted |
+|---|---|---|
+| F-629 | yes | observer 0.38 §3.6: "**A read never undoes a token heard since it was asked.** The read and the watch ride two sessions, which no router orders (§3.7). A token the watch hears declared after the read is asked stands, whatever the read shows: the read establishes nothing of it. A reader MUST NOT apply such a read's absence to a token heard since." `scenarios-v2.md` §13: "Over 39 takeovers, K never reads B gone. It accepts each later heartbeat of B's." **Resolved.** The reference's follower lost its incumbent in 0 of 78 takeovers with the reference's candidates, two runs of 39, where round 128 measured 6 of 39, and in 0 of 30 with zk2py's (below). zk2py's PresenceView has folded reads so since round 54, and its follower since round 128. The rule leaves out its mirror, a withdrawal heard since (F-635). |
+| F-630 | yes | `redundancy.v2` §2.10: "merge only the new incumbent's answers. `[Sc: §13, §15]` They are its snapshots, or its replies per key under a `redundancy.v1` incumbent (v1 §2.10)." "No omission rule applies to replies per key. Under a `redundancy.v1` incumbent the follower keeps what the last incumbent held, as v1 §2.10's does." **Resolved** for a `redundancy.v1` incumbent. zk2py's follower already merged the incumbent's replies per key by their stamps, with no omission rule, so nothing moved. A `redundancy.v2` incumbent answers per key the states §2.6 leaves per key, which the list leaves out (F-636). |
+| F-631 | yes | §2.10: "**How often.** At a takeover, only for a follower that holds none of the new holder's runs. ... So it learns the run from the new holder's descriptor, read at its token. A sample between the two is held." §13 Expected 2: "K learns that run from B's descriptor, read at B's token. A put between the two is held." **Resolved.** zk2py's follower read it so. The runner's check moved to it: a heartbeat held between B's token and its descriptor's read, then accepted. |
+| F-632 | partly | Core 0.119: "**Verified.** The reference's `redundancy.v2` candidate runs its session without timestamping, and only a `redundancy.v1` candidate's stamps (#987's N2)." `redundancy.v2` 0.1: "**Two implementations ran it, after the text.**" **Resolved**, both entries saying what is verified, as asked. But 0.1's line stands under "**Not verified.**", beside "No byte crossed a wire under this major", which this mend measured false (F-638). |
+
+### What moved in zk2py
+
+- **The follower's read again** (`redundancy_v2_live.Follower`):
+  - **The watch's times are its callback's,** not the worker's. A token
+    heard before the ask and taken up after it was weighed as heard
+    since, so a complete read's absence never applied to it.
+  - **A withdrawal heard since the ask** stands over the read's showing:
+    the follower no longer adds back a holder the watch heard withdrawn
+    after the ask (F-635, as PresenceView folds it).
+  - **A withdrawal heard while a read is in flight** owes another read,
+    since that read was asked before it. Before, it was dropped as one
+    of a burst.
+  - **The seeded line's `complete`** says the seed's GET reached its
+    final reply with no error reply, as the reference's line says of a
+    GET that drew none. Before, it said a reply was accepted.
+  - `counts` adds `kept_heard_since` and `kept_withdrawn`.
+- **The runner** (`redundancy_v2_scenarios`):
+  - `hb-takeover --repeat N` checks §13's step as the mend words it. K
+    never reads B gone, says B at the end, and accepts each later
+    heartbeat of B's. A heartbeat held between B's token and its
+    descriptor's read is accepted after it, and none is discarded but
+    `no_incumbent` before B's token reached K. It counts each
+    follower's incumbent lost.
+  - `perkey` runs zk2py's `tally.v1` (`interop/redundancy/`), a
+    `redundancy.v2` interface whose state is per key by core §4.2's
+    first row.
+  - §13 notes Appendix B's bytes under this major.
+- **The readings** (`_round128b_readings`, 5): the follower's read
+  again, its presence read stood in, over five shapes. A token heard
+  since stands over the read's absence. One heard before the ask, even
+  one the worker took up after it, is undone. A withdrawal heard since
+  stands over the read's showing, and owes a read. A token the watch
+  missed is added.
+
+### Live
+
+```bash
+PYTHONPATH=impl/python target/py-venv/bin/python -m zk2py.redundancy_v2_scenarios \
+  --pairing ref-cand|zk2py-cand --only hb-takeover --repeat 39|15 --bin /srv/dev/scratch/zenkey/bin/ea4f363c
+```
+
+**§13's takeover of `beacon-governed-run.v2`,** A serving, B standing by,
+both followers started after B's claim, A killed. Both followers run in
+each takeover.
+
+| Takeovers | The reference's follower: incumbent lost | zk2py's follower: incumbent lost | Passed |
+|---|---|---|---|
+| 39, the reference's candidates | **0 of 39** (6 of 39 in round 128) | 0 of 39 | 78 of 78 |
+| 15, zk2py's candidates | 0 of 15 (0 of 15 in round 128) | 0 of 15 | 30 of 30 |
+| Both again, on zk2py's follower as committed (fbebefd0) | 0 of 39, 0 of 15 | 0 of 39, 0 of 15 | 108 of 108 |
+
+The first two rows ran while zk2py's follower moved. Its start gate
+came after them (below), so the third row repeats both on the
+committed follower. Over the four runs the reference's follower lost
+its incumbent in 0 of 108 takeovers.
+
+- **B's interface token** reached either follower 0.106 to 0.185 s
+  after the kill, 0.11 s at the median. The read again is asked 0.1 s
+  after the withdrawal, so the two race.
+- **"A sample between the two is held"** (F-631):
+  - zk2py's follower held B's first heartbeat in 1 of 78 takeovers with
+    the reference's candidates, and in 2 of 30 with zk2py's;
+  - the reference's follower held none in 108;
+  - each held heartbeat was accepted under B's run.
+- **One that overtook B's token** was discarded `no_incumbent`, by the
+  rule's step 1. With zk2py's candidates that happened to the
+  reference's follower in 4 of 30 and to zk2py's in 10 of 30. It never
+  happened with the reference's candidates, whose first heartbeat
+  comes about 0.1 s after the token.
+- **zk2py's follower** read again once per takeover. Its read never
+  came back without B after the watch had heard B
+  (`kept_heard_since` 0 in 108). The race F-629 measured is in the
+  reference's follower's timing, not zk2py's.
+
+**Beside them,** to see that the moves broke nothing:
+
+| Run | ref-cand (zk2py's follower as K) | zk2py-cand (the reference's as K) |
+|---|---|---|
+| §1, §9, §13 to §15, `hb`, `hb-takeover`, `perkey` and `tool`, the whole runner | 67 of 67 | 67 of 67 |
+| §13 | 9 of 9 | 9 of 9 |
+| `perkey`, both runs (F-636, F-637) | 5 of 5 | 5 of 5 |
+
+- **§9 failed once** in ref-cand before the start gate: 66 of 67. K,
+  zk2py's follower, started during the split. Its history told B's
+  token before A's, so K took B as its incumbent and merged B's
+  snapshot in its first seed. The follower now chooses no incumbent
+  before the history, the round trip and a complete read. §9, §13 and
+  §15 then ran 23 of 23, and the whole runner 67 of 67.
+- **§13's bytes under this major** (F-638), the reference's candidates:
+  B's descriptor was 339 or 340 B marked and 324 or 325 B unmarked,
+  by run; its put of `balance`, `b1`, was a 10 B payload. S recorded
+  R1's id on it. zk2py's candidates put the same sizes.
+
+### F-635 · gap · observer 0.38 §3.6: "A read never undoes a token heard since it was asked" names a token heard declared, and leaves a withdrawal heard since to "present when it shows one"
+
+> §3.6: "**A read never undoes a token heard since it was asked.** The
+> read and the watch ride two sessions, which no router orders (§3.7). A
+> token the watch hears declared after the read is asked stands,
+> whatever the read shows: the read establishes nothing of it. A reader
+> MUST NOT apply such a read's absence to a token heard since."
+> §3.6, above it: "The reader SHOULD report what that read establishes:
+> absent when the read is complete and shows no such token held, present
+> when it shows one."
+
+- **The mirror, by the same reason.** A read is asked, the watch hears
+  a token withdrawn, then the read's answer, sent before that
+  withdrawal, shows the token. The rule says nothing of it. "Present
+  when it shows one" reports it held, and no withdrawal of it will come
+  again.
+- **The harm is F-629's.** A follower that so holds a gone holder whose
+  id is the lower takes it as its incumbent. It discards every sample
+  of the live holder, `not_incumbent`, for as long as it runs.
+- **Not measured.** The read again follows a withdrawal that leaves the
+  interface with no token. So this needs a token declared and withdrawn
+  while the read is in flight. No takeover of 108 made one: S heard B
+  withdrawn in none.
+- **zk2py reads both.** PresenceView has folded each read as of its ask
+  since round 54: a reply sent before a withdrawal never brings the
+  token back, and the withdrawal stays unconfirmed, a read owed. The
+  follower now does the same, and reads again after a withdrawal heard
+  while a read is in flight.
+- **Fix:** "A token the watch hears declared or withdrawn after the read
+  is asked stands as the watch heard it ... A reader MUST NOT apply
+  such a read's absence to a token heard declared since, nor its
+  showing to one heard withdrawn since. That one is unconfirmed, and
+  owes a read."
+- **Resolved** (the lead, observer 0.38): "A token the watch hears declared or withdrawn after the read is asked stands as the watch heard it … nor its showing to one heard withdrawn since. That one is unconfirmed, and owes a read."
+
+### F-636 · minor · `redundancy.v2` §2.10, "Seed again": the answers it lists leave out a `redundancy.v2` incumbent's replies per key, which §2.6 allows
+
+> §2.10: "merge only the new incumbent's answers. `[Sc: §13, §15]` They
+> are its snapshots, or its replies per key under a `redundancy.v1`
+> incumbent (v1 §2.10)." "No omission rule applies to replies per key.
+> Under a `redundancy.v1` incumbent the follower keeps what the last
+> incumbent held, as v1 §2.10's does." "**The address's word is its
+> incumbent's.** ... This one holds the new incumbent's."
+> §2.6: "A state of an interface this major governs is answered by
+> snapshot, as core §4.2 answers any collection, unless another row of
+> core §4.2's list of per-key resources names it."
+> Core §4.2: "a state that declares `freshness.ttl_s` above 0, of a
+> contract that does not use `freshness.v2`; a desired resource of a
+> contract that does not use `desired.v2`; a state that is a metric
+> resource of `telemetry.v1` or `telemetry.v2`".
+
+- **Such an incumbent answers per key.** zk2py's `tally.v1` uses
+  `freshness.v1` and `redundancy.v2`, and its `count` declares
+  `freshness.ttl_s`. It lints clean in both implementations.
+- **Measured,** `perkey`, both pairings:
+  - each implementation's candidate answered a GET of `count` with a
+    reply per key;
+  - at B's takeover both followers seeded again and merged B's reply
+    per key, under B's run, with `"snapshots": 0`;
+  - where B took over holding nothing, both kept A's value.
+  - 5 of 5 in each pairing.
+- **So both read "answers" wider than the list.** "They are its
+  snapshots, or its replies per key under a `redundancy.v1` incumbent"
+  leaves this one out. "The address's word is its incumbent's" does not
+  hold for its members: the follower keeps the last incumbent's, as
+  v1's does.
+- **Fix:** "They are its snapshots, or its replies per key: a
+  `redundancy.v1` incumbent's (v1 §2.10), and a per-key resource's
+  (§2.6). No omission rule applies to replies per key: for those
+  members the follower keeps what the last incumbent held, as v1
+  §2.10's does."
+- **Resolved** (the lead): "They are its snapshots, or its replies per key: a `redundancy.v1` incumbent's (v1 §2.10), and a per-key resource's (§2.6)."
+
+### F-637 · contradiction · `redundancy.v2` §2.10, "No session stamp" and "A clock ahead", against core §4.3's table: a candidate's per-key state carries the Zenoh timestamp its owner sets
+
+> §2.10: "**No session stamp.** ... Its session runs without
+> timestamping, and it sets no Zenoh timestamp on a put or a delete of
+> the interface's keys. Core §8.2's exception is `redundancy.v1`'s
+> alone." "**A clock ahead.** No write of a candidate of this major
+> carries a Zenoh timestamp, so the clock guard holds none of them (core
+> §4.3, "What goes on")."
+> Core §4.3: "Only these resources carry a Zenoh timestamp the owner
+> sets, beside the in-band stamp. ... A state among them carries one on
+> each mutation and reply (S1, S2)"; its first row, "A state whose
+> contract declares `freshness.ttl_s` above 0, and does not use
+> `freshness.v2`". "On a session without timestamping, as an owner's
+> runs (§8.2), `Session::new_timestamp()` is the wall clock with the
+> zid".
+
+- **The two texts disagree** on a state §2.6 leaves per key. Core
+  §4.3's table gives it the owner's timestamp. §2.10 gives no write of
+  the interface one.
+- **Measured,** `perkey`, both pairings. S recorded each candidate's own
+  id on its puts of `count`: A's on A's, B's on B's at its takeover. G's
+  GET reply carried A's. On `ledger-run.v1`'s `balance`, by contrast, S
+  recorded R1's id and none of B's (§13).
+- **Both implementations follow core §4.3.** zk2py's owner has stamped
+  the table's rows since core 0.73 (`keeps_timestamp`), whatever the
+  major. Neither session timestamps.
+- **The clock guard** stops "the state writes that carry a Zenoh
+  timestamp" (core §4.3, "Ahead"). So "holds none of them" is false of
+  these.
+- **Fix:** "it sets no Zenoh timestamp on a put or a delete of the
+  interface's keys, but where core §4.3's table lists the resource";
+  "No write of a candidate of this major carries a Zenoh timestamp but
+  those core §4.3's table lists, which the clock guard holds as any
+  owner's."
+- **Changes:** no follower's decision: under a `redundancy.v2`
+  incumbent the rule reads the run. A candidate built from §2.10 alone
+  strips the timestamp that `freshness.v1` ages a reply by.
+- **Resolved** (the lead): a candidate sets no Zenoh timestamp "but where core §4.3's table lists the resource", and the clock guard holds those as any owner's.
+
+### F-638 · index · `redundancy.v2` 0.1's entry heads "Two implementations ran it" with "Not verified", beside "No byte crossed a wire under this major"; Appendix B says the same
+
+> `redundancy/CHANGELOG.md`, 0.1: "**Not verified.** - **Two
+> implementations ran it, after the text.** ... - **No byte crossed a
+> wire under this major.** The payloads measured are
+> `redundancy.v1`'s."
+> Appendix B: "The payloads were measured on `redundancy.v1` today ...
+> None crossed a wire under this major."
+
+- **F-632's answer went in under the old heading.** Core 0.119's entry
+  heads its line "**Verified.**". This one keeps "**Not verified.**"
+  over the item that says it ran.
+- **Bytes crossed a wire under this major,** in round 128 and here.
+  Measured in §13, with the reference's candidates:
+  - B's descriptor: 339 or 340 B marked standby, 324 or 325 B put
+    again unmarked, by run;
+  - B's put of `balance` under its run: a 10 B payload for a 2 B
+    record, so 13 B for the 5 B record;
+  - S recorded R1's id on that put, and none of B's.
+  - Each matches Appendix B's `redundancy.v2` column.
+- **Fix:** a "Verified." heading for the first item. Replace "No byte
+  crossed a wire" and Appendix B's last sentence with what crossed:
+  the descriptor's two sizes and the put's payload, measured under
+  this major.
+- **Resolved** (the lead): 0.1's entry heads its first item "Verified.", and Appendix B says what crossed a wire under this major.
+
+### Not run
+
+- **F-635's mirror live:** no takeover declared and withdrew a token
+  while a read again was in flight.
+- **A per-key state under a `redundancy.v1` incumbent beside a v2 one**
+  (§15's shape on `tally.v1`): §15's `ledger.v1` reads it per key
+  already.
+- **A `desired.v1` or `telemetry.v1` resource under `redundancy.v2`**,
+  core §4.2's other two rows: `tally.v1` reads the first.
+
+### Counts at observer 0.38 (round 128's mend)
+
+638 entries.
+- **New: F-635 to F-638:**
+  - one gap, F-635;
+  - one minor error, F-636;
+  - one contradiction, F-637;
+  - one index error, F-638.
+- **Settle first:** F-637. A candidate built from §2.10 alone writes a
+  `freshness.v1` state without the timestamp its readers age it by.
+- **Resolved:** F-629 to F-632. F-632's answer leaves F-638.
+- **Open:** F-437 to F-441; F-635 to F-638.
+
   F-365 stays open as #965's.

@@ -100,12 +100,21 @@ class Inst:
                  flags: list[str] | None = None, contract: str = "ledger.v1", g: Any = None) -> None:
         self.impl, self.rust = impl, impl != "zk2py"
         self.address, self.instance, self.name = address, instance, name
-        self.iface = "valve.v1" if contract.startswith("valve") else "ledger.v1"
+        # a contract by name in CONTRACT_DIR, or (round 128) a .toml path,
+        # whose interface its [interface] table names
+        self.iface = "valve.v1" if Path(contract).name.startswith("valve") else "ledger.v1"
+        if contract.endswith(".toml"):
+            import tomllib
+
+            with open(contract, "rb") as f:
+                head = tomllib.load(f).get("interface") or {}
+            self.iface = f"{head.get('name')}.v{head.get('major')}"
         self.g = g
         flags = list(flags or [])
         self.wait_go = "--wait-go" in flags
         args = ["--connect", endpoint, "--standby", "--instance-id", instance, "--name", name, "--retry-ms",
-                "2000", "--grace-ms", "2000", *flags, address, str(CONTRACT_DIR / f"{contract}.toml")]
+                "2000", "--grace-ms", "2000", *flags, address,
+                contract if contract.endswith(".toml") else str(CONTRACT_DIR / f"{contract}.toml")]
         self.argv = ([str(impl)] if self.rust else [sys.executable, "-m", "zk2py.redundancy_owner"]) + args
         self.proc: subprocess.Popen | None = None
         self.lines: queue.Queue[str] = queue.Queue()

@@ -431,9 +431,10 @@ fn a_desired_report_keeps_every_answer_apart() {
     assert_eq!(judgement_exit_code(&r.judgement()), 1);
 }
 
-/// `redundancy.v1` (#841, RC): §5's four questions per governed interface
-/// in the fixture's tokens, each instance's role read off its fourth
-/// answer; a split, a twin and a lasting vacancy are the findings.
+/// `redundancy` (#841, RC; #987's N3): §5's four questions per governed
+/// interface in the fixture's tokens, each instance's role read off its
+/// fourth answer and its run beside it; a split, a twin and a lasting
+/// vacancy are the findings.
 #[test]
 fn a_redundancy_report_keeps_every_answer_apart() {
     let r = fx::redundancy_report();
@@ -463,6 +464,17 @@ fn a_redundancy_report_keeps_every_answer_apart() {
         (Some("split"), Some("lasting"))
     );
     assert_eq!(by("lab/twin")["instances"][1]["twin"]["reason"], "unmarked");
+    // redundancy.v2 §2.15 (#987's N3): each candidate's run beside it, and
+    // a v1 incumbent with a v2 standby one election, both majors named.
+    assert_eq!(ledger["instances"][0]["run"], "8b030000");
+    assert_eq!(ledger["majors"], serde_json::json!(["redundancy.v1"]));
+    let mixed = by("lab/mixed");
+    assert_eq!(mixed["governance"], "claim");
+    assert_eq!(
+        mixed["majors"],
+        serde_json::json!(["redundancy.v1", "redundancy.v2"])
+    );
+    assert_eq!(mixed["instances"][1]["role"], "standby");
     assert_eq!(v["reads"].as_array().unwrap().len(), 2);
     assert_eq!(judgement_exit_code(&r.judgement()), 1);
 }

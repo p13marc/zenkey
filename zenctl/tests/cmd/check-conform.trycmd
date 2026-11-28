@@ -128,11 +128,12 @@ on one resource:
                    in the window with no horizon passes, naming
                    §2.11's SHOULD (desired.v1 §2.2, §2.11)
   redundancy-declaration
-                   when its revision uses redundancy.v1, the
-                   declaration is valid and no descriptor puts the
-                   interface in a tokenless set: one running under
-                   an invalid one is the violation, since a runtime
-                   refuses to start it (redundancy.v1 §2.2, §2.14)
+                   when its revision uses a major of redundancy, the
+                   declaration is valid, read by that major, and no
+                   descriptor puts the interface in a tokenless set:
+                   one running under an invalid one is the
+                   violation, since a runtime refuses to start it
+                   (redundancy.v1 §2.2, §2.14; redundancy.v2 §2.2)
   redundancy-standby
                    when a descriptor marks the interface standby,
                    every instance so marked in two presence reads

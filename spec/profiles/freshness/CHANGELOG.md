@@ -5,6 +5,32 @@ entry naming its text. Each entry records what changed, what deliberately
 did not, and why. A breaking change is a new major, a new file, never an
 entry here ([`../README.md`](../README.md)).
 
+## `v2.md` 0.14 — 2026-11-28: editorial: a standby of either major of `redundancy` sends no heartbeat, and only a `redundancy.v1` candidate's session stamps, no keyword changed (#987)
+
+`redundancy.v2` text 0.1 restates `redundancy.v1` without the session's
+HLC, and core 0.119 says so of §8.2's exception. Three sentences of this
+text read a candidate's session as one that stamps, or a standby as
+`redundancy.v1`'s alone.
+
+**What changed.**
+- **§2.4, "When".** An owner sends heartbeats never from a standby,
+  citing `redundancy.v1` §2.4 "which `redundancy.v2` keeps".
+- **§2.4, the owner heartbeat.** An owner leaves out the group of an
+  interface it does not serve, "as a standby of either major does".
+- **§2.10, "A held write".** The parenthesis names a `redundancy.v1`
+  candidate's session, where it said a candidate's. A new sentence says
+  a `redundancy.v2` candidate's stamps none, so the guard holds none of
+  its writes.
+
+**What deliberately did not change.**
+- **No rule.** A standby still sends no heartbeat, and a held write
+  still clears its member's bit.
+- **No fixture and no scenario.** `scenarios-v2.md` §2 step 6 keeps
+  `beacon.v2`'s revision 2.1, which uses `redundancy.v1`, so its
+  candidate's session still stamps.
+- **The header** is still written against core 0.108. The new sentence
+  restates core 0.119's §8.2.
+
 ## `v2.md` 0.13 — 2026-11-27: editorial: a read on the near side that draws no reply takes the deployment's word, and which catalog that word is, no keyword changed (#609, #986)
 
 zk2py's round 117 found §2.5 reading two ways of one case (F-574): a

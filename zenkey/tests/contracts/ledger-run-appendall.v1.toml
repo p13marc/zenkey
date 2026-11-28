@@ -1,0 +1,29 @@
+# redundancy.v2's scenarios §12, as redundancy.v1's step 8 and step 9 (#987
+# N3): ledger-appendall.v1, its `uses` moved to redundancy.v2, at minor 1.
+# A second operation whose name begins with the first's, its fan-out
+# allowed, so that a probe of append's wildcard (`append$*`) would reach it
+# and run it. Governed under `claim`, as ledger-run.v1.
+[interface]
+name  = "ledger"
+major = 1
+minor = 1
+uses  = ["redundancy.v2"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.balance]
+kind = "state"
+type = { raw = "text/plain" }
+
+[resources.append]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
+
+[resources.appendall]
+kind     = "operation"
+request  = { raw = "text/plain" }
+response = { raw = "text/plain" }
+fanout   = "allowed"
+idempotent = true

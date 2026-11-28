@@ -371,7 +371,9 @@ pub use bus::arbitration::{
     Listened as ArbitrationListened, RoleObserved, observe as observe_arbitration, run_arbitration,
 };
 pub use judge::arbitration::judge as judge_arbitration;
-pub use model::arbitration::{RoleRead, RoleSubject, ViewBook, roles_in as arbitrated_roles_in};
+pub use model::arbitration::{
+    ReadAsked, RoleRead, RoleSubject, ViewBook, roles_in as arbitrated_roles_in,
+};
 pub use model::config::{Assignment, Given, TypedValues};
 pub use model::telemetry::{
     FrameMetric, FramePair, FrameSeen, MemberBook, MetricResource, MetricSample, MetricType,

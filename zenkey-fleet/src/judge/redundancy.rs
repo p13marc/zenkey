@@ -1,6 +1,8 @@
-//! `redundancy.v1` (#841, RC): §5's four questions of each governed
-//! interface, and `hostid.v1` §2.12's recognised standby
-//! (`spec/profiles/redundancy/v1.md` §2.15).
+//! `redundancy` (#841, RC; #987's N3): §5's four questions of each
+//! interface either major governs, and `hostid.v1` §2.12's recognised
+//! standby (`spec/profiles/redundancy/v1.md` §2.15; `v2.md` §2.15, which
+//! restates them by reference, reads governance from both majors and shows
+//! each candidate's run; `hostid.v1` 0.10).
 //!
 //! Every answer is `zenkey_model::redundancy`'s ([`model::one_incumbent`],
 //! [`model::vacancy`], [`model::standbys`], [`model::twin`]) over the
@@ -105,6 +107,7 @@ pub fn row(
     governed: &Governed,
     reading: &Reading,
     zid: impl Fn(&InstanceId) -> Option<String>,
+    run: impl Fn(&InstanceId) -> Option<String>,
 ) -> RedundancyRow {
     let (sb, count) = model::standbys(reading);
     let mut ids: Vec<InstanceId> = reading
@@ -121,6 +124,7 @@ pub fn row(
         .map(|id| {
             let t = model::twin(reading, &id);
             RedundancyInstance {
+                run: run(&id),
                 zid: zid(&id),
                 first: seen_in(&reading.first, &id),
                 second: seen_in(&reading.second, &id),
@@ -135,6 +139,11 @@ pub fn row(
         iface: iface.to_string(),
         governance: governed.governance.as_str().to_owned(),
         governance_says: governed.says.clone(),
+        majors: governed
+            .majors
+            .iter()
+            .map(|m| m.profile().to_owned())
+            .collect(),
         holders: reading
             .second
             .holders()
@@ -173,6 +182,7 @@ pub fn rows(
                 Governed {
                     governance: Governance::NoContract,
                     says: "across a constrained face no descriptor crosses (§2.13)".into(),
+                    majors: Vec::new(),
                 }
             } else {
                 projection::governance(&reads, &a, &i, contracts)
@@ -182,9 +192,14 @@ pub fn rows(
             }
             let reading =
                 projection::reading(first, second, &a, &i, governed.governance, across_face);
-            Some(row(&a, &i, &governed, &reading, |id| {
-                projection::zid_of(&reads, &a, id)
-            }))
+            Some(row(
+                &a,
+                &i,
+                &governed,
+                &reading,
+                |id| projection::zid_of(&reads, &a, id),
+                |id| projection::run_of(&reads, &a, id),
+            ))
         })
         .collect()
 }
@@ -261,13 +276,14 @@ pub fn judge(
     }
 }
 
-/// What `hostid.v1` §2.12 makes of one instance (its text 0.6, 0.7).
+/// What `hostid.v1` §2.12 makes of one instance (its text 0.6, 0.7, 0.10).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Standby {
     /// A recognised standby: its second-read descriptor lists only
-    /// interfaces whose contracts use `redundancy.v1`, at least one, and
-    /// the fourth question answers no, `standby`, of each, from the same
-    /// two reads. Not counted.
+    /// interfaces whose contracts use a major of `redundancy`
+    /// (`redundancy.v1` or `redundancy.v2`, hostid.v1 0.10), at least one,
+    /// and that major's fourth question answers no, `standby`, of each,
+    /// from the same two reads. Not counted.
     Recognised,
     /// Counted, and why it is not a recognised standby: its descriptor
     /// lists no interface or one not governed, or a twin, or its
@@ -281,8 +297,10 @@ pub enum Standby {
     Unobservable(String),
 }
 
-/// `hostid.v1` §2.12's recognised standby (its text 0.6, 0.7), from the
-/// two reads a doctor or a reader holds.
+/// `hostid.v1` §2.12's recognised standby (its text 0.6, 0.7, 0.10), from
+/// the two reads a doctor or a reader holds: each interface's governance
+/// read from both majors ([`projection::governance`]), and the fourth
+/// question the one both majors share.
 pub fn recognised_standby(
     first: Option<&Observed>,
     second: Option<&Observed>,
@@ -445,6 +463,7 @@ mod tests {
             let governed = Governed {
                 governance,
                 says: String::new(),
+                majors: Vec::new(),
             };
             let (first, second) = (observed(&r["first"]), observed(&r["second"]));
             let across = r["across_face"] == true;
@@ -456,7 +475,7 @@ mod tests {
                 governance,
                 across,
             );
-            let row = row(&addr(), &ledger(), &governed, &reading, |_| None);
+            let row = row(&addr(), &ledger(), &governed, &reading, |_| None, |_| None);
             let note = &case["note"];
             let e = &case["expect"];
             let pair = |a: &RedundancyAnswer| serde_json::json!({"answer": a.answer.as_str(), "reason": a.reason});
@@ -479,6 +498,135 @@ mod tests {
                 .collect();
             assert_eq!(Value::Object(twins), e["twins"], "{note}");
         }
+    }
+
+    /// `redundancy.v2` §2.2 "Across revisions", §2.15: every address of
+    /// `v2/declarations.json`, its revisions written as contracts the
+    /// candidates' descriptors name, read through the fleet's projection,
+    /// gives the fixture's governance. A `redundancy.v1` candidate and a
+    /// `redundancy.v2` one with one election are one election, and the
+    /// row names both majors.
+    #[test]
+    fn every_address_reads_its_governance_as_v2_declarations_json() {
+        use crate::model::catalog::{ContractState, Revision};
+        use std::sync::Arc;
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../spec/profiles/redundancy/conformance/v2/declarations.json");
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let addresses = doc["addresses"].as_array().unwrap();
+        assert!(addresses.len() >= 16);
+        for case in addresses {
+            let note = &case["note"];
+            let mut contracts = Contracts::new();
+            let mut descriptors = BTreeMap::new();
+            let mut majors = std::collections::BTreeSet::new();
+            for (n, r) in case["revisions"].as_array().unwrap().iter().enumerate() {
+                let kind = r["declaration"].as_str().unwrap();
+                let (uses, election) = match kind {
+                    "governed" => {
+                        let m = r["major"].as_u64().unwrap();
+                        majors.insert(format!("redundancy.v{m}"));
+                        (
+                            format!("uses = [\"redundancy.v{m}\"]\n"),
+                            r["election"].as_str().unwrap().to_owned(),
+                        )
+                    }
+                    "invalid" => ("uses = [\"redundancy.v2\"]\n".to_owned(), "vote".to_owned()),
+                    "not_governed" | "unread" => (String::new(), String::new()),
+                    other => panic!("{other}"),
+                };
+                let defaults = if election.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "[defaults]\nannotations = {{ \"redundancy.election\" = \"{election}\" }}\n"
+                    )
+                };
+                let text = format!(
+                    "[interface]\nname = \"ledger\"\nmajor = 1\nminor = {n}\n{uses}{defaults}\
+                     [resources.r{n}]\nkind = \"state\"\ntype = {{ raw = \"text/plain\" }}\n"
+                );
+                let l = zenkey_model::contract::load_str(&text, std::path::Path::new("."), None);
+                let rev = Arc::new(Revision::from_contract(
+                    l.contract.unwrap_or_else(|| panic!("{note}: {}", l.report)),
+                    crate::report::ContractSource::File,
+                ));
+                let fp = rev.fingerprint().clone();
+                if kind != "unread" {
+                    contracts.insert((ledger(), fp.clone()), Ok(ContractState::Held(rev)));
+                }
+                let id = format!("{:016x}", 0xa + n);
+                descriptors.insert(
+                    (addr(), id.parse::<InstanceId>().unwrap()),
+                    DescriptorRead::Served(Box::new(
+                        serde_json::from_value(serde_json::json!({
+                            "format": "zk2-descriptor/0.1",
+                            "service": "lab/ledger",
+                            "instance": id,
+                            "interfaces": [{"iface": "ledger.v1", "contract": fp.to_string(), "minor": n}],
+                        }))
+                        .unwrap(),
+                    )),
+                );
+            }
+            let o = Observed {
+                selector: String::new(),
+                complete: true,
+                cut_off_during: false,
+                at_interests_timeout: false,
+                tokens: vec![],
+                unparsed: vec![],
+                descriptors: Some(descriptors),
+            };
+            let g = projection::governance(&[Some(&o)], &addr(), &ledger(), &contracts);
+            assert_eq!(
+                g.governance.as_str(),
+                case["expect"]["governance"].as_str().unwrap(),
+                "{note}: {}",
+                g.says
+            );
+            if matches!(g.governance, Governance::Governed(_)) {
+                let named: std::collections::BTreeSet<String> =
+                    g.majors.iter().map(|m| m.profile().to_owned()).collect();
+                assert_eq!(named, majors, "{note}");
+                for m in &majors {
+                    assert!(g.says.contains(m.as_str()), "{note}: {}", g.says);
+                }
+            }
+        }
+    }
+
+    /// `redundancy.v2` §2.15: each candidate's run beside its instance, as
+    /// the later read's descriptor states it.
+    #[test]
+    fn each_candidate_shows_its_run() {
+        let mut first = observed(&serde_json::json!({"complete": true, "instances": [
+            {"id": "000000000000000a", "token": true, "descriptor": "serving"},
+            {"id": "000000000000000b", "token": false, "descriptor": "standby"},
+        ]}));
+        let mut second = first.clone();
+        let run = |o: &mut Observed, id: &str, run: &str| {
+            let k = (addr(), id.parse::<InstanceId>().unwrap());
+            if let Some(DescriptorRead::Served(d)) = o.descriptors.as_mut().unwrap().get_mut(&k) {
+                d.run = Some(run.to_owned());
+            }
+        };
+        run(&mut first, "000000000000000a", "0a0a0a0a");
+        run(&mut first, "000000000000000b", "0b0b0b0b");
+        run(&mut second, "000000000000000a", "1a1a1a1a");
+        let reads = [Some(&first), Some(&second)];
+        let a: InstanceId = "000000000000000a".parse().unwrap();
+        let b: InstanceId = "000000000000000b".parse().unwrap();
+        assert_eq!(
+            projection::run_of(&reads, &addr(), &a).as_deref(),
+            Some("1a1a1a1a"),
+            "the later read's"
+        );
+        assert_eq!(
+            projection::run_of(&reads, &addr(), &b).as_deref(),
+            Some("0b0b0b0b"),
+            "the earlier read's where the later states none"
+        );
     }
 
     /// The governance of an address, from the revisions its descriptors

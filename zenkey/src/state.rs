@@ -584,6 +584,23 @@ impl Minter {
         r.seq = next.min(SEQ_END);
     }
 
+    /// Chooses the instance's first run: for tests of a run another
+    /// instance states (`redundancy.v2` §2.10, scenarios §14 step 3); a
+    /// deployment never chooses one. Before any write and before the start,
+    /// so that the first descriptor states it. Refused once a run is taken.
+    #[doc(hidden)]
+    pub fn simulate_run(&self, run: wire::Run) -> Result<()> {
+        let mut r = self.runs.lock().expect("not poisoned");
+        if r.run.is_some() {
+            return Err(Error::Contract(
+                "the first run is chosen before the first write: a run is taken already".to_owned(),
+            ));
+        }
+        r.used.push(run);
+        r.run = Some(run);
+        Ok(())
+    }
+
     /// The next state and event seq of the run, with no Zenoh timestamp
     /// and never held by the clock guard: for a profile whose model mints
     /// its own stamps, its writes then putting them as minted

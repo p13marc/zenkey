@@ -269,6 +269,16 @@
     "over": 12,
     "tags": 0
   },
+  "spec/profiles/redundancy/conformance/v2/README.md": {
+    "mean": 13.45,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/redundancy/scenarios-v2.md": {
+    "mean": 11.28,
+    "over": 0,
+    "tags": 0
+  },
   "spec/profiles/redundancy/scenarios.md": {
     "mean": 16.7,
     "over": 0,
@@ -276,6 +286,11 @@
   },
   "spec/profiles/redundancy/v1.md": {
     "mean": 19.64,
+    "over": 0,
+    "tags": 0
+  },
+  "spec/profiles/redundancy/v2.md": {
+    "mean": 13.22,
     "over": 0,
     "tags": 0
   },

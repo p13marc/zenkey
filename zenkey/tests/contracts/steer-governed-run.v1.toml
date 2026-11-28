@@ -1,0 +1,22 @@
+# steer.v1, minor 2: the commanders' stream governed by redundancy.v2, for
+# arbitration.v1's scenarios §11 under that major (text 0.7, #987's N2): an
+# actuator holding it counts as arrivals only the samples under the
+# incumbent's runs (redundancy.v2 §2.10). steer-governed.v1.toml's, its
+# `uses` moved from redundancy.v1 to redundancy.v2.
+[interface]
+name  = "steer"
+major = 1
+minor = 2
+uses  = ["timing.v1", "redundancy.v2"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.cmd]                  # one command every 50 ms, missed 300 ms after the last
+kind        = "stream"
+type        = { raw = "text/plain" }
+reliability = "best_effort"
+congestion  = "drop"
+priority    = "real_time"
+express     = true
+annotations = { "timing.period_ms" = 50, "timing.deadline_ms" = 300 }
