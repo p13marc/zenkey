@@ -565,12 +565,24 @@ async fn telemetry(bed: &Bed, catalogs: Catalogs, drops: &zenkey::writer::Writer
 async fn telemetry_reads_a_compact_descriptor_as_the_json_one() {
     let json = Bed::up(false).await;
     let (_svc, drops) = meter(&json.owner).await;
-    let want = telemetry(&json, Catalogs::default(), &drops).await;
-    assert!(want.contains("drops"), "{want}");
+    // A presence read made before the owner's tokens reach the router finds
+    // no owner, and the run ends with nothing in scope: read again until
+    // the owner is found, as `why`'s test does.
+    let want = settled(
+        "the JSON owner's metric resources in scope",
+        || telemetry(&json, Catalogs::default(), &drops),
+        |w| w.contains("drops"),
+    )
+    .await;
     let bed = Bed::up(true).await;
     let (svc, drops) = meter(&bed.owner).await;
     let (catalogs, _twin) = bed.twin(&svc).await;
-    let got = telemetry(&bed, catalogs, &drops).await;
+    let got = settled(
+        "the compact twin read as the JSON one",
+        || telemetry(&bed, catalogs.clone(), &drops),
+        |g| *g == want,
+    )
+    .await;
     let unread = telemetry(&bed, Catalogs::default(), &drops).await;
     eprintln!("json {want}\ncompact {got}\nunread {unread}");
     assert_eq!(got, want);
