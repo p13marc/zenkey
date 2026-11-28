@@ -1023,3 +1023,31 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `presence::descriptor`, `answer::owner_revision` and `owner_catalog`,
   which read either form and leave a compact one unread.
   `tests/compact_descriptor.rs`' `a_client_and_a_put_read_the_compact_form`.
+
+  C5c (#980, core 0.120's §8.1 SHOULD): the owner writes the compact form.
+  `ServiceConfig::compact_descriptor: Option<bool>` (serde
+  `compact_descriptor`, builder `.compact_descriptor(bool)`) and
+  `writes_compact(catalog, role)`: `None` is the compact form on a first hop
+  given a catalog that holds no role, JSON otherwise. `Some(true)` without a
+  catalog or beside a role is refused at start (`descriptor_form`, step 2,
+  nothing declared). `Served` keeps `Bytes { bytes, form }` (the queryable
+  answers under its form's Encoding) and the minter: `encode_with(instance,
+  run, seq)` checks the JSON descriptor, then `descriptor::encode_compact`
+  (the catalog and the impls' revisions), a descriptor with no compact form
+  written as JSON and said once (`fell_back`). The seq is the as-of mark's,
+  `Minter::last_seq(run)` (0 for a run not written under now), read before
+  any `Served` lock (lock order: the minter's runs, then `putting`); at
+  `run_changed`, under the minter's lock, `publish_at(run, 0)`. A compact put
+  carries no Zenoh timestamp, the JSON one keeps its. The compact form
+  carries `meta.zid` (§3.3's SHOULD), 16 B: the probe device of
+  `constrained.md` §10 is 36 B (32-bit run), 47 B across the hop against
+  JSON's 695 B. `Service::descriptor_form()`; `descriptor_bytes()` is the
+  served form's bytes. The owner example's `--compact-descriptor` (needs
+  `--catalog`), and `--first-hop --catalog` writes it by default; the
+  consume example's `--catalog <path>` (the service's catalog, so its
+  consumer reads a compact descriptor). Tests: `constrained.rs`'s
+  `s10_a_first_hop_device_writes_its_descriptor_compact` (step 7: the bytes
+  across the hop, the tool and the consumer with the catalog and without)
+  and `the_compact_form_asked_for_needs_a_catalog_and_no_role`;
+  `owner_example.rs`'s `the_owner_example_writes_its_descriptor_compact`
+  (consume found it through `--catalog`); `config.rs`'s default.

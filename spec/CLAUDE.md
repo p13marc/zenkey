@@ -1188,3 +1188,21 @@ again by `b_check.py`, written from the finished text, which agreed on
 every case; the revisions' fingerprints are lane P's canonicalizer's
 (`lib/canon.py`), which the reference matches. zenoh-modem's node is 22 B
 compact (`tests/examples.rs`), against 1,344 B of JSON.
+
+**The compact descriptor, adopted (#980 C5c, core 0.120's entry
+extended).** §3.3, "Both forms are read": a reader of descriptors MUST
+read both forms (`[F: descriptors/compact/]` `[Sc: constrained.md §10]`)
+and MUST NOT guess a catalog or a revision it lacks; a provider found by a
+descriptor it did not read is unobservable, never absent (observer §3.6);
+a compact put needs no Zenoh timestamp. §8.1, "On a first hop", "Its
+descriptor's form": such an owner given a catalog SHOULD write the compact
+form (`[Sc: constrained.md §10]`), its puts and its GET's replies; with a
+role (question 4), no catalog or no compact form it writes JSON; off a
+first hop an owner given a catalog MAY (question 7), JSON the near side's
+default; the GET answers the form of the last put. `constrained.md` §10
+step 7 counts the descriptor's put across the hop, under a quarter of step
+3's JSON one (the reference: 47 B against 695 B, the payload 36 B with the
+zid, which §3.3's SHOULD keeps, against 664 B), and reads it through the
+catalog and without. `RULES.md` gains three rules (305); its generated
+"Where it reads" lists gain core §3.3, so its baseline mean went from
+12.19 to 12.25 by hand.

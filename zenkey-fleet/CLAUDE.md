@@ -1093,3 +1093,12 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   and alarms, config, desired (the author's), telemetry and why read it as
   the JSON one, and unread with no catalog. `tempfile` is a dev-dependency
   for the runtime's example owners it includes.
+
+  C5c (#980): a runtime owner now writes the compact form, on a first hop
+  given a catalog (or `ServiceConfig::compact_descriptor(true)`).
+  `tests/first_hop.rs`'s
+  `s10_the_fleet_reads_a_first_hop_devices_compact_descriptor`: the fleet's
+  `observe_presence_through` with `Describing::retrieving` (the catalog, the
+  revision offline, since a first-hop device holds no bundle) reads a real
+  owner's compact descriptor, and `observe_presence` with none reads it
+  `Unread` (`unknown_catalog`).
