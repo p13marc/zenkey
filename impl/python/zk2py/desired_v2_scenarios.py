@@ -1400,12 +1400,29 @@ def section14(rp: Report, moves: bool = True, ohb: bool = False) -> None:
         new = puts[0][4] if puts else None
         gets = author.gets()
         hb_runs = {g[4].split("/")[0] for g in _hb(bus, t5) if g[4]}
+        # 0.3's Expected 5: "The target reads its author's descriptors for
+        # that run before it judges the put (§2.18). None crosses the face,
+        # so the deployment's word stands, and the target adopts the put.
+        # The first heartbeat of the new instance is of another run, and the
+        # target reads once. Asked after the adoption, the read is answered
+        # unchanged. Asked while the descriptors' read runs, it carries v3's
+        # earlier stamp and is answered whole. Its entry waits with the put,
+        # and is the same version." A read answered whole is followed by
+        # §2.5's "Whole: it judges the entry (§2.6), and expects none. The
+        # next heartbeat makes it read once more, and that read settles what
+        # it expects", which Expected 5 does not say (F-625): so two reads
+        # on that path, the second unchanged.
+        after, during = [{"held": new, "alone": True}], [{"held": s3, "alone": False}, {"held": new, "alone": True}]
         rp.check(sec, "5. the author restarts from its record: S receives a put on D holding v3's content under a new "
-                      "run; the target hears it and adopts it; the first heartbeat of the new instance is of another "
-                      "run; the target reads, and is answered unchanged; Run receives nothing",
+                      "run; the target reads its author's descriptors for that run before it judges the put, none "
+                      "crosses, and it adopts the put; the first heartbeat of the new instance is of another run, and "
+                      "the target reads once: answered unchanged after the adoption, or whole with v3's earlier stamp "
+                      "while the descriptors' read runs, and then, by §2.5's \"Whole\", once more at the next "
+                      "heartbeat, answered unchanged (F-625); Run receives nothing (0.3)",
                  new is not None and new != s3 and target.report() == converged(new, 3) and target.acts() == acts0
-                 and gets == [{"held": new, "alone": True}] and not [g for g in bus.since2(t5) if g[1] == RUN]
+                 and gets in (after, during) and not [g for g in bus.since2(t5) if g[1] == RUN]
                  and len(hb_runs) == 1, f"put {new}, gets {gets}, heartbeat runs {hb_runs}")
+        rp.note(sec, f"step 5: the new run's read was {'answered unchanged, after the adoption' if gets == after else 'answered whole, during the descriptors read, then once more, unchanged' if gets == during else gets}")
         g0, t6, w0 = len(author.gets()), time.monotonic(), target.watch()
         author.pause()
         time.sleep(6.0)

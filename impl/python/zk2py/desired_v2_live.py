@@ -106,8 +106,13 @@ class Author:
     def __init__(self, address: str, endpoint: str, *, record: str | None = None, run_record: str | None = None,
                  window_s: float = 60.0, tasking: Any = None, watched: bool = False,
                  tokenless: tuple[str, ...] = (), catalog: str | None = None,
-                 owner_heartbeat: bool = False) -> None:
+                 owner_heartbeat: bool = False, after_descriptor: bool = False) -> None:
         self.address, self.endpoint = address, endpoint
+        #: a new instance's puts again made after its descriptor (core §8.2
+        #: step 3) rather than before it, both before its tokens: §2.18's why
+        #: (0.3), "puts its first version just after its new descriptor",
+        #: made so (round 127)
+        self.after_descriptor = after_descriptor
         self.tokenless = set(tokenless)
         #: core §8.6's catalog, by its file's path, and whether the author
         #: confirms its interface by owner heartbeats (freshness.v2 §2.4)
@@ -130,7 +135,9 @@ class Author:
     def start(self) -> str:
         system, service = self.address.split("/")
         self.owner = Owner(system, service, [self.contract], connect=self.endpoint, tombstone_s=self.window_s,
-                           before_tokens=self._adopt, run_record=self.run_record, tokenless=self.tokenless)
+                           before_tokens=None if self.after_descriptor else self._adopt,
+                           after_descriptor=self._adopt if self.after_descriptor else None,
+                           run_record=self.run_record, tokenless=self.tokenless)
         owner = self.owner
         if self.catalog is not None:
             from . import catalog as cat

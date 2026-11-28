@@ -64,6 +64,11 @@ class Report:
               flush=True)
         return bool(ok)
 
+    def note(self, section: str, text: str) -> None:
+        """A measurement kept beside the checks, and not counted."""
+        self.rows.append({"section": section, "note": text, "ok": True, "counted": False})
+        print(f"NOTE {section}: {text}", flush=True)
+
     def keep(self, section: str, step: str, listener: al.Listener, since: int) -> list[dict[str, Any]]:
         """Every put S heard since ``since``: key, kind, payload in hex, and
         the record read (or the words)."""
@@ -92,9 +97,10 @@ class OwnerProc:
 
     def __init__(self, impl: str, endpoint: str, address: str, *, contracts: list[Path] = (),
                  record: str | None = None, rules: str | None = None, bound: int | None = None,
-                 tokenless: list[str] = (), run_file: str | None = None, v1_owner: bool = False):
+                 tokenless: list[str] = (), run_file: str | None = None, v1_owner: bool = False,
+                 first_hop: bool = False):
         self.impl, self.address = impl, address
-        flags: list[str] = []
+        flags: list[str] = ["--first-hop"] if first_hop else []
         if record:
             flags += ["--alarms-record", record]
         if rules:
@@ -1090,8 +1096,12 @@ def section15(rep: Report) -> None:
         o.raise_(A)
         o.raise_(B)
         time.sleep(0.8)
+        # the deployment's word names the owner's revisions: tc.v1's, and
+        # alarms.v2's standard one, whose horizon a far reader ages by
+        # (§2.7, 0.2: "Across a face, the deployment's word names the
+        # revision (§2.11)")
         r = al.read_owner(bus.g, "lab/svc", held_revisions(TC), across="granted",
-                          named=[load_contract(TC).fingerprint])
+                          named=[load_contract(TC).fingerprint, a2.standard().fingerprint])
         mine = {s_: j.firing.pair() for s_, j in r.slots.items()}
         takes = {k: a2.reader_slot([a2.SlotSeen(s_, r.collection.run_hex(), 0)], None)
                  for s_, k in ((0, KA), (1, KB))}
@@ -1108,6 +1118,56 @@ def section15(rep: Report) -> None:
                   "two slots", True, {"exit": code, "owner": own, "slots": zs,
                                       "any_firing": (doc or {}).get("any_firing") if isinstance(doc, dict) else None,
                                       "stderr": err[-600:]})
+    finally:
+        bus.close()
+
+
+def section17(rep: Report) -> None:
+    """§6's state on the copy, read as across a face (granted), where "the
+    deployment's word names the revision (§2.11)" (§2.7, 0.2; round 127):
+    zk2py's reader given a word that names the copy, one that names no
+    alarms.v2 revision, and one that names the copy it does not hold; and
+    ``zenctl alarms --across-face granted``, given the copy by
+    ``--contracts`` and not given it."""
+    sec = "§6 across a face"
+    bus = Bus(rep, sec)
+    try:
+        from .contract import load_contract
+
+        short = _short_contract(bus)
+        sc = al.standard(4)
+        o = bus.owner("lab/svc", contracts=[short, TC])
+        time.sleep(1.0)
+        o.raise_(A)
+        o.raise_(B)
+        o.resolve(KB)
+        time.sleep(0.5)
+        o.cmd(f"alarm confirm {KA} off")
+        time.sleep(7.0)
+        tc = load_contract(TC).fingerprint
+        out: dict[str, Any] = {}
+        for name, named, files in (("the word names the copy, held", [tc, sc.fingerprint], [TC, short]),
+                                   ("the word names no alarms.v2 revision", [tc], [TC]),
+                                   ("the word names the copy, not held", [tc, sc.fingerprint], [TC])):
+            r = al.read_owner(bus.g, "lab/svc", held_revisions(*files), across="granted", named=named)
+            out[f"zk2py: {name}"] = {"revision": r.revision, "horizon": r.horizon_s, "verdict": r.verdict.expect(),
+                                     "slots": {s_: j.firing.pair() for s_, j in sorted(r.slots.items())}}
+        for name, files in (("given the copy", [TC, short]), ("not given it", [TC])):
+            code, doc, err = bus.zenctl("--across-face", "granted",
+                                        *[x for f in files for x in ("--contracts", str(f))],
+                                        "zk2/lab/svc/alarms.v2/state/alarms/**")
+            out[f"zenctl: {name}"] = {"exit": code, "slots": {x["slot"]: pair(x.get("firing")) for x in zen_alarms(doc)},
+                                      "any_firing": (doc or {}).get("any_firing", {}).get("answer")
+                                      if isinstance(doc, dict) else None}
+        nh = {"answer": "unobservable", "reason": "not_a_horizon"}
+        rep.check(sec, "zk2py's far reader: a word that names the copy it holds ages A at 4 s, unobservable, stale; "
+                  "one that names no alarms.v2 revision, or the copy unheld, gives no horizon: A unobservable, "
+                  "not_a_horizon; B no, resolved in each",
+                  [x["slots"] for k, x in out.items() if k.startswith("zk2py")]
+                  == [{0: UNOBS_STALE, 1: NO_RESOLVED}, {0: nh, 1: NO_RESOLVED}, {0: nh, 1: NO_RESOLVED}], out)
+        rep.check(sec, "zenctl alarms --across-face granted, given the copy: A unobservable, stale, at its 4 s; "
+                  "B no, resolved", out["zenctl: given the copy"]["slots"] == {0: UNOBS_STALE, 1: NO_RESOLVED}, out)
+        rep.note(sec, f"zenctl --across-face granted, not given the copy: {out['zenctl: not given it']}")
     finally:
         bus.close()
 
@@ -1174,18 +1234,66 @@ def section2(rep: Report) -> None:
                   == [True, "heartbeat", 17, 1, [0], "fresh"],
                   {"heartbeats": len(wires), "tag": env and env.tag, "copy's tag": heartbeat.tag_of(sc.fingerprint),
                    "last": wires[-1].hex() if wires else None, "after the window": later})
+        got = readers(bus, "lab/svc", short)
+        rep.check(sec, "Expected 4, every reader on the copy (0.2's Conventions: \"S, G and the tools hold the copy. "
+                  "Each is given it, or retrieves it\"): zk2py's G and zenctl alarms, each given the copy and not "
+                  "given it, age H at the copy's 4 s, and answer it yes, firing, past that horizon, by its "
+                  "confirmations",
+                  all(x["slots"].get(0) == YES_FIRING for x in got.values())
+                  and [x.get("horizon") for k, x in got.items() if k.startswith("zk2py")] == [4, 4],
+                  got)
     finally:
         bus.close()
 
 
+def readers(bus: Bus, address: str, short: Path, *, given: bool = True) -> dict[str, Any]:
+    """§2.7 (0.2), "The horizon is the revision's": zk2py's G
+    (:func:`zk2py.alarms_v2_live.read_owner`) and ``zenctl alarms``, each
+    given the copy beside ``tc.v1`` (``--contracts``), and given ``tc.v1``
+    alone, so that each retrieves the revision the descriptor names (core
+    §8.4) -> each reader's answer to "is this alarm firing?" by slot, and
+    what it had of the revision."""
+    service = address.split("/", 1)[1]
+    out: dict[str, Any] = {}
+    for name, files in ((("given", [TC, short]),) if given else ()) + (("not given", [TC]),):
+        r = al.read_owner(bus.g, address, held_revisions(*files))
+        out[f"zk2py, {name}"] = {"revision": r.revision, "horizon": r.horizon_s,
+                                 "slots": {s_: j.firing.pair() for s_, j in sorted(r.slots.items())}}
+        code, doc, err = bus.zenctl(*[x for f in files for x in ("--contracts", str(f))], f"zk2/{address}/**")
+        out[f"zenctl, {name}"] = {
+            "exit": code, "slots": {x["slot"]: pair(x.get("firing")) for x in zen_alarms(doc)
+                                    if (x.get("alarm") or {}).get("service", service) == service
+                                    and x.get("slot") is not None},
+            "owner": {k: v for k, v in (zen_owner(doc, address) or {}).items() if k in ("verdict", "reason")},
+            "any_firing": (doc or {}).get("any_firing") if isinstance(doc, dict) else None,
+            **({"stderr": err.strip()[-300:]} if err.strip() else {})}
+    return out
+
+
 def section6(rep: Report) -> None:
-    sec = "§6"
+    _section6(rep, first_hop=False)
+
+
+def section16(rep: Report) -> None:
+    """§6 on the copy, its owner on a first hop (core §8.1, §8.4: "no
+    bundle held"): a reader not given the copy can neither hold nor retrieve
+    the revision the descriptor names (§2.7, 0.2: "A revision not in hand
+    gives no horizon ... reads that owner's alarms' freshness as
+    unobservable, never at 900 s"; round 127)."""
+    _section6(rep, first_hop=True)
+
+
+UNOBS_STALE = {"answer": "unobservable", "reason": "stale"}
+
+
+def _section6(rep: Report, first_hop: bool) -> None:
+    sec = "§6" + (", the owner on a first hop" if first_hop else "")
     bus = Bus(rep, sec)
     try:
         short = _short_contract(bus)
         sc = al.standard(4)
         S = bus.listener("lab/svc", sc)
-        o = bus.owner("lab/svc", contracts=[short, TC])
+        o = bus.owner("lab/svc", contracts=[short, TC], first_hop=first_hop)
         time.sleep(1.0)
         o.raise_(A)
         o.raise_(B)
@@ -1207,26 +1315,35 @@ def section6(rep: Report) -> None:
                   "unobservable, stale, and the last question yes, stale; B no, resolved",
                   [[x["key"] for x in S.all(t) if "/state/alarms/" in x["key"]], sec_.get("live"), sec_.get("vouched"),
                    ra.pair(), rs.pair()]
-                  == [[], 2, [], {"answer": "unobservable", "reason": "stale"}, {"answer": "yes", "reason": "stale"}],
+                  == [[], 2, [], UNOBS_STALE, {"answer": "yes", "reason": "stale"}],
                   {"heartbeat": wires[-1].hex() if wires else None, "section": sec_})
         r = al.read_owner(bus.g, "lab/svc", held_revisions(TC, short))
         snap = r.collection.snapshot() if r.collection else None
         rep.check(sec, "Expected 2: G's snapshot lists A with its last confirmation, past the horizon, and B with its own",
                   [[(e["slot"], e["confirmation"]) for e in (snap or {}).get("live", [])]] == [[(0, "conf"), (1, "conf")]],
                   (snap or {}).get("live"))
-        if True:
-            g = judged(bus, "lab/svc", [TC, short]) if PAIRING == "zk2py-owner" else None
-            if g is None:
-                code, doc, err = bus.zenctl("--contracts", str(TC), "--contracts", str(short), "zk2/lab/svc/**")
-                g = {"slots": {x["slot"]: {"firing": pair(x.get("firing"))} for x in zen_alarms(doc)}}
-            rep.check(sec, "Expected 2 (zenctl as G, on the 4 s copy): zenctl ages by §2.14's 900 s, not the copy's 4 s, "
-                      "so A still reads yes, firing at 7 s (F-613); B no, resolved",
-                      [(g["slots"].get(0) or {}).get("firing"), (g["slots"].get(1) or {}).get("firing")]
-                      == [YES_FIRING, NO_RESOLVED], g["slots"])
-            if False:
-                rep.check(sec, "",
-                      [(g["slots"].get(0) or {}).get("firing"), (g["slots"].get(1) or {}).get("firing")]
-                      == [{"answer": "unobservable", "reason": "stale"}, NO_RESOLVED], g["slots"])
+        got = readers(bus, "lab/svc", short)
+        given = {k: v for k, v in got.items() if k.endswith(", given")}
+        rep.check(sec, "Expected 2, every reader given the copy (0.2's Conventions, F-613's answer): zk2py's G and "
+                  "zenctl alarms age A at the copy's 4 s: unobservable, stale at 7 s; B no, resolved",
+                  all(x["slots"].get(0) == UNOBS_STALE and x["slots"].get(1) == NO_RESOLVED for x in given.values()),
+                  given)
+        nog = {k: v for k, v in got.items() if k.endswith("not given")}
+        if not first_hop:
+            rep.check(sec, "Expected 2, every reader not given the copy: each retrieves the revision the descriptor "
+                      "names (core §8.4), and ages A at its 4 s: unobservable, stale; B no, resolved",
+                      all(x["slots"].get(0) == UNOBS_STALE and x["slots"].get(1) == NO_RESOLVED for x in nog.values())
+                      and nog["zk2py, not given"]["revision"] == "retrieved", nog)
+        else:
+            zs = nog["zenctl, not given"]["slots"].get(0) or {}
+            rep.check(sec, "§2.7 (0.2), a revision not in hand: the owner on a first hop holds no bundle, so a reader "
+                      "not given the copy neither holds nor can retrieve it; each reads A's freshness unobservable, "
+                      "never at 900 s (zk2py: not_a_horizon), and B no, resolved, whatever its age",
+                      nog["zk2py, not given"]["slots"].get(0) == {"answer": "unobservable", "reason": "not_a_horizon"}
+                      and nog["zk2py, not given"]["revision"] == "not_in_hand" and zs.get("answer") == "unobservable"
+                      and all(x["slots"].get(1) == NO_RESOLVED for x in nog.values()), nog)
+            rep.note(sec, f"zenctl's reason for a revision not in hand: {zs.get('reason')!r}; its owner row "
+                          f"{nog['zenctl, not given'].get('owner')}, any_firing {nog['zenctl, not given'].get('any_firing')}")
     finally:
         bus.close()
 
@@ -1295,8 +1412,9 @@ def main(argv: list[str] | None = None) -> int:
 
         name = f"{PAIRING}{'-' + '-'.join(a.only) if a.only else ''}.json"
         (Path(a.out) / name).write_text(json.dumps(plain({"rows": rep.rows, "puts": rep.puts}), indent=1))
-    bad = [r for r in rep.rows if not r["ok"]]
-    print(f"{len(rep.rows) - len(bad)} of {len(rep.rows)} checks passed", flush=True)
+    counted = [r for r in rep.rows if r.get("counted", True)]
+    bad = [r for r in counted if not r["ok"]]
+    print(f"{len(counted) - len(bad)} of {len(counted)} checks passed", flush=True)
     return 1 if bad else 0
 
 

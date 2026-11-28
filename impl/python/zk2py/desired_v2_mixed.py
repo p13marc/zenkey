@@ -40,6 +40,14 @@ alone, as one built before this major does"); run C is ``v2-target`` told,
 and its refusal names the role; run D is :func:`run_d`, the same target
 told the scenarios' own ``tasking.v2`` while its author runs run C's
 revision, and the author's descriptor reaches it.
+
+``--only run-e`` (round 127, text 0.3) runs §16's run E alone, and
+``s16`` runs it beside A to D: :func:`run_e`, run D's target under an
+author that starts on the scenarios' own revision, then restarts on run
+C's from its record. ``--repeat <n>`` runs it n times in each pairing.
+``--only run-e-after`` runs it with zk2py's author putting its documents
+again after its descriptor (``--desired-after-descriptor``), beside each
+target.
 """
 
 from __future__ import annotations
@@ -49,6 +57,7 @@ import json
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Sequence
 
 from . import desired_v2 as d2, zk2c
@@ -342,9 +351,153 @@ def run_d(rp: Report, a_impl: str, t_impl: str) -> dict[str, Any]:
         w.close()
 
 
+def _descriptor_at_first_put(w: Wire, key: str, after: set[str]) -> dict[str, Any]:
+    """What a read of the author's descriptors draws at the first put on
+    ``key`` under a run not in ``after``, asked from G the moment S hears
+    it, as a target that holds the put would ask (§2.18, 0.3): the runs the
+    descriptors state, and how long the read took. Set going before the
+    author restarts; read with :func:`_wait_first`."""
+    out: dict[str, Any] = {}
+    done = threading.Event()
+
+    def ask(run: str, t0: float) -> None:
+        from . import freshness_v2 as f2
+
+        docs = f2.descriptors_of(w.g, AUTHOR, 1.0)
+        out.update({"run": run, "stated": [d.get("run") for d in docs], "ms": round((time.monotonic() - t0) * 1000)})
+        done.set()
+
+    def heard(smp: Any) -> None:
+        if done.is_set() or "run" in out:
+            return
+        rd = zk2c.read_sample(smp)
+        if rd.stamp is None:
+            return
+        run = d2.Version.of(rd.stamp.width, rd.stamp.run, rd.stamp.seq).run.text
+        if run in after:
+            return
+        out["run"] = run
+        threading.Thread(target=ask, args=(run, time.monotonic()), daemon=True).start()
+
+    sub = w.g.declare_subscriber(key, w.zenoh.handlers.Callback(heard))
+    out["_sub"], out["_done"] = sub, done
+    return out
+
+
+def run_e(rp: Report, a_impl: str, t_impl: str, tmp: str, after: bool = False) -> dict[str, Any]:
+    """§16 run E (desired.v2 0.3), each run in a directory of its own: run D's target, told the scenarios' own
+    tasking.v2; its author starts on that revision, then ends without
+    closing and starts again on run C's revision (tasking.v2 using
+    desired.v1), under a new run, from its record, and puts v1 again and
+    then v2. Steps 7 and 8; Expected 7 and 8: "the target judges nothing of
+    the new run before it reads the descriptor stating that run (§2.18). It
+    names run C's revision, so the role stops. The target says so, and acts
+    on neither put. `Rp` and `Run` receive nothing."
+
+    Beside it, G reads the author's descriptors the moment S hears the new
+    run's first put: whether a target that holds that put then finds the
+    new run stated (core §8.2 puts a state's value before step 4, and
+    names no place for it beside step 3)."""
+    import tempfile
+
+    sec = (f"§16 run E: a new run read first [{impl_name(a_impl)} author"
+           f"{', its puts again after its descriptor' if after else ''}, {impl_name(t_impl)} target]")
+    w = Wire(True)
+    key = f"zk2/{AUTHOR}/tasking.v2/state/tasks/{TARGET}"
+    run_c = str(MIXED / "tasking.v2.toml")
+    rp_key = f"zk2/{TARGET}/worker.v2/state/desired/task"
+    run_key = f"zk2/{TARGET}/worker.v2/state/running"
+    d = tempfile.mkdtemp(prefix=f"run-e-{a_impl}-{t_impl}-", dir=tmp)
+    rec, runs = str(Path(d) / "author.record.json"), str(Path(d) / "author.run.json")
+
+    def author(files: Sequence[str]) -> Proc:
+        if a_impl == "zk2py":
+            return w.add(_py("zk2py.desired_v2_owner", w.ep,
+                             ["--desired-author", "--desired-record", rec, "--desired-run-record", runs,
+                              *(["--desired-after-descriptor"] if after else []),
+                              *(["--desired-contract", files[0]] if files else [])], AUTHOR))
+        return w.add(_rust(w.ep, ["--desired-author", "--desired-v2", "--desired-record", rec, "--run-file", runs],
+                           AUTHOR, files))
+
+    try:
+        a1 = author(())
+        time.sleep(0.5)
+        heard: list[tuple[float, str, bytes]] = []
+        sub = w.s.declare_subscriber(f"zk2/{TARGET}/worker.v2/state/**", w.zenoh.handlers.Callback(
+            lambda smp: heard.append((time.monotonic(), str(smp.key_expr), smp.payload.to_bytes()))))
+        d_at: list[tuple[float, str | None]] = []
+
+        def on_d(smp: Any) -> None:
+            rd = zk2c.read_sample(smp)
+            d_at.append((time.monotonic(), None if rd.stamp is None else
+                         d2.Version.of(rd.stamp.width, rd.stamp.run, rd.stamp.seq).text))
+
+        sub_d = w.s.declare_subscriber(key, w.zenoh.handlers.Callback(on_d))
+        tokens: list[tuple[float, str, str]] = []
+        sub_t = w.s.liveliness().declare_subscriber(f"zk2/{AUTHOR}/@zk/instance/*", w.zenoh.handlers.Callback(
+            lambda smp: tokens.append((time.monotonic(), "put" if smp.kind == w.zenoh.SampleKind.PUT else "delete",
+                                       str(smp.key_expr).rsplit("/", 1)[1][:8]))))
+        if t_impl == "zk2py":
+            target = w.add(_py("zk2py.desired_v2_owner", w.ep, ["--desired-target", AUTHOR, "--desired-presence-watch"],
+                               TARGET))
+        else:
+            target = w.add(_rust(w.ep, ["--desired-target", AUTHOR, "--desired-v2", "--desired-watch"], TARGET))
+        time.sleep(1.5)
+        said1 = a1.cmd(f"desired put {TARGET} {json.dumps(DOC1)}")
+        time.sleep(2.0)
+        acts7 = target.n_acts()
+        st = w.live.get_state(w.g, rp_key, 1.0)
+        raw = next((r.raw for r in st.replies if r.key == rp_key and r.raw), b"")
+        rep7 = d2.read_put(raw).report if raw else None
+        runs7 = {v.split("/")[0] for k, _, v in w.samples(key) if k == "put" and v}
+        rp.check(sec, "7. the target starts, the author puts v1: the target acts on v1, and the report is converged "
+                      "on it",
+                 bool(said1) and acts7 == 1 and rep7 is not None and rep7.get("outcome") == "converged"
+                 and target.say("running") == DOC1, f"author {said1!r}, acts {acts7}, Rp {rep7}")
+        seeds7 = target.cmd("desired seeds") or ""
+        probe = _descriptor_at_first_put(w, key, runs7)
+        a1.kill()
+        t8 = time.monotonic()
+        a2 = author((run_c,))
+        time.sleep(1.5)
+        said2 = a2.cmd(f"desired put {TARGET} {json.dumps(DOC2)}")
+        time.sleep(3.0)
+        probe["_done"].wait(3.0)
+        probe.pop("_sub").undeclare()
+        probe.pop("_done")
+        wire = [(k, ts, v) for k, ts, v in w.samples(key)]
+        new_puts = [v for k, _, v in wire if k == "put" and v and v.split("/")[0] not in runs7]
+        later = [(k.rsplit("/", 1)[1], b.hex()) for t, k, b in heard if t >= t8 and k in (rp_key, run_key)]
+        seeds8 = target.cmd("desired seeds") or ""
+        words = dict(x.split("=", 1) for x in seeds8.split()[3:] if "=" in x)
+        acts8 = target.n_acts()
+        rp.check(sec, "8. the author restarts on run C's revision under a new run, from its record, and puts v1 "
+                      "again and then v2: the target reads the descriptor stating that run before it judges either, "
+                      "names run C's revision and stops the role; it says so where it says what its seed found, "
+                      "acts on neither put, and Rp and Run receive nothing (§2.18, 0.3)",
+                 a2.instance is not None and len(new_puts) >= 2 and bool(said2) and acts8 == acts7 and not later
+                 and str(words.get("revision", "")).startswith("stopped:desired.v1:")
+                 and target.say("running") == DOC1,
+                 f"author {said2!r}, the new run's puts {new_puts}, acts {acts7} -> {acts8}, after the restart "
+                 f"{later}, seeds {seeds7!r} -> {seeds8!r}")
+        rp.note(sec, f"G's descriptor read at the new run's first put: {probe}")
+        ms = lambda t: round((t - t8) * 1000)  # noqa: E731
+        rp.note(sec, "after the kill, ms: the new run's puts on D "
+                     f"{[(ms(t), v) for t, v in d_at if t >= t8]}, the author's instance tokens "
+                     f"{[(ms(t), k, i) for t, k, i in tokens if t >= t8]}, Rp and Run "
+                     f"{[(ms(t), k.rsplit('/', 1)[1]) for t, k, _ in heard if t >= t8]}")
+        sub_d.undeclare()
+        sub_t.undeclare()
+        sub.undeclare()
+        return {"seeds": seeds8, "acts": [acts7, acts8], "after": later, "probe": probe, "puts": new_puts}
+    finally:
+        w.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m zk2py.desired_v2_mixed", description=__doc__.split("\n")[0])
-    ap.add_argument("--only", action="append", choices=["v1-target", "v2-target", "s16", "hlc"])
+    ap.add_argument("--only", action="append", choices=["v1-target", "v2-target", "s16", "run-e", "run-e-after", "hlc"])
+    ap.add_argument("--repeat", type=int, default=1, help="run E this many times in each pairing")
     args = ap.parse_args(argv)
     rp = Report()
     only = args.only or ["v1-target", "v2-target"]
@@ -358,6 +511,18 @@ def main(argv: list[str] | None = None) -> int:
         runs += [(v1_target, (a, t, ts, True)) for ts in (False, True) for a in impls for t in impls]
         runs += [(v2_target, (a, t, True, True)) for a in impls for t in impls]
         runs += [(run_d, (a, t)) for a in impls for t in impls]
+    if "s16" in only or "run-e" in only:
+        import os
+        import tempfile
+
+        tmp = tempfile.mkdtemp(prefix="zk2py-run-e-", dir=os.environ.get("ZK2PY_SCRATCH"))
+        runs += [(run_e, (a, t, tmp)) for _ in range(args.repeat) for a in impls for t in impls]
+    if "run-e-after" in only:
+        import os
+        import tempfile
+
+        tmp = tempfile.mkdtemp(prefix="zk2py-run-e-", dir=os.environ.get("ZK2PY_SCRATCH"))
+        runs += [(run_e, ("zk2py", t, tmp, True)) for _ in range(args.repeat) for t in impls]
     if "hlc" in only:
         # round 125 (F-617): run A's router, the target's own session's HLC on
         runs += [(v1_target, (a, t, False, True, True)) for a in impls for t in impls]
