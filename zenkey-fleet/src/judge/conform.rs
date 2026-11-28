@@ -3609,9 +3609,21 @@ fn forbids_fanout(r: &Resource) -> bool {
         && r.template.has_params()
 }
 
-/// §8.2, §8.4: the claimed bundle, as its holders served it.
+/// §8.2, §8.4: the claimed bundle, as its holders served it. An owner
+/// off a first hop holds it (§8.2 step 3), so none served is its
+/// violation. One on a first hop holds none, and its deployment holds it
+/// on this side of the hop, in a holder there or given to each reader
+/// (§8.4), so none served is no case of the owner's: not asked
+/// (`ConformSpec::first_hop`, the face policy's word, observer §3.11).
 fn contract_served(obs: &ConformObservation, fp: &str) -> ConformCase {
     let subject = format!("{} {fp}", obs.iface);
+    let rest = if obs.revision.is_some() {
+        " — the suite judges the rest against the revision this reader holds (--contracts, or \
+         a standard one compiled in)"
+    } else {
+        ""
+    };
+    let hop = obs.spec.first_hop;
     match &obs.served {
         None => ConformCase::unobservable(CaseId::ContractServed, subject, "not retrieved"),
         Some(Err(e)) => ConformCase::unobservable(
@@ -3619,30 +3631,47 @@ fn contract_served(obs: &ConformObservation, fp: &str) -> ConformCase {
             subject,
             format!("the retrieval could not be put on the bus: {e}"),
         ),
+        Some(Ok(ContractState::Held(_))) if hop => ConformCase::passed(
+            CaseId::ContractServed,
+            subject,
+            "on a first hop, the owner holds no bundle (§8.2, §8.4): a holder on this side of \
+             its hop served the one the descriptor names, and it verified",
+        ),
         Some(Ok(ContractState::Held(_))) => ConformCase::passed(
             CaseId::ContractServed,
             subject,
             "a holder served the bundle the descriptor names, and it verified",
         ),
-        Some(Ok(ContractState::Unavailable { refused })) => ConformCase::failed(
-            CaseId::ContractServed,
-            subject,
-            format!(
-                "no holder served a bundle that verified ({}): an owner holds the bundle of \
-                 every interface it implements (§8.2), and a consumer never decodes with an \
-                 unverified one{}",
-                if refused.is_empty() {
-                    "no reply".to_owned()
-                } else {
-                    format!("refused: {}", refused.join(", "))
-                },
-                if obs.revision.is_some() {
-                    " — the suite judges the rest against --contracts"
-                } else {
-                    ""
-                }
-            ),
-        ),
+        Some(Ok(ContractState::Unavailable { refused })) => {
+            let replies = if refused.is_empty() {
+                "no reply".to_owned()
+            } else {
+                format!("refused: {}", refused.join(", "))
+            };
+            if hop {
+                ConformCase::not_asked(
+                    CaseId::ContractServed,
+                    subject,
+                    format!(
+                        "on a first hop (the face policy lists it on a device face), an owner \
+                         holds no bundle (§8.2, §8.4), and no holder on this side of its hop \
+                         served one that verified ({replies}): the deployment holds it here or \
+                         gives it to each reader (§8.4), never the owner's violation{rest}"
+                    ),
+                )
+            } else {
+                ConformCase::failed(
+                    CaseId::ContractServed,
+                    subject,
+                    format!(
+                        "no holder served a bundle that verified ({replies}): an owner off a \
+                         first hop holds the bundle of every interface it implements (§8.2), \
+                         one on a first hop none, which --face-policy tells (observer §3.11), \
+                         and a consumer never decodes with an unverified one{rest}"
+                    ),
+                )
+            }
+        }
         Some(Ok(ContractState::Unreadable { reason })) => ConformCase::failed(
             CaseId::ContractServed,
             subject,
@@ -4677,6 +4706,7 @@ mod tests {
                 clocks_synced: false,
                 routers: zenkey_model::budget::Routers::default(),
                 skip: crate::bus::conform::Skipped::default(),
+                first_hop: false,
             },
             asked_fp: None,
             presence: Ok(presence(Some(OWNER))),
@@ -5148,6 +5178,60 @@ mod tests {
         assert!(
             failed(&r, CaseId::ContractServed, &format!("m.v1 {}", fp()))
                 .contains("no holder served a bundle that verified")
+        );
+    }
+
+    /// Core §8.2 step 3 and §8.4: an owner on a first hop holds no bundle,
+    /// and its deployment holds each on this side of the hop. Told so (a
+    /// face policy listing it on a device face, observer §3.11), the suite
+    /// asks it none: no holder serving one is not asked, never its
+    /// violation, and the rest is judged against `--contracts` as before; a
+    /// holder serving one passes. Told nothing, the owner is any owner,
+    /// and no holder serving one is its violation.
+    #[test]
+    fn contract_served_asks_no_bundle_of_an_owner_on_a_first_hop() {
+        let subject = format!("m.v1 {}", fp());
+        let mut hop = conforming();
+        hop.spec.first_hop = true;
+        hop.served = Some(Ok(ContractState::Unavailable { refused: vec![] }));
+        let r = judge(&hop);
+        let c = case(&r, CaseId::ContractServed, &subject);
+        assert_eq!(c.verdict, Judgement::NotAsked, "{c:#?}");
+        let why = c.detail.as_deref().expect("why it is not asked");
+        assert!(
+            why.contains("on a first hop") && why.contains("never the owner's violation"),
+            "{why}"
+        );
+        assert!(
+            r.failures().all(|f| f.case != CaseId::ContractServed),
+            "{r:#?}"
+        );
+        assert!(
+            why.contains("the suite judges the rest against the revision this reader holds"),
+            "{why}"
+        );
+        assert!(
+            r.cases.iter().any(|c| c.case != CaseId::ContractServed),
+            "the rest is judged: {r:#?}"
+        );
+
+        let mut held = conforming();
+        held.spec.first_hop = true;
+        let r = judge(&held);
+        let c = case(&r, CaseId::ContractServed, &subject);
+        assert!(
+            matches!(&c.verdict, Judgement::NotEstablished { reason }
+                if reason.contains("a holder on this side of its hop served")),
+            "{c:#?}"
+        );
+
+        let mut told_nothing = conforming();
+        told_nothing.served = Some(Ok(ContractState::Unavailable { refused: vec![] }));
+        let finding = failed(&judge(&told_nothing), CaseId::ContractServed, &subject);
+        assert!(
+            finding.contains("an owner off a first hop holds the bundle")
+                && finding.contains("--face-policy"),
+            "{finding}"
         );
     }
 

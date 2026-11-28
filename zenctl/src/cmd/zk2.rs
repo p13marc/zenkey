@@ -105,6 +105,22 @@ pub async fn presence_through(
     Ok(catalog)
 }
 
+/// What an owner's compact descriptor (core §3.3) is read through: the
+/// catalogs `--catalog` loads, the standard revisions every tool holds
+/// compiled in, and a store seeded with `--contracts` that retrieves each
+/// other revision it names (§8.4). A JSON one needs neither, and a compact
+/// one with no catalog that reads it (`unknown_catalog`), or naming a
+/// revision none of them can have (`unknown_revision`), is not read, never
+/// guessed.
+pub fn describing(dep: &Deployment, args: &ContractArgs) -> Result<zenkey_fleet::Describing> {
+    let offline = load_contracts(args)?;
+    let catalogs = load_catalogs(args)?;
+    Ok(zenkey_fleet::Describing::new(
+        &catalogs,
+        &store(dep, &offline),
+    ))
+}
+
 /// A contract store for this invocation, holding what `--contracts`
 /// loaded: a revision held there is never retrieved (spec §8.5).
 pub fn store(dep: &Deployment, contracts: &ContractSet) -> BundleStore {
@@ -474,6 +490,17 @@ pub fn first_hop(path: Option<&std::path::Path>) -> Result<zenkey_fleet::FirstHo
         ));
     }
     Ok(hop)
+}
+
+/// The owners on a first hop `--face-policy` lists, none when it lists
+/// none: [`first_hop`] for a verb whose policy is the routers' (`check
+/// conform`), which may attach no device. Refused, exit 2: what
+/// [`face_policy`] refuses.
+pub fn devices_listed(path: Option<&std::path::Path>) -> Result<zenkey_fleet::FirstHop> {
+    Ok(match path {
+        None => zenkey_fleet::FirstHop::default(),
+        Some(path) => zenkey_fleet::FirstHop::of_policy(&face_policy(path)?),
+    })
 }
 
 /// The far side `--face-policy F --face NAME` names (#988 L4): the face of

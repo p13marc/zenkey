@@ -54,6 +54,11 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         lease,
         wait_before_close,
     ));
+    // A device the policy's device faces list is on a first hop (observer
+    // §3.11): it holds no bundle (core §8.4).
+    let first_hop = ASKING
+        .ask(zk2::devices_listed(face_policy.as_deref()))
+        .contains(&address);
     let offline = ASKING.ask(zk2::load_contracts(&contracts));
     let catalogs = ASKING.ask(zk2::load_catalogs(&contracts));
     let spec = ConformSpec {
@@ -73,6 +78,7 @@ pub async fn run(cli: CheckConformArgs) -> Result<()> {
         routers,
         // F-222: a skipped case sends nothing.
         skip: zenkey_fleet::bus::conform::Skipped::of(&skip),
+        first_hop,
     };
     // The service is read in the deployment's namespace, and the admin
     // space in none, as the doctor reads them (S1, §4.2, 0.17).

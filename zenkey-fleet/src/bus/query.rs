@@ -675,10 +675,18 @@ impl<'a> OwnerRevisions<'a> {
             store: store
                 .cloned()
                 .unwrap_or_else(|| crate::bus::contracts::BundleStore::new(timeout)),
+            // The standard revisions are this reader's own too, so a
+            // first-hop owner's compact descriptor reads with the catalogs
+            // alone (core §8.4).
             described: zenkey::presence::Held::new(
                 std::sync::Arc::new(catalogs.held().to_vec()),
                 held.iter()
                     .map(|c| std::sync::Arc::new((*c).clone()))
+                    .chain(
+                        crate::model::standard::revisions()
+                            .iter()
+                            .map(|r| r.shared_contract()),
+                    )
                     .collect(),
             )
             .retrieving(),

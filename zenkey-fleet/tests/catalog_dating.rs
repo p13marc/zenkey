@@ -258,6 +258,7 @@ async fn conform_dates_a_modem_owners_confirmations() {
         clocks_synced: true,
         routers: zenkey_model::budget::Routers::default(),
         skip: zenkey_fleet::bus::conform::Skipped::default(),
+        first_hop: false,
     };
     let observe = |modem: bool| {
         let bus = &bus;

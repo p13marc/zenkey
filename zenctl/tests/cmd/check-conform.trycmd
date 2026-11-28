@@ -13,7 +13,8 @@ a session in the deployment's namespace. Every case is one verdict,
 on one resource:
 
   contract-served  the bundle the descriptor names is served and
-                   verifies (§8.4)
+                   verifies (§8.4); not asked of an owner on a first
+                   hop, which holds none, where no holder serves it
   resource-served  each exposed stream, state and event resource is
                    heard in the --for window, or answers a GET (§8.2)
   payload-type     every sample and reply decodes as its declared type
@@ -230,7 +231,7 @@ Options:
           The routers' wait_before_close, seconds (zenoh's `transport/link/tx/queue/congestion_control/block/wait_before_close`): a router waits that long on this run's full queue, then closes the transport. A window is lossless only if this run never stalled longer than it, nor than --lease less one of the routers' keep-alive intervals (spec §2.7, 0.27). A router that waits it tells a withdrawal that late, so where it is longer than --lease, a window's owner is watched for it (observer §5.2). Default: --face-policy's, else --binding's, else zenoh 1.10.1's 5 s
 
       --face-policy <FILE>
-          The routers' face policy (TOML, `link.v2` §2.1): its `[transport]` is what they run, so its lease and wait_before_close are the defaults of --lease and --wait-before-close, and its keep_alive the stall bound's (#1011). A `link.v1` policy states no transport and is refused, exit 2
+          The routers' face policy (TOML, `link.v2` §2.1): its `[transport]` is what they run, so its lease and wait_before_close are the defaults of --lease and --wait-before-close, and its keep_alive the stall bound's (#1011). A device its device faces list (`attach = "device"`, link.v2 §2.5) is on a first hop (observer §3.11) and holds no bundle (core §8.4), so contract-served asks it none. A `link.v1` policy states no transport and is refused, exit 2
 
       --binding <NAME>
           The zenoh the deployment's routers run, by its `link.v2` name (§2.4): zenoh-1.10.1, zenoh-1.10.2 or zm-1.10.2-r1. Its defaults are those of --lease and --wait-before-close, and its keep-alives the stall bound's, where no flag and no --face-policy states them (`link.v2` §2.19): zm-1.10.2-r1 waits 10 s before it closes, stock zenoh, 1.10.1 and 1.10.2, 5 s. Omitted, zenoh 1.10.1's

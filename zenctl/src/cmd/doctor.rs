@@ -53,14 +53,14 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         every,
         count,
         catalog,
+        contracts,
         face_policy,
         ns,
     } = cli;
     let dep = ASKING.ask(Deployment::resolve(&ns));
-    let catalogs = ASKING.ask(super::zk2::load_catalogs(&crate::cli::ContractArgs {
-        contracts: Vec::new(),
-        catalog,
-    }));
+    let given = crate::cli::ContractArgs { contracts, catalog };
+    let catalogs = ASKING.ask(super::zk2::load_catalogs(&given));
+    let offline = ASKING.ask(super::zk2::load_contracts(&given));
     let first_hop = ASKING.ask(super::zk2::first_hop(face_policy.as_deref()));
     let grace = ASKING.ask(super::positive_secs("--grace", grace));
     let desired_behind = ASKING.ask(super::positive_secs("--desired-behind", desired_behind));
@@ -94,7 +94,10 @@ pub async fn run(cli: DoctorArgs) -> Result<()> {
         // The doctor follows no presence live: it reads (#830).
         watch: None,
     };
-    let store = BundleStore::new(dep.timeout());
+    // The run's store, seeded with --contracts: a compact descriptor reads
+    // through it and --catalog (core §3.3), and a revision held there is
+    // never retrieved (§8.5).
+    let store = super::zk2::store(&dep, &offline);
     if transitions {
         return transition_loop(&bus, &store, &spec, every, count).await;
     }

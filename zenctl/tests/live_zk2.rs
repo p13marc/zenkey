@@ -736,6 +736,305 @@ async fn service_show_renders_a_compact_descriptor_through_the_catalog() {
     );
 }
 
+/// A first-hop device read with the deployment's catalog alone (core
+/// §3.3, §8.4; rc-023's part B, bug 1). `lab/hop`, the runtime's owner on
+/// its first hop given the catalog, writes its descriptor compact and holds
+/// no bundle. It implements `health.v1`, which uses `freshness.v2`, and
+/// `meter.v1`. Every tool holds the two standard revisions compiled in, and
+/// before they were retrieved too, from no holder. `meter.v1`'s is had only
+/// from a holder on this side of the hop or `--contracts` (§8.4): without
+/// either, `service show --catalog` reads `unknown_revision`, never a
+/// guess; the doctor, given `--contracts` (new), judges the owner. Once a
+/// holder serves it, `service show`, the doctor and `telemetry` given only
+/// `--catalog` read the owner: the descriptor served, the doctor's checks
+/// judged clean, and `meter.v1`'s metric resources in scope.
+///
+/// Bug 2, core §8.2 step 3 and §8.4: no holder serves `health.v1`'s bundle.
+/// `check conform lab/hop health.v1`, told nothing, calls it the owner's
+/// `contract-served` violation; given a face policy listing `lab/hop` on a
+/// device face (observer §3.11), it asks no bundle of it, and judges the
+/// resources against the standard revision.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_first_hop_owner_reads_with_the_catalog_alone() {
+    use zenkey::model::canonical::Fingerprint;
+    use zenkey::model::catalog::Catalog;
+    use zenkey::model::descriptor::Form;
+    let mut bus = Bus::bare(None).await;
+    let meter = load_path(&meter_contract_path())
+        .contract
+        .expect("meter.v1 loads");
+    let standard = |hex: &str| Fingerprint::parse(&format!("sha256:{hex}")).expect("a fp");
+    let mut catalog = Catalog::new(0).expect("a catalog");
+    for (i, fp) in [
+        (
+            zenkey::health::iface(),
+            standard(zenkey::health::FINGERPRINT),
+        ),
+        (
+            iface("freshness.v2"),
+            standard(zenkey::heartbeat::FINGERPRINT),
+        ),
+        (meter.iface.clone(), Fingerprint::of(&meter)),
+    ] {
+        catalog.push(i, fp).expect("an entry");
+    }
+    let file = bus.home.join("hop.catalog.json");
+    std::fs::write(&file, catalog.to_jcs()).expect("the catalog's file");
+    let cat = file.to_str().expect("a UTF-8 path").to_owned();
+    let meter_path = meter_contract_path();
+    let meter_path = meter_path.to_str().expect("a UTF-8 path").to_owned();
+
+    let cfg = ServiceConfig::new("lab/hop".parse().expect("an address")).first_hop();
+    let mut b = ServiceBuilder::new(&bus.owners, cfg);
+    b.catalog(catalog).expect("the catalog first");
+    let health = b.health().await.expect("health.v1");
+    b.implement(Implementation::new(meter.clone()))
+        .expect("meter.v1");
+    for r in &meter.resources {
+        let _ = b.expose(&meter.iface, &zenkey::implementation::resource_name(r));
+    }
+    let svc = b.start().await.expect("lab/hop starts");
+    assert_eq!(
+        svc.descriptor_form(),
+        Form::Compact,
+        "a first hop given a catalog"
+    );
+    bus.services.push(svc);
+    bus.keep(health);
+
+    // meter.v1's revision had nowhere: never guessed.
+    let show = [
+        "service",
+        "show",
+        "lab/hop",
+        "--catalog",
+        &cat,
+        "--timeout",
+        "2",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&show, |r| {
+            r.code == 0 && r.json()["rows"][0]["descriptor"]["answer"] == "unread"
+        })
+        .await;
+    exits(&run, 0);
+    let reason = run.json()["rows"][0]["descriptor"]["reason"].clone();
+    assert!(
+        reason
+            .as_str()
+            .is_some_and(|r| r.starts_with("unknown_revision")),
+        "{run}"
+    );
+
+    // The doctor given meter.v1 by --contracts reads it.
+    let checks = [
+        "--check",
+        "descriptor-invalid",
+        "--check",
+        "contract-unavailable",
+        "--check",
+        "token-missing",
+        "--catalog",
+        &cat,
+    ];
+    let mut given = doctor_args(&checks);
+    given.extend(["--contracts", &meter_path, "--format", "json"]);
+    let run = bus.until(&given, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    for id in [
+        "descriptor-invalid",
+        "contract-unavailable",
+        "token-missing",
+    ] {
+        assert_eq!(
+            check_row(&doc, id)["verdict"]["answer"],
+            "not_established",
+            "{id}, judged: {run}"
+        );
+    }
+
+    // A holder on this side of the hop serves meter.v1's bundle (§8.4).
+    let holder = client(&bus.endpoint, None).await;
+    let imp = Implementation::new(meter.clone());
+    let key = zenkey::model::grammar::contract_key(imp.iface(), imp.fingerprint().hex())
+        .expect("a contract key")
+        .into_keyexpr();
+    let (reply, bytes) = (key.clone(), imp.bundle_bytes().to_vec());
+    let queryable = holder
+        .declare_queryable(key)
+        .complete(true)
+        .callback(move |q| {
+            use zenoh::Wait as _;
+            let _ = q
+                .reply(reply.clone(), bytes.clone())
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                .wait();
+        })
+        .await
+        .expect("a holder");
+    bus.keep((holder, queryable));
+
+    // The catalog alone: health.v1's and freshness.v2's standard revisions
+    // are this reader's own.
+    let run = bus
+        .until(&show, |r| {
+            r.code == 0 && r.json()["rows"][0]["descriptor"]["answer"] == "served"
+        })
+        .await;
+    exits(&run, 0);
+    let served = &run.json()["rows"][0]["descriptor"]["descriptor"];
+    let entries: BTreeSet<(&str, bool)> = served["interfaces"]
+        .as_array()
+        .expect("interfaces")
+        .iter()
+        .map(|e| {
+            (
+                e["iface"].as_str().expect("iface"),
+                e["token"].as_bool().expect("token"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        entries,
+        BTreeSet::from([
+            ("freshness.v2", false),
+            ("health.v1", false),
+            ("meter.v1", false)
+        ]),
+        "every interface read, each tokenless on its first hop: {run}"
+    );
+
+    let mut alone = doctor_args(&checks);
+    alone.extend(["--format", "json"]);
+    let run = bus.until(&alone, |r| r.code == 0).await;
+    exits(&run, 0);
+    let doc = run.json();
+    for id in [
+        "descriptor-invalid",
+        "contract-unavailable",
+        "token-missing",
+    ] {
+        assert_eq!(
+            check_row(&doc, id)["verdict"]["answer"],
+            "not_established",
+            "{id}, judged: {run}"
+        );
+    }
+    let summary = &check_row(&doc, "contract-unavailable")["verdict"]["reason"];
+    assert!(
+        summary
+            .as_str()
+            .is_some_and(|s| s.starts_with("3 revision(s)")
+                && s.contains("held by this reader (2")),
+        "the two standard revisions held, never retrieved: {run}"
+    );
+
+    let run = bus
+        .zenctl(&[
+            "telemetry",
+            "zk2/lab/hop/**",
+            "--catalog",
+            &cat,
+            "--for",
+            "1",
+            "--timeout",
+            "2",
+            "--format",
+            "json",
+        ])
+        .await;
+    let doc = run.json();
+    let resources: BTreeSet<&str> = rows_of(&doc, "resource")
+        .into_iter()
+        .filter(|r| r["iface"] == "meter.v1")
+        .filter_map(|r| r["resource"].as_str())
+        .collect();
+    assert!(
+        resources.contains("stream/drops") && resources.contains("state/total"),
+        "meter.v1's metric resources, from its descriptor: {run}"
+    );
+
+    // Bug 2: no holder serves health.v1's bundle.
+    let conform = |extra: &[&str]| {
+        let mut args: Vec<String> = [
+            "check",
+            "conform",
+            "lab/hop",
+            "health.v1",
+            "--catalog",
+            &cat,
+            "--for",
+            "1",
+            "--lease",
+            "1",
+            "--wait-before-close",
+            "1",
+            "--timeout",
+            "2",
+            "--format",
+            "json",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        args.extend(extra.iter().map(|s| (*s).to_owned()));
+        args
+    };
+    let served_case = |doc: &Value| {
+        rows_of(doc, "case")
+            .into_iter()
+            .find(|c| c["case"] == "contract-served")
+            .cloned()
+            .unwrap_or_else(|| panic!("a contract-served row: {doc}"))
+    };
+    let args = conform(&[]);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&args).await;
+    exits(&run, 1);
+    let told_nothing = served_case(&run.json());
+    assert_eq!(told_nothing["verdict"]["answer"], "established", "{run}");
+
+    let rf =
+        std::fs::read_to_string(examples().join("link/media/rf.face.toml")).expect("the RF policy");
+    let text = rf
+        .replace("services = [\"radio-a\"]", "services = []")
+        .replace(
+            "far              = \"ground\"\nattach           = \"client\"\n",
+            "far              = \"hop\"\nattach           = \"device\"\n\
+         devices          = [\"lab/hop\"]\n",
+        );
+    assert_ne!(text, rf, "the edit applies");
+    let policy = bus.home.join("device.face.toml");
+    std::fs::write(&policy, text).expect("the policy's file");
+    let args = conform(&["--face-policy", policy.to_str().expect("a UTF-8 path")]);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let run = bus.zenctl(&args).await;
+    let doc = run.json();
+    let on_hop = served_case(&doc);
+    assert_eq!(on_hop["verdict"]["answer"], "not_asked", "{run}");
+    assert!(
+        on_hop["detail"]
+            .as_str()
+            .is_some_and(|d| d.contains("never the owner's violation")),
+        "{run}"
+    );
+    assert!(
+        rows_of(&doc, "case")
+            .iter()
+            .all(|c| c["verdict"]["answer"] != "established"),
+        "no violation of the owner: {run}"
+    );
+    assert!(
+        rows_of(&doc, "case")
+            .iter()
+            .any(|c| c["case"] == "resource-served"),
+        "the resources judged against the standard revision: {run}"
+    );
+}
+
 /// `why` reads a compact descriptor (core §3.3, #980 C5b2) through
 /// `--catalog`: the ladder passes the descriptor and reaches the key's
 /// answer, which no queryable gives; without the catalog it stops at the

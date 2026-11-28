@@ -397,6 +397,7 @@ async fn zenwatch_passes_its_own_conformance() {
                 clocks_synced: true,
                 routers: zenkey::model::budget::Routers::default(),
                 skip: zenkey_fleet::bus::conform::Skipped::default(),
+                first_hop: false,
             },
         )
         .await;
