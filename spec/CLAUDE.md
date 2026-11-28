@@ -842,9 +842,9 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   frames, inside §2.16's ranges, idle 720 and 96 each way. It also
   states the batch zenoh ran under zenoh-modem's lean stack (206, 208,
   101 and 210 B, where the policies state 222, 224, 117 and 224).
-  `frame_over_batch` is unchanged: that it compares the payload alone,
-  10 B short of zenoh's message and length on these faces, is an open
-  question. Its §2.19 (round 112's F-546) names two layers: the codes
+  `frame_over_batch` was unchanged: that it compared the payload alone,
+  10 B short of zenoh's message and length on these faces, was the open
+  question link.v1 0.22 answered (#1136, below). Its §2.19 (round 112's F-546) names two layers: the codes
   are findings over the keys a configuration states
   (`check_transport`, the fixture's `router`), and a tool that reads the
   file through zenoh's own loader names zenoh's refusal and asks no
@@ -1230,3 +1230,28 @@ measured 3 B against 196 B). `archive/attachments.json`: revisions from
 written from the finished text, which agreed on every case. `RULES.md`:
 310 rules, its baseline mean 12.25 → 12.31 by hand (the generated "Where it
 reads" lists gain §4.4).
+
+`link.v1` 0.22 and `link.v2` 0.30 (#1136, chunk-1136): `frame_over_batch`
+and `block_over_batch` weigh what crosses, a put's payload and its
+**allowance** (link.v1 §2.8): the put's 3 bytes and the payload's length
+(1, 2 or 3 bytes), 2 in the push for a QoS other than `data`, `drop`, not
+express, 2 in the frame for a priority other than `data`, the frame's byte
+and its sequence number (at most 1, 2, 4 and 5 bytes at `8bit` to
+`64bit`, as zenoh 1.10.1 masks them to 7, 14, 28 and 32 bits; a link.v1
+policy reads `32bit`), and the batch's 2-byte length unless every link
+protocol is `serial`, `ws` or `unixsock-dgram`. Measured at the bound on
+rf0's face, bare (`docs/zk2/measurements/wire-baseline/`, "The batch's
+bound", `bound.sh`, `bound.py`, routers' ids chosen so the numbers wrap):
+`data`/`drop` 10 and 12 at 16 and 32 bits, `block` or express 12 and 14,
+`data_low` 14 and 16; the 16-bit number ran 16,383 then 0, so #1136's
+3-byte reading was wrong, and §2.16's "at most 2 bytes, where 32bit takes
+4" was true (restated with the mask). Moved: `plan.json`'s case 0 and
+`lints.json`'s 56 to 60 (RF at 220 B: `frames/fast`, `frames/slow`),
+`v2/plan.json`'s 14, 15 and 17; cases 46 to 48, 53 and 54 re-pinned at 169
+and 170 bytes. New: `plan.json` 19 and 20 (228/227), `v2/plan.json` 56 to
+59 (226/225 for a frame, 244/243 for a `block` put); 21 and 60 cases.
+Every expectation computed twice by two scripts sharing no code
+(`/srv/dev/scratch/zenkey/py/1136/`), each first reproducing every old
+finding, never by the model. zk2py's plan took the minimal arithmetic
+(`link.allowance`, `over_batch`), which breaks its independence for this
+one rule.

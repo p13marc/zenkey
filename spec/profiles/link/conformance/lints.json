@@ -735,6 +735,18 @@
           "code": "window_under_outage",
           "face": "rf",
           "severity": "error"
+        },
+        {
+          "at": "modem.v3/stream/frames/fast",
+          "code": "frame_over_batch",
+          "face": "rf",
+          "severity": "warning"
+        },
+        {
+          "at": "modem.v3/stream/frames/slow",
+          "code": "frame_over_batch",
+          "face": "rf",
+          "severity": "warning"
         }
       ],
       "implements": {
@@ -754,7 +766,20 @@
         "spec/profiles/config/config.v1.toml",
         "spec/profiles/health/health.v1.toml"
       ],
-      "expect": [],
+      "expect": [
+        {
+          "at": "modem.v3/stream/frames/fast",
+          "code": "frame_over_batch",
+          "face": "rf",
+          "severity": "warning"
+        },
+        {
+          "at": "modem.v3/stream/frames/slow",
+          "code": "frame_over_batch",
+          "face": "rf",
+          "severity": "warning"
+        }
+      ],
       "implements": {
         "rf0": [
           "modem.v3",
@@ -780,6 +805,18 @@
           "code": "window_under_outage",
           "face": "rf",
           "severity": "error"
+        },
+        {
+          "at": "modem.v3/stream/frames/fast",
+          "code": "frame_over_batch",
+          "face": "rf",
+          "severity": "warning"
+        },
+        {
+          "at": "modem.v3/stream/frames/slow",
+          "code": "frame_over_batch",
+          "face": "rf",
+          "severity": "warning"
         }
       ],
       "implements": {
@@ -801,7 +838,20 @@
         "spec/profiles/config/config.v1.toml",
         "spec/profiles/health/health.v1.toml"
       ],
-      "expect": [],
+      "expect": [
+        {
+          "at": "modem.v3/stream/frames/fast",
+          "code": "frame_over_batch",
+          "face": "rf",
+          "severity": "warning"
+        },
+        {
+          "at": "modem.v3/stream/frames/slow",
+          "code": "frame_over_batch",
+          "face": "rf",
+          "severity": "warning"
+        }
+      ],
       "implements": {
         "rf0": [
           "modem.v3",
@@ -824,6 +874,18 @@
           "at": "ground",
           "code": "far_of_two_faces",
           "face": null,
+          "severity": "warning"
+        },
+        {
+          "at": "modem.v3/stream/frames/fast",
+          "code": "frame_over_batch",
+          "face": "a",
+          "severity": "warning"
+        },
+        {
+          "at": "modem.v3/stream/frames/slow",
+          "code": "frame_over_batch",
+          "face": "a",
           "severity": "warning"
         },
         {

@@ -247,7 +247,20 @@
             ],
             "downsampling": null,
             "far": "ground",
-            "findings": [],
+            "findings": [
+              {
+                "at": "modem.v3/stream/frames/fast",
+                "code": "frame_over_batch",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/slow",
+                "code": "frame_over_batch",
+                "face": "rf",
+                "severity": "warning"
+              }
+            ],
             "liveness": [
               {
                 "evidence": [
@@ -275,7 +288,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's RF face, modem.v3 3.4: its JSON streams denied in seven subtrees and 3.2's nine deprecated frames by name, frames/fast, frames/slow and frames/paid crossing whole with no downsampling rule, each liveness evidence by its horizon, everything else of the management plane denied, its four JSON events by name under events/ (link.v1 §2.7, §2.8, §2.12, Appendix B; the sketch's defect fixed); 3.4's three `face/` events cross whole, never downsampled (§2.9)",
+      "note": "zenoh-modem's RF face, modem.v3 3.4: its JSON streams denied in seven subtrees and 3.2's nine deprecated frames by name, frames/fast, frames/slow and frames/paid crossing whole with no downsampling rule, each liveness evidence by its horizon, everything else of the management plane denied, its four JSON events by name under events/ (link.v1 §2.7, §2.8, §2.12, Appendix B; the sketch's defect fixed); 3.4's three `face/` events cross whole, never downsampled (§2.9); `frames/fast`'s and `frames/slow`'s largest frames, 216 B, and their 12-B allowance do not fit the 220-B batch (`frame_over_batch`, §2.8), and `frames/paid`'s, 207 B, does",
       "policy": "# zenoh-modem's RF node (link.v1 Appendix B)\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 3600\nbatch_bytes  = 220\nlink_bps     = 2400\n"
     },
     {
@@ -4320,7 +4333,576 @@
         "b2"
       ],
       "policy": "# owner heartbeats turned on behind a link.v1 face (link.v1 0.21)\nsystem   = \"lab\"\nservices = [\"b1\", \"b2\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 600\nbatch_bytes  = 1000\nlink_bps     = 2400\n"
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
+                  "zk2/*/*/modem.v3/stream/if/**",
+                  "zk2/*/*/modem.v3/stream/layer/**",
+                  "zk2/*/*/modem.v3/stream/link/**",
+                  "zk2/*/*/modem.v3/stream/radio/**",
+                  "zk2/*/*/modem.v3/stream/sched/**",
+                  "zk2/*/*/modem.v3/stream/sdu/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/events/action_event/**",
+                  "zk2/*/*/modem.v3/events/device_fault/**",
+                  "zk2/*/*/modem.v3/events/identity_change/**",
+                  "zk2/*/*/modem.v3/events/oper_change/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [],
+            "liveness": [
+              {
+                "evidence": [
+                  "modem.v3/stream/frames/fast",
+                  "modem.v3/stream/frames/paid",
+                  "modem.v3/stream/frames/slow"
+                ],
+                "service": "h-3fa9c2d41b7e/rf0"
+              }
+            ],
+            "name": "rf",
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "h-3fa9c2d41b7e/rf0"
+              }
+            ]
+          }
+        ]
+      },
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "case 0's face and deployment at a 228-byte batch, the bound of `frames/fast`'s and `frames/slow`'s largest frames (§2.8): a put at `data` and `drop` on `unixsock-stream` takes 12 B beside its payload under a link.v1 policy, 5 of put, the frame's 5 at zenoh's default `32bit`, and the batch's 2-byte length. So no `frame_over_batch`: each one's largest frame, 216 B, and its 12-B allowance fit the 228-B batch exactly; `frames/paid`'s, a full record of 207 B, fits. The rest is case 0's plan. Written by reading link.v1 0.22, computed twice by two readings sharing no code, not derived by the reference",
+      "policy": "# zenoh-modem's RF node at a 228-byte batch (link.v1 0.22)\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 3600\nbatch_bytes  = 228\nlink_bps     = 2400\n"
+    },
+    {
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
+                  "zk2/*/*/modem.v3/stream/if/**",
+                  "zk2/*/*/modem.v3/stream/layer/**",
+                  "zk2/*/*/modem.v3/stream/link/**",
+                  "zk2/*/*/modem.v3/stream/radio/**",
+                  "zk2/*/*/modem.v3/stream/sched/**",
+                  "zk2/*/*/modem.v3/stream/sdu/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/events/action_event/**",
+                  "zk2/*/*/modem.v3/events/device_fault/**",
+                  "zk2/*/*/modem.v3/events/identity_change/**",
+                  "zk2/*/*/modem.v3/events/oper_change/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [
+              {
+                "at": "modem.v3/stream/frames/fast",
+                "code": "frame_over_batch",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/slow",
+                "code": "frame_over_batch",
+                "face": "rf",
+                "severity": "warning"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "modem.v3/stream/frames/fast",
+                  "modem.v3/stream/frames/paid",
+                  "modem.v3/stream/frames/slow"
+                ],
+                "service": "h-3fa9c2d41b7e/rf0"
+              }
+            ],
+            "name": "rf",
+            "windows": [
+              {
+                "min_s": 3600,
+                "service": "h-3fa9c2d41b7e/rf0"
+              }
+            ]
+          }
+        ]
+      },
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "case 0's face and deployment at a 227-byte batch, the bound of `frames/fast`'s and `frames/slow`'s largest frames (§2.8): a put at `data` and `drop` on `unixsock-stream` takes 12 B beside its payload under a link.v1 policy, 5 of put, the frame's 5 at zenoh's default `32bit`, and the batch's 2-byte length. So `frame_over_batch` of `frames/fast` and `frames/slow`: each one's largest frame, 216 B, and its 12-B allowance are 1 B above the 227-B batch; `frames/paid`'s, a full record of 207 B, fits. The rest is case 0's plan. Written by reading link.v1 0.22, computed twice by two readings sharing no code, not derived by the reference",
+      "policy": "# zenoh-modem's RF node at a 227-byte batch (link.v1 0.22)\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\n\n[face.rf]\nfar          = \"ground\"\nattach       = \"client\"\nselect       = { link_protocols = [\"unixsock-stream\"] }\nclass        = \"constrained\"\nexpose       = \"link\"\ninterval_s   = 60\nmax_outage_s = 3600\nbatch_bytes  = 227\nlink_bps     = 2400\n"
     }
   ],
-  "description": "link.v1 §2.3, §2.5-§2.12: a face policy and a deployment -> each face's plan, or the findings that refuse it. policy is the face policy's TOML text (§2.1). implements maps each listed service's name to the interface ids it implements. The interfaces' resources are given inline in interfaces (interface id -> resources, each {template, token, annotations}, token one of stream, @stream, state, @state, events, @op, annotations resolved), or loaded from contracts, paths of authoring files relative to the repository root, loaded as core §9 loads them (defaults resolved, core §9.3). An inline resource declares no `history` and no `frame` table: a case about frame resources (core §7.7, 0.13) loads a contract, and the plan reads each frame resource's interval and largest frame from it. An interface inline is one revision's resources, or {revisions: [resources, ...]}, several revisions of one interface id (0.3, F-119); two files in contracts with one interface id are two revisions of it. The plan reads every revision of an interface together (§2.3). expect is {faces: [...]}, each face's plan as §2.3 states it, faces sorted by name: name, far, attach ({shape: client}, or {shape: south-region, region, gateway}), deny (each {id, flows, messages, key_exprs}: zk, adv, admin, then the exposure denies by kind token in the order stream, @stream, state, @state, events, each wholesale with id <token> or per listed interface with id <token>:<iface>, sorted by interface id, an empty one left out), downsampling ({id, link_protocols, flows, messages, rules: [{key_expr, freq}]}, or null), windows ([{service, min_s}]), liveness ([{service, evidence}]) and findings (warnings, each {code, severity, face, at}). Key expressions within a rule, rules, windows, liveness entries and evidence are sorted by their bytes; findings by face (null first), at, then code. freq is 1/interval_s as an IEEE 754 double. A case may give owner_heartbeats, the listed services whose owner heartbeats the deployment turns on (§2.3, §2.9; 0.21): absent, it turns none on. Or expect is {refused: [finding...]}: the policy's errors and warnings (§2.1), or the deployment's errors alone, no warning of the policy's or the plan's (service_unknown, contract_unknown; 0.16), sorted the same way."
+  "description": "link.v1 §2.3, §2.5-§2.12: a face policy and a deployment -> each face's plan, or the findings that refuse it. policy is the face policy's TOML text (§2.1). implements maps each listed service's name to the interface ids it implements. The interfaces' resources are given inline in interfaces (interface id -> resources, each {template, token, annotations}, token one of stream, @stream, state, @state, events, @op, annotations resolved), or loaded from contracts, paths of authoring files relative to the repository root, loaded as core §9 loads them (defaults resolved, core §9.3). An inline resource declares no `history` and no `frame` table: a case about frame resources (core §7.7, 0.13) loads a contract, and the plan reads each frame resource's interval and largest frame from it. An interface inline is one revision's resources, or {revisions: [resources, ...]}, several revisions of one interface id (0.3, F-119); two files in contracts with one interface id are two revisions of it. The plan reads every revision of an interface together (§2.3). expect is {faces: [...]}, each face's plan as §2.3 states it, faces sorted by name: name, far, attach ({shape: client}, or {shape: south-region, region, gateway}), deny (each {id, flows, messages, key_exprs}: zk, adv, admin, then the exposure denies by kind token in the order stream, @stream, state, @state, events, each wholesale with id <token> or per listed interface with id <token>:<iface>, sorted by interface id, an empty one left out), downsampling ({id, link_protocols, flows, messages, rules: [{key_expr, freq}]}, or null), windows ([{service, min_s}]), liveness ([{service, evidence}]) and findings (warnings, each {code, severity, face, at}). Key expressions within a rule, rules, windows, liveness entries and evidence are sorted by their bytes; findings by face (null first), at, then code. freq is 1/interval_s as an IEEE 754 double. A case may give owner_heartbeats, the listed services whose owner heartbeats the deployment turns on (§2.3, §2.9; 0.21): absent, it turns none on. Or expect is {refused: [finding...]}: the policy's errors and warnings (§2.1), or the deployment's errors alone, no warning of the policy's or the plan's (service_unknown, contract_unknown; 0.16), sorted the same way. A frame's largest frame fits one batch with its allowance (§2.8; 0.22): cases 19 and 20, case 0 at the bound of `frames/fast`'s and `frames/slow`'s 216 bytes and their 12-byte allowance, were computed twice by two readings of the text sharing no code, not derived by the reference."
 }

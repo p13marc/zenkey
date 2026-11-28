@@ -7,6 +7,125 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `link.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## link.v2 0.30 — 2026-11-28: §2.16: `block_over_batch` weighs a put with its allowance, at the transport's `sequence`, and the sequence number's bytes as zenoh masks it, no keyword changed (#1136)
+
+`link.v1` 0.22 makes `frame_over_batch` weigh what crosses, a put's
+payload and its allowance, where it weighed the payload. This text takes
+the same allowance for `block_over_batch`, at what its policy states.
+
+**What changed.**
+- **§0's readings.** §2.8's allowance reads `[transport]`'s `sequence`,
+  and the binding's link protocols for the batch's length.
+- **§2.16, "A `block` put larger than a batch".** The plan warns of a
+  crossing `block` resource whose longest put, with its allowance, is
+  above `batch_bytes`. A new item says what the allowance is here: the
+  transport's sequence width, the batch's length unless every link
+  protocol is `serial`, `ws` or `unixsock-dgram`, and the push's QoS
+  extension, 2 bytes, which every `block` put carries. A crossing owner
+  heartbeat is weighed the same, at its key's QoS, `data` and `drop`.
+- **§2.16, the sequence window.** "`16bit` writes a sequence number in at
+  most 2 bytes, where `32bit` takes 4" was true. It is restated with its
+  reason and all four widths: zenoh 1.10.1 masks a number to 7, 14, 28
+  and 32 bits (`common/seq_num.rs`'s `RES_U8` to `RES_U64`, the last cut
+  to the 32-bit `TransportSn`), and writes 7 bits a byte, so 1, 2, 4 and
+  5 bytes. The measurement says the same: a 16-bit number ran to 16,383
+  and then 0. #1136's comment of 2026-11-27 read the varint without the
+  mask, and said 3 bytes; the measurement corrects it.
+- **§2.3's table**, the row of `block_over_batch`, and "Its longest put"
+  say the same.
+- **Appendix B.** RF, LoRa SF7 and LoRa SF12 now draw `frame_over_batch`,
+  each face's largest frame, 216 B, and its 10 B allowance above its 222
+  B or 224 B batch. "The warning reads the payload" gives way to what the
+  warning weighs.
+
+**The cases.**
+- **Moved:** `v2/plan.json`'s cases 14, 15 and 17 gain `frame_over_batch`,
+  of `frames/fast`, `frames/fast` and `frames/slow`. Case 16 drew it
+  already.
+- **Moved with their pin:** cases 46 and 47 pinned the owner heartbeat's
+  160 bytes from both sides, at batches of 159 and 160. With the
+  allowance, 10 bytes, both would warn. Their batches are now 169 and
+  170, so they pin the 160 bytes and the allowance together. Case 53,
+  case 46's deployment, is at 169; cases 48 and 54, case 47's face, at
+  170. None of their plans moved otherwise.
+- **New:** cases 56 and 57 are case 14 at 226 and 225 bytes, the bound of
+  `frames/fast`'s 216 bytes and their 10-byte allowance: no warning, then
+  `frame_over_batch`. Cases 58 and 59 are case 5 at 244 and 243 bytes, the
+  bound of `config`'s 232 bytes and a `block` put's 12-byte allowance: no
+  warning, then `block_over_batch`. 60 cases.
+- Each expectation was computed twice, by two readings of the texts that
+  share no code (#1136's working files), each of which first reproduced
+  every case's old findings, `v2/lints.json`'s among them, none of which
+  moved. Neither was derived by the reference.
+- **zk2py** takes the allowance as the minimal arithmetic its plan needs,
+  so for this one rule it is no independent reading.
+
+**What deliberately did not change.**
+- **The batch a policy states** is still what the plan judges. Under
+  zenoh-modem's lean stack its drivers leave zenoh 14 to 16 bytes less
+  (Appendix B). That is the policy's to state.
+- **No keyword.** Both warnings are a plan's. `RULES.md` is unchanged.
+- **The header** is still written against core 0.108.
+
+## 0.22 — 2026-11-28: §2.8: `frame_over_batch` weighs what crosses, a frame's payload and its allowance, where it weighed the payload, no keyword changed (#1136)
+
+Found by #989's LoRa runs (`docs/zk2/measurements/wire-baseline/`'s
+finding 10). zenoh fragments a message that does not fit its batch, and
+the message is longer than its payload. So a frame up to 12 bytes under
+the batch fragmented, and the plan warned of none.
+
+**What changed.**
+- **§2.8, `frame_over_batch`.** Its largest frame does not fit one batch:
+  its payload and its allowance are above `batch_bytes`.
+- **§2.8, "What a batch holds beside a put's payload".** A new item gives
+  the allowance:
+  - the put's 3 bytes and its length's 1 to 3;
+  - 2 bytes in the push for a QoS other than `data`, `drop` and not
+    express, and 2 in the frame for a priority other than `data`;
+  - the frame's header and its sequence number, at most 4 bytes, since a
+    link.v1 policy states no width and zenoh's default is `32bit`;
+  - and the batch's 2-byte length, unless every link protocol the face
+    selects is `serial` or `ws`.
+  It says what it leaves out: a timestamp, an attachment, `history`'s
+  source info, a key the far reader did not declare, a scope's id of
+  128 or more.
+- **§2.3's table**, the row of `frame_over_batch`, says the same.
+- **Appendix B.** The RF node's plan warns `frame_over_batch` of
+  `frames/fast` and `frames/slow`. Each one's largest frame, 216 bytes,
+  does not fit the 220-byte batch with its 12-byte allowance. A new
+  paragraph holds the measurement at the bound.
+
+**The measurement.** `bound.sh` and `bound.py` in the measurement's
+directory sent puts of chosen lengths across zenoh-modem's RF face, no
+layers below zenoh, at 16-bit and at 32-bit sequence numbers, and read
+every batch on the air. The routers' ids were chosen so that each run's
+sequence numbers crossed their mask (`compute_sn`, checked against each
+OpenAck). The allowance's every part was read there, byte for byte:
+`data` and `drop` 10 and 12, `block` or express 12 and 14, `data_low` 14
+and 16. One byte more fragmented in each case.
+
+**The cases that moved.** `plan.json`'s case 0, zenoh-modem's RF node,
+gains `frame_over_batch` of `frames/fast` and `frames/slow`. So do
+`lints.json`'s cases 56 to 60, whose windows are checked over the same
+face and list its plan's warnings.
+
+**The cases.** Cases 19 and 20 are case 0 at 228 and 227 bytes, the bound
+of the two frames' 216 bytes and their 12-byte allowance: no warning,
+then `frame_over_batch` of both. `frames/paid`, 207 bytes, fits either.
+21 cases. Each expectation was computed twice, by two readings that
+share no code, and neither by the reference.
+
+**What deliberately did not change.**
+- **A stated width.** A link.v1 policy still states no sequence width.
+  The plan reads zenoh's default, `32bit`. A router configured to
+  `64bit` writes one byte more a frame, which a link.v2 policy states.
+- **The QoS a contract declares** is the put's, as core §2.4 says. The
+  plan reads it as stated, so a priority other than `data` costs its
+  4 bytes.
+- **No keyword.** `frame_over_batch` is a plan's warning. `RULES.md` is
+  unchanged.
+- **The header** is still written against core 0.32.
+
 ## link.v2 0.29 — 2026-11-28: §2.5: a device implementing an interface whose revision uses `redundancy.v2` is refused, `presence_required`, as one under `redundancy.v1` is (#987)
 
 `redundancy.v2` text 0.1 §2.13 forbids an owner on a first hop an
