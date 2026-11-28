@@ -1102,3 +1102,19 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   revision offline, since a first-hop device holds no bundle) reads a real
   owner's compact descriptor, and `observe_presence` with none reads it
   `Unread` (`unknown_catalog`).
+
+  C3 (#980): the archive's compact attachment. `model::attachment`
+  (`is_archive_key`, a namespace's prefix allowed; `archive_attachment`, the
+  compact form's fields or its refusal on an archive's key; `attachment_value`
+  and `attachment_text`, else the structural ladder), which zenctl's
+  renderers and zengui's attachment pane use. The doctor's `archive_keys`
+  reads `confirmed` in either form. `bus::consume::last_known_through`
+  (`last_known_state_through`, `Catalogs`: the compact identity through the
+  catalog the archive's descriptor names, the revision read) beside
+  `last_known_in`, which holds none; `why` reads `confirmed` through the
+  runtime's `last_known`. `tests/compact_attachment.rs`: a compact and a JSON
+  archive on one router; `archive-unaligned` over both, the state report's
+  identity through the catalog equal to the JSON one's (nulls without), and
+  `why`'s last-known rung reading the compact bit, an owner kept present and
+  silent by a twin holding its tokens and descriptor. Its archives watch a
+  router no owner reaches, so they align only when asked.

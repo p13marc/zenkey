@@ -1206,3 +1206,27 @@ zid, which §3.3's SHOULD keeps, against 664 B), and reads it through the
 catalog and without. `RULES.md` gains three rules (305); its generated
 "Where it reads" lists gain core §3.3, so its baseline mean went from
 12.19 to 12.25 by hand.
+
+**The archive's compact attachment (#980 C3, core 0.120's entry
+extended).** §4.4: an archive reply's attachment has two forms, told by
+their length: exactly 3 bytes is the compact form, `index · resource ·
+confirmed · extension · reserved` (10, 7, 1, 1, 5 bits, MSB first), any
+other the JSON form. An archive given a catalog SHOULD write it (question
+8; `[Sc: state.md §5]`), JSON for a revision the catalog does not list or a
+resource past the 128th; the archive's catalog is the one its descriptor
+names, across a face the deployment's word. A reader of an archive's
+replies MUST read both: `confirmed` with no catalog, the identity through
+that catalog as §8.6 reads an index, decoded to the JSON form's members.
+Refusals in order: `extension`, `reserved`, `unknown_catalog`,
+`unknown_index`, `unknown_revision`, `resource` (past, or not a state),
+`origin` (the origin key's interface, kind token or chunks); the first two
+leave nothing read. Question 6 kept the resource as a checked index.
+`state.md` §5 step 4 (both archives given the catalog; the reference
+measured 3 B against 196 B). `archive/attachments.json`: revisions from
+`descriptors/` plus `archive/contracts/log.v1.toml` and `wide.v1.toml`
+(130 states), catalogs `a`, `b` (succeeds `a`, lists `ghost.v1`) and `c`
+(unrelated); 12 writes and 44 reads, computed by
+`/srv/dev/scratch/zenkey/py/980-c3/a_gen.py` and again by `b_check.py`,
+written from the finished text, which agreed on every case. `RULES.md`:
+309 rules, its baseline mean 12.25 → 12.31 by hand (the generated "Where it
+reads" lists gain §4.4).

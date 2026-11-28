@@ -4,6 +4,16 @@
 What it reads off a bus is the contract with its users, so a change to a
 flag, a badge, a file or a surface is written down here, old beside new.
 
+## Unreleased (`main`, zk2) — the archive's compact attachment (#980's C3)
+
+Core 0.120 §4.4: an archive given a catalog answers with a 3-byte
+attachment. No flag or file changed. No scene changed, so no pixel moved.
+
+| Before | Now | Notes |
+|---|---|---|
+| the Inspector's last-known read: the identity and `confirmed` from a JSON attachment | either form: `confirmed` from the compact bit, the identity through the window's catalogs | given none, the identity is unknown, never guessed |
+| the attachment pane: 3 bytes sniffed as text | on an archive's own key, the compact form by its fields (`index`, `resource`, `confirmed`), or its refusal | |
+
 ## Unreleased (`main`, zk2) — the compact descriptor read (#980's C5b, C5b2)
 
 Core 0.120 §3.3. A descriptor under `zenoh/bytes` is the compact form,

@@ -1051,3 +1051,26 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   and `the_compact_form_asked_for_needs_a_catalog_and_no_role`;
   `owner_example.rs`'s `the_owner_example_writes_its_descriptor_compact`
   (consume found it through `--catalog`); `config.rs`'s default.
+
+  C3 (#980, core 0.120 §4.4): the archive's compact attachment.
+  `Archive::start_under(session, config, catalog)` (`start_with`'s
+  `under`): the service is given the catalog (its descriptor names it), it
+  reads owners' compact descriptors through it, and `Inner::identity` keeps
+  each record's `Compact` (index, resource) where the catalog lists the
+  revision, so `answer` writes the 3 bytes with the record's `confirmed`, the
+  JSON form otherwise. Aligning from a peer reads `confirmed` in either form
+  (`attachment::read` with no catalog). `LastKnown::unresolved` (why the
+  identity is unknown, its token first; the identity's members then null);
+  `last_known_through` and `last_known_all_through` (a `Held`: the catalog
+  the archive's descriptor names, asked once of its instances when a compact
+  attachment came, `Through::catalog`); `last_known`/`last_known_all` hold
+  none. The archive example's `--catalog <path>`. Tests: `state.rs`'s
+  `s5_the_compact_attachment` (state.md §5 step 4: 3 B against 196 B of
+  JSON; the vehicle's archive, starting empty, aligns from the peer's
+  compact bit; the identity through the catalog equals the JSON twin's, and
+  `unknown_catalog` without). Its owner-side archives watch a router no
+  owner reaches, so they align only when asked: their own alignment at the
+  owner's token, still retrying when the owner went, read nothing and left
+  the key unconfirmed, the peer's bit 0, in about one run in four under
+  load. The vehicle's wait re-asks `align` too; `archive_example.rs`'s
+  `the_archive_example_writes_the_compact_attachment_under_a_catalog`.

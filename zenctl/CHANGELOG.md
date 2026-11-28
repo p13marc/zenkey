@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — the archive's compact attachment (#980's C3), and the compact descriptor written (C5c)
+
+Core 0.120 §4.4: an archive given a catalog answers with a 3-byte
+attachment, its revision by its index in the catalog, its resource by its
+place, and `confirmed`. Core §8.1: an owner on a first hop given a catalog
+writes its descriptor compact, which C5b's readers already read. No flag
+or exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `get state --last-known <archive>`: the identity and `confirmed` from a JSON attachment | either form: `confirmed` from the compact form's bit, with no catalog; the identity through `--catalog`, the catalog the archive's descriptor names | given no catalog, a compact row states `confirmed` and an identity of nulls, never a guess |
+| `doctor`'s `archive-unaligned`: `confirmed` read from JSON | either form | an attachment neither form reads is unconfirmed, as before |
+| `why`'s last-known rung: `confirmed` from JSON | either form | |
+| `echo`, `get` (`raw`, `--format ndjson`): a 3-byte attachment sniffed as text | on an archive's own key, the compact form by its fields: `{"form": "compact", "index", "resource", "confirmed"}`, or its refusal | the same 3 bytes on any other key are sniffed as before |
+
 ## Unreleased (`main`, zk2) — every reader reads the compact descriptor (#980's C5b2)
 
 Core 0.120 §3.3. C5b taught `service`, `echo`'s lens, `doctor`,
