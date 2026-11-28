@@ -57,26 +57,36 @@ example). `Config::contract_crate(true)` puts every runtime item behind a
 `zenoh` feature, for a crate of contracts whose default build has no
 zenoh dependency (`zenkey` with `default-features = false`).
 
-## Changes since 0.21
+## Changes since 0.22
 
-- **The wire breaks 0.21's,** in the runtime the generated code runs on:
-  an event's key ends in its owner's run and seq, and its payload is form
-  4, its time inside (core 0.103,
-  [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C2). A
-  0.21 service and a 0.22 one do not understand each other's events, so
-  take `zenkey` and `zenkey-build` at 0.22 together.
-- **This crate's API and the code it generates did not change.** What
-  the generated code calls did: a generated event writer's `put` keys
-  each occurrence by the next seq and writes the clock's time, `put_at`
-  writes the time given under that same next seq, and
-  `inner().put_untimed` writes an unknown one. A generated `Consumer`
-  never delivers a sample on an events key that carries no event, and
-  replays by the event's time. [`zenkey`'s
-  README](https://crates.io/crates/zenkey), "Changes since 0.21", has the
-  rest.
+- **This crate's API and the code it generates did not change**
+  (`cargo semver-checks` against 0.22.0 finds nothing). What the
+  generated code runs on did: take `zenkey` and `zenkey-build` at 0.23
+  together. [`zenkey`'s README](https://crates.io/crates/zenkey),
+  "Changes since 0.22", has the rest.
+- **The wire breaks 0.22's, through the generated code.** A generated
+  `implementation()` holds its revision's bundle and not its authoring
+  file, so the owner's descriptor states no `minor` for it (core 0.107,
+  [#1127](https://git.marcpardo.eu/marcpardo/zenkey/issues/1127)), and a
+  0.22 reader refuses that descriptor. On a first hop given a catalog,
+  the descriptor is the compact form (core 0.120,
+  [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C5),
+  which a 0.22 reader does not read either. Move the readers first.
+- **The build refuses more:**
+  - E051, a packed type declared at layout tag 0, a profile-derived type
+    aside ([#1152](https://git.marcpardo.eu/marcpardo/zenkey/issues/1152));
+  - in a contract that lists `desired.v2`, an invalid declaration of a
+    desired or report resource; in one that lists `health.v2`, an
+    invalid table of words; in one that lists `alarms.v2`, an invalid
+    table of rules. Each is an error, since an owner would write no word
+    of it.
+  - A governed interface's invalid declaration, under either major of
+    `redundancy` (`value`, `disagrees`, and `explicit_stream` under
+    `redundancy.v2`), is a `cargo:warning`: its runtime refuses to start
+    it.
 - **The authoring format and the canonical form did not move:** a
-  contract that builds under 0.21 builds under 0.22, at the same
-  fingerprint.
+  contract that builds under 0.22 builds under 0.23, at the same
+  fingerprint, unless one of the checks above refuses it.
 
 ## What 0.22 does not promise
 

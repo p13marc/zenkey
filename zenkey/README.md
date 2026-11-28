@@ -90,75 +90,84 @@ The walkthrough is the worked example: its contracts are in
 and `examples/owner.rs` is a service to interoperate with, driven from
 its standard input.
 
-## Changes since 0.21
+## Changes since 0.22
 
-- **The wire breaks 0.21's: a 0.21 service and a 0.22 one do not
-  understand each other's events.** Move a deployment's owners and
-  readers together.
-  - An owner keys each occurrence by its run and its next seq (core
-    0.103, [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s
-    C2), `…/events/<template>/<occurrence>`, 8 or 12 characters where a
-    ULID took 26. Its payload is form 4: the occurrence's time, counted
-    from the deployment epoch (the catalog's, given by
-    `ServiceBuilder::catalog`, else 0), then the record. A 0.22 reader
-    refuses a 0.21 owner's ULID keys, and a 0.21 reader refuses form 4.
-  - `EventWriter::put` writes the clock's time, unknown while core §4.3's
-    clock guard holds. `put_at` writes the time it is given, and its key
-    still takes the next seq. `put_untimed` writes an unknown time, for an
-    owner that does not trust its clock.
-  - `Consumer::replay` orders by the event's time, then by run and seq,
-    and the occurrences of unknown time after the rest (core §2.6).
-    `Delivery::occurred` carries an event's time.
-  - A put or a delete on an events key that carries no event is never
-    delivered, live or replayed (core 0.104 and 0.105). It is counted
-    undecodable, `form` (`inband::admit_event`, `Undecodable::NoEvent`),
-    and a replay's refusals now reach `Consumer::with_refused`'s callback
-    too.
-  - A `reply_del` is a stray by the owner's revision under its run, never
-    the reader's (core 0.102,
-    [#1094](https://git.marcpardo.eu/marcpardo/zenkey/issues/1094)): the
-    revision the owner's descriptor names, retrieved by its fingerprint
-    when the reader holds another. A snapshot's omission rule applies only
-    where a descriptor states the snapshot's run.
-- **An archive keeps the watch session handed in**
-  ([#1101](https://git.marcpardo.eu/marcpardo/zenkey/issues/1101)).
-  Given its caller's only handle in `ArchiveConfig::watch`, it went deaf
-  as `start` returned, and never re-aligned an owner whose token came
-  back after a link cut.
-- **Added:** `Consumer::subscribe_heartbeats` hands over each heartbeat
-  its view reads, confirmed, diverged or absent, and whether one was lost
-  before it (`consumer::{HeartbeatRead, HeartbeatSection}`;
-  [#990](https://git.marcpardo.eu/marcpardo/zenkey/issues/990)'s V6).
-  `inband::event_time` reads an event's time from its sample.
+- **The wire breaks 0.22's: a 0.22 reader does not read a 0.23 owner's
+  descriptor.** Move a deployment's readers first, then its owners: a
+  0.23 reader reads a 0.22 owner's descriptor, which states minor 0.
+  - An entry states its revision's minor only where the owner holds the
+    authoring file, and none for a revision from its bundle (core 0.107,
+    [#1127](https://git.marcpardo.eu/marcpardo/zenkey/issues/1127)):
+    every generated `implementation()` and every standard profile's. A
+    0.22 reader requires the member, and refuses the whole descriptor.
+  - **The compact descriptor** (core 0.120,
+    [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C5): an
+    owner on a first hop given a catalog
+    (`ServiceConfig::first_hop`, `ServiceBuilder::catalog`) writes its
+    descriptor in a few tens of bytes, under `zenoh/bytes`, where the JSON
+    form takes some hundreds. `ServiceConfig::compact_descriptor` asks for
+    either form; `None`, the default, writes this one there and the JSON
+    form elsewhere, and a role keeps the JSON form. Its readers need the
+    catalog and every revision it names, held or retrieved: one without
+    reads `presence::Found::Unread`, never absent. A 0.22 reader reads
+    none, so a first-hop owner moves after its readers, or runs
+    `compact_descriptor(false)`.
+  - **An archive's attachment** may be compact too (core 0.120, #980's
+    C3): `Archive::start_under` writes it where its catalog lists the
+    value's revision, and `archive::LastKnown::unresolved` says why one
+    was not read.
+  - **The ahead time** (core 0.113): an owner whose clock guard holds
+    writes its heartbeat's time as ahead, which a reader before 0.113
+    refuses.
 - **Added: the owner heartbeat**
   ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110),
-  `freshness.v2` 0.9 and 0.10). An owner given a catalog may confirm
+  `freshness.v2` 0.9 to 0.14). An owner given a catalog may confirm
   several interfaces in one put per class of exposure, on
   `…/freshness.v2/stream/heartbeats/<class>`, in place of one heartbeat
   per interface.
   - **`ServiceConfig::owner_heartbeat`**, off unless the deployment sets
     it (`owner_heartbeat: true` in a config file). It needs
     `ServiceBuilder::catalog`: a service with the option and no catalog
-    does not start. Each implemented interface the catalog lists is
-    covered, up to 15 on a key; any other keeps its heartbeat.
+    does not start. `Service::owner_heartbeat_cover` lists the interfaces
+    covered.
   - **Turn it on once the readers read it.** A consumer subscribes to an
-    owner's class keys only when it holds a catalog
-    (`Consumer::with_catalog`, or a service's own). A reader given none,
-    or one built before this release, reads every member of a covered
-    interface stale.
-  - **A descriptor** of a `freshness.v2` owner lists the standard
-    contract's revision 1.1 (`9e07704d…`), and its
-    `stream/heartbeats/{class}` unavailable, cause `config`, unless its
-    owner heartbeats cover an interface.
-  - `Consumer::subscribe_heartbeats` hands one `HeartbeatRead` per group
-    read for its interface, `group` naming the class and the index.
-- **Removed, and what to use instead:**
-  - `writer::ulid` and `writer::ulid_time`: an event's key ends in its
-    occurrence chunk (`zenkey_model::chunk::occurrence` reads it), its
-    time is `Delivery::occurred` or `inband::event_time`, and a call's
-    request id is `call::request_id`.
-  - Built field by field or matched whole, `Delivery` needs `occurred`
-    and `Undecodable` its `NoEvent`.
+    owner's class keys only when it holds a catalog: `Consumer::with_catalog`
+    now holds the one given, and a consumer with none declares no class
+    key, so to it every member of a covered interface reads stale.
+    `Consumer::with_owner_catalog_timeout` bounds the read that learns the
+    catalog an owner names.
+  - A descriptor of a `freshness.v2` owner lists the standard contract's
+    revision 1.1 (`9e07704d…`).
+  - `consumer::HeartbeatRead` gains `group`: the class and the index a
+    heartbeat read names.
+- **Added: four profiles' second majors,** each opt-in beside its first:
+  `health.v2` (`ServiceBuilder::health_v2`, `health_v2_with`;
+  `health::Effective::word`), `alarms.v2` (`ServiceBuilder::alarms_v2`),
+  `desired.v2` (`desired_author` and `desired_target` over a contract
+  that lists it) and `redundancy.v2`, a follower that fences by run
+  (core 0.119). `ServiceBuilder::health_with` and `config_v1_with` take
+  an implementation of your own.
+- **Added: a conditional read** (core 0.110, #986's J1):
+  `Consumer::get_conditional` asks with the stamps it holds, and an
+  unchanged member is answered by its held stamp alone.
+- **zenoh and zenoh-ext 1.10.2**
+  ([#1165](https://git.marcpardo.eu/marcpardo/zenkey/issues/1165)), which
+  `zenoh = "1.10"` already resolves.
+- **Grown or changed, and what to write instead:**
+  - `ServiceConfig` gains `owner_heartbeat` and `compact_descriptor`:
+    build it with `ServiceConfig::new` and its methods, never a literal.
+  - `desired::Written` gains `PutV2` and `DeletedV2`, `desired::Kept`
+    `major`, `desired::Document` `inband` and `desired::Seeded` `revision`
+    ([#1156](https://git.marcpardo.eu/marcpardo/zenkey/issues/1156)).
+    `desired::TargetStartup` gains `word_alone`, `across_face` and
+    `hold`: a target holds a new run's versions until its descriptor
+    states the run, its author's token appears, or `hold` (10 s) passes
+    (PR #1176).
+  - `desired::Target::set_reread` returns a `Result`: a period below a
+    `desired.v2` read's timeout is refused
+    ([#1166](https://git.marcpardo.eu/marcpardo/zenkey/issues/1166)).
+  - `presence::Found` gains `Unread`, a descriptor not read (above).
+  - `archive::LastKnown` gains `unresolved`.
 
 ## What 0.22 does not promise
 
