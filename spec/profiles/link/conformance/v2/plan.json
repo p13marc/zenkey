@@ -3038,6 +3038,12 @@
                 "severity": "warning"
               },
               {
+                "at": "modem.v3/stream/frames/fast",
+                "code": "frame_over_batch",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
                 "at": "modem.v3/stream/frames/paid",
                 "code": "frame_unlisted",
                 "face": "rf",
@@ -3093,7 +3099,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3 3.4, which lists link.v1: what it exposes is its three frame resources over one record of all 73 readings, all packed, so none draws `not_packed` (§2.17); 3.2's nine are deprecated and `host`, so they are denied with the reading subtrees; the face lists `frames/fast` at 60 s, crossing whole with no downsampling, and denies `frames/slow` and `frames/paid` by name (`frame_unlisted`, §2.7); `frames/fast`'s 300 s horizon is liveness evidence; one frame a minute at the 60-s keep-alive interval, so each keep-alive races a frame (`keep_alive_not_suppressed`, §2.16); the catalog the ground holds lists every crossing revision (§2.18); the face lists modem.v3 3.4's three `face/` events, which cross whole, never downsampled (§2.7, link.v1 §2.9), and its four JSON events are denied by name; `face/device_fault` is JSON, so it draws `not_packed` (§2.17)",
+      "note": "zenoh-modem's RF router (Appendix B, `examples/zk2/zenoh-modem/faces/`) over modem.v3 3.4, which lists link.v1: what it exposes is its three frame resources over one record of all 73 readings, all packed, so none draws `not_packed` (§2.17); 3.2's nine are deprecated and `host`, so they are denied with the reading subtrees; the face lists `frames/fast` at 60 s, crossing whole with no downsampling, and denies `frames/slow` and `frames/paid` by name (`frame_unlisted`, §2.7); `frames/fast`'s 300 s horizon is liveness evidence; one frame a minute at the 60-s keep-alive interval, so each keep-alive races a frame (`keep_alive_not_suppressed`, §2.16); the catalog the ground holds lists every crossing revision (§2.18); the face lists modem.v3 3.4's three `face/` events, which cross whole, never downsampled (§2.7, link.v1 §2.9), and its four JSON events are denied by name; `face/device_fault` is JSON, so it draws `not_packed` (§2.17); `frames/fast`'s largest frame, 216 B, and its 10-B allowance at `data` and `drop` on `unixsock-stream` at `16bit` do not fit the 222-B batch (`frame_over_batch`, link.v1 §2.8)",
       "policy": "# zenoh-modem's RF node (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"8982cc41\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 222          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\nevents           = [\"modem.v3/face/device_fault\", \"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
     },
     {
@@ -3450,6 +3456,12 @@
             "far": "ground",
             "findings": [
               {
+                "at": "modem.v3/stream/frames/fast",
+                "code": "frame_over_batch",
+                "face": "lora",
+                "severity": "warning"
+              },
+              {
                 "at": "modem.v3/stream/frames/paid",
                 "code": "frame_unlisted",
                 "face": "lora",
@@ -3505,7 +3517,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF7 (Appendix B): `frames/fast` at 60 s, twice the 30-s keep-alive interval, so the uplink pays one keep-alive between two frames, and a second before each frame later than the one before (`keep_alive_not_suppressed`, §2.16); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists modem.v3 3.4's two `rare` events, which cross whole, and the plan denies `face/device_fault` by name with the four JSON events (§2.7)",
+      "note": "zenoh-modem's LoRa router at SF7 (Appendix B): `frames/fast` at 60 s, twice the 30-s keep-alive interval, so the uplink pays one keep-alive between two frames, and a second before each frame later than the one before (`keep_alive_not_suppressed`, §2.16); `frames/slow` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists modem.v3 3.4's two `rare` events, which cross whole, and the plan denies `face/device_fault` by name with the four JSON events (§2.7); `frames/fast`'s largest frame, 216 B, and its 10-B allowance do not fit the 224-B batch (`frame_over_batch`, link.v1 §2.8)",
       "policy": "# zenoh-modem's LoRa node at SF7 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"8982cc41\"\n\n[transport]\nlease_ms             = 120000\nkeep_alive           = 4\nwait_before_close_ms = 120000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the chip's 222 B frame and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 5469\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 120\nevents           = [\"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.lora.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
     },
     {
@@ -4259,6 +4271,12 @@
                 "severity": "warning"
               },
               {
+                "at": "modem.v3/stream/frames/slow",
+                "code": "frame_over_batch",
+                "face": "lora",
+                "severity": "warning"
+              },
+              {
                 "at": "transport.keep_alive",
                 "code": "keep_alive_not_suppressed",
                 "face": "lora",
@@ -4303,7 +4321,7 @@
           "health.v1"
         ]
       },
-      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): `frames/slow` at 900 s, asked for a full record hourly, which its 4 records reach (`keyframe_s`, §2.7); its 1,800 s horizon is twice its cadence and the face's `horizon_s`, so it is liveness evidence with no `interval_over_horizon` or `horizon_under_face` (§2.12); the 900 s keep-alive interval is the cadence, so each keep-alive races a frame (`keep_alive_not_suppressed`, §2.16); `frames/fast` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists no event (`events = []`), so `events` is denied whole (§2.7)",
+      "note": "zenoh-modem's LoRa router at SF12 (Appendix B): `frames/slow` at 900 s, asked for a full record hourly, which its 4 records reach (`keyframe_s`, §2.7); its 1,800 s horizon is twice its cadence and the face's `horizon_s`, so it is liveness evidence with no `interval_over_horizon` or `horizon_under_face` (§2.12); the 900 s keep-alive interval is the cadence, so each keep-alive races a frame (`keep_alive_not_suppressed`, §2.16); `frames/fast` and `frames/paid` are denied by name (`frame_unlisted`, §2.7); the face lists no event (`events = []`), so `events` is denied whole (§2.7); `frames/slow`'s largest frame, 216 B, a delta record of every reading, and its 10-B allowance do not fit the 224-B batch (`frame_over_batch`, link.v1 §2.8)",
       "policy": "# zenoh-modem's LoRa node at SF12 (link.v2 Appendix B)\nprofile  = \"link.v2\"\nsystem   = \"h-c2a95e41d7f0\"\nservices = [\"lora0\"]\nbinding  = \"zm-1.10.2-r1\"\ncatalog  = \"8982cc41\"\n\n[transport]\nlease_ms             = 3600000\nkeep_alive           = 4\nwait_before_close_ms = 3600000\nsequence             = \"16bit\"\nbatch_bytes          = 224          # the fragment layer's 222 B SDU and 2 B of stream framing\nopen_timeout_ms      = 40000\naccept_timeout_ms    = 40000\ninterests_timeout_ms = 40000\n\n[face.lora]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 900\nmax_outage_s     = 3600\nlink_bps         = 293\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 120000\nhorizon_s        = 1800\nevents           = []\n\n# frames/slow writes a full record at least every 4 (modem.v3), hourly at\n# one every 15 minutes, as the face asks.\n[face.lora.frames]\n\"modem.v3/frames/slow\" = { every_s = 900, keyframe_s = 3600 }\n"
     },
     {
@@ -10172,7 +10190,7 @@
         ],
         "transport": {
           "accept_timeout_ms": 10000,
-          "batch_bytes": 159,
+          "batch_bytes": 169,
           "interests_timeout_ms": 10000,
           "keep_alive": 4,
           "lease_ms": 240000,
@@ -10253,8 +10271,8 @@
           ]
         }
       },
-      "note": "an owner heartbeat's longest put against the batch (§2.9, §2.16): `node-a`'s `link` owner heartbeat holds a group for census.v1 and one for vital.v1, and none for quiet.v1, whose one collection is `host`. census.v1's group is 14 bits, a 16-bit size, 3 map bits, `status`'s 33 and `peer/{peer}`'s 33 + 10 + 1,000 at a cardinality of 1,000: 1,109. vital.v1's is 14, an 8-bit size, 1 map bit and 33: 56. With the body's 46 that is 1,211 bits, 152 bytes, and 160 with the envelope's 8, above the 159-byte batch (`block_over_batch`, `at` the `link` key). The `host` key and quiet.v1's heartbeat are denied by name, and the `link` key is `node-a`'s evidence beside its two crossing heartbeats. Written by reading link.v2 0.19, not derived by the reference",
-      "policy": "# an owner heartbeat's longest put against the batch (link.v2 0.19)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 159\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+      "note": "an owner heartbeat's longest put against the batch (§2.9, §2.16): `node-a`'s `link` owner heartbeat holds a group for census.v1 and one for vital.v1, and none for quiet.v1, whose one collection is `host`. census.v1's group is 14 bits, a 16-bit size, 3 map bits, `status`'s 33 and `peer/{peer}`'s 33 + 10 + 1,000 at a cardinality of 1,000: 1,109. vital.v1's is 14, an 8-bit size, 1 map bit and 33: 56. With the body's 46 that is 1,211 bits, 152 bytes, and 160 with the envelope's 8. With its allowance at `data` and `drop`, 10 B on `unixsock-stream` at `16bit`, it is 170, above the 169-byte batch (`block_over_batch`, `at` the `link` key; link.v2 0.30 moved the batch from 159). The `host` key and quiet.v1's heartbeat are denied by name, and the `link` key is `node-a`'s evidence beside its two crossing heartbeats. Written by reading link.v2 0.19 and 0.30, not derived by the reference",
+      "policy": "# an owner heartbeat's longest put against the batch (link.v2 0.19)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 169\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
       "expect": {
@@ -10489,7 +10507,7 @@
         ],
         "transport": {
           "accept_timeout_ms": 10000,
-          "batch_bytes": 160,
+          "batch_bytes": 170,
           "interests_timeout_ms": 10000,
           "keep_alive": 4,
           "lease_ms": 240000,
@@ -10570,8 +10588,8 @@
           ]
         }
       },
-      "note": "the same face under a 160-byte batch (§2.16): the owner heartbeat's longest put is 160 bytes, not above it, so the plan warns no `block_over_batch`; with case 46 it pins the count of bits on both sides. Written by reading link.v2 0.19, not derived by the reference",
-      "policy": "# an owner heartbeat's longest put against the batch (link.v2 0.19)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 160\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+      "note": "the same face under a 170-byte batch (§2.16): the owner heartbeat's longest put is 160 bytes, and with its 10-byte allowance it fits the batch exactly, so the plan warns no `block_over_batch`; with case 46 it pins the count of bits and the allowance on both sides (link.v2 0.30 moved the batch from 160). Written by reading link.v2 0.19 and 0.30, not derived by the reference",
+      "policy": "# an owner heartbeat's longest put against the batch (link.v2 0.19)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 170\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
       "expect": {
@@ -10827,7 +10845,7 @@
         ],
         "transport": {
           "accept_timeout_ms": 10000,
-          "batch_bytes": 160,
+          "batch_bytes": 170,
           "interests_timeout_ms": 10000,
           "keep_alive": 4,
           "lease_ms": 240000,
@@ -10926,8 +10944,8 @@
           ]
         }
       },
-      "note": "an owner heartbeat's plan counts the listed interfaces with a heartbeat, never every listed interface (§2.9, §2.16): case 47's face, a 160-byte batch, with `horizon_s` 60 and one more listed interface, old.v1, whose revision uses `freshness.v1`. Its `link` state `peer/{peer}` has a 30-s horizon and a cardinality of 1,000, and no heartbeat, so the `link` owner heartbeat holds no group for it. The longest put stays 160 bytes, not above the batch (no `block_over_batch`; a group for old.v1 would add 14 + 16 + 1 + 1,043 bits), and the key's horizon stays vital.v1's 60 s, not below `horizon_s` (no `horizon_under_face`). old.v1's state crosses as `node-a`'s evidence, its stream subtree is denied by name, and, a per-key resource, it gives `node-a` a tombstone window floor of `max_outage_s` (§2.11). Derived by the reference, then read by hand against link.v2 0.22: it differs from case 47's plan by that deny, that evidence and that floor alone",
-      "policy": "# an owner heartbeat's plan counts the listed interfaces with a heartbeat (link.v2 0.22)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 160\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nhorizon_s        = 60\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+      "note": "an owner heartbeat's plan counts the listed interfaces with a heartbeat, never every listed interface (§2.9, §2.16): case 47's face, a 170-byte batch, with `horizon_s` 60 and one more listed interface, old.v1, whose revision uses `freshness.v1`. Its `link` state `peer/{peer}` has a 30-s horizon and a cardinality of 1,000, and no heartbeat, so the `link` owner heartbeat holds no group for it. The longest put stays 160 bytes, which fits the batch with its 10-byte allowance (no `block_over_batch`; a group for old.v1 would add 14 + 16 + 1 + 1,043 bits), and the key's horizon stays vital.v1's 60 s, not below `horizon_s` (no `horizon_under_face`). old.v1's state crosses as `node-a`'s evidence, its stream subtree is denied by name, and, a per-key resource, it gives `node-a` a tombstone window floor of `max_outage_s` (§2.11). Derived by the reference, then read by hand against link.v2 0.22: it differs from case 47's plan by that deny, that evidence and that floor alone; link.v2 0.30 moved the batch from 160",
+      "policy": "# an owner heartbeat's plan counts the listed interfaces with a heartbeat (link.v2 0.22)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 170\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nhorizon_s        = 60\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
       "expect": {
@@ -12036,7 +12054,7 @@
         ],
         "transport": {
           "accept_timeout_ms": 10000,
-          "batch_bytes": 159,
+          "batch_bytes": 169,
           "interests_timeout_ms": 10000,
           "keep_alive": 4,
           "lease_ms": 240000,
@@ -12117,11 +12135,11 @@
           ]
         }
       },
-      "note": "case 46 with the deployment turning `node-a`'s owner heartbeats on (\u00a70, \u00a72.9, 0.27): its `link` owner heartbeat crosses where a heartbeat does, so the plan warns no `owner_heartbeat_denied`, link.v1's, and is case 46's plan. Written by reading link.v2 0.27, case 46's plan by hand",
+      "note": "case 46 with the deployment turning `node-a`'s owner heartbeats on (§0, §2.9, 0.27): its `link` owner heartbeat crosses where a heartbeat does, so the plan warns no `owner_heartbeat_denied`, link.v1's, and is case 46's plan. Written by reading link.v2 0.27, case 46's plan by hand; at case 46's 169-byte batch since link.v2 0.30",
       "owner_heartbeats": [
         "node-a"
       ],
-      "policy": "# owner heartbeats turned on behind a link.v2 face (link.v2 0.27)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 159\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+      "policy": "# owner heartbeats turned on behind a link.v2 face (link.v2 0.27)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 169\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
       "expect": {
@@ -12384,7 +12402,7 @@
         ],
         "transport": {
           "accept_timeout_ms": 10000,
-          "batch_bytes": 160,
+          "batch_bytes": 170,
           "interests_timeout_ms": 10000,
           "keep_alive": 4,
           "lease_ms": 240000,
@@ -12503,8 +12521,8 @@
           ]
         }
       },
-      "note": "a collection the revisions disagree on is read `host`, for the horizon and for the longest put (§2.9, §2.16, link.v1 §2.3; F-573): case 48 with a second revision of quiet.v1, in which `note` reads `link`, is packed and has a 30-s horizon. The two revisions disagree, so `note` is `host` (`exposure_disagrees`), and its horizon the least, 30 s. It does not cross, so quiet.v1's heartbeat is still denied by name, and the `link` owner heartbeat holds no group for it. The plan is case 48's with that warning. Read `link`, quiet.v1's group would add 14 + 8 + 1 + 33 bits: 1,267, 167 bytes, above the 160-byte batch (`block_over_batch`), and the `link` key's horizon would be 30 s, below `horizon_s` (`horizon_under_face`). Written by reading link.v2 0.28 and the reference's merge, case 48's plan by hand, not derived by the reference",
-      "policy": "# a collection two revisions disagree on is read host (link.v2 0.28)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 160\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nhorizon_s        = 60\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+      "note": "a collection the revisions disagree on is read `host`, for the horizon and for the longest put (§2.9, §2.16, link.v1 §2.3; F-573): case 48 with a second revision of quiet.v1, in which `note` reads `link`, is packed and has a 30-s horizon. The two revisions disagree, so `note` is `host` (`exposure_disagrees`), and its horizon the least, 30 s. It does not cross, so quiet.v1's heartbeat is still denied by name, and the `link` owner heartbeat holds no group for it. The plan is case 48's with that warning. Read `link`, quiet.v1's group would add 14 + 8 + 1 + 33 bits: 1,267, 167 bytes, which with its 10-byte allowance does not fit the 170-byte batch (`block_over_batch`), and the `link` key's horizon would be 30 s, below `horizon_s` (`horizon_under_face`). Written by reading link.v2 0.28 and the reference's merge, case 48's plan by hand, not derived by the reference; at case 48's 170-byte batch since link.v2 0.30",
+      "policy": "# a collection two revisions disagree on is read host (link.v2 0.28)\nprofile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"node-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 170\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nhorizon_s        = 60\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
     },
     {
       "expect": {
@@ -12540,7 +12558,1321 @@
       },
       "note": "case 25's device, implementing `gov.v1` alone, its revision using `redundancy.v2`: `presence_required` on the device's face, and no plan (\u00a72.5; redundancy.v2 \u00a72.13). Written by reading link.v2 0.29, not derived by the reference, and inserted as text",
       "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = []\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 222\n\n[face.radio]\nfar              = \"gov-a\"\nattach           = \"device\"\ndevices          = [\"lab/gov-a\"]\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\n"
+    },
+    {
+      "catalog": {
+        "entries": [
+          {
+            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+            "iface": "modem.v3",
+            "index": 0
+          },
+          {
+            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+            "iface": "config.v1",
+            "index": 1
+          },
+          {
+            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+            "iface": "health.v1",
+            "index": 2
+          },
+          {
+            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+            "iface": "config.v1",
+            "index": 3
+          },
+          {
+            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+            "iface": "health.v1",
+            "index": 4
+          },
+          {
+            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+            "iface": "modem.v3",
+            "index": 5
+          },
+          {
+            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+            "iface": "modem.v3",
+            "index": 6
+          },
+          {
+            "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+            "iface": "sx1262_config.v1",
+            "index": 7
+          },
+          {
+            "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+            "iface": "modem.v3",
+            "index": 8
+          },
+          {
+            "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+            "iface": "freshness.v2",
+            "index": 9
+          },
+          {
+            "contract": "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca",
+            "iface": "modem.v3",
+            "index": 10
+          },
+          {
+            "contract": "sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1",
+            "iface": "freshness.v2",
+            "index": 11
+          }
+        ],
+        "epoch": 1767225600,
+        "format": "zk2-catalog/1",
+        "lineage": [
+          {
+            "entries": 3,
+            "id": "0a90fd61"
+          },
+          {
+            "entries": 5,
+            "id": "ea268fad"
+          },
+          {
+            "entries": 6,
+            "id": "36c25c0f"
+          },
+          {
+            "entries": 7,
+            "id": "ab76ec37"
+          },
+          {
+            "entries": 8,
+            "id": "8c808dff"
+          },
+          {
+            "entries": 9,
+            "id": "e3a529fe"
+          },
+          {
+            "entries": 10,
+            "id": "0ff6bf6d"
+          },
+          {
+            "entries": 11,
+            "id": "29bf7d47"
+          }
+        ]
+      },
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "binding": "zm-1.10.2-r1",
+        "catalog": "8982cc41",
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/paid/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
+                  "zk2/*/*/modem.v3/stream/frames/slow/**",
+                  "zk2/*/*/modem.v3/stream/if/**",
+                  "zk2/*/*/modem.v3/stream/layer/**",
+                  "zk2/*/*/modem.v3/stream/link/**",
+                  "zk2/*/*/modem.v3/stream/radio/**",
+                  "zk2/*/*/modem.v3/stream/sched/**",
+                  "zk2/*/*/modem.v3/stream/sdu/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/events/action_event/**",
+                  "zk2/*/*/modem.v3/events/device_fault/**",
+                  "zk2/*/*/modem.v3/events/identity_change/**",
+                  "zk2/*/*/modem.v3/events/oper_change/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [
+              {
+                "at": "modem.v3/events/face/device_fault",
+                "code": "not_packed",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/paid",
+                "code": "frame_unlisted",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/slow",
+                "code": "frame_unlisted",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "rf",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "resource": "modem.v3/stream/frames/fast"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "modem.v3/stream/frames/fast"
+                ],
+                "service": "h-3fa9c2d41b7e/rf0"
+              }
+            ],
+            "name": "rf",
+            "reply_timeout_ms": 15000,
+            "windows": []
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 226,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "zenoh-modem's RF router, case 14's face and deployment at a 226-byte batch, the bound of `frames/fast`'s largest frame (link.v1 §2.8, §2.16): 216 B, and beside it 10 B, the put's 5, a frame's 3 at `16bit` and the batch's 2-byte length on `unixsock-stream`, fit exactly, so the plan warns no `frame_over_batch`. The rest is case 14's plan. Written by reading link.v2 0.30, computed twice by two readings sharing no code, not derived by the reference",
+      "policy": "# zenoh-modem's RF node (link.v2 Appendix B), at a 226-byte batch (link.v2 0.30)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"8982cc41\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 226          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\nevents           = [\"modem.v3/face/device_fault\", \"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
+    },
+    {
+      "catalog": {
+        "entries": [
+          {
+            "contract": "sha256:9a3e2859a538a95daafc53e7dffe8c9d0610312f7650f27250b9e6fee0965953",
+            "iface": "modem.v3",
+            "index": 0
+          },
+          {
+            "contract": "sha256:727ff0090b99ad8fc09b5398804d1a14288bebf661f374ec6904351344a1a7b1",
+            "iface": "config.v1",
+            "index": 1
+          },
+          {
+            "contract": "sha256:e9dbcdcb2fc325ca3121fdcacf7badd0091f62d97ab4c7d7a5f022dd8d6671df",
+            "iface": "health.v1",
+            "index": 2
+          },
+          {
+            "contract": "sha256:4778b0aae3ce092a5a61386c8616cd4470534e354b35bdc9666c75c601ad4501",
+            "iface": "config.v1",
+            "index": 3
+          },
+          {
+            "contract": "sha256:60a4374513172609a9140051bb9b5bd9abc898ed6c22035c303414795940e42f",
+            "iface": "health.v1",
+            "index": 4
+          },
+          {
+            "contract": "sha256:69081ed3aae72b1e6a869a260c234ba5f2bf0b8c63069f55e396a96b677e7d66",
+            "iface": "modem.v3",
+            "index": 5
+          },
+          {
+            "contract": "sha256:a584f236cbe0b7d5a379c733baf63ffe8a665bd6b25216afede10204ac6ae404",
+            "iface": "modem.v3",
+            "index": 6
+          },
+          {
+            "contract": "sha256:dc7c01069bffc9dc5a966c93cfe2444eca0391e71f051bc9bf6d2b2b54d4317b",
+            "iface": "sx1262_config.v1",
+            "index": 7
+          },
+          {
+            "contract": "sha256:71f55126c2e046f059993cf738911e4fb7cd68bc45d5bd8dd564e7e082a711cf",
+            "iface": "modem.v3",
+            "index": 8
+          },
+          {
+            "contract": "sha256:8756e6a64a25424c962af374d844cf56c2ed1e831a4bac349fc17f6c0544a890",
+            "iface": "freshness.v2",
+            "index": 9
+          },
+          {
+            "contract": "sha256:04836e1785402629a03f27d3ff0f07158942460564facde5731f4467020467ca",
+            "iface": "modem.v3",
+            "index": 10
+          },
+          {
+            "contract": "sha256:9e07704d114d5124a0d177a003c125ec01b80da0f3f1bad594ab300e0ae1e5d1",
+            "iface": "freshness.v2",
+            "index": 11
+          }
+        ],
+        "epoch": 1767225600,
+        "format": "zk2-catalog/1",
+        "lineage": [
+          {
+            "entries": 3,
+            "id": "0a90fd61"
+          },
+          {
+            "entries": 5,
+            "id": "ea268fad"
+          },
+          {
+            "entries": 6,
+            "id": "36c25c0f"
+          },
+          {
+            "entries": 7,
+            "id": "ab76ec37"
+          },
+          {
+            "entries": 8,
+            "id": "8c808dff"
+          },
+          {
+            "entries": 9,
+            "id": "e3a529fe"
+          },
+          {
+            "entries": 10,
+            "id": "0ff6bf6d"
+          },
+          {
+            "entries": 11,
+            "id": "29bf7d47"
+          }
+        ]
+      },
+      "contracts": [
+        "examples/zk2/zenoh-modem/modem.v3.toml",
+        "spec/profiles/config/config.v1.toml",
+        "spec/profiles/health/health.v1.toml"
+      ],
+      "expect": {
+        "binding": "zm-1.10.2-r1",
+        "catalog": "8982cc41",
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/stream/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/air/**",
+                  "zk2/*/*/modem.v3/stream/frames/bearer/**",
+                  "zk2/*/*/modem.v3/stream/frames/if/**",
+                  "zk2/*/*/modem.v3/stream/frames/layer/**",
+                  "zk2/*/*/modem.v3/stream/frames/link/**",
+                  "zk2/*/*/modem.v3/stream/frames/message/**",
+                  "zk2/*/*/modem.v3/stream/frames/paid/**",
+                  "zk2/*/*/modem.v3/stream/frames/radio/**",
+                  "zk2/*/*/modem.v3/stream/frames/sched/**",
+                  "zk2/*/*/modem.v3/stream/frames/sdu/**",
+                  "zk2/*/*/modem.v3/stream/frames/slow/**",
+                  "zk2/*/*/modem.v3/stream/if/**",
+                  "zk2/*/*/modem.v3/stream/layer/**",
+                  "zk2/*/*/modem.v3/stream/link/**",
+                  "zk2/*/*/modem.v3/stream/radio/**",
+                  "zk2/*/*/modem.v3/stream/sched/**",
+                  "zk2/*/*/modem.v3/stream/sdu/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "state",
+                "key_exprs": [
+                  "zk2/*/*/*/state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:config.v1",
+                "key_exprs": [
+                  "zk2/*/*/config.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:health.v1",
+                "key_exprs": [
+                  "zk2/*/*/health.v1/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events:modem.v3",
+                "key_exprs": [
+                  "zk2/*/*/modem.v3/events/action_event/**",
+                  "zk2/*/*/modem.v3/events/device_fault/**",
+                  "zk2/*/*/modem.v3/events/identity_change/**",
+                  "zk2/*/*/modem.v3/events/oper_change/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": null,
+            "far": "ground",
+            "findings": [
+              {
+                "at": "modem.v3/events/face/device_fault",
+                "code": "not_packed",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/fast",
+                "code": "frame_over_batch",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/paid",
+                "code": "frame_unlisted",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "modem.v3/stream/frames/slow",
+                "code": "frame_unlisted",
+                "face": "rf",
+                "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "rf",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "resource": "modem.v3/stream/frames/fast"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "modem.v3/stream/frames/fast"
+                ],
+                "service": "h-3fa9c2d41b7e/rf0"
+              }
+            ],
+            "name": "rf",
+            "reply_timeout_ms": 15000,
+            "windows": []
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 225,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "rf0": [
+          "modem.v3",
+          "config.v1",
+          "health.v1"
+        ]
+      },
+      "note": "zenoh-modem's RF router, case 14's face and deployment at a 225-byte batch: `frames/fast`'s largest frame, 216 B, and its 10-B allowance are 1 B above it (`frame_over_batch`, link.v1 §2.8). The rest is case 14's plan. Written by reading link.v2 0.30, computed twice by two readings sharing no code, not derived by the reference",
+      "policy": "# zenoh-modem's RF node (link.v2 Appendix B), at a 225-byte batch (link.v2 0.30)\nprofile  = \"link.v2\"\nsystem   = \"h-3fa9c2d41b7e\"\nservices = [\"rf0\"]\nbinding  = \"zm-1.10.2-r1\"           # the zenoh fork zenoh-modem's routers run\ncatalog  = \"8982cc41\"               # catalog.json, which the ground holds\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4            # a keep-alive every 60 s, which a frame a minute replaces\nwait_before_close_ms = 240000       # at least the lease\nsequence             = \"16bit\"\nbatch_bytes          = 225          # the radio's 220 B SDU and 2 B of stream framing\nopen_timeout_ms      = 10000\naccept_timeout_ms    = 10000\ninterests_timeout_ms = 10000\n\n[face.rf]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000            # 5 %\narq              = false            # no link ARQ on the radio (zenoh-modem's tracker)\nreply_timeout_ms = 15000            # 16 full batches take 11.8 s\nhorizon_s        = 120              # one frame a minute affords a 120 s horizon\nevents           = [\"modem.v3/face/device_fault\", \"modem.v3/face/identity_change\", \"modem.v3/face/oper_change\"]\n\n[face.rf.frames]\n\"modem.v3/frames/fast\" = { every_s = 60 }\n"
+    },
+    {
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml"
+      ],
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/heartbeats/host/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:probe.v1",
+                "key_exprs": [
+                  "zk2/*/*/probe.v1/stream/frames/detail/**",
+                  "zk2/*/*/probe.v1/stream/setpoint/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": {
+              "flows": [
+                "egress"
+              ],
+              "id": "radio",
+              "link_protocols": [
+                "unixsock-stream"
+              ],
+              "messages": [
+                "put"
+              ],
+              "rules": [
+                {
+                  "freq": 0.016666666666666666,
+                  "key_expr": "zk2/lab/probe-a/probe.v1/stream/level"
+                }
+              ]
+            },
+            "far": "ground",
+            "findings": [
+              {
+                "at": "probe.v1/stream/frames/detail",
+                "code": "frame_unlisted",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "probe.v1/stream/setpoint",
+                "code": "timed_downsampled",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "radio",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "keyframe_s": 900,
+                "resource": "probe.v1/stream/frames/link"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "freshness.v2/stream/heartbeat/probe.v1",
+                  "freshness.v2/stream/heartbeats/link",
+                  "probe.v1/state/status",
+                  "probe.v1/stream/frames/link"
+                ],
+                "service": "lab/probe-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 15000,
+            "windows": []
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 244,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "probe-a": [
+          "probe.v1"
+        ]
+      },
+      "note": "case 5's face and deployment at a 244-byte batch, the bound of `config`'s longest put (§2.16): 232 B, and beside it 12 B, a `block` put's 7 with its QoS extension, a frame's 3 at `16bit` and the batch's 2-byte length, fit exactly, so the plan warns no `block_over_batch`. The rest is case 5's plan. Written by reading link.v2 0.30, computed twice by two readings sharing no code, not derived by the reference",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 244\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 900 } }\n"
+    },
+    {
+      "contracts": [
+        "spec/profiles/link/conformance/contracts/probe.v1.toml"
+      ],
+      "expect": {
+        "binding": "zenoh-1.10.1",
+        "catalog": null,
+        "faces": [
+          {
+            "attach": {
+              "shape": "client"
+            },
+            "deny": [
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "zk",
+                "key_exprs": [
+                  "zk2/**/@zk/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "adv",
+                "key_exprs": [
+                  "zk2/**/@adv/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "admin",
+                "key_exprs": [
+                  "@/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber",
+                  "query",
+                  "declare_queryable",
+                  "reply",
+                  "liveliness_token",
+                  "declare_liveliness_subscriber",
+                  "liveliness_query"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:freshness.v2",
+                "key_exprs": [
+                  "zk2/*/*/freshness.v2/stream/heartbeats/host/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "stream:probe.v1",
+                "key_exprs": [
+                  "zk2/*/*/probe.v1/stream/frames/detail/**",
+                  "zk2/*/*/probe.v1/stream/setpoint/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@stream",
+                "key_exprs": [
+                  "zk2/*/*/*/@stream/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "@state",
+                "key_exprs": [
+                  "zk2/*/*/*/@state/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              },
+              {
+                "flows": [
+                  "egress",
+                  "ingress"
+                ],
+                "id": "events",
+                "key_exprs": [
+                  "zk2/*/*/*/events/**"
+                ],
+                "messages": [
+                  "put",
+                  "delete",
+                  "declare_subscriber"
+                ]
+              }
+            ],
+            "downsampling": {
+              "flows": [
+                "egress"
+              ],
+              "id": "radio",
+              "link_protocols": [
+                "unixsock-stream"
+              ],
+              "messages": [
+                "put"
+              ],
+              "rules": [
+                {
+                  "freq": 0.016666666666666666,
+                  "key_expr": "zk2/lab/probe-a/probe.v1/stream/level"
+                }
+              ]
+            },
+            "far": "ground",
+            "findings": [
+              {
+                "at": "probe.v1/state/config",
+                "code": "block_over_batch",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "probe.v1/stream/frames/detail",
+                "code": "frame_unlisted",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "probe.v1/stream/setpoint",
+                "code": "timed_downsampled",
+                "face": "radio",
+                "severity": "warning"
+              },
+              {
+                "at": "transport.keep_alive",
+                "code": "keep_alive_not_suppressed",
+                "face": "radio",
+                "severity": "warning"
+              }
+            ],
+            "frames": [
+              {
+                "every_s": 60,
+                "keyframe_s": 900,
+                "resource": "probe.v1/stream/frames/link"
+              }
+            ],
+            "liveness": [
+              {
+                "evidence": [
+                  "freshness.v2/stream/heartbeat/probe.v1",
+                  "freshness.v2/stream/heartbeats/link",
+                  "probe.v1/state/status",
+                  "probe.v1/stream/frames/link"
+                ],
+                "service": "lab/probe-a"
+              }
+            ],
+            "name": "radio",
+            "reply_timeout_ms": 15000,
+            "windows": []
+          }
+        ],
+        "transport": {
+          "accept_timeout_ms": 10000,
+          "batch_bytes": 243,
+          "interests_timeout_ms": 10000,
+          "keep_alive": 4,
+          "lease_ms": 240000,
+          "open_timeout_ms": 10000,
+          "sequence": "16bit",
+          "wait_before_close_ms": 240000
+        }
+      },
+      "implements": {
+        "probe-a": [
+          "probe.v1"
+        ]
+      },
+      "note": "case 5's face and deployment at a 243-byte batch: `config`'s longest put, 232 B, and its 12-B allowance are 1 B above it (`block_over_batch`, §2.16). The rest is case 5's plan. Written by reading link.v2 0.30, computed twice by two readings sharing no code, not derived by the reference",
+      "policy": "profile  = \"link.v2\"\nsystem   = \"lab\"\nservices = [\"probe-a\"]\nbinding  = \"zenoh-1.10.1\"\n\n[transport]\nlease_ms             = 240000\nkeep_alive           = 4\nwait_before_close_ms = 240000\nsequence             = \"16bit\"\nbatch_bytes          = 243\n\n[face.radio]\nfar              = \"ground\"\nattach           = \"client\"\nselect           = { link_protocols = [\"unixsock-stream\"] }\nclass            = \"constrained\"\nexpose           = \"link\"\ninterval_s       = 60\nmax_outage_s     = 3600\nlink_bps         = 2400\nloss_ppm         = 50000\narq              = false\nreply_timeout_ms = 15000\nhorizon_s        = 300\nframes           = { \"probe.v1/frames/link\" = { every_s = 60, keyframe_s = 900 } }\n"
     }
   ],
-  "description": "link.v2's plan (v2.md \u00a72.3, \u00a72.4, \u00a72.7, \u00a72.8, \u00a72.11, \u00a72.12, \u00a72.16, \u00a72.17, \u00a72.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). A case may give `owner_heartbeats`, as link.v1's plan.json does: a link.v2 plan draws nothing from it (\u00a70, \u00a72.9). A case may give `users`, the principals the deployment binds by a user name (\u00a72.5): `near_opens_user` reads them, and a case that gives none binds no principal by one. `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 \u00a72.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (\u00a72.3). A case's own `catalog`, where it gives one, is the core \u00a78.6 catalog the far side holds (\u00a72.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (\u00a72.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 \u00a72.4 over the binding's list), null when no face excludes any. A device face (\u00a72.5) names its devices by address: `implements` maps a listed service's name, or a device's `<system>/<service>`, to its interfaces, and its plan's `attach` is `{shape: \"device\", devices}`. An inline interface may state `uses`, which a device's `presence_required` reads for `redundancy.v1`, and an inline resource `epoch`, the parameter its template declares as its epoch (`epoch_on_device`). The device cases, from case 22, were written by reading the text, not derived by the reference. A link.v2 face's `windows` is \u00a72.11's floor: each listed service that owns a state or @state resource whose deletes only a tombstone proves, a per-key resource (core \u00a74.2) or a template whose first chunk is a parameter, read from its revisions' kinds, templates, resolved annotations and `uses`. A device's address is its window's `service`, as it is a listed service's. An inline revision uses what its `uses` lists, and none where it states none. An inline resource may state `cardinality`, a templated one's (core \u00a72.2), which an owner heartbeat's longest put reads of a collection (\u00a72.16); a templated one that states none is read there as no ceiling. Since 0.19 a link.v2 face that a heartbeat crosses denies the `host` class's owner heartbeat key by name and lists the `link` class's as evidence (\u00a72.9); cases 46 and 47, an owner heartbeat's longest put on both sides of the batch, were written by reading the text, not derived by the reference. Case 48, a listed interface with no heartbeat that an owner heartbeat's plan does not count, was derived by the reference and then read by hand. Case 49, a `desired.v2` desired resource with no floor (\u00a72.11, 0.23), is case 31 with its revision's `uses` moved: derived by the reference into a copy, read by hand, and inserted as text. Case 50, the same resource at a template whose first chunk is a parameter (\u00a72.11), keeps its floor: derived by the reference into a copy, read by hand against cases 31 and 49, and inserted as text. Case 52, the same resource of a revision that also uses `redundancy.v1` (\u00a72.11), keeps its floor: written by reading link.v2 0.26 against cases 33 and 50, and inserted as text. Case 54, a collection two revisions disagree on (\u00a72.9, F-573), is case 48 with a second revision of quiet.v1 that reads `note` `link`: written by reading link.v2 0.28 and the reference's merge, its plan case 48's with one warning by hand, not derived by the reference, and inserted as text. Case 55, a device implementing an interface whose revision uses `redundancy.v2` (\u00a72.5), is refused `presence_required` as case 25's `gov.v1` is: written by reading link.v2 0.29, and inserted as text."
+  "description": "link.v2's plan (v2.md §2.3, §2.4, §2.7, §2.8, §2.11, §2.12, §2.16, §2.17, §2.18). Each case is a face policy, `policy`, and a deployment as link.v1's plan.json writes it (`implements`, `contracts` loaded from the repository's root, or `interfaces` inline). A case may give `owner_heartbeats`, as link.v1's plan.json does: a link.v2 plan draws nothing from it (§0, §2.9). A case may give `users`, the principals the deployment binds by a user name (§2.5): `near_opens_user` reads them, and a case that gives none binds no principal by one. `expect` is `{refused}`, the findings that refuse it (a policy's linter's, warnings included, or a deployment's errors alone, link.v1 §2.3), or the plan: `binding`, `catalog` (null when the policy names none), `transport` (null for a link.v1 policy) and `faces`, each face as link.v1's plan.json writes it with `reply_timeout_ms` for a link.v2 face. A face's plan carries `frames` for a link.v2 face with `frames`: each listed frame that crosses, `{resource, every_s, keyframe_s}`, and none for an empty `frames` (§2.3). A case's own `catalog`, where it gives one, is the core §8.6 catalog the far side holds (§2.18); an inline revision has no fingerprint, so a case about the catalog loads contracts. An inline resource may state `type`, its type's kind: `packed` is packed, and any other or none is not (§2.17). `narrow` names principals: `expect.narrowed` gives, for each, the link protocols a subject bound to it is selected by (link.v1 §2.4 over the binding's list), null when no face excludes any. A device face (§2.5) names its devices by address: `implements` maps a listed service's name, or a device's `<system>/<service>`, to its interfaces, and its plan's `attach` is `{shape: \"device\", devices}`. An inline interface may state `uses`, which a device's `presence_required` reads for `redundancy.v1`, and an inline resource `epoch`, the parameter its template declares as its epoch (`epoch_on_device`). The device cases, from case 22, were written by reading the text, not derived by the reference. A link.v2 face's `windows` is §2.11's floor: each listed service that owns a state or @state resource whose deletes only a tombstone proves, a per-key resource (core §4.2) or a template whose first chunk is a parameter, read from its revisions' kinds, templates, resolved annotations and `uses`. A device's address is its window's `service`, as it is a listed service's. An inline revision uses what its `uses` lists, and none where it states none. An inline resource may state `cardinality`, a templated one's (core §2.2), which an owner heartbeat's longest put reads of a collection (§2.16); a templated one that states none is read there as no ceiling. Since 0.19 a link.v2 face that a heartbeat crosses denies the `host` class's owner heartbeat key by name and lists the `link` class's as evidence (§2.9); cases 46 and 47, an owner heartbeat's longest put on both sides of the batch, were written by reading the text, not derived by the reference. Case 48, a listed interface with no heartbeat that an owner heartbeat's plan does not count, was derived by the reference and then read by hand. Case 49, a `desired.v2` desired resource with no floor (§2.11, 0.23), is case 31 with its revision's `uses` moved: derived by the reference into a copy, read by hand, and inserted as text. Case 50, the same resource at a template whose first chunk is a parameter (§2.11), keeps its floor: derived by the reference into a copy, read by hand against cases 31 and 49, and inserted as text. Case 52, the same resource of a revision that also uses `redundancy.v1` (§2.11), keeps its floor: written by reading link.v2 0.26 against cases 33 and 50, and inserted as text. Case 54, a collection two revisions disagree on (§2.9, F-573), is case 48 with a second revision of quiet.v1 that reads `note` `link`: written by reading link.v2 0.28 and the reference's merge, its plan case 48's with one warning by hand, not derived by the reference, and inserted as text. Case 55, a device implementing an interface whose revision uses `redundancy.v2` (§2.5), is refused `presence_required` as case 25's `gov.v1` is: written by reading link.v2 0.29, and inserted as text. A put's allowance (link.v1 §2.8, §2.16; 0.30): cases 56 and 57, case 14 at the bound of `frames/fast`'s 216 bytes and their 10-byte allowance, and cases 58 and 59, case 5 at the bound of `config`'s 232 bytes and a `block` put's 12-byte allowance, were computed twice by two readings of the text sharing no code, not derived by the reference; cases 46 to 48, 53 and 54 moved their batches by 10 bytes to keep the owner heartbeat's bound."
 }

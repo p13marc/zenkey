@@ -1,0 +1,323 @@
+{
+ "run": "bound-16bit-1",
+ "medium": "rf-zk2c",
+ "sequence": "16bit",
+ "batch_size": 222,
+ "open_ack_initial_sn": 16370,
+ "puts": [
+  {
+   "index": 0,
+   "qos": "data/drop/reliable",
+   "payload": 211,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 5,
+   "push_qos_ext": 0,
+   "sn": 16370,
+   "sn_bytes": 2,
+   "frame_header": 3,
+   "frame_qos_ext": 0,
+   "batch": 221,
+   "fits": true
+  },
+  {
+   "index": 1,
+   "qos": "data/drop/reliable",
+   "payload": 212,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 5,
+   "push_qos_ext": 0,
+   "sn": 16371,
+   "sn_bytes": 2,
+   "frame_header": 3,
+   "frame_qos_ext": 0,
+   "batch": 222,
+   "fits": true
+  },
+  {
+   "index": 2,
+   "qos": "data/drop/reliable",
+   "payload": 213,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 5,
+   "push_qos_ext": 0,
+   "sn": 16372,
+   "fragments": 2,
+   "fragment_sns": [
+    16372,
+    16373
+   ],
+   "fragment_sdus": [
+    220,
+    5
+   ],
+   "fits": false
+  },
+  {
+   "index": 3,
+   "qos": "data/drop/reliable",
+   "payload": 214,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 5,
+   "push_qos_ext": 0,
+   "sn": 16375,
+   "fragments": 2,
+   "fragment_sns": [
+    16375,
+    16376
+   ],
+   "fragment_sdus": [
+    220,
+    6
+   ],
+   "fits": false
+  },
+  {
+   "index": 4,
+   "qos": "data/block/reliable",
+   "payload": 209,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 7,
+   "push_qos_ext": 2,
+   "sn": 16378,
+   "sn_bytes": 2,
+   "frame_header": 3,
+   "frame_qos_ext": 0,
+   "batch": 221,
+   "fits": true
+  },
+  {
+   "index": 5,
+   "qos": "data/block/reliable",
+   "payload": 210,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 7,
+   "push_qos_ext": 2,
+   "sn": 16379,
+   "sn_bytes": 2,
+   "frame_header": 3,
+   "frame_qos_ext": 0,
+   "batch": 222,
+   "fits": true
+  },
+  {
+   "index": 6,
+   "qos": "data/block/reliable",
+   "payload": 211,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 7,
+   "push_qos_ext": 2,
+   "sn": 16380,
+   "fragments": 2,
+   "fragment_sns": [
+    16380,
+    16381
+   ],
+   "fragment_sdus": [
+    220,
+    5
+   ],
+   "fits": false
+  },
+  {
+   "index": 7,
+   "qos": "data/drop/reliable",
+   "payload": 100,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 4,
+   "push_qos_ext": 0,
+   "sn": 16383,
+   "sn_bytes": 2,
+   "frame_header": 3,
+   "frame_qos_ext": 0,
+   "batch": 109,
+   "fits": true
+  },
+  {
+   "index": 8,
+   "qos": "data/drop/reliable",
+   "payload": 100,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 4,
+   "push_qos_ext": 0,
+   "sn": 0,
+   "sn_bytes": 1,
+   "frame_header": 2,
+   "frame_qos_ext": 0,
+   "batch": 108,
+   "fits": true
+  },
+  {
+   "index": 9,
+   "qos": "data/drop/reliable",
+   "payload": 100,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 4,
+   "push_qos_ext": 0,
+   "sn": 1,
+   "sn_bytes": 1,
+   "frame_header": 2,
+   "frame_qos_ext": 0,
+   "batch": 108,
+   "fits": true
+  },
+  {
+   "index": 10,
+   "qos": "data/drop/reliable",
+   "payload": 100,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 4,
+   "push_qos_ext": 0,
+   "sn": 2,
+   "sn_bytes": 1,
+   "frame_header": 2,
+   "frame_qos_ext": 0,
+   "batch": 108,
+   "fits": true
+  },
+  {
+   "index": 11,
+   "qos": "data/drop/reliable",
+   "payload": 213,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 5,
+   "push_qos_ext": 0,
+   "sn": 3,
+   "sn_bytes": 1,
+   "frame_header": 2,
+   "frame_qos_ext": 0,
+   "batch": 222,
+   "fits": true
+  },
+  {
+   "index": 12,
+   "qos": "data/drop/reliable",
+   "payload": 214,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 5,
+   "push_qos_ext": 0,
+   "sn": 4,
+   "fragments": 2,
+   "fragment_sns": [
+    4,
+    5
+   ],
+   "fragment_sdus": [
+    220,
+    4
+   ],
+   "fits": false
+  },
+  {
+   "index": 13,
+   "qos": "data/block/reliable",
+   "payload": 211,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 7,
+   "push_qos_ext": 2,
+   "sn": 7,
+   "sn_bytes": 1,
+   "frame_header": 2,
+   "frame_qos_ext": 0,
+   "batch": 222,
+   "fits": true
+  },
+  {
+   "index": 14,
+   "qos": "data_low/drop/reliable",
+   "payload": 207,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 7,
+   "push_qos_ext": 2,
+   "sn": 16370,
+   "sn_bytes": 2,
+   "frame_header": 5,
+   "frame_qos_ext": 2,
+   "batch": 221,
+   "fits": true
+  },
+  {
+   "index": 15,
+   "qos": "data_low/drop/reliable",
+   "payload": 208,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 7,
+   "push_qos_ext": 2,
+   "sn": 16371,
+   "sn_bytes": 2,
+   "frame_header": 5,
+   "frame_qos_ext": 2,
+   "batch": 222,
+   "fits": true
+  },
+  {
+   "index": 16,
+   "qos": "data_low/drop/reliable",
+   "payload": 209,
+   "scope": 3,
+   "suffix": "",
+   "put_header": 7,
+   "push_qos_ext": 2,
+   "sn": 16372,
+   "fragments": 2,
+   "fragment_sns": [
+    16372,
+    16373
+   ],
+   "fragment_sdus": [
+    220,
+    7
+   ],
+   "fits": false
+  }
+ ],
+ "compute_sn": 16370,
+ "bounds": {
+  "data/drop/reliable sn 2 B": {
+   "largest_fit": 212,
+   "smallest_fragmented": 213,
+   "allowance": 10,
+   "exact": true
+  },
+  "data/block/reliable sn 2 B": {
+   "largest_fit": 210,
+   "smallest_fragmented": 211,
+   "allowance": 12,
+   "exact": true
+  },
+  "data/drop/reliable sn 1 B": {
+   "largest_fit": 213,
+   "smallest_fragmented": 214,
+   "allowance": 9,
+   "exact": true
+  },
+  "data/block/reliable sn 1 B": {
+   "largest_fit": 211,
+   "smallest_fragmented": null,
+   "allowance": 11,
+   "exact": false
+  },
+  "data_low/drop/reliable sn 2 B": {
+   "largest_fit": 208,
+   "smallest_fragmented": 209,
+   "allowance": 14,
+   "exact": true
+  }
+ },
+ "max_sn": 16383
+}

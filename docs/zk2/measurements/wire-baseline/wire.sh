@@ -4,7 +4,8 @@
 #   zk2 owner (client) -> zenohd A -> driver A ~udp~ relay ~udp~ driver B -> zenohd B -> readers (clients)
 #
 # Usage: wire.sh up <medium> <stack> | down | status | cut | restore | loss <p> | start <name> <cmd...>
-#   <medium>: rf, rf-zk2c, sf7, sf7-zk2c, sf9, sf9-zk2c, sf12 or sf12-zk2c (render.py's MEDIA)
+#   <medium>: rf, rf-zk2c, rf-zk2c-32, sf7, sf7-zk2c, sf9, sf9-zk2c, sf12 or sf12-zk2c
+#             (render.py's MEDIA)
 #   <stack>:  bare (no layers) or lean (compress with a 1 KB dictionary, aead
 #             aes-128-ccm with an 8-byte tag, a 2-byte overhead for address;
 #             the fragment layer under it at SF12)
@@ -34,7 +35,9 @@
 #         (link.v2 0.13, 0.15): render.py --far;
 #   FAR   (default 1) 0 leaves --far out, as the RF and SF7 zk2c runs of
 #         2026-11-08 were rendered: router A's `timestamping` written by
-#         render.py, and no generated user on router B.
+#         render.py, and no generated user on router B;
+#   ZIDS  (#1136's bound runs) router A's and router B's zenoh ids, "A,B",
+#         which fix each direction's initial sequence number (render.py --ids).
 #
 # Every process runs on CORES under `timeout`, and its PID (timeout's)
 # goes to WORK/run/INST/pids, which `down` signals and nothing else.
@@ -105,6 +108,7 @@ render() { # medium, stack
     extra=(--face "$CFG/face-router.json5" --auth "$WORK/cfg/auth")
     [[ ${FAR:-1} == 0 ]] || extra+=(--far "$CFG/face-far.json5")
   fi
+  [[ -z ${ZIDS:-} ]] || extra+=(--ids "$ZIDS")
   python3 -I "$HERE/render.py" --medium "$1" --stack "$2" --work "$WORK" --inst "$INST" \
     --base "$BASE" --out "$CFG" "${extra[@]}" >/dev/null
   mkdir -p "$LOGS/configs" && cp "$CFG"/driver-?.toml "$CFG"/zenohd-?.json5 "$CFG/params.json" "$LOGS/configs/"
@@ -187,7 +191,7 @@ control() { # cut | restore | "loss <p>": the relay drops every datagram both wa
 }
 
 case ${1:-} in
-  up) up "${2:?medium: rf, rf-zk2c, sf7, sf7-zk2c, sf9, sf9-zk2c, sf12 or sf12-zk2c}" "${3:?stack: bare or lean}" ;;
+  up) up "${2:?medium: rf, rf-zk2c, rf-zk2c-32, sf7, sf7-zk2c, sf9, sf9-zk2c, sf12 or sf12-zk2c}" "${3:?stack: bare or lean}" ;;
   down) down ;;
   status) status ;;
   cut | restore) control "$1" ;;

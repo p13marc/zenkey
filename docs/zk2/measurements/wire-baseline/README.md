@@ -21,7 +21,10 @@ end, in both directions, on zenoh-modem's media as a lab simulates them:
 - **W2 with desired.v2 and alarms.v2** (2026-11-27, #986's J5, #984's S4):
   W2 zk2c on RF again, its desired target on desired.v2, by its period and by
   the watch, and its alarms on alarms.v2
-  ([below](#w2-with-desiredv2-and-alarmsv2-986s-j5-984s-s4)).
+  ([below](#w2-with-desiredv2-and-alarmsv2-986s-j5-984s-s4));
+- **the batch's bound** (2026-11-28, #1136): puts of chosen lengths across
+  rf0's face, bare, at 16-bit and 32-bit sequence numbers, to find where
+  zenoh starts to fragment ([below](#the-batchs-bound-1136)).
 
 SBD is not measured. Every figure is a day, extrapolated from a window of 10
 to 45 minutes, or of one and two hours at SF9 and SF12 under zk2c, and every
@@ -1467,8 +1470,9 @@ router B opened a new transport 3.9 s after the restore. Its reopen cost
       117 and ran 101, and its plan warns already.
     - **Not measured:** a 216-B frame at a 224-B batch. gen wrote none. By
       the anatomy measured here, a put's 5 B and the frame's 3 B, it would
-      be a 224-B message for the 222 B that batch carries: the rule counts
-      the payload alone.
+      be a 224-B message for the 222 B that batch carries: the rule counted
+      the payload alone. "The batch's bound" (#1136) measured the bound
+      since, and `link.v1` 0.22 counts what crosses.
 11. **One owner heartbeat took W2's heartbeats from 227 KB a day to
     177 KB** (#1110), on 16-bit runs under the lean stack: 3,045 SDUs of
     58 B where three heartbeats took 5,349 SDUs. The layout said 176 KB,
@@ -1526,6 +1530,89 @@ router B opened a new transport 3.9 s after the restore. Its reopen cost
     - Neither moves a rule: the figures are costs of rules as written, and
       `zenctl desired --across-face` and `zenctl alarms --across-face
       granted` read the device across the link as their texts say.
+
+## The batch's bound (#1136)
+
+Run 2026-11-28 with #1136's harness on main at 206145ca (link.v1 0.21 and
+link.v2 0.29), and the binaries of the W2 v2 runs: `zenctl` from 0cd0f6ba,
+the fork's zenohd at `zm-1.10.2-r1` and `modem-driver` at d8c62df, on
+cores 4–5. Finding 10
+left a question: how much longer than its payload is the message zenoh
+sends, and where does it start to fragment? [`bound.sh`](bound.sh) asks it
+on rf0's face with no layers and no loss, the plan of
+`zenohd-rf0.face.toml` on router A and its 222 B batch on
+`unixsock-stream`:
+- **The far side** is one `zenctl echo` on router B of `frames/fast`'s key
+  alone, which it declares. So router A sends each put by that key's id, as
+  a device's frame crosses.
+- **The near side** is `zenctl replay` as `rf-node` of captures written by
+  the script: one put every 8 s, or 4 s, each of a chosen length and QoS
+  axes, so that each is alone in its batch. Replay declares one publisher
+  per key, with its first row's QoS, so each run of one QoS is a capture
+  of its own.
+- **The routers' ids** are chosen, so that each direction's initial
+  sequence number is known before the run (`render.py --ids`, wire.sh's
+  `ZIDS`). zenoh 1.10.1 derives it from the two ids (`compute_sn`), and
+  masks it to 14 bits at `16bit` and 28 at `32bit` (`common/seq_num.rs`).
+  [`bound.py`](bound.py) computes it the same way and checks it against
+  the OpenAck router A sent.
+- **`rf-zk2c-32`** is `rf-zk2c` at 32-bit sequence numbers, rf0's policy
+  with `sequence = "32bit"`, which is zenoh's default and what a link.v1
+  face runs.
+
+`bound.py` decodes every A->B SDU and finds each put by its payload, the
+byte of its index repeated: the batch it took, or its fragments.
+
+| Run | Sequence | Router A's first sequence number | Puts |
+|---|---|---:|---|
+| `bound-16bit-1` | `16bit` | 16,370 | 17: around the bound at each QoS, and four of 100 B to run past 16,383 |
+| `bound-32bit-1` | `32bit` | 268,435,425 | 28: around the bound at each QoS, and 19 of 100 B to run past 268,435,455 |
+
+The largest payload that crossed in one batch, by QoS and sequence number;
+one byte more fragmented in every row:
+
+| QoS | 16-bit, a number of 2 bytes | 16-bit, a number below 128 | 32-bit, a number of 4 bytes |
+|---|---:|---:|---:|
+| `data/drop/reliable` (`frames/fast`'s) | 212 B: 10 B beside it | 213 B: 9 | 210 B: 12 |
+| `data/block/reliable` | 210 B: 12 | 211 B fit; 212 B not sent | 208 B: 14 |
+| `data/drop/reliable+express` | | | 208 B: 14 |
+| `data_low/drop/reliable` | 208 B: 14 | | 206 B: 16 |
+
+- **What a batch holds beside the payload**, byte for byte as decoded:
+  - the put: the push's header, the scope, the put's header, and the
+    payload's length, 2 bytes from 128 B, so 5 bytes; 4 below 128 B;
+  - the push's QoS extension, 2 bytes, at `block`, at express or at
+    `data_low`;
+  - the frame's header, 1 byte, and the sequence number; at `data_low` the
+    frame's QoS extension, 2 bytes more;
+  - the batch's 2-byte length, which the driver strips: the SDU is 2 bytes
+    shorter than the batch.
+- **The sequence numbers wrapped at their mask.** At `16bit` they ran from
+  16,370 to 16,383 and then 0, so a number never took more than 2 bytes. At
+  `32bit` they ran from 268,435,425 to 268,435,455 and then 0, never more
+  than 4. A number below 128 took 1 byte: a 213 B put fragmented at 16,372
+  and fit at 3.
+- **Each fragmented message** spent one sequence number beyond its
+  fragments: 16,372 and 16,373, then the next message at 16,375.
+- **Every channel starts at the same number.** `data_low`'s first put took
+  16,370, as `data`'s had, since each priority has its own sequence.
+- **The 2-byte length is a streamed link's.** zenoh 1.10.1 writes it on
+  `tcp`, `tls`, `quic`, `unixpipe`, `unixsock-stream`, `vsock`, and `udp`
+  where the endpoint asks for a reliable link; not on `serial`, `ws` or the
+  fork's `unixsock-dgram` (each link's `is_streamed`). Read in the source,
+  not measured.
+
+`link.v1` 0.22 §2.8 takes these as a put's **allowance**, and its
+Appendix B holds the table; `link.v2` 0.30 §2.16 reads it at the
+transport's `sequence`. The 2026-11-27 reading of #1136 had a 16-bit number
+take 3 bytes from 16,384: the mask keeps it below that.
+
+The first attempts (not kept): an unpaced run, its `t` given in seconds
+where a capture's is in microseconds, so replay put every row at once and
+zenoh dropped the `drop` puts that found the queue full; and a run whose
+far reader died when `/srv/dev` filled, so the far side undeclared its
+key midway. Their decoded batches agree with the runs kept, as far as they
+went.
 
 ## Reproduce
 
@@ -1633,8 +1720,23 @@ INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 RUN_FILE=1 V2=1 DESIRED_TTL=600 CO
 INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 RUN_FILE=1 V2=1 DICT=$PWD/w2.zdict CONTRACTS=$PWD/contracts \
   timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c lean zk2c-w2-v2-lean-1
 
+# The batch's bound (#1136, 2026-11-28; about 5 and 7 minutes): bare, no loss, the routers'
+# ids fixing A->B's first sequence number; bound.sh builds rf0's 32-bit policy itself
+P16="data/drop/reliable:211 data/drop/reliable:212 data/drop/reliable:213 data/drop/reliable:214"
+P16="$P16 data/block/reliable:209 data/block/reliable:210 data/block/reliable:211"
+P16="$P16 $(printf 'data/drop/reliable:100 %.0s' 1 2 3 4)data/drop/reliable:213 data/drop/reliable:214"
+P16="$P16 data/block/reliable:211 data_low/drop/reliable:207 data_low/drop/reliable:208 data_low/drop/reliable:209"
+INST=bound BASE=17800 ZIDS=a1136003a4d,b1136b PUTS="$P16" \
+  timeout 30m taskset -c 4-5 ./bound.sh rf-zk2c bound-16bit-1
+P32="data/drop/reliable:209 data/drop/reliable:210 data/drop/reliable:211 data/block/reliable:208"
+P32="$P32 data/block/reliable:209 data/drop/reliable+express:208 data/drop/reliable+express:209"
+P32="$P32 $(printf 'data/drop/reliable:100 %.0s' $(seq 19))data_low/drop/reliable:206 data_low/drop/reliable:207"
+INST=bound BASE=17800 ZIDS=a1136011e8d34,b1136b GAP_S=4 PUTS="$P32" \
+  timeout 30m taskset -c 4-5 ./bound.sh rf-zk2c-32 bound-32bit-1
+
 # Analysis
 python3 -I analyze.py $WORK/logs/<run> --json results/<run>/analysis.json
+python3 -I bound.py $WORK/logs/bound-16bit-1 --json results/bound-16bit-1/analysis.json   # and -32bit-1
 python3 -I honesty.py $WORK/logs/{zk2c-honesty-1,zk2c-honesty-reset-1,zk2c-w2-bare-1} \
   --json results/zk2c-honesty.json
 python3 -I honesty.py $WORK/logs/zk2c-w2-owner-honesty-1 --json results/zk2c-w2-owner-honesty.json
@@ -1679,7 +1781,7 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | | |
 |---|---|
 | `configs/` | the driver and router templates, which `render.py` fills per medium, stack and path |
-| `render.py` | each medium's numbers (`MEDIA`), the layer stacks, the ports and directories of a path |
+| `render.py` | each medium's numbers (`MEDIA`), the layer stacks, the ports and directories of a path; `--ids` the routers' zenoh ids (#1136) |
 | `wire.sh` | brings a path up (`up <medium> <stack>`), lists it (`status`), stops it (`down`), and tells the relay to `cut`, `restore` or take a `loss` |
 | `measure.sh` | one W1 run: the idle window, W1's setup, the W1 window, `marks.json`; `PERIOD_S` is gen's tick, a face's `every_s` |
 | `measure-w2.sh`, `w2-drive.py` | one W2 run: the device and the author through the owner example, the steady window, the acts, the reconnect, the config changes; `OWNER_HEARTBEAT=1` has the device send owner heartbeats under a catalog the far readers hold, and `WATCH=1` adds the host's `watch` and `health` (#1110); `V2=1` puts the desired target and the alarms on desired.v2 and alarms.v2, with a refresh, a change of document and the host's probes among the acts, and `DESIRED_TTL` the watch (#986's J5, #984's S4) |
@@ -1691,10 +1793,11 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | `analyze.py` | the drivers' counters and the relay's capture, per direction and window; W2's elements, acts and reconnect; zk2c's frame and event sizes, and the transports opened; on LoRa under zk2c, when each keep-alive and each frame left; freshness.v2's heartbeats per key: their puts, sizes, SDUs and the element a day, decoded bare and placed under the lean stack; a bare window's desired, alarms and heartbeat messages one by one, and each act's messages with their sizes |
 | `honesty.sh`, `honesty.py` | #989's honesty checks across rf0's face (zk2c), and what each tool said in them; for #1110's honesty run, each owner heartbeat put, what `watch` printed with the catalog and with none, and the descriptor reads that crossed |
 | `setup-loss.py` | what a declaration lost in the setup cost a bare W2 run |
+| `bound.sh`, `bound.py` | #1136's bound: puts of chosen lengths and QoS across rf0's face, bare, the routers' ids fixing the first sequence number; each put's batch or fragments, decoded, and the largest payload that fit at each QoS and sequence width |
 | `model.py` | runs the report's Appendix A and states its figures per direction; `--zk2c` its zk2c column, each LoRa face's uplink a range by link.v2 §2.16, asserted against its run, and W2's owner heartbeat by its layout, asserted against `zk2c-w2-lean-2` and `-bare-2` |
 | `summary.py` | the README's W2, LoRa and zk2c tables, from `results/`, and the heartbeat element with three heartbeats and with one owner heartbeat; the v2 runs' messages, elements and acts |
 | `train-dictionary.sh`, `rf.zdict`, `w2.zdict` | the compress layer's dictionaries: `rf.zdict` from `bare-1` (W1), `w2.zdict` from `w2-rf-bare-2` (W2) |
-| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/` (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs; `zk2c-w2-owner-honesty.json` and each owner-heartbeat run's `catalog.json` for #1110's; each v2 run's probes, `probe_desired-*.json` and `probe_alarms-*.json`, as `zenctl` printed them, and the watch run's `tasking.v2.toml` (#986's J5, #984's S4) |
+| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/`; for the bound runs (`bound-16bit-1`, `bound-32bit-1`) the capture `air.jsonl` too (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs; `zk2c-w2-owner-honesty.json` and each owner-heartbeat run's `catalog.json` for #1110's; each v2 run's probes, `probe_desired-*.json` and `probe_alarms-*.json`, as `zenctl` printed them, and the watch run's `tasking.v2.toml` (#986's J5, #984's S4) |
 
 Each relay summary's `loss` is the loss it started with. Under `LOSS_START=0`
 that is 0, and the windows' loss was set later on the control port.

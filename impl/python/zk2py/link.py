@@ -452,6 +452,13 @@ class Resource:
     block: bool = False
     longest_put: int | None = None
     timed: bool = False
+    #: link.v1 0.22 §2.8 (#1136): "its QoS (core §2.4): 2 bytes in the push,
+    #: unless the resource's priority is data, its congestion drop and it is
+    #: not express; and 2 bytes in the frame, unless its priority is data".
+    #: Across revisions the widest: data only where every one is, express
+    #: where any one is.
+    priority_data: bool = True
+    express: bool = False
     #: link.v2 0.19 §2.16: a templated resource's cardinality (core §2.2),
     #: the largest any declaring revision states, which an owner heartbeat's
     #: longest put reads of a collection; None where a declaring revision
@@ -656,6 +663,8 @@ def _contract_side(r: Resource, rows: list[dict[str, Any]]) -> Resource:
     r.packed = all(row.get("type") == "packed" for row in rows)
     blocks = [row for row in rows if row.get("congestion", _DEFAULT_CONGESTION.get(r.token, "drop")) == "block"]
     r.block = bool(blocks)
+    r.priority_data = all(row.get("priority", "data") == "data" for row in rows)
+    r.express = any(row.get("express", False) for row in rows)
     # link.v2 0.6 §2.3 (F-469): "Its longest put is weighed in each revision
     # that declares it block. One whose longest put is above batch_bytes
     # draws block_over_batch."
@@ -708,6 +717,34 @@ def frame_facts(contract: Any, r: dict[str, Any]) -> dict[str, Any] | None:
 #: every optional field present, after an 8-byte envelope."
 ENVELOPE_BYTES = 8
 
+#: link.v1 0.22 §2.8: the frame's sequence number, "at most 4 bytes" at
+#: zenoh's default 32bit; link.v2 0.30 §2.16: "at most 1, 2, 4 and 5 bytes".
+SEQUENCE_BYTES = {"8bit": 1, "16bit": 2, "32bit": 4, "64bit": 5}
+
+
+def allowance(n: int, block: bool, priority_data: bool, express: bool, sequence: str,
+              protocols: list[str]) -> int:
+    """link.v1 0.22 §2.8 "What a batch holds beside a put's payload": the
+    put's 3 bytes and "n's length, 7 bits a byte: 1 byte below 128, 2 below
+    16,384, and 3 from there"; its QoS's 2 bytes in the push and in the frame;
+    the frame's byte and its sequence number; and "the batch's length: 2
+    bytes, unless every link protocol the face selects is serial or ws"
+    (link.v2 0.30 §2.16 adds unixsock-dgram)."""
+    length = 1 if n < 128 else 2 if n < 16_384 else 3
+    push_qos = 0 if priority_data and not block and not express else 2
+    frame_qos = 0 if priority_data else 2
+    streamed = not all(p in ("serial", "ws", "unixsock-dgram") for p in protocols)
+    return 3 + length + push_qos + 1 + SEQUENCE_BYTES[sequence] + frame_qos + (2 if streamed else 0)
+
+
+def over_batch(n: int, r: Any, sequence: str, face: Any) -> bool:
+    """§2.8: a put of n bytes does not fit one batch: "n and its allowance"
+    are above batch_bytes. ``r`` is a :class:`Resource`, or None for a put at
+    data and drop (link.v2 0.30 §2.16's owner heartbeat)."""
+    a = allowance(n, False, True, False, sequence, face.link_protocols) if r is None else \
+        allowance(n, r.block, r.priority_data, r.express, sequence, face.link_protocols)
+    return n + a > face.batch_bytes
+
 
 def longest_bytes(contract: Any, r: dict[str, Any]) -> int | None:
     """A packed resource's longest put (link.v2 §2.16): its record type's
@@ -730,8 +767,9 @@ def resources_of(contract: Any) -> list[dict[str, Any]]:
     for r in contract.canonical["resources"]:
         row = {"template": r["template"], "token": r["token"], "annotations": dict(r["annotations"]),
                "type": (r.get("type") or {}).get("kind"), "congestion": r.get("congestion"),
-               "cardinality": r.get("cardinality")}
-        for k in ("type", "congestion", "cardinality"):
+               "cardinality": r.get("cardinality"), "priority": r.get("priority"),
+               "express": r.get("express")}
+        for k in ("type", "congestion", "cardinality", "priority", "express"):
             if row[k] is None:
                 del row[k]
         facts = frame_facts(contract, r) if r.get("frame") is not None else None
@@ -956,7 +994,10 @@ def plan_face(policy: Policy, face: Face, implements: dict[str, list[str]],
                             warnings.append(finding("interval_over_horizon", face.name, r.name, "warning"))
                         if iv is not None and iv < (face.interval_s or 0) * 1000:
                             warnings.append(finding("frame_over_interval", face.name, r.name, "warning"))
-                        if face.batch_bytes is not None and r.frame["largest_bytes"] > face.batch_bytes:
+                        # 0.22 §2.8: a link.v1 policy "states no sequence width, so the plan
+                        # reads zenoh's default, 32bit".
+                        seq = "32bit" if v2 is None else v2.transport["sequence"]
+                        if face.batch_bytes is not None and over_batch(r.frame["largest_bytes"], r, seq, face):
                             warnings.append(finding("frame_over_batch", face.name, r.name, "warning"))
                         if r.frame["history"]:
                             warnings.append(finding("history_on_frame", face.name, r.name, "warning"))

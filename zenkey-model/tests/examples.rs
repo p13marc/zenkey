@@ -372,9 +372,11 @@ fn the_zenoh_modem_catalog_holds_its_contracts() {
 /// where `keyframe_every` allows them. `examples/zk2/zenoh-modem/README.md`
 /// states `modem.v3`'s, 3.2's deprecated nine and 3.3's three (#991);
 /// zk2py's writer measured `frames/layer` and gendev's `frames/sample` so
-/// (round 99). `frames/message` and `frames/paid`, a full record every
-/// frame, and `frames/fast`, a delta of all 73 readings, fit RF's 220-B
-/// batch; only SF9's 117-B batch draws `frame_over_batch`.
+/// (round 99). With what zenoh writes beside each (link.v1 §2.8, #1136),
+/// `frames/paid`, a full record every frame, fits RF's 222-B batch, and
+/// `frames/fast` and `frames/slow`, a delta of all 73 readings, fit neither
+/// RF's nor LoRa's 224 B: those faces draw `frame_over_batch`, as SF9's
+/// 117-B batch does.
 #[test]
 fn every_adopter_frame_has_its_largest_frame() {
     use std::collections::BTreeMap;
@@ -408,10 +410,23 @@ fn every_adopter_frame_has_its_largest_frame() {
     .map(|(k, v)| (k.to_owned(), v))
     .collect();
     assert_eq!(modem, want, "zenoh-modem/README.md's payloads");
-    for f in ["frames/message", "frames/fast", "frames/paid"] {
-        assert!(modem[f] <= 220, "{f}: RF's batch");
+    // zenoh-modem's faces: `unixsock-stream`, 16 bits, `data` and `drop`.
+    let lane = ["unixsock-stream".to_owned()];
+    let fits = |f: &str, batch: u64| {
+        zenkey_model::link::fits_batch(
+            modem[f],
+            batch,
+            zenkey_model::link::PutQos::DATA_DROP,
+            zenkey_model::link::Sequence::Bit16,
+            &lane,
+        )
+    };
+    assert!(fits("frames/paid", 222), "RF's batch: a full record");
+    for f in ["frames/fast", "frames/slow"] {
+        assert!(!fits(f, 222) && !fits(f, 224), "{f}: RF's and LoRa's batch");
+        assert!(fits(f, 226), "{f}: 216 B and a 10-B allowance");
     }
-    assert!(modem["frames/fast"] > 117, "SF9's batch: frame_over_batch");
+    assert!(!fits("frames/fast", 117), "SF9's batch: frame_over_batch");
     let gendev = largest(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../docs/zk2/measurements/wire-baseline/contracts/gendev.v1.toml"),

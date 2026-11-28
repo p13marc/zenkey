@@ -1,0 +1,149 @@
+{
+ "medium": "rf-zk2c-32",
+ "stack": "bare",
+ "zids": "a1136011e8d34,b1136b",
+ "puts_start": 1795851742.535101,
+ "puts_end": 1795851869.624397,
+ "puts": [
+  {
+   "index": 0,
+   "qos": "data/drop/reliable",
+   "payload": 209
+  },
+  {
+   "index": 1,
+   "qos": "data/drop/reliable",
+   "payload": 210
+  },
+  {
+   "index": 2,
+   "qos": "data/drop/reliable",
+   "payload": 211
+  },
+  {
+   "index": 3,
+   "qos": "data/block/reliable",
+   "payload": 208
+  },
+  {
+   "index": 4,
+   "qos": "data/block/reliable",
+   "payload": 209
+  },
+  {
+   "index": 5,
+   "qos": "data/drop/reliable+express",
+   "payload": 208
+  },
+  {
+   "index": 6,
+   "qos": "data/drop/reliable+express",
+   "payload": 209
+  },
+  {
+   "index": 7,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 8,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 9,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 10,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 11,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 12,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 13,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 14,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 15,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 16,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 17,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 18,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 19,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 20,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 21,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 22,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 23,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 24,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 25,
+   "qos": "data/drop/reliable",
+   "payload": 100
+  },
+  {
+   "index": 26,
+   "qos": "data_low/drop/reliable",
+   "payload": 206
+  },
+  {
+   "index": 27,
+   "qos": "data_low/drop/reliable",
+   "payload": 207
+  }
+ ]
+}

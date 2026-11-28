@@ -19,7 +19,11 @@
 # §2.16). That is 1,440 to 2,880 a day, 74 s to 148 s of air, 376 s to
 # 450 s of the 864 in all. The zk2c runs measured 2,160 a day, 111 s (v2
 # Appendix B). frames/slow and frames/paid are SF12's and SBD's
-# (`frame_unlisted`), and the chip has no ARQ (`no_arq`).
+# (`frame_unlisted`), and the chip has no ARQ (`no_arq`). Its largest
+# frame, a delta of all 73 readings, is 216 B, and with the 10 B zenoh
+# writes beside it (link.v1 0.22 §2.8, #1136) it does not fit the 224 B
+# batch: the plan warns `frame_over_batch` (link.md says what zenoh-modem
+# can do).
 #
 # Events (modem.v3 3.4, #991): the face lists `face/oper_change` and
 # `face/identity_change` (link.v2 0.12 §2.7), 4.9 s of air a day at their

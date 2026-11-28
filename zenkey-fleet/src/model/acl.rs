@@ -2561,8 +2561,10 @@ pub fn link_says(code: link::Code) -> &'static str {
              never downsampled, it crosses more often than the face's rate (§2.8)"
         }
         C::FrameOverBatch => {
-            "a crossing frame resource whose largest frame is above the batch: zenoh \
-             fragments it and resends no fragment, so one lost loses the frame (§2.8)"
+            "a crossing frame resource whose largest frame does not fit one batch, with what \
+             zenoh writes beside it (the put's and the frame's headers, and the batch's length \
+             on a streamed link): zenoh fragments it and resends no fragment, so one lost \
+             loses the frame (§2.8)"
         }
         C::HistoryOnFrame => {
             "a crossing frame resource that declares history: its source info crosses with \
@@ -2605,11 +2607,11 @@ pub fn link_says(code: link::Code) -> &'static str {
              (link.v2 §2.9, §2.12)"
         }
         C::BlockOverBatch => {
-            "a crossing block resource whose longest put is above the batch: its fragments \
-             queue behind everything before them, and a block push that cannot be queued \
-             within wait_before_close closes the transport; or the `link` owner heartbeat's \
-             longest put, which fragments the same, and one lost fragment loses every group \
-             (link.v2 §2.16)"
+            "a crossing block resource whose longest put does not fit one batch, with what \
+             zenoh writes beside it (link.v1 §2.8): its fragments queue behind everything \
+             before them, and a block push that cannot be queued within wait_before_close \
+             closes the transport; or the `link` owner heartbeat's longest put, which \
+             fragments the same, and one lost fragment loses every group (link.v2 §2.16)"
         }
         C::KeepAliveNotSuppressed => {
             "the face's shortest crossing cadence is the keep-alive interval or above it: \

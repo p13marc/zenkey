@@ -6,6 +6,21 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — `acl gen --face-policy` and `check face` weigh a frame or a `block` put with what zenoh writes beside it (#1136)
+
+`link.v1` 0.22 §2.8, `link.v2` 0.30 §2.16. A face's plan warns
+`frame_over_batch` of a crossing frame resource, and `block_over_batch` of a
+crossing `block` resource or the `link` owner heartbeat, whose largest put
+does not fit one batch: its payload and its allowance, the put's and the
+frame's headers at the face's sequence width and QoS, and the batch's
+2-byte length on a streamed link, above `batch_bytes`. No flag is new, and
+no exit code changed: both are warnings.
+
+| Before | Now | Notes |
+|---|---|---|
+| `frame_over_batch`: the largest frame's payload above `batch_bytes` | its payload and its allowance above it: 10 B more at `data`, `drop`, `16bit` on `unixsock-stream`; 12 B under a `link.v1` policy, which reads zenoh's `32bit` | zenoh-modem's RF, LoRa SF7 and SF12 routers now warn of `frames/fast` or `frames/slow`, 216 B; `check-face.trycmd` shows RF's |
+| `block_over_batch`: the longest put above `batch_bytes` | the same with its allowance, 2 B more for a `block` put's QoS extension | the owner heartbeat's at `data` and `drop` |
+
 ## Unreleased (`main`, zk2) — the archive's compact attachment (#980's C3), and the compact descriptor written (C5c)
 
 Core 0.120 §4.4: an archive given a catalog answers with a 3-byte

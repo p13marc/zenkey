@@ -47,6 +47,15 @@
 //! `horizon_under_face`, `block_over_batch`, `keep_alive_not_suppressed`,
 //! `timed_downsampled`).
 //!
+//! **What fits one batch** (#1136, link.v1 0.22, v2 0.30): `frame_over_batch`
+//! and `block_over_batch` weigh a put's payload with its [`allowance`], what
+//! zenoh 1.10.1 writes beside it: the put's header and the payload's length,
+//! the push's and the frame's QoS extensions where the resource's QoS
+//! ([`PutQos`]) has them, the frame's header at the sequence width's widest
+//! ([`Sequence::max_bytes`], 32 bits under a link.v1 policy), and the
+//! batch's 2-byte length on a link that may be streamed. Measured at the
+//! bound on zenoh-modem's RF face.
+//!
 //! **A device face** (#982 H1, v2 0.7): `attach = "device"` with `devices`,
 //! the owners on a first hop by address (v2 §2.1, §2.5). Each device is a
 //! listed owner on every face ([`FacePolicy::owners`]), but for
@@ -406,6 +415,95 @@ impl Sequence {
             Self::Bit64 => 1 << 31,
         }
     }
+
+    /// The most bytes a frame's sequence number takes (v2 §2.16, #1136):
+    /// masked as [`window`](Self::window) says, and written 7 bits a byte,
+    /// 1, 2, 4 and 5. Measured on rf0's face, a `16bit` number ran to
+    /// 16,383 and then 0, and a `32bit` one to 268,435,455 and then 0.
+    #[must_use]
+    pub fn max_bytes(self) -> u64 {
+        match self {
+            Self::Bit8 => 1,
+            Self::Bit16 => 2,
+            Self::Bit32 => 4,
+            Self::Bit64 => 5,
+        }
+    }
+}
+
+/// The link protocols on which zenoh 1.10.1 writes no batch length, a
+/// datagram's: `serial`, `ws` and the fork's `unixsock-dgram` (link.v1
+/// §2.8, v2 §2.16, #1136). Every other one may be streamed (`udp` where its
+/// endpoint asks for a reliable link), and a streamed link spends 2 bytes of
+/// its batch on the length.
+pub const UNSTREAMED_PROTOCOLS: [&str; 3] = ["serial", "ws", "unixsock-dgram"];
+
+/// What a put's QoS adds to its batch (link.v1 §2.8, core §2.4): the push's
+/// QoS extension unless its priority is `data`, its congestion `drop` and
+/// it is not express, and the frame's unless its priority is `data`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PutQos {
+    /// Its congestion is `block`.
+    pub block: bool,
+    /// Its priority is `data`, zenoh's default.
+    pub priority_data: bool,
+    /// It is express.
+    pub express: bool,
+}
+
+impl PutQos {
+    /// zenoh's defaults: `data`, `drop`, not express. No extension.
+    pub const DATA_DROP: PutQos = PutQos {
+        block: false,
+        priority_data: true,
+        express: false,
+    };
+}
+
+/// The most bytes zenoh 1.10.1 writes in a batch beside a put's payload of
+/// `payload` bytes, on a key its far reader declared (link.v1 §2.8, #1136):
+/// the put's 3 bytes and the payload's length, 7 bits a byte; the push's
+/// and the frame's QoS extensions, 2 bytes each where `qos` has one; the
+/// frame's header byte and its sequence number at `sequence`'s widest; and
+/// the batch's 2-byte length unless no link of `protocols` is streamed
+/// ([`UNSTREAMED_PROTOCOLS`]). Measured at the bound on zenoh-modem's RF
+/// face (`docs/zk2/measurements/wire-baseline/`, "The batch's bound").
+#[must_use]
+pub fn allowance(payload: u64, qos: PutQos, sequence: Sequence, protocols: &[String]) -> u64 {
+    let length = match payload {
+        0..128 => 1,
+        128..16_384 => 2,
+        _ => 3,
+    };
+    let push_qos = if qos.priority_data && !qos.block && !qos.express {
+        0
+    } else {
+        2
+    };
+    let frame_qos = if qos.priority_data { 0 } else { 2 };
+    let batch_length = if protocols
+        .iter()
+        .all(|p| UNSTREAMED_PROTOCOLS.contains(&p.as_str()))
+    {
+        0
+    } else {
+        2
+    };
+    3 + length + push_qos + 1 + sequence.max_bytes() + frame_qos + batch_length
+}
+
+/// Whether a put of `payload` bytes fits one batch of `batch_bytes` with its
+/// [`allowance`] (link.v1 §2.8): zenoh fragments one that does not.
+#[must_use]
+pub fn fits_batch(
+    payload: u64,
+    batch_bytes: u64,
+    qos: PutQos,
+    sequence: Sequence,
+    protocols: &[String],
+) -> bool {
+    u128::from(payload) + u128::from(allowance(payload, qos, sequence, protocols))
+        <= u128::from(batch_bytes)
 }
 
 impl Serialize for Sequence {
@@ -1029,8 +1127,9 @@ pub enum Code {
     /// face's `interval_s`: never downsampled, it crosses at its own
     /// cadence (§2.8).
     FrameOverInterval,
-    /// A crossing frame resource whose largest frame's payload is above
-    /// the face's batch: it is fragmented, and lost whole (§2.8).
+    /// A crossing frame resource whose largest frame, with its
+    /// [`allowance`], does not fit the face's batch: it is fragmented, and
+    /// lost whole (§2.8).
     FrameOverBatch,
     /// A crossing frame resource that declares `history`: every put pays
     /// the advanced publisher's source info across the face, and its
@@ -1123,9 +1222,9 @@ pub enum Code {
     /// A crossing heartbeat, owner heartbeat or frame resource whose
     /// horizon is below the face's `horizon_s` (v2 §2.9, §2.12).
     HorizonUnderFace,
-    /// A crossing `block` resource whose longest put is above the batch,
-    /// or a crossing owner heartbeat's, `at`
-    /// `freshness.v2/stream/heartbeats/link` (v2 §2.16).
+    /// A crossing `block` resource whose longest put, with its
+    /// [`allowance`], does not fit the batch, or a crossing owner
+    /// heartbeat's, `at` `freshness.v2/stream/heartbeats/link` (v2 §2.16).
     BlockOverBatch,
     /// A face whose shortest crossing cadence is the keep-alive interval
     /// or above it (v2 §2.16).
@@ -2835,6 +2934,12 @@ pub struct Res {
     /// Its congestion is `block` (core §2.4); across revisions, where any
     /// one declares it so.
     pub block: bool,
+    /// Its priority is `data` (core §2.4); across revisions, where every
+    /// one declares it so. Another priority adds a QoS extension to the
+    /// push and the frame (link.v1 §2.8).
+    pub priority_data: bool,
+    /// It is express (core §2.4); across revisions, where any one is.
+    pub express: bool,
     /// Its longest put's payload, in bytes: a packed record's longest
     /// (every optional field present) after an [`ENVELOPE_BYTES`] envelope,
     /// or a frame resource's largest frame. `None` for any other type.
@@ -2863,8 +2968,9 @@ pub struct Res {
 impl Res {
     /// A resource of `token` at `template`, with resolved `annotations`, and
     /// nothing else stated: no history, no frame, a type that is not packed,
-    /// `drop`, no cardinality, in a revision that does not list `link.v2`
-    /// and uses no profile ([`tombstone_only`]).
+    /// `drop` at priority `data` and not express, no cardinality, in a
+    /// revision that does not list `link.v2` and uses no profile
+    /// ([`tombstone_only`]).
     #[must_use]
     pub fn new(template: Template, token: KindToken, annotations: BTreeMap<String, Value>) -> Self {
         Res {
@@ -2872,6 +2978,8 @@ impl Res {
             frame: None,
             packed: false,
             block: false,
+            priority_data: true,
+            express: false,
             longest_bytes: None,
             link_v2: false,
             epoch: None,
@@ -2912,6 +3020,16 @@ pub struct FrameFacts {
 }
 
 impl Res {
+    /// What its QoS adds to its batch (link.v1 §2.8).
+    #[must_use]
+    pub fn qos(&self) -> PutQos {
+        PutQos {
+            block: self.block,
+            priority_data: self.priority_data,
+            express: self.express,
+        }
+    }
+
     /// `r` of contract `c`, as the plan reads it.
     #[must_use]
     pub fn of(c: &Contract, r: &Resource) -> Self {
@@ -2945,6 +3063,8 @@ impl Res {
             frame,
             packed,
             block: data.is_some_and(|d| d.congestion == crate::authoring::Congestion::Block),
+            priority_data: data.is_none_or(|d| d.priority == crate::authoring::Priority::Data),
+            express: data.is_some_and(|d| d.express),
             longest_bytes,
             link_v2: uses_v2(c),
             epoch: r.epoch.clone(),
@@ -3131,6 +3251,10 @@ fn merge(revisions: &[Vec<Res>]) -> (Vec<Res>, BTreeSet<usize>) {
         }
         let block = rs.iter().any(|r| r.block);
         out[i].block = block;
+        // The widest QoS any revision puts with (link.v1 §2.8): an owner
+        // of either minor may run.
+        out[i].priority_data = rs.iter().all(|r| r.priority_data);
+        out[i].express = rs.iter().any(|r| r.express);
         out[i].tombstone_only = rs.iter().any(|r| r.tombstone_only);
         // An owner heartbeat's longest put (v2 §2.16) is the longest any
         // revision writes: no ceiling where one states none.
@@ -3472,6 +3596,19 @@ fn plan_face(
     let mut facts = FaceFacts::default();
     let v2 = policy.profile == Profile::V2;
     let resources_of = |iface: &str| -> &[Res] { &view[iface].0 };
+    // A put of a payload in one batch, with its allowance (§2.8, #1136): at
+    // the transport's sequence width, or zenoh's default, 32 bits, for a
+    // link.v1 policy, which states none.
+    let sequence = policy.transport.map_or(Sequence::Bit32, |t| t.sequence);
+    let fits = |payload: u64, qos: PutQos| {
+        fits_batch(
+            payload,
+            face.batch_bytes,
+            qos,
+            sequence,
+            &face.link_protocols,
+        )
+    };
     // Whether each resource of each listed interface crosses (§2.7; v2
     // §2.7, §2.8).
     let crossing_of = |iface: &str, r: &Res| {
@@ -3775,7 +3912,9 @@ fn plan_face(
             {
                 findings.push(Finding::new(Code::FrameOverInterval, Some(name), at()));
             }
-            if f.largest_bytes.is_some_and(|b| b > face.batch_bytes) {
+            // Its largest frame, with what zenoh writes beside it, in one
+            // batch (§2.8, #1136).
+            if f.largest_bytes.is_some_and(|b| !fits(b, r.qos())) {
                 findings.push(Finding::new(Code::FrameOverBatch, Some(name), at()));
             }
             if r.history {
@@ -3830,7 +3969,7 @@ fn plan_face(
                         res_name(iface, r),
                     ));
                 }
-                if r.block && r.longest_bytes.is_some_and(|b| b > face.batch_bytes) {
+                if r.block && r.longest_bytes.is_some_and(|b| !fits(b, r.qos())) {
                     findings.push(Finding::new(
                         Code::BlockOverBatch,
                         Some(name),
@@ -3879,8 +4018,13 @@ fn plan_face(
                 }
                 // Its put is `drop`, and fragments the same: any listed
                 // service's longest one against the batch.
-                over |= owner_heartbeat_longest(view, &heartbeat_crosses, ifaces)
-                    .is_some_and(|b| b > u128::from(face.batch_bytes));
+                // At its key's QoS, `data` and `drop` (`freshness.v2`).
+                over |=
+                    owner_heartbeat_longest(view, &heartbeat_crosses, ifaces).is_some_and(|b| {
+                        u64::try_from(b)
+                            .ok()
+                            .is_none_or(|b| !fits(b, PutQos::DATA_DROP))
+                    });
             }
             if under {
                 findings.push(Finding::new(Code::HorizonUnderFace, Some(name), owner_at()));
@@ -5528,6 +5672,63 @@ mod tests {
         };
         assert_eq!(t(240_000, 4).keep_alive_interval_words(), "60000 ms");
         assert_eq!(t(2_000, 3).keep_alive_interval_words(), "about 666 ms");
+    }
+
+    /// A put's allowance is the bound measured on rf0's face (link.v1 §2.8,
+    /// #1136; `docs/zk2/measurements/wire-baseline/results/bound-*`): on
+    /// `unixsock-stream` at a 222-byte batch, the largest payload in one
+    /// batch at 16 and 32 bits, by QoS, and one byte more fragmented.
+    #[test]
+    fn a_puts_allowance_is_the_measured_bound() {
+        let lane = ["unixsock-stream".to_owned()];
+        let block = PutQos {
+            block: true,
+            ..PutQos::DATA_DROP
+        };
+        let express = PutQos {
+            express: true,
+            ..PutQos::DATA_DROP
+        };
+        let low = PutQos {
+            priority_data: false,
+            ..PutQos::DATA_DROP
+        };
+        for (qos, bit16, bit32) in [
+            (PutQos::DATA_DROP, 212, 210),
+            (block, 210, 208),
+            (express, 210, 208),
+            (low, 208, 206),
+        ] {
+            for (sequence, largest) in [(Sequence::Bit16, bit16), (Sequence::Bit32, bit32)] {
+                assert!(
+                    fits_batch(largest, 222, qos, sequence, &lane),
+                    "{qos:?} {sequence:?}"
+                );
+                assert!(!fits_batch(largest + 1, 222, qos, sequence, &lane));
+            }
+        }
+        // A payload under 128 bytes has a 1-byte length; a datagram link
+        // spends nothing on the batch's length; 8 and 64 bits.
+        assert_eq!(allowance(100, PutQos::DATA_DROP, Sequence::Bit16, &lane), 9);
+        assert_eq!(
+            allowance(16_384, PutQos::DATA_DROP, Sequence::Bit16, &lane),
+            11
+        );
+        let serial = ["serial".to_owned(), "ws".to_owned()];
+        assert_eq!(
+            allowance(200, PutQos::DATA_DROP, Sequence::Bit16, &serial),
+            8
+        );
+        let mixed = ["serial".to_owned(), "udp".to_owned()];
+        assert_eq!(
+            allowance(200, PutQos::DATA_DROP, Sequence::Bit16, &mixed),
+            10
+        );
+        assert_eq!(allowance(200, PutQos::DATA_DROP, Sequence::Bit8, &lane), 9);
+        assert_eq!(
+            allowance(200, PutQos::DATA_DROP, Sequence::Bit64, &lane),
+            13
+        );
     }
 
     /// The window and the handshake's air (v2 §2.16): RF's 324 full

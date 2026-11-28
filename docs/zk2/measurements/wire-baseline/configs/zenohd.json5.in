@@ -13,6 +13,7 @@
   // - mode: @MODE_WHY@.
   // zk2 clients attach to the TCP face.
   mode: "@MODE@",
+  @ID@
 @ENDPOINTS@
   scouting: {
     multicast: { enabled: false },

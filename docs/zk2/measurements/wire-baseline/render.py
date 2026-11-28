@@ -3,7 +3,7 @@
 
 Usage: render.py --medium rf|rf-zk2c|sf7|sf7-zk2c|sf9|sf9-zk2c|sf12|sf12-zk2c --stack bare|lean
                  --work DIR --inst NAME --base PORT --out DIR [--face ROUTER.json5 --auth DIR
-                 [--far FAR.json5]]
+                 [--far FAR.json5]] [--ids A,B]
 
 Each medium's numbers are in MEDIA, each from the source it names. The
 rendered files and params.json go to --out; wire.sh copies them into the
@@ -23,7 +23,12 @@ the record. Router A runs the `timestamping` block `acl gen --json5` wrote,
 router B the far end's (`--far-config`), and router B presents the user the
 far block names in its `transport.auth.usrpwd`, with its test password and
 the dictionary filled in. Without --far, router A's timestamping is written
-here, as the zk2c runs on RF and SF7 set it by hand. Standard library only.
+here, as the zk2c runs on RF and SF7 set it by hand.
+
+--ids (#1136's bound runs): the two routers' zenoh ids, so that each
+direction's initial sequence number is known before the run. zenoh 1.10.1
+derives it from the two ids (`compute_sn`, unicast/establishment/mod.rs),
+and `bound.py` computes it the same way. Standard library only.
 """
 import argparse
 import json
@@ -47,6 +52,13 @@ MEDIA = {
                     latency_ms=150, jitter_ms=30, loss=0.05, lease=240_000, keep_alive=4,
                     open=10_000, interests=10_000, sequence="16bit",
                     timers="zenohd-rf0.face.toml's [transport] (link.v2 §2.16)"),
+    # rf-zk2c at 32-bit sequence numbers (#1136's bound runs), zenoh's default and
+    # what a link.v1 face runs: rf0's policy with `sequence = "32bit"`.
+    "rf-zk2c-32": dict(words="RF, rf()'s profile, link.v2's transport at 32-bit sequence numbers",
+                       max_sdu=220, rate=2400, latency_ms=150, jitter_ms=30, loss=0.05,
+                       lease=240_000, keep_alive=4, open=10_000, interests=10_000,
+                       sequence="32bit",
+                       timers="zenohd-rf0.face.toml's [transport], at 32bit (link.v2 §2.16)"),
     # fake-medium lora(sf): EU868's payload limit (222 B at SF7-8, 115 at SF9,
     # 51 at SF10-12), 10 +/- 5 ms, 5 % loss. Paced at the nominal bit rate,
     # SF x BW / 2^SF x 4/(4 + CR), BW 125 kHz, CR 4/5.
@@ -205,7 +217,9 @@ def main():
     p.add_argument("--face", help="router A's generated face block (acl gen --json5)")
     p.add_argument("--auth", help="the directory of users.txt and ground.pw, with --face")
     p.add_argument("--far", help="the far end's generated block (acl gen --far-config), with --face")
+    p.add_argument("--ids", help="router A's and router B's zenoh ids, A,B (#1136)")
     a = p.parse_args()
+    ids = dict(zip("ab", a.ids.split(","))) if a.ids else {}
     m = MEDIA[a.medium]
     b, why = batch(m, a.stack)
     ports = dict(router_a=a.base + 1, router_b=a.base + 2, driver_a=a.base + 10,
@@ -316,7 +330,8 @@ def main():
             why = ("the far end of the face: a peer that opens the lane to router A as the "
                    "principal `ground`; its own clients present `local`")
         # A placeholder with nothing to say takes its line with it.
-        for k, v in (("@SEQ@", seq), ("@AUTH@", auth), ("@TIMESTAMPING@", stamps),
+        zid = f'id: "{ids[side]}",' if ids else ""
+        for k, v in (("@SEQ@", seq), ("@AUTH@", auth), ("@TIMESTAMPING@", stamps), ("@ID@", zid),
                      ("__ACL__", acl if side == "a" else None)):
             if not v:
                 text = re.sub(rf"\n[ ]*{k}\n", "\n", text)
@@ -324,7 +339,8 @@ def main():
                            "@LEASE@": str(m["lease"]), "@KA@": str(m["keep_alive"]),
                            "@WBC@": str(max(m["lease"], 10_000) * 1000),
                            "@TIMERS_WHY@": m["timers"], "@MODE@": mode, "@MODE_WHY@": why,
-                           "@SEQ@": seq, "@AUTH@": auth, "@TIMESTAMPING@": stamps})
+                           "@SEQ@": seq, "@AUTH@": auth, "@TIMESTAMPING@": stamps,
+                           "@ID@": zid})
         if acl and side == "a":
             text = text.replace("__ACL__", "// The face's access control, as acl gen wrote it.\n"
                                 + acl + ",")
@@ -333,6 +349,7 @@ def main():
         open(f"{a.out}/zenohd-{side}.json5", "w").write(text)
     params = {"medium": a.medium, "stack": a.stack, "inst": a.inst, "batch_size": b,
               "ports": ports, "run": run, "face": bool(a.face), "generated": bool(a.far),
+              **({"ids": ids} if ids else {}),
               **{k: v for k, v in m.items() if k != "words"}}
     json.dump(params, open(f"{a.out}/params.json", "w"), indent=1)
     print(json.dumps(params))

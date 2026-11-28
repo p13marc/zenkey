@@ -13,10 +13,10 @@
 >
 > | Face policy | Node, service | bit/s | Lease / keep-alives, `wait_before_close` | Timeouts | Batch | What crosses, at each frame's `every_s` | `horizon_s` | The plan's warnings |
 > |---|---|---:|---|---|---:|---|---:|---|
-> | [`zenohd-rf0`](faces/zenohd-rf0.face.toml) | `h-3fa9c2d41b7e`, `rf0` | 2,400 | 240 s / 4, 240 s | 10 s | 222 | `frames/fast`, 60 s | 120 | `frame_unlisted`, `keep_alive_not_suppressed`, `not_packed` |
-> | [`zenohd-lora0-sf7`](faces/zenohd-lora0-sf7.face.toml) | `h-c2a95e41d7f0`, `lora0` | 5,469 | 120 s / 4, 120 s | 10 s | 224 | `frames/fast`, 60 s | 120 | `frame_unlisted`, `keep_alive_not_suppressed` |
+> | [`zenohd-rf0`](faces/zenohd-rf0.face.toml) | `h-3fa9c2d41b7e`, `rf0` | 2,400 | 240 s / 4, 240 s | 10 s | 222 | `frames/fast`, 60 s | 120 | `frame_over_batch`, `frame_unlisted`, `keep_alive_not_suppressed`, `not_packed` |
+> | [`zenohd-lora0-sf7`](faces/zenohd-lora0-sf7.face.toml) | `h-c2a95e41d7f0`, `lora0` | 5,469 | 120 s / 4, 120 s | 10 s | 224 | `frames/fast`, 60 s | 120 | `frame_over_batch`, `frame_unlisted`, `keep_alive_not_suppressed` |
 > | [`zenohd-lora0-sf9`](faces/zenohd-lora0-sf9.face.toml) | `lora0` | 1,758 | 480 s / 4, 480 s | 10 s | 117 | `frames/fast`, 120 s; `keyframe_s` 900 | 120 | `frame_unlisted`, `frame_over_batch`, `keep_alive_not_suppressed` |
-> | [`zenohd-lora0-sf12`](faces/zenohd-lora0-sf12.face.toml) | `lora0` | 293 | 3,600 s / 4, 3,600 s | 40 s, interests 40 s | 224 | `frames/slow`, 900 s; `keyframe_s` 3,600 | 1,800 | `frame_unlisted`, `keep_alive_not_suppressed` |
+> | [`zenohd-lora0-sf12`](faces/zenohd-lora0-sf12.face.toml) | `lora0` | 293 | 3,600 s / 4, 3,600 s | 40 s, interests 40 s | 224 | `frames/slow`, 900 s; `keyframe_s` 3,600 | 1,800 | `frame_over_batch`, `frame_unlisted`, `keep_alive_not_suppressed` |
 > | [`zenohd-sat0`](faces/zenohd-sat0.face.toml) | `h-71c0e2a9d4b3`, `sat0` | 2,400 | 3,600 s / 2, 3,600 s | 1,000 s | 271 | `frames/paid`, 1,800 s | 3,600 | `frame_unlisted`, `keep_alive_not_suppressed` |
 >
 > The three LoRa policies are alternatives for `lora0`'s one router, one per spreading factor. Every
@@ -26,10 +26,24 @@
 >   §2.8). Every frame a face leaves out is denied by name. So `stream:modem.v3` is the seven
 >   reading subtrees (`air`, `if`, `layer`, `link`, `radio`, `sched`, `sdu`), 3.2's nine frames,
 >   deprecated and `host` since 3.3, and the two of `frames/fast`, `slow` and `paid` the face does
->   not list. No plain stream crosses, so no face has a downsampling rule. `frames/fast`'s largest
->   frame, 216 B, is above SF9's 117 B batch alone (`frame_over_batch`): zenoh fragments its 207 B
->   full record every 15 minutes, and one lost fragment loses the frame, which the next full record
+>   not list. No plain stream crosses, so no face has a downsampling rule.
+> - **`frame_over_batch`** (`link.v1` 0.22 §2.8, #1136). A frame fits one batch when its largest
+>   frame and what zenoh writes beside it, its allowance, are at most the batch. On these faces, at
+>   `data` and `drop`, `unixsock-stream` and `16bit`, the allowance is 10 B: the put's 5, the
+>   frame's 3 and the batch's 2-byte length, measured at the bound on rf0's face (`link.v1`
+>   Appendix B). `frames/fast`'s and `frames/slow`'s largest frames, a delta of all 73 readings, are
+>   216 B, so they fit none of RF's 222 B, LoRa SF7's and SF12's 224 B and SF9's 117 B: RF, SF7,
+>   SF9 and SF12 warn. `frames/paid`'s, a full record, 207 B, fits SBD's 271 B. zenoh fragments a
+>   frame that does not fit, and one lost fragment loses the frame, which the next full record
 >   heals.
+>   - **What zenoh-modem can do** (zenoh-modem#213 item 7, its policies' `batch_bytes`). Each
+>     policy states its bare driver's batch, and the plans judge that. Under the lean stack the
+>     drivers leave zenoh 206 B on RF, 208 B at SF7, 101 B at SF9 and 210 B at SF12. A policy that
+>     states those warns of every frame, its full records too, which is what crosses. A frame fits
+>     one batch at most 10 B under it: 212 B on RF and 214 B on LoRa as stated now, and 196 B,
+>     198 B and 200 B under the lean stack. `frames/fast`'s 216 B fits none. A frame of fewer
+>     readings would, or one whose owner writes a full record wherever a delta would be longer,
+>     which `keyframe_every = 1` states (`frames/paid`'s 207 B).
 > - **`frame_unlisted`** names, on each router, the frames no face of its policy lets across. One
 >   contract serves every medium, and each router knows only its own face. Its device's owner
 >   leaves those frames unpublished (`config:device.frames.<name>`).
@@ -56,7 +70,7 @@
 >   - **The batch under the lean stack** is below each policy's: zenoh ran 206 B on RF, 208 B at
 >     SF7, 101 B at SF9 and 210 B at SF12, so a 205 B full record fragmented on every face (the
 >     same README's finding 10). The policies state their bare drivers' batches, and the plans
->     judge those.
+>     judge those (`frame_over_batch`, above).
 >   - **Why the leases.** #991 moved SF9's from 240 s to 480 s and SF12's from 1,080 s to
 >     3,600 s, each four frame intervals. SF12's 270 s interval had sent three keep-alives a gap,
 >     288 a day and 427 s of air, half its duty.
