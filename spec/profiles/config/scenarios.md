@@ -41,6 +41,17 @@ that reads `config.v1`.
 - **"The fixture's step"** names a step of `lifecycle.json` whose replies,
   events and state the scenario observes on the bus: the reply on the
   call, the events on `Ev`, the state as `St` (and `V`'s parameters).
+- **The horizon** is the contract's, 60 s. The owner's heartbeat
+  confirms `V` and `St` at least every 30 s. §1 and §14 wait it out, 65 s
+  and 70 s. A runner MAY run them on a copy of the standard contract with
+  `freshness.ttl_s = 6`. It is made in memory and never published, as
+  for `health.v1`. The reference does so.
+  - **Every reader reads the copy's horizon.** S, C and T hold the copy.
+    Across §14's face T is given it, the deployment's word.
+  - **The waits follow the horizon.** On the copy, §1's 65 s is 11 s and
+    30 s is 3 s. §14's 60 s and 70 s are 6 s and 16 s.
+  - **What the copy leaves.** The floor, every window and deadline, the
+    timeouts and the apply's 1 s are not the horizon's, and stay.
 
 ## §1 A hot set, read back (§2.3, §2.9, §2.17)
 
@@ -144,17 +155,22 @@ that reads `config.v1`.
 ## §6 An extend (§2.10)
 
 **Steps.**
-1. C calls `Op(set/duty)` with `fraction_ppm` 20000 and `confirm_s` 30.
-2. 20 s later, C calls `Op(extend)` with `confirm_s` 60 and `answer =
+1. C calls `Op(set/duty)` with `fraction_ppm` 20000 and `confirm_s` 10,
+   the floor.
+2. 5 s later, C calls `Op(extend)` with `confirm_s` 10 and `answer =
    "status"`.
 3. C does nothing more.
 
 **Expected.**
-1. `{applied: <view>}` with the change pending, deadline 30 s after the
+1. `{applied: <view>}` with the change pending, deadline 10 s after the
    call.
-2. `{status: <status>}` with the deadline 60 s after the extend. No event.
+2. `{status: <status>}` with the deadline 10 s after the extend. No event.
 3. The undo runs at the new deadline, not the first: S receives the
-   `rolled-back` event 80 s after step 1, ± 0.5 s.
+   `rolled-back` event 15 s after step 1, ± 0.5 s, and none at 10 s.
+
+The windows are the floor's. The rule moves a deadline whatever the
+window. An extend whose deadline is not the first's checks it. A runner
+MAY take longer ones.
 
 ## §7 A restart during a pending change (§2.6, §2.12)
 

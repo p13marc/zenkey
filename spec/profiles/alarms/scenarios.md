@@ -93,20 +93,25 @@ T being `zenctl alarms` and, in §8, the watchdog's `alert-firing`).
 
 ## §3 Resolve, then delete (§2.5, §2.6)
 
-**Steps.** A firing.
+**Steps.** A firing. The deployment configures the owner's tombstone
+window to 5 s (core S3).
 1. The owner resolves A.
 2. G GETs within 1 s of the delete.
-3. G GETs 65 s after it, with the owner's tombstone window at its 60 s
-   default (core S3).
+3. G GETs 10 s after it, past the window.
 
 **Expected.**
 1. S receives a put of A with `state: resolved`, a new `timestamp`, no
-   `observed_at_ms`, then a delete of the key, within 60 s of the put and,
-   for the reference, within 1 s. S reads **resolved**, then **retired**.
+   `observed_at_ms`, then a delete of the key, within the window of the
+   put and, for the reference, within 1 s. S reads **resolved**, then
+   **retired**.
 2. G's answer lists the key as a tombstone, with the delete's in-band
    stamp, and no time: a tombstone has no confirmation (core S3, §7.5). G
    judges **no**, `deleted`.
 3. G's GET draws nothing for the key.
+
+The window is not the rule's: a delete within it and a tombstone until it
+ends hold at any window, the 60 s default too. A runner MAY keep the
+default, and GET 65 s after the delete.
 
 ## §4 Re-raise (§2.5)
 

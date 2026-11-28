@@ -132,16 +132,17 @@ a reading of 85.5: `argument` 1255.
 
 ## §3 Resolve: one put, and no delete (§2.5, §2.6, §2.7)
 
-**Steps.** A firing on slot 0.
+**Steps.** A firing on slot 0. The owner's tombstone window is 5 s, as
+in `alarms.v1`'s scenario §3.
 1. The owner resolves A.
 2. G GETs within 1 s.
-3. G GETs 65 s later.
+3. G GETs 10 s later, past the window.
 4. S reads the owner's next heartbeat.
 
 **Expected.**
 1. S receives one put on slot 0: `resolved`, `warning`, a new `at`,
    rule 1, `labels` 2. S reads **resolved**. No delete of the key
-   follows, within 60 s or after it.
+   follows, within the window or after it.
 2. G's snapshot lists slot 0 as a live entry: the resolved record, with
    its last confirmation, its put's (confirmation 2, core §7.5). It
    lists no tombstone. G judges **no**, `resolved`.

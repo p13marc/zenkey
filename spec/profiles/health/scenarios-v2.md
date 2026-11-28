@@ -44,7 +44,15 @@ The reference runs §1 to §5 and §9
   a scenario runs on one host.
 - **The horizon** is the contract's, 60 s. The owner's heartbeat
   confirms its status at least every 30 s. §1, §2, §4 and §8 wait it
-  out. A runner MAY keep them in a slow tier.
+  out. A runner MAY keep them in a slow tier, and run them on a copy of
+  the standard contract with `freshness.ttl_s = 6`, made in memory and
+  never published, as `health.v1`'s scenarios say. The reference does.
+  - **Every reader reads the copy's horizon.** S, G, L and T hold the
+    copy. Across §8's face T is given it, the deployment's word. The
+    heartbeat's tag is the copy's, not 1.
+  - **The waits follow the horizon.** On the copy, 65 s is 11 s, 35 s is
+    8 s and 30 s is 3 s, as for `health.v1`, and 60.5 s is 6.5 s. Sizes,
+    the detection's 1 s and the verdicts do not change.
 - **Jitter.** A gap between deliveries is measured at S, which adds the
   bus's jitter to what the owner sent.
 

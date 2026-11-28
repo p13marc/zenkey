@@ -47,7 +47,21 @@ reference tool runs them (`zenctl/tests/live_zk2.rs`, `zenctl health`).
 - **The horizon** is the contract's, 60 s. The owner's heartbeat confirms
   its status at least every 30 s, the reference's every 28.5 s. §1, §2,
   §4 and §8 wait it out: §1 about 70 s, §2 about 135 s, §4 about 100 s
-  and §8 about 200 s. A runner MAY keep them in a slow tier.
+  and §8 about 200 s. A runner MAY keep them in a slow tier, and run them
+  on a copy of the standard contract with `freshness.ttl_s = 6`, made in
+  memory and never published. The reference runs the standard's in that
+  tier, and the copy's by default.
+  - **Every reader reads the copy's horizon.** S, G and T hold the copy.
+    Each is given it, or retrieves it (core §8.4). Across §8's face
+    nothing is retrieved, so T is given it, the deployment's word. The
+    heartbeat's tag is the copy's.
+  - **The waits follow the horizon.** On the copy, 65 s is 11 s, the
+    horizon and 5 s. 35 s is 8 s, half the horizon and 5 s. 30 s is 3 s,
+    and 31 s is 4 s. 60.5 s is 6.5 s. The reference's heartbeat is then
+    every 2.85 s.
+  - **What the copy leaves.** The detection's 1 s, §1's and §4's 3 s,
+    §7's 2 s and the jitter are not the horizon's, and stay. The verdicts
+    stay too: each rule holds at any horizon.
 - **Jitter.** A gap between deliveries is measured at S, which adds the
   bus's jitter to what the owner sent. The reference allows 200 ms on
   loopback.

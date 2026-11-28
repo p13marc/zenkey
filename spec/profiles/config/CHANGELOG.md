@@ -7,6 +7,40 @@ file, never an entry here ([`../README.md`](../README.md)). An entry
 headed `config.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 `v1.md`'s.
 
+## Scenarios — 2026-11-28: editorial: §6 at the floor, and a copy of the contract with a short horizon for §1 and §14, no keyword changed (#1151)
+
+Neither text's version moves: `v1.md` and `v2.md` are unchanged. This
+entry is the scenario files' alone.
+
+**What changed, in `scenarios.md` and `scenarios-v2.md`.**
+- **§6 at the floor.** The change's window and the extend's are both
+  10 s, the floor, where they were 30 s and 60 s. The extend comes 5 s
+  after the call, 5.4 s under `config.v2`, where it came 20 s and 20.4 s
+  after. So the undo is due 15 s after step 1, and 15.4 s to 16.4 s under
+  `config.v2`, where it was 80 s and 80.4 s to 81.4 s. Expected 3 now
+  also says that nothing comes at the first deadline.
+- **§1 and §14 on a copy.** A runner MAY run them on a copy of the
+  contract with `freshness.ttl_s = 6`, as `health.v1`'s scenarios allow.
+  On the copy, §1's 65 s is 11 s, and §14's 60 s and 70 s are 6 s and
+  16 s. Across §14's face the tool is given the copy, the deployment's
+  word.
+- **Why.** §6 waited 80 s and §1 and §14 the horizon. The six tests took
+  456 s of the reference's suite.
+
+**Deliberately not changed.**
+- **No rule.** §2.10 moves a deadline to the extend's receipt plus its
+  window, whatever the window. An extend whose deadline is not the
+  first's checks that, and the floor's windows do. Freshness past the
+  horizon holds at any horizon.
+- **The floor, the timeouts and the apply's 1 s** are not the horizon's,
+  and stay. No fixture changes.
+
+**The reference.** `ServiceBuilder::config_v1_with` implements a
+revision other than the standard. Across a face, `zenctl config get`
+reads `config.v1` by the one revision of it in `--contracts`, as it
+already read `config.v2`'s config interface. The tests run §1 and §14 on
+the copy, and §1 on the standard contract in the slow tier.
+
 ## config.v2 0.6 — 2026-11-28: editorial: a derived type may have the layout tag 0, which E051 does not read, no rule changed (#1152)
 
 Core 0.117 makes a packed type at the layout tag 0 a lint error, E051.
