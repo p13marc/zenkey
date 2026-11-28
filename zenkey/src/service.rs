@@ -691,7 +691,18 @@ impl ServiceBuilder {
     /// implements `health.v1` already, and when it implements `health.v2`:
     /// an instance has one status (`health.v2` §2.3).
     pub async fn health(&mut self) -> Result<crate::health::Health> {
-        self.health_of(crate::health::Major::V1).await
+        self.health_with(crate::health::implementation()).await
+    }
+
+    /// [`ServiceBuilder::health`] on `imp`, another revision of
+    /// `health.v1` (R4): its resources the standard's, and its
+    /// `freshness.ttl_s` the horizon the heartbeat confirms the status
+    /// within, so the heartbeat's period and the `clock_ahead` fault's
+    /// (`freshness.v2` §2.4). A later minor, or a test's copy with a short
+    /// horizon (the scenarios' conventions). Refused as
+    /// [`ServiceBuilder::health`] is, and when `imp` is not `health.v1`.
+    pub async fn health_with(&mut self, imp: Implementation) -> Result<crate::health::Health> {
+        self.health_of(crate::health::Major::V1, imp).await
     }
 
     /// Implements `health.v2`, its standard contract embedded
@@ -711,16 +722,36 @@ impl ServiceBuilder {
     /// when it implements `health.v1`: an owner MUST NOT implement both
     /// majors in one instance (§2.3).
     pub async fn health_v2(&mut self) -> Result<crate::health::Health> {
-        self.health_of(crate::health::Major::V2).await
+        self.health_v2_with(crate::health::v2::implementation())
+            .await
     }
 
-    async fn health_of(&mut self, major: crate::health::Major) -> Result<crate::health::Health> {
+    /// [`ServiceBuilder::health_v2`] on `imp`, another revision of
+    /// `health.v2`, as [`ServiceBuilder::health_with`] is of `health.v1`:
+    /// its `freshness.ttl_s` the horizon the heartbeat covering it
+    /// confirms the status within. Refused as [`ServiceBuilder::health_v2`]
+    /// is, and when `imp` is not `health.v2`.
+    pub async fn health_v2_with(&mut self, imp: Implementation) -> Result<crate::health::Health> {
+        self.health_of(crate::health::Major::V2, imp).await
+    }
+
+    async fn health_of(
+        &mut self,
+        major: crate::health::Major,
+        imp: Implementation,
+    ) -> Result<crate::health::Health> {
         let iface: IfaceId = major.iface().parse().expect("an interface id");
+        if *imp.iface() != iface {
+            return Err(Error::Contract(format!(
+                "{} is not {iface}: a health owner implements a revision of its major",
+                imp.iface()
+            )));
+        }
         other_health_major(&self.impls, &iface)?;
         if self.health.is_some() || self.implements(&iface) {
             return Err(Error::Duplicate(iface));
         }
-        crate::health::Health::declare(self, major).await
+        crate::health::Health::declare(self, major, imp).await
     }
 
     /// `health.v2` §2.10: the instance's own tables of words, the one
@@ -750,14 +781,37 @@ impl ServiceBuilder {
         startup: crate::config_v1::Startup,
         device: Arc<dyn crate::config_v1::Device>,
     ) -> Result<crate::config_v1::Configuration> {
+        self.config_v1_with(crate::config_v1::implementation(), startup, device)
+            .await
+    }
+
+    /// [`ServiceBuilder::config_v1`] on `imp`, another revision of
+    /// `config.v1` (R4): its resources the standard's, and its
+    /// `freshness.ttl_s` the horizon the heartbeat confirms the view and
+    /// the status within (`freshness.v2` §2.4). A later minor, or a
+    /// test's copy with a short horizon (the scenarios' conventions).
+    /// Refused as [`ServiceBuilder::config_v1`] is, and when `imp` is not
+    /// `config.v1`.
+    pub async fn config_v1_with(
+        &mut self,
+        imp: Implementation,
+        startup: crate::config_v1::Startup,
+        device: Arc<dyn crate::config_v1::Device>,
+    ) -> Result<crate::config_v1::Configuration> {
         let iface = crate::config_v1::iface();
+        if *imp.iface() != iface {
+            return Err(Error::Contract(format!(
+                "{} is not {iface}: a config.v1 owner implements a revision of it",
+                imp.iface()
+            )));
+        }
         if self.config_v1.is_some() || self.implements(&iface) {
             return Err(Error::Duplicate(iface));
         }
         if self.config_v2.is_some() {
             return Err(Error::Contract(ONE_CONFIGURATION.to_owned()));
         }
-        crate::config_v1::Configuration::declare(self, startup, device).await
+        crate::config_v1::Configuration::declare(self, imp, startup, device).await
     }
 
     /// Implements `config.v2` over the service's config contract, which

@@ -366,6 +366,10 @@ pub struct Health {
 
 struct Inner {
     major: Major,
+    /// The period of the heartbeat covering the revision implemented
+    /// (`freshness.v2` §2.4): under `health.v1`, the `clock_ahead` fault's
+    /// too (§2.5).
+    period: Duration,
     /// `health.v2` §2.10: the instance's own tables, as the contracts the
     /// service implements hold them ([`Health::retable`]).
     tables: Mutex<v2::InstanceTables>,
@@ -614,14 +618,17 @@ async fn clock_ahead_once(
 }
 
 impl Health {
-    /// Implements `major`'s standard contract on `b`: the status's writer,
-    /// the checks' template exposed, the faults' writer (§2.3).
-    pub(crate) async fn declare(b: &mut ServiceBuilder, major: Major) -> Result<Self> {
+    /// Implements `imp`, a revision of `major` (its standard contract, or a
+    /// copy with another horizon), on `b`: the status's writer, the
+    /// checks' template exposed, the faults' writer (§2.3).
+    pub(crate) async fn declare(
+        b: &mut ServiceBuilder,
+        major: Major,
+        imp: Implementation,
+    ) -> Result<Self> {
         let addr = b.address()?.clone();
-        let imp = match major {
-            Major::V1 => implementation(),
-            Major::V2 => v2::implementation(),
-        };
+        let period = crate::heartbeat::period(&zenkey_model::heartbeat::Layout::of(imp.contract()))
+            .unwrap_or(model::STATUS_REFRESH);
         let iface = imp.iface().clone();
         let checks = imp.resource(CHECKS)?.clone();
         let epoch = b.deployment_epoch();
@@ -635,6 +642,7 @@ impl Health {
         let h = Self {
             inner: Arc::new(Inner {
                 major,
+                period,
                 tables: Mutex::new(b.health_tables()),
                 packed,
                 epoch,
@@ -782,11 +790,7 @@ impl Health {
         let faults = Arc::clone(&self.inner.faults);
         let minter = Arc::clone(&self.inner.minter);
         let task = match self.inner.major {
-            Major::V1 => {
-                let layout = zenkey_model::heartbeat::Layout::of(implementation().contract());
-                let period = crate::heartbeat::period(&layout).unwrap_or(model::STATUS_REFRESH);
-                rt.spawn(clock_ahead(faults, minter, period, closed))
-            }
+            Major::V1 => rt.spawn(clock_ahead(faults, minter, self.inner.period, closed)),
             // health.v2 §2.5: once per hold. The heartbeat says it each
             // period.
             Major::V2 => rt.spawn(clock_ahead_once(faults, minter, self.inner.epoch, closed)),
