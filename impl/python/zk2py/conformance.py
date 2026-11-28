@@ -4354,7 +4354,7 @@ def family_readings(root: Path) -> list[Result]:
         + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
         + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
         + _round123_readings(root) + _round124_readings(root) + _round125_readings(root) \
-        + _round126_readings(root) + _round127_readings(root)
+        + _round126_readings(root) + _round127_readings(root) + _round127b_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -5879,6 +5879,122 @@ def _round127_readings(root: Path) -> list[tuple[str, Any, Any]]:
                           "so, and acts on neither put. `Rp` and `Run` receive nothing."),
                 [[], ["0007"], [("sample", "0007/1", stop), ("sample", "0007/0", stop), ("no_entry", "0007", stop),
                                 ("sample", "0008/0", "given")]]))
+    return out
+
+
+def _round127b_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Round 127's mend (#609; #984, #986): desired.v2 0.3's "None states
+    the run yet" (F-621) and §14's Expected 5 (F-625), each read cold, and
+    zk2py's target's hold run over descriptor reads that zk2py stands in
+    for. No session is opened."""
+    import threading
+    import types
+
+    from . import desired_v2 as d2, freshness_v2 as f2
+    from .desired_v2_live import Target
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    d2t, d2s = flat("profiles/desired/v2.md"), flat("profiles/desired/scenarios-v2.md")
+    dlog = flat("profiles/desired/CHANGELOG.md")
+    out: list[tuple[str, Any, Any]] = []
+
+    # -- F-621: "None states the run yet" --------------------------------------------------
+    stop = "stopped:desired.v1:sha256:" + "0" * 64
+    answers: list[list[dict[str, Any]]] = []
+    real = f2.descriptors_of
+
+    def target(across: bool = False) -> tuple[Any, list[Any]]:
+        t = Target("lab/worker", "tcp/127.0.0.1:1", across=across)
+        t.owner = types.SimpleNamespace(session=object())  # type: ignore[assignment]
+        order: list[Any] = []
+        t._receive = lambda x, live_: order.append((x.version.text, t._revision_of_run(x.version.run.text)))  # type: ignore[method-assign]
+        t._receive_no_entry = lambda n: order.append((n.run.text, t._revision_of_run(n.run.text)))  # type: ignore[method-assign]
+        return t, order
+
+    def settle(t: Any, n: int = 100) -> None:
+        for _ in range(n):
+            with t.lock:
+                if not t._asking:
+                    return
+            threading.Event().wait(0.02)
+
+    r7 = d2.Run(16, 7)
+    put = lambda seq: ("sample", d2.Sample("owner", False, d2.Version(r7, seq)), True)  # noqa: E731
+    f2.descriptors_of = lambda session, author, timeout: answers.pop(0) if answers else []  # type: ignore[assignment]
+    try:
+        # the author's new instance put before its descriptor: the read finds
+        # only the old instance's, stating 0006; a second put reads nothing
+        a, a_order = target()
+        answers[:] = [[{"instance": "00000000000000aa", "run": "0006"}]]
+        a._judge_or_wait(put(0))
+        settle(a)
+        a._judge_or_wait(put(1))
+        settle(a)
+        before = [list(a._held_runs), len(answers), list(a_order)]
+        a._descriptor_says = lambda run: (stop, "0007")  # type: ignore[method-assign]
+        a._token_appeared({"00000000000000bb"})
+        threading.Event().wait(0.05)
+        settle(a)
+        # a read after the token that names none: the instance that appeared
+        # silent, made again four times, then the deployment's word
+        b, b_order = target()
+        answers[:] = [[]] * 6
+        b._judge_or_wait(put(0))
+        settle(b)
+        b._token_appeared({"00000000000000cc"})
+        threading.Event().wait(0.05)
+        settle(b, 150)
+        # across a face no descriptor reaches the target: the word at once
+        c, c_order = target(across=True)
+        answers[:] = [[]]
+        c._judge_or_wait(put(0))
+        settle(c)
+    finally:
+        f2.descriptors_of = real  # type: ignore[assignment]
+    out.append(("F-621, resolved by desired.v2 0.3's mend (round 127's mend): \"None states the run yet\"; "
+                "zk2py's target holds a run whose read finds no descriptor stating it, the old instance's alone or "
+                "none, reads nothing more at its next version, and reads again at the author's instance token, "
+                "which states the run here: both puts judged then, in their order, by run C's revision; a read "
+                "after the token that names none, the instance that appeared silent, is made again four times "
+                "(v1 §2.5's MAY, zk2py's choice) and leaves the word; across a face, the word at once, no hold",
+                [before, a.hold_log, a_order, [x[1] for x in b.hold_log], b_order, c.hold_log, c_order]
+                + missing(d2t, "- **None states the run yet.** Where descriptors reach the target, a read that "
+                               "finds none stating the run holds that run's versions still. The target reads again "
+                               "when the author's instance token appears, which follows its descriptor (core §8.2, "
+                               "steps 3 and 4). Only a read after that token that names none leaves the "
+                               "deployment's word. `[Sc: §16]` An author MAY put a version before its descriptor "
+                               "(core §8.2 orders a value before step 4, not after step 3), so the first read can "
+                               "find nothing.",
+                          "- **A read that names none** leaves the deployment's word: no descriptor reached the "
+                          "target, as across a face, or the read failed.")
+                + missing(dlog, "Where descriptors reach the target, such a read now keeps the hold, and the target "
+                                "reads again when the author's instance token appears, which follows its "
+                                "descriptor (core §8.2, steps 3 and 4). Only a read after that token that names "
+                                "none leaves the word. No author's order is constrained.")
+                + missing(d2s, "4. X, as a new instance of the author, puts v3's content on `D` under a 32-bit run "
+                               "of its own, at seq 0. It then answers a descriptor stating that run, and declares "
+                               "its instance token.",
+                          "4. The put waits: no descriptor states X's run yet (§2.18). At X's instance token the "
+                          "target reads again, and the descriptor states the run."),
+                [[["0007"], 0, []],
+                 [("0007", "held", 0), ("0007", "released", stop)],
+                 [("0007/0", stop), ("0007/1", stop)],
+                 ["held", "again", "again", "again", "again", "word", "released"],
+                 [("0007/0", "word")], [], [("0007/0", "word")]]))
+
+    # -- F-625: §14's Expected 5, the read once more --------------------------------------
+    out.append(("F-625, resolved by desired.v2 0.3's mend (round 127's mend): §14's Expected 5 says the second "
+                "read §2.5's \"Whole\" makes; zk2py's §14 runner took that path since round 127, and nothing moved",
+                missing(d2s, "- Asked while the descriptors' read runs, it carries v3's earlier stamp and is answered "
+                             "whole. Its entry waits with the put, and is the same version. The next heartbeat makes "
+                             "it read once more, answered unchanged (§2.5).")
+                + missing(dlog, "- **§14's Expected 5** says the second read §2.5 makes after a whole answer (F-625)."),
+                []))
     return out
 
 

@@ -47,7 +47,8 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
     cmd = words[1] if len(words) > 1 else ""
     rest = words[2] if len(words) > 2 else ""
     a_cmds = {"put", "delete", "delete!", "documents", "adoption", "gets", "run"}
-    t_cmds = {"report", "running", "fail-next", "hold", "release", "reread", "acts", "watch", "reads", "seeds"}
+    t_cmds = {"report", "running", "fail-next", "hold", "release", "reread", "acts", "watch", "reads", "seeds",
+              "holds"}
     if cmd not in a_cmds | t_cmds | {"new-epoch"}:
         # refused before any role is asked for: an author-only process holds
         # no target, and an unknown word is no target's command
@@ -115,6 +116,12 @@ def answer(line: str, author: Author | None, target: Target | None) -> str:
                 f"archive={ls['archive']} revision={ls.get('revision', 'not-read')}{why}")
     if cmd in ("watch", "reads"):
         return f"desired {cmd} " + _dump(target.watch_says())
+    if cmd == "holds":
+        # zk2py's own word (round 127's mend): what each read of a new run's
+        # descriptors left under §2.18's "None states the run yet", in order:
+        # [run, held|again|word|released, the appearances counted or the word]
+        with target.lock:
+            return "desired holds " + _dump([list(x) for x in target.hold_log])
     return f"refused {line}: unknown command"
 
 

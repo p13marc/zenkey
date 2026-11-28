@@ -322,6 +322,22 @@ class Target:
         #: its order of arrival: ("sample", the sample, heard live) or
         #: ("no_entry", the snapshot's run and asof)
         self._waiting: dict[str, list[tuple[str, Any, bool]]] = {}
+        #: §2.18 (0.3's mend, F-621): "None states the run yet. Where
+        #: descriptors reach the target, a read that finds none stating the
+        #: run holds that run's versions still. The target reads again when
+        #: the author's instance token appears, which follows its descriptor
+        #: (core §8.2, steps 3 and 4). Only a read after that token that
+        #: names none leaves the deployment's word." The runs so held, each
+        #: with the appearances counted when the read that found none began;
+        #: the appearances counted when each run was first seen; the author's
+        #: instance tokens seen to appear, counted, and the last ids; which
+        #: instances answered each run's last read; and what each hold did
+        self._held_runs: dict[str, int] = {}
+        self._first_n: dict[str, int] = {}
+        self._appeared = 0
+        self._appeared_ids: set[str] = set()
+        self._answered_by: dict[str | None, set[str]] = {}
+        self.hold_log: list[tuple[str | None, str, Any]] = []
         #: v1 §2.9, which §2.9 keeps: "With its author absent, by a complete
         #: read without its instance token (core §8.1), ... a target MAY read
         #: its slice's last-known from an archive, through the key's archive
@@ -490,6 +506,7 @@ class Target:
 
         def token(sample: Any) -> None:
             if sample.kind == zenoh.SampleKind.PUT:
+                self._token_appeared({str(sample.key_expr).rsplit("/", 1)[1]})
                 threading.Thread(target=self.read, args=("appearance",), daemon=True).start()
 
         self._entities.append(live.declare_liveliness_subscriber(self.watch_session, self._instance_selector(),
@@ -507,6 +524,7 @@ class Target:
                 continue
             now = {i["instance"] for i in p.instances}
             if seen is not None and now - seen:
+                self._token_appeared(now - seen)
                 threading.Thread(target=self.read, args=("appearance",), daemon=True).start()
             seen = now if p.kind == live.COMPLETE else seen | now if seen is not None else now
 
@@ -601,8 +619,18 @@ class Target:
                 run = d2.Run(no_entry[0].header["run_width"], no_entry[0].header["run"]).text
             # each seed reads the descriptor afresh: what an earlier one
             # named stands no longer, and is put aside only once the read
-            # answers, so a version heard meanwhile is not asked twice
-            said = self._read_revision(run, afresh=True)
+            # answers, so a version heard meanwhile is not asked twice. A run
+            # held (§2.18, "None states the run yet") or asked is left to its
+            # own read, which the token's appearance makes.
+            with self.lock:
+                busy = run is not None and (run in self._held_runs or run in self._asking)
+                said = self.revision_said
+            if not busy:
+                # a seed at an appearance is a read after that token: the
+                # run it first sees was first seen before it
+                at = why in ("appearance", "again")
+                said = self._read_revision(run, afresh=True, since=self._appeared - 1 if at else None,
+                                           awaiting=set(self._appeared_ids) if at else ())
             with self.lock:
                 self.revision_said = said
             self.seeds += 1
@@ -653,25 +681,97 @@ class Target:
 
     # -- the author's revision (§2.18) -----------------------------------------------
 
-    def _read_revision(self, run: str | None, afresh: bool = False) -> str:
+    def _read_revision(self, run: str | None, afresh: bool = False, *, since: int | None = None,
+                       awaiting: Any = ()) -> str:
         """§2.18 (0.2): the revision the author's descriptor names for
         ``run`` (any present instance's where ``run`` is None), as the
         reference's ``desired seeds`` words it: ``given``, ``another:<fp>``
         of this major, ``stopped:desired.v1:<fp>`` for one that uses
         ``desired.v1`` (the reference's words, round 125),
         ``word`` where no descriptor reaches the target, ``unread`` where
-        the read failed, every descriptor stated another run, or the named
-        revision could not be retrieved (core §8.4). Its major is read from
-        the revision itself, its ``uses``, never from the descriptor's
-        ``profiles``, which are the instance's union."""
+        the read failed or the named revision could not be retrieved (core
+        §8.4). Its major is read from the revision itself, its ``uses``,
+        never from the descriptor's ``profiles``, which are the instance's
+        union.
+
+        §2.18 (0.3's mend, F-621): a read that finds none stating ``run``,
+        where descriptors reach the target (none answered, or each stated
+        another run), holds it: ``held``. Unless it began after an author's
+        instance token that appeared once ``run`` was first seen (``since``,
+        else when its first version waited): then it leaves the
+        deployment's word. ``awaiting`` are the instances whose token's
+        appearance this read follows: while none of them has answered, it
+        is made again, up to four times, 100 ms more apart each time, as v1
+        §2.5 makes a seed again ("a token can reach the target's router
+        before the route to its author's queryable does")."""
         if self.word_alone:
             return "not-read"
-        state, stated = self._descriptor_says(run)
+        n0 = self._appeared
+        if run is not None and since is not None:
+            with self.lock:
+                self._first_n.setdefault(run, since)
+        for again in range(5):
+            if again:
+                time.sleep(0.1 * again)
+                with self.lock:
+                    self.hold_log.append((run, "again", again))
+            state, stated = self._descriptor_says(run)
+            with self.lock:
+                answered = self._answered_by.get(run, set())
+            if state != "none" or not awaiting or answered & set(awaiting) or self._stop.is_set():
+                break
         with self.lock:
             if afresh:
                 self.revisions = {r: w for r, w in self.revisions.items() if r in self._asking}
-            self.revisions[stated if stated is not None else run] = state
+            return self._decide(run, state, stated, n0)
+
+    def _decide(self, run: str | None, state: str, stated: str | None, n0: int) -> str:
+        """What one read of ``run``'s descriptors leaves, under the lock:
+        ``held`` for a run none states yet, else the word it names, which
+        stands for ``run`` from then on."""
+        if state == "none" and run is not None:
+            if n0 > self._first_n.setdefault(run, n0):
+                # "Only a read after that token that names none leaves the
+                # deployment's word."
+                state = "word"
+                self.hold_log.append((run, "word", n0))
+            else:
+                self._held_runs[run] = n0
+                self.hold_log.append((run, "held", n0))
+                if self._appeared > n0:
+                    # a token appeared while this read was out: its read is due
+                    threading.Thread(target=self._reread_held, args=(run,), daemon=True).start()
+                return "held"
+        elif state == "none":
+            state = "word"
+        if run is not None and run in self._held_runs:
+            del self._held_runs[run]
+            self.hold_log.append((run, "released", state))
+        self.revisions[stated if stated is not None else run] = state
+        if run is not None:
+            self.revisions.setdefault(run, state)
         return state
+
+    def _token_appeared(self, ids: Any) -> None:
+        """An instance token of the author's appeared (v1 §2.5): §2.18 (0.3's
+        mend), "The target reads again when the author's instance token
+        appears". Each held run is read again."""
+        with self.lock:
+            self._appeared += 1
+            self._appeared_ids = set(ids)
+            held = list(self._held_runs)
+        for run in held:
+            threading.Thread(target=self._reread_held, args=(run,), daemon=True).start()
+
+    def _reread_held(self, run: str) -> None:
+        """A held run's read at its author's instance token (§2.18, 0.3's
+        mend), then what waited for it, in its order of arrival."""
+        with self.lock:
+            if run not in self._held_runs or run in self._asking:
+                return
+            self._asking.add(run)
+            ids = set(self._appeared_ids)
+        self._settled(run, self._read_revision(run, awaiting=ids))
 
     def _descriptor_says(self, run: str | None) -> tuple[str, str | None]:
         """What the author's descriptors name, and the run the one read
@@ -683,13 +783,22 @@ class Target:
         try:
             docs = f2.descriptors_of(session, self.author, self.timeout)
         except Exception:  # noqa: BLE001 - a read that fails names nothing
+            # §2.18: "A read that names none leaves the deployment's word:
+            # ... or the read failed."
             return "unread", None
+        with self.lock:
+            self._answered_by[run] = {d["instance"] for d in docs if isinstance(d.get("instance"), str)}
         if not docs:
-            return "word", None
+            # "no descriptor reached the target, as across a face": across
+            # one, the word; elsewhere descriptors reach the target, and this
+            # read finds none stating the run (0.3's mend, F-621)
+            return ("word" if self.across else "none"), None
         if run is not None:
             docs = [d for d in docs if d.get("run") in (run, None)]
             if not docs:
-                return "unread", None
+                # "None states the run yet" (0.3's mend): every descriptor
+                # stated another run
+                return "none", None
         stated = docs[0].get("run") if isinstance(docs[0].get("run"), str) else None
         iface = self.author_contract.interface
         fp = live.fingerprint_of(docs[0], iface)
@@ -808,10 +917,13 @@ class Target:
         kind, x, live_ = item
         run = (None if x.version is None else x.version.run.text) if kind == "sample" else x.run.text
         with self.lock:
-            wait = not self.word_alone and run is not None and (run not in self.revisions or run in self._asking)
+            wait = not self.word_alone and run is not None and (run not in self.revisions or run in self._asking
+                                                                or run in self._held_runs)
             if wait:
+                self._first_n.setdefault(run, self._appeared)
                 self._waiting.setdefault(run, []).append(item)
-                ask = run not in self._asking
+                # a held run is read again at its author's token, never here
+                ask = run not in self._asking and run not in self._held_runs
                 if ask:
                     self._asking.add(run)
         if not wait:
@@ -831,14 +943,33 @@ class Target:
         """The one read of a new run's descriptors, then what waited for it,
         in its order of arrival. What arrives while that is judged waits
         too, and is judged after it: the run stays asked until none is
-        left."""
-        said = self._read_revision(run)
+        left. A token that appeared once the run was first seen makes it a
+        read after that token (§2.18, 0.3's mend), made again while that
+        instance has not answered."""
         with self.lock:
-            self.revision_said = said
-            self.revisions.setdefault(run, said)  # asked once per run, whatever it named
-            if self.last_seed is not None:
-                # §2.18: "It says so where it says what its seed found"
-                self.last_seed["revision"] = said
+            ids = set(self._appeared_ids) if self._appeared > self._first_n.get(run, self._appeared) else set()
+        self._settled(run, self._read_revision(run, awaiting=ids))
+
+    def _settled(self, run: str, said: str) -> None:
+        """After a read of ``run``'s descriptors: a run held waits for its
+        author's token, what waited with it still waiting; else what waited
+        is judged by the word the read left."""
+        with self.lock:
+            if said == "held":
+                self._asking.discard(run)
+                # an appearance during the read: the read it makes is due now
+                again = self._appeared > self._held_runs.get(run, self._appeared)
+            else:
+                again = False
+                self.revision_said = said
+                self.revisions.setdefault(run, said)  # asked once per run, whatever it named
+                if self.last_seed is not None:
+                    # §2.18: "It says so where it says what its seed found"
+                    self.last_seed["revision"] = said
+        if said == "held":
+            if again:
+                self._reread_held(run)
+            return
         while True:
             with self.lock:
                 batch = self._waiting.pop(run, [])
