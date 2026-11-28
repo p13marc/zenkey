@@ -1,0 +1,15 @@
+{
+"gen1": 1795861486.585106,
+"loss_on": 1795861716.623495,
+"loss_off": 1795861956.651224,
+"cut": 1795862376.692307,
+"stale-watch": 1795862706.705068,
+"stale-watch_exit": 2,
+"stale-telemetry": 1795862766.743147,
+"stale-telemetry_exit": 2,
+"stale-doctor": 1795862827.039879,
+"stale-doctor_exit": 2,
+"restore": 1795862829.080080,
+"gen1_stop": 1795863279.115174,
+"gen2": 1795863299.139159,
+"complete": true, "medium": "rf-zk2c", "stack": "bare"}

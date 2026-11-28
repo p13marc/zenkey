@@ -1,0 +1,1543 @@
+{
+ "run": "rc-023-soak-1",
+ "hours": 2.17,
+ "reopens": [
+  {
+   "reopen": 1,
+   "kind": "driver-a",
+   "at": 600.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 30,
+     "passed": 25,
+     "bytes": 2465,
+     "first_s": 1.1,
+     "last_s": 512.5
+    },
+    "ba": {
+     "sdus": 37,
+     "passed": 34,
+     "bytes": 2893,
+     "first_s": 1.3,
+     "last_s": 571.5
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 2,
+   "kind": "zenohd-a",
+   "at": 1200.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 30,
+     "passed": 28,
+     "bytes": 2598,
+     "first_s": 0.2,
+     "last_s": 529.7
+    },
+    "ba": {
+     "sdus": 43,
+     "passed": 42,
+     "bytes": 3550,
+     "first_s": 31.5,
+     "last_s": 529.2
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 3,
+   "kind": "driver-b",
+   "at": 1800.0,
+   "restart_s": 0.05,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 16,
+     "passed": 16,
+     "bytes": 1766,
+     "first_s": 171.8,
+     "last_s": 420.9
+    },
+    "ba": {
+     "sdus": 19,
+     "passed": 19,
+     "bytes": 1525,
+     "first_s": 172.3,
+     "last_s": 420.8
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 4,
+   "kind": "zenohd-b",
+   "at": 2400.0,
+   "restart_s": 0.05,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 30,
+     "passed": 26,
+     "bytes": 2572,
+     "first_s": 76.6,
+     "last_s": 585.3
+    },
+    "ba": {
+     "sdus": 45,
+     "passed": 42,
+     "bytes": 3576,
+     "first_s": 77.1,
+     "last_s": 584.4
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 5,
+   "kind": "driver-a",
+   "at": 3000.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 29,
+     "passed": 29,
+     "bytes": 1867,
+     "first_s": 226.8,
+     "last_s": 479.1
+    },
+    "ba": {
+     "sdus": 26,
+     "passed": 24,
+     "bytes": 2164,
+     "first_s": 222.8,
+     "last_s": 597.8
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 6,
+   "kind": "zenohd-a",
+   "at": 3600.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 44,
+     "passed": 41,
+     "bytes": 2727,
+     "first_s": 0.2,
+     "last_s": 555.4
+    },
+    "ba": {
+     "sdus": 28,
+     "passed": 25,
+     "bytes": 1872,
+     "first_s": 57.7,
+     "last_s": 554.0
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 7,
+   "kind": "driver-b",
+   "at": 4200.0,
+   "restart_s": 0.06,
+   "span_s": 600.0,
+   "air": {
+    "ab": {
+     "sdus": 17,
+     "passed": 17,
+     "bytes": 1638,
+     "first_s": 196.5,
+     "last_s": 444.9
+    },
+    "ba": {
+     "sdus": 22,
+     "passed": 21,
+     "bytes": 1822,
+     "first_s": 197.0,
+     "last_s": 444.6
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 8,
+   "kind": "zenohd-b",
+   "at": 4800.0,
+   "restart_s": 0.1,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 27,
+     "passed": 27,
+     "bytes": 2640,
+     "first_s": 83.3,
+     "last_s": 581.1
+    },
+    "ba": {
+     "sdus": 27,
+     "passed": 23,
+     "bytes": 1817,
+     "first_s": 87.7,
+     "last_s": 581.5
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 9,
+   "kind": "driver-a",
+   "at": 5400.0,
+   "restart_s": 0.11,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 17,
+     "passed": 16,
+     "bytes": 1676,
+     "first_s": 223.4,
+     "last_s": 473.4
+    },
+    "ba": {
+     "sdus": 18,
+     "passed": 17,
+     "bytes": 1272,
+     "first_s": 219.6,
+     "last_s": 471.6
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 10,
+   "kind": "zenohd-a",
+   "at": 6000.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 27,
+     "passed": 26,
+     "bytes": 2128,
+     "first_s": 0.2,
+     "last_s": 370.0
+    },
+    "ba": {
+     "sdus": 18,
+     "passed": 18,
+     "bytes": 1323,
+     "first_s": 121.6,
+     "last_s": 369.2
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 11,
+   "kind": "driver-b",
+   "at": 6600.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 26,
+     "passed": 24,
+     "bytes": 2210,
+     "first_s": 8.0,
+     "last_s": 520.5
+    },
+    "ba": {
+     "sdus": 25,
+     "passed": 23,
+     "bytes": 1730,
+     "first_s": 26.5,
+     "last_s": 519.4
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 12,
+   "kind": "zenohd-b",
+   "at": 7200.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 16,
+     "passed": 16,
+     "bytes": 1292,
+     "first_s": 158.2,
+     "last_s": 403.4
+    },
+    "ba": {
+     "sdus": 26,
+     "passed": 25,
+     "bytes": 2322,
+     "first_s": 158.7,
+     "last_s": 584.5
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  }
+ ],
+ "probes": {
+  "0": {
+   "config-set": {
+    "exit": 0,
+    "seconds": 2.0,
+    "verdict": {
+     "answer": "record"
+    }
+   },
+   "config-get": {
+    "exit": 0,
+    "seconds": 1.8,
+    "verdict": null
+   },
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   },
+   "health": {
+    "exit": 0,
+    "seconds": 4.2,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "1 service(s) asked, every one healthy, its status fresh and agreeing with its checks"
+    }
+   },
+   "alarms": {
+    "exit": 1,
+    "seconds": 1.3,
+    "verdict": {
+     "answer": "established"
+    }
+   },
+   "desired": {
+    "exit": 0,
+    "seconds": 0.8,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "1 role(s) converged on their authors' current documents, none refused"
+    }
+   }
+  },
+  "1": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "2": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 60.0,
+    "verdict": {
+     "answer": "silent"
+    },
+    "stderr": " receive final reply for query local/8e6e9049:0:1: Timeout(30s)!\na set that drew nothing started nothing a tool can name: resent without an idempotency key, it may make a second change (config.v1 \u00a75)\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 30.0,
+    "verdict": null,
+    "stderr": "ment's word stands for the descriptor (config.v2 \u00a72.19)\na reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 \u00a72.6)\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict"
+    },
+    "stderr": "_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 62.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent)"
+    },
+    "stderr": "yment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nhealth: no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 23.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "an owner's alarms are not known whole (owner_unobservable)"
+    },
+    "stderr": "ock, on the deployment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nalarms: an owner's alarms are not known whole (owner_unobservable) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14)"
+    },
+    "stderr": "(freshness.v1 \u00a72.6)\ndesired: h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14) \u2014 exit 2, the reserved non-verdict\n"
+   }
+  },
+  "3": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.0,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.0,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "4": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 60.0,
+    "verdict": {
+     "answer": "silent"
+    },
+    "stderr": " receive final reply for query local/f947e3a1:0:1: Timeout(30s)!\na set that drew nothing started nothing a tool can name: resent without an idempotency key, it may make a second change (config.v1 \u00a75)\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 30.0,
+    "verdict": null,
+    "stderr": "ment's word stands for the descriptor (config.v2 \u00a72.19)\na reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 \u00a72.6)\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict"
+    },
+    "stderr": "_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 62.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent)"
+    },
+    "stderr": "yment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nhealth: no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 30.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "an owner's alarms are not known whole (owner_unobservable)"
+    },
+    "stderr": "ock, on the deployment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nalarms: an owner's alarms are not known whole (owner_unobservable) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 33.5,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14)"
+    },
+    "stderr": "(freshness.v1 \u00a72.6)\ndesired: h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14) \u2014 exit 2, the reserved non-verdict\n"
+   }
+  },
+  "5": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "6": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.0,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "7": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "8": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "9": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "10": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 9.9,
+    "verdict": null,
+    "stderr": "ment's word stands for the descriptor (config.v2 \u00a72.19)\na reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 \u00a72.6)\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict"
+    },
+    "stderr": "_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.0,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.0,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "11": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "12": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 0.1,
+    "verdict": {
+     "answer": "silent"
+    },
+    "stderr": "nds, nothing else is checked here, and the owner judges the rest\na set that drew nothing started nothing a tool can name: resent without an idempotency key, it may make a second change (config.v1 \u00a75)\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": null,
+    "stderr": "ment's word stands for the descriptor (config.v2 \u00a72.19)\na reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 \u00a72.6)\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict"
+    },
+    "stderr": "_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18002)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  }
+ },
+ "probe_exits": {
+  "alarms": {
+   "1": 1,
+   "2": 12
+  },
+  "config-get": {
+   "0": 1,
+   "2": 12
+  },
+  "config-set": {
+   "0": 1,
+   "2": 12
+  },
+  "desired": {
+   "0": 1,
+   "2": 12
+  },
+  "health": {
+   "0": 1,
+   "2": 12
+  },
+  "telemetry": {
+   "0": 1,
+   "2": 12
+  }
+ },
+ "rss": [
+  {
+   "name": "author",
+   "comm": "owner",
+   "pid": 1177981,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 1708,
+   "at_10min_kb": 1908,
+   "last_kb": 2184,
+   "max_kb": 2184,
+   "slope_first_half_kb_h": 244.9,
+   "slope_second_half_kb_h": 195.6,
+   "median_by_third_kb": [
+    1908,
+    2000,
+    2144
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-a",
+   "comm": "zenctl",
+   "pid": 1177796,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 31852,
+   "at_10min_kb": 36952,
+   "last_kb": 40788,
+   "max_kb": 43356,
+   "slope_first_half_kb_h": 1285.7,
+   "slope_second_half_kb_h": 2175.0,
+   "median_by_third_kb": [
+    40576,
+    38800,
+    40384
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-a",
+   "comm": "python3",
+   "pid": 1177797,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 4168,
+   "at_10min_kb": 4264,
+   "last_kb": 4608,
+   "max_kb": 4608,
+   "slope_first_half_kb_h": 307.0,
+   "slope_second_half_kb_h": 93.7,
+   "median_by_third_kb": [
+    4356,
+    4496,
+    4568
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-b",
+   "comm": "zenctl",
+   "pid": 1177810,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 32384,
+   "at_10min_kb": 36772,
+   "last_kb": 40368,
+   "max_kb": 43312,
+   "slope_first_half_kb_h": 2296.5,
+   "slope_second_half_kb_h": 2833.8,
+   "median_by_third_kb": [
+    38372,
+    38320,
+    40396
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-b",
+   "comm": "python3",
+   "pid": 1177815,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 4180,
+   "at_10min_kb": 4276,
+   "last_kb": 4596,
+   "max_kb": 4596,
+   "slope_first_half_kb_h": 303.4,
+   "slope_second_half_kb_h": 79.1,
+   "median_by_third_kb": [
+    4348,
+    4488,
+    4576
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "device",
+   "comm": "owner",
+   "pid": 1177994,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3564,
+   "at_10min_kb": 3580,
+   "last_kb": 4176,
+   "max_kb": 4180,
+   "slope_first_half_kb_h": 420.6,
+   "slope_second_half_kb_h": 165.6,
+   "median_by_third_kb": [
+    3836,
+    4056,
+    4176
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a",
+   "comm": "modem-driver",
+   "pid": 1177757,
+   "minutes": 3.0,
+   "samples": 4,
+   "first_kb": 5232,
+   "at_10min_kb": null,
+   "last_kb": 5232,
+   "max_kb": 5232,
+   "slope_first_half_kb_h": null,
+   "slope_second_half_kb_h": null,
+   "median_by_third_kb": [
+    5232,
+    5232,
+    5232
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a.r1",
+   "comm": "modem-driver",
+   "pid": 1249368,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 4964,
+   "at_10min_kb": 5176,
+   "last_kb": 5128,
+   "max_kb": 5176,
+   "slope_first_half_kb_h": 587.6,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    5064,
+    5128,
+    5128
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a.r5",
+   "comm": "modem-driver",
+   "pid": 1338305,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 4660,
+   "at_10min_kb": 5152,
+   "last_kb": 5156,
+   "max_kb": 5156,
+   "slope_first_half_kb_h": 1479.7,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    5116,
+    5156,
+    5156
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a.r9",
+   "comm": "modem-driver",
+   "pid": 1500304,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 4640,
+   "at_10min_kb": 4932,
+   "last_kb": 5044,
+   "max_kb": 5044,
+   "slope_first_half_kb_h": 1231.7,
+   "slope_second_half_kb_h": 73.6,
+   "median_by_third_kb": [
+    4844,
+    5008,
+    5008
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b",
+   "comm": "modem-driver",
+   "pid": 1177760,
+   "minutes": 23.0,
+   "samples": 24,
+   "first_kb": 5256,
+   "at_10min_kb": 5440,
+   "last_kb": 5452,
+   "max_kb": 5452,
+   "slope_first_half_kb_h": 1234.9,
+   "slope_second_half_kb_h": 68.0,
+   "median_by_third_kb": [
+    5324,
+    5440,
+    5452
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b.r11",
+   "comm": "modem-driver",
+   "pid": 1511884,
+   "minutes": 19.0,
+   "samples": 20,
+   "first_kb": 4920,
+   "at_10min_kb": 5080,
+   "last_kb": 5084,
+   "max_kb": 5084,
+   "slope_first_half_kb_h": 612.3,
+   "slope_second_half_kb_h": 30.5,
+   "median_by_third_kb": [
+    4920,
+    5080,
+    5080
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b.r3",
+   "comm": "modem-driver",
+   "pid": 1326835,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 4672,
+   "at_10min_kb": 5016,
+   "last_kb": 5128,
+   "max_kb": 5132,
+   "slope_first_half_kb_h": 1515.3,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    5016,
+    5128,
+    5128
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b.r7",
+   "comm": "modem-driver",
+   "pid": 1416302,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 4652,
+   "at_10min_kb": 4948,
+   "last_kb": 5148,
+   "max_kb": 5148,
+   "slope_first_half_kb_h": 1590.6,
+   "slope_second_half_kb_h": 17.3,
+   "median_by_third_kb": [
+    4856,
+    5144,
+    5148
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-alarms",
+   "comm": "zenctl",
+   "pid": 1177907,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3308,
+   "at_10min_kb": 3456,
+   "last_kb": 3892,
+   "max_kb": 3892,
+   "slope_first_half_kb_h": 342.3,
+   "slope_second_half_kb_h": 77.2,
+   "median_by_third_kb": [
+    3456,
+    3760,
+    3812
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-alarms",
+   "comm": "python3",
+   "pid": 1177910,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3924,
+   "at_10min_kb": 3924,
+   "last_kb": 3924,
+   "max_kb": 3924,
+   "slope_first_half_kb_h": 0.0,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    3924,
+    3924,
+    3924
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-health",
+   "comm": "zenctl",
+   "pid": 1177901,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3352,
+   "at_10min_kb": 3512,
+   "last_kb": 3888,
+   "max_kb": 3888,
+   "slope_first_half_kb_h": 407.5,
+   "slope_second_half_kb_h": 123.1,
+   "median_by_third_kb": [
+    3508,
+    3752,
+    3796
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-health",
+   "comm": "python3",
+   "pid": 1177902,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3924,
+   "at_10min_kb": 3924,
+   "last_kb": 3924,
+   "max_kb": 3924,
+   "slope_first_half_kb_h": 0.0,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    3924,
+    3924,
+    3924
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-modem",
+   "comm": "zenctl",
+   "pid": 1177890,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 5164,
+   "at_10min_kb": 5416,
+   "last_kb": 5776,
+   "max_kb": 5776,
+   "slope_first_half_kb_h": 404.9,
+   "slope_second_half_kb_h": 128.7,
+   "median_by_third_kb": [
+    5472,
+    5640,
+    5768
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-modem",
+   "comm": "python3",
+   "pid": 1177893,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 4020,
+   "at_10min_kb": 4024,
+   "last_kb": 4024,
+   "max_kb": 4024,
+   "slope_first_half_kb_h": 0.7,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    4024,
+    4024,
+    4024
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-rfcfg",
+   "comm": "zenctl",
+   "pid": 1177934,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3352,
+   "at_10min_kb": 3572,
+   "last_kb": 3884,
+   "max_kb": 3884,
+   "slope_first_half_kb_h": 296.4,
+   "slope_second_half_kb_h": 176.0,
+   "median_by_third_kb": [
+    3572,
+    3692,
+    3788
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-rfcfg",
+   "comm": "python3",
+   "pid": 1177935,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3924,
+   "at_10min_kb": 3924,
+   "last_kb": 3924,
+   "max_kb": 3924,
+   "slope_first_half_kb_h": 0.0,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    3924,
+    3924,
+    3924
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-worker",
+   "comm": "zenctl",
+   "pid": 1177942,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3300,
+   "at_10min_kb": 3524,
+   "last_kb": 3836,
+   "max_kb": 3836,
+   "slope_first_half_kb_h": 276.0,
+   "slope_second_half_kb_h": 130.0,
+   "median_by_third_kb": [
+    3524,
+    3680,
+    3756
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-worker",
+   "comm": "python3",
+   "pid": 1177945,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 3920,
+   "at_10min_kb": 3920,
+   "last_kb": 3920,
+   "max_kb": 3920,
+   "slope_first_half_kb_h": 0.0,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    3920,
+    3920,
+    3920
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "gen",
+   "comm": "zenctl",
+   "pid": 1178013,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 8436,
+   "at_10min_kb": 8764,
+   "last_kb": 9392,
+   "max_kb": 9392,
+   "slope_first_half_kb_h": 673.0,
+   "slope_second_half_kb_h": 234.8,
+   "median_by_third_kb": [
+    8916,
+    9172,
+    9276
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "relay",
+   "comm": "python3",
+   "pid": 1177752,
+   "minutes": 123.0,
+   "samples": 124,
+   "first_kb": 11692,
+   "at_10min_kb": 11696,
+   "last_kb": 11700,
+   "max_kb": 11708,
+   "slope_first_half_kb_h": 0.7,
+   "slope_second_half_kb_h": 2.5,
+   "median_by_third_kb": [
+    11696,
+    11696,
+    11700
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a",
+   "comm": "zenohd",
+   "pid": 1177784,
+   "minutes": 13.0,
+   "samples": 14,
+   "first_kb": 1780,
+   "at_10min_kb": 2052,
+   "last_kb": 2220,
+   "max_kb": 2220,
+   "slope_first_half_kb_h": 934.0,
+   "slope_second_half_kb_h": 3050.7,
+   "median_by_third_kb": [
+    1780,
+    1852,
+    2052
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a.r10",
+   "comm": "zenohd",
+   "pid": 1500847,
+   "minutes": 29.0,
+   "samples": 30,
+   "first_kb": 1576,
+   "at_10min_kb": 2028,
+   "last_kb": 2256,
+   "max_kb": 2256,
+   "slope_first_half_kb_h": 2410.1,
+   "slope_second_half_kb_h": 817.6,
+   "median_by_third_kb": [
+    1640,
+    2092,
+    2248
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a.r2",
+   "comm": "zenohd",
+   "pid": 1310704,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 1580,
+   "at_10min_kb": 1928,
+   "last_kb": 2308,
+   "max_kb": 2308,
+   "slope_first_half_kb_h": 1581.1,
+   "slope_second_half_kb_h": 619.1,
+   "median_by_third_kb": [
+    1796,
+    2032,
+    2244
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a.r6",
+   "comm": "zenohd",
+   "pid": 1382156,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 1580,
+   "at_10min_kb": 1904,
+   "last_kb": 2520,
+   "max_kb": 2520,
+   "slope_first_half_kb_h": 1456.2,
+   "slope_second_half_kb_h": 1537.6,
+   "median_by_third_kb": [
+    1852,
+    2048,
+    2296
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b",
+   "comm": "zenohd",
+   "pid": 1177777,
+   "minutes": 33.0,
+   "samples": 34,
+   "first_kb": 2236,
+   "at_10min_kb": 2436,
+   "last_kb": 3316,
+   "max_kb": 3316,
+   "slope_first_half_kb_h": 1445.5,
+   "slope_second_half_kb_h": 2594.4,
+   "median_by_third_kb": [
+    2248,
+    2600,
+    2856
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b.r12",
+   "comm": "zenohd",
+   "pid": 1575060,
+   "minutes": 9.0,
+   "samples": 10,
+   "first_kb": 1692,
+   "at_10min_kb": null,
+   "last_kb": 2288,
+   "max_kb": 2288,
+   "slope_first_half_kb_h": 5687.5,
+   "slope_second_half_kb_h": 5039.5,
+   "median_by_third_kb": [
+    1928,
+    2008,
+    2288
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b.r4",
+   "comm": "zenohd",
+   "pid": 1328296,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 1680,
+   "at_10min_kb": 2340,
+   "last_kb": 3996,
+   "max_kb": 3996,
+   "slope_first_half_kb_h": 4325.4,
+   "slope_second_half_kb_h": 2904.2,
+   "median_by_third_kb": [
+    2228,
+    3228,
+    3980
+   ],
+   "grows_without_levelling": true
+  },
+  {
+   "name": "zenohd-b.r8",
+   "comm": "zenohd",
+   "pid": 1457303,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 1716,
+   "at_10min_kb": 2720,
+   "last_kb": 3340,
+   "max_kb": 3340,
+   "slope_first_half_kb_h": 4083.5,
+   "slope_second_half_kb_h": 1627.7,
+   "median_by_third_kb": [
+    2460,
+    2860,
+    3164
+   ],
+   "grows_without_levelling": false
+  }
+ ]
+}

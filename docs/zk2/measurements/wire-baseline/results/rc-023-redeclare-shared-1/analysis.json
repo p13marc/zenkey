@@ -1,0 +1,223 @@
+{
+ "run": "rc-023-redeclare-shared-1",
+ "marks_s": {
+  "gen": -115.1,
+  "r0": -80.1,
+  "r0_stop": -10.0,
+  "cut": 0.0,
+  "r1": 0.5,
+  "restore": 8.6,
+  "r2": 23.6,
+  "end": 743.6
+ },
+ "declarations": [
+  {
+   "t_s": -118.3,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "@/cd8f92465704624507482f78430eb6d9/peer/config",
+   "bytes": 58,
+   "lost": false
+  },
+  {
+   "t_s": -118.3,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "@/cd8f92465704624507482f78430eb6d9/peer",
+   "bytes": 46,
+   "lost": false
+  },
+  {
+   "t_s": -118.3,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "@/cd8f92465704624507482f78430eb6d9/peer/config/**",
+   "bytes": 10,
+   "lost": false
+  },
+  {
+   "t_s": -118.3,
+   "dir": "ba",
+   "kind": "declare-queryable",
+   "key": "@/cd8f92465704624507482f78430eb6d9/peer/**",
+   "bytes": 10,
+   "lost": false
+  },
+  {
+   "t_s": -79.3,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault",
+   "bytes": 68,
+   "lost": false
+  },
+  {
+   "t_s": -79.3,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*",
+   "bytes": 9,
+   "lost": false
+  },
+  {
+   "t_s": -79.3,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change",
+   "bytes": 66,
+   "lost": false
+  },
+  {
+   "t_s": -79.3,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*",
+   "bytes": 9,
+   "lost": false
+  },
+  {
+   "t_s": -79.3,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change",
+   "bytes": 62,
+   "lost": false
+  },
+  {
+   "t_s": -79.0,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*",
+   "bytes": 14,
+   "lost": false
+  },
+  {
+   "t_s": -79.0,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+   "bytes": 57,
+   "lost": false
+  },
+  {
+   "t_s": -79.0,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+   "bytes": 6,
+   "lost": false
+  },
+  {
+   "t_s": -9.9,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 10,
+   "lost": false
+  },
+  {
+   "t_s": -9.9,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "lost": false
+  },
+  {
+   "t_s": -9.9,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "lost": false
+  },
+  {
+   "t_s": -9.9,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "lost": false
+  },
+  {
+   "t_s": 0.6,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*",
+   "bytes": 14,
+   "lost": true
+  },
+  {
+   "t_s": 0.7,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*",
+   "bytes": 14,
+   "lost": true
+  },
+  {
+   "t_s": 0.7,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*",
+   "bytes": 9,
+   "lost": true
+  },
+  {
+   "t_s": 0.7,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+   "bytes": 6,
+   "lost": true
+  },
+  {
+   "t_s": 744.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 10,
+   "lost": false
+  },
+  {
+   "t_s": 744.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "lost": false
+  },
+  {
+   "t_s": 744.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "lost": false
+  },
+  {
+   "t_s": 744.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "lost": false
+  }
+ ],
+ "heard": {
+  "r0": {
+   "frames_fast_at_s": [
+    -54.4
+   ],
+   "events": 1
+  },
+  "r1": {
+   "frames_fast_at_s": [],
+   "events": 0
+  },
+  "r2": {
+   "frames_fast_at_s": [],
+   "events": 0
+  }
+ }
+}

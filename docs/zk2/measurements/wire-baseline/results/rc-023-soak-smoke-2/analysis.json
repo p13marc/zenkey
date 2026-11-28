@@ -1,0 +1,748 @@
+{
+ "run": "rc-023-soak-smoke-2",
+ "hours": 0.33,
+ "reopens": [
+  {
+   "reopen": 1,
+   "kind": "driver-a",
+   "at": 240.0,
+   "restart_s": 0.05,
+   "span_s": 239.9,
+   "air": {
+    "ab": {
+     "sdus": 9,
+     "passed": 9,
+     "bytes": 887,
+     "first_s": 200.8,
+     "last_s": 204.1
+    },
+    "ba": {
+     "sdus": 14,
+     "passed": 14,
+     "bytes": 1091,
+     "first_s": 0.0,
+     "last_s": 204.4
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 2,
+   "kind": "zenohd-a",
+   "at": 480.0,
+   "restart_s": 0.06,
+   "span_s": 239.9,
+   "air": {
+    "ab": {
+     "sdus": 9,
+     "passed": 7,
+     "bytes": 870,
+     "first_s": 202.7,
+     "last_s": 206.1
+    },
+    "ba": {
+     "sdus": 9,
+     "passed": 9,
+     "bytes": 459,
+     "first_s": 202.1,
+     "last_s": 235.2
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 3,
+   "kind": "driver-b",
+   "at": 720.0,
+   "restart_s": 0.06,
+   "span_s": 239.9,
+   "air": {
+    "ab": {
+     "sdus": 10,
+     "passed": 10,
+     "bytes": 776,
+     "first_s": 203.5,
+     "last_s": 211.0
+    },
+    "ba": {
+     "sdus": 26,
+     "passed": 24,
+     "bytes": 1500,
+     "first_s": 4.1,
+     "last_s": 211.9
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  },
+  {
+   "reopen": 4,
+   "kind": "zenohd-b",
+   "at": 960.0,
+   "restart_s": 0.06,
+   "span_s": 239.9,
+   "air": {
+    "ab": {
+     "sdus": 7,
+     "passed": 7,
+     "bytes": 801,
+     "first_s": 219.7,
+     "last_s": 222.6
+    },
+    "ba": {
+     "sdus": 26,
+     "passed": 25,
+     "bytes": 1390,
+     "first_s": 0.2,
+     "last_s": 222.6
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {},
+   "link_back": false
+  }
+ ],
+ "probes": {
+  "0": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 30.0,
+    "verdict": {
+     "answer": "silent"
+    },
+    "stderr": "nds, nothing else is checked here, and the owner judges the rest\na set that drew nothing started nothing a tool can name: resent without an idempotency key, it may make a second change (config.v1 \u00a75)\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": null,
+    "stderr": "ment's word stands for the descriptor (config.v2 \u00a72.19)\na reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 \u00a72.6)\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 70.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 70.0s: silence is never a verdict"
+    },
+    "stderr": "e_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 70.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 2.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent)"
+    },
+    "stderr": "yment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nhealth: no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "an owner's alarms are not known whole (owner_unobservable)"
+    },
+    "stderr": "ock, on the deployment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nalarms: an owner's alarms are not known whole (owner_unobservable) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14)"
+    },
+    "stderr": "(freshness.v1 \u00a72.6)\ndesired: h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14) \u2014 exit 2, the reserved non-verdict\n"
+   }
+  },
+  "1": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 30.0,
+    "verdict": {
+     "answer": "silent"
+    },
+    "stderr": " receive final reply for query local/20c0a36c:0:1: Timeout(30s)!\na set that drew nothing started nothing a tool can name: resent without an idempotency key, it may make a second change (config.v1 \u00a75)\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": null,
+    "stderr": "ment's word stands for the descriptor (config.v2 \u00a72.19)\na reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 \u00a72.6)\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 70.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 70.0s: silence is never a verdict"
+    },
+    "stderr": "e_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 70.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 2.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent)"
+    },
+    "stderr": "yment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nhealth: no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "an owner's alarms are not known whole (owner_unobservable)"
+    },
+    "stderr": "ock, on the deployment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nalarms: an owner's alarms are not known whole (owner_unobservable) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14)"
+    },
+    "stderr": "(freshness.v1 \u00a72.6)\ndesired: h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14) \u2014 exit 2, the reserved non-verdict\n"
+   }
+  },
+  "2": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18302)]!\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "c/index.crates.io-1949cf8c6b5b557f/zenoh-1.10.2/src/net/runtime/orchestrator.rs:447.\nError: failed to open the Zenoh session\n\nCaused by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18302)]!\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": " by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18302)]!\ntelemetry: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18302)]!\nhealth: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "sed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18302)]!\nalarms: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 10.1,
+    "verdict": null,
+    "stderr": "ed by:\n    Unable to connect to any of [Single(tcp/127.0.0.1:18302)]!\ndesired: the question could not be asked \u2014 exit 2, the reserved non-verdict (1 here would claim a verdict this run never reached)\n"
+   }
+  },
+  "3": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "silent"
+    },
+    "stderr": "nds, nothing else is checked here, and the owner judges the rest\na set that drew nothing started nothing a tool can name: resent without an idempotency key, it may make a second change (config.v1 \u00a75)\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": null,
+    "stderr": "ment's word stands for the descriptor (config.v2 \u00a72.19)\na reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 \u00a72.6)\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 70.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 70.0s: silence is never a verdict"
+    },
+    "stderr": "e_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 70.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 2.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent)"
+    },
+    "stderr": "yment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nhealth: no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "an owner's alarms are not known whole (owner_unobservable)"
+    },
+    "stderr": "ock, on the deployment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nalarms: an owner's alarms are not known whole (owner_unobservable) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14)"
+    },
+    "stderr": "(freshness.v1 \u00a72.6)\ndesired: h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14) \u2014 exit 2, the reserved non-verdict\n"
+   }
+  },
+  "4": {
+   "config-set": {
+    "exit": 2,
+    "seconds": 0.1,
+    "verdict": {
+     "answer": "silent"
+    },
+    "stderr": "nds, nothing else is checked here, and the owner judges the rest\na set that drew nothing started nothing a tool can name: resent without an idempotency key, it may make a second change (config.v1 \u00a75)\n"
+   },
+   "config-get": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": null,
+    "stderr": "ment's word stands for the descriptor (config.v2 \u00a72.19)\na reply's stamp is aged against this host's clock, on the deployment's word that it and the owner's agree (--clocks-synced) (freshness.v1 \u00a72.6)\n"
+   },
+   "telemetry": {
+    "exit": 2,
+    "seconds": 70.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 70.0s: silence is never a verdict"
+    },
+    "stderr": "e_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 70.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "health": {
+    "exit": 2,
+    "seconds": 2.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent)"
+    },
+    "stderr": "yment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nhealth: no finding, and 1 service(s) could not be read: h-3fa9c2d41b7e/rf0 (silent) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "alarms": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "an owner's alarms are not known whole (owner_unobservable)"
+    },
+    "stderr": "ock, on the deployment's word that it and the owners' agree (--clocks-synced) (freshness.v1 \u00a72.6)\nalarms: an owner's alarms are not known whole (owner_unobservable) \u2014 exit 2, the reserved non-verdict\n"
+   },
+   "desired": {
+    "exit": 2,
+    "seconds": 0.0,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14)"
+    },
+    "stderr": "(freshness.v1 \u00a72.6)\ndesired: h-3fa9c2d41b7e/rf0 task: converged unobservable (nothing_crossed) \u2014 across a face, no report of the role crossed to this reader (\u00a72.14) \u2014 exit 2, the reserved non-verdict\n"
+   }
+  }
+ },
+ "probe_exits": {
+  "alarms": {
+   "2": 5
+  },
+  "config-get": {
+   "2": 5
+  },
+  "config-set": {
+   "2": 5
+  },
+  "desired": {
+   "2": 5
+  },
+  "health": {
+   "2": 5
+  },
+  "telemetry": {
+   "2": 5
+  }
+ },
+ "rss": [
+  {
+   "name": "author",
+   "comm": "owner",
+   "pid": 1174275,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 19576,
+   "at_10min_kb": 2984,
+   "last_kb": 8940,
+   "max_kb": 19716,
+   "slope_first_half_kb_h": -95227.5,
+   "slope_second_half_kb_h": 48085.1,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-a",
+   "comm": "zenctl",
+   "pid": 1171794,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 25580,
+   "at_10min_kb": 22804,
+   "last_kb": 36828,
+   "max_kb": 55504,
+   "slope_first_half_kb_h": 70022.7,
+   "slope_second_half_kb_h": 36037.8,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-a",
+   "comm": "python3",
+   "pid": 1171799,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 10244,
+   "at_10min_kb": 6040,
+   "last_kb": 6136,
+   "max_kb": 11112,
+   "slope_first_half_kb_h": -23908.7,
+   "slope_second_half_kb_h": 652.3,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-b",
+   "comm": "zenctl",
+   "pid": 1171802,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 25040,
+   "at_10min_kb": 26212,
+   "last_kb": 41840,
+   "max_kb": 55444,
+   "slope_first_half_kb_h": 73479.8,
+   "slope_second_half_kb_h": 75382.8,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-b",
+   "comm": "python3",
+   "pid": 1171805,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 10276,
+   "at_10min_kb": 4332,
+   "last_kb": 4480,
+   "max_kb": 10500,
+   "slope_first_half_kb_h": -33930.0,
+   "slope_second_half_kb_h": 632.7,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "device",
+   "comm": "owner",
+   "pid": 1174288,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 22484,
+   "at_10min_kb": 4384,
+   "last_kb": 9620,
+   "max_kb": 22672,
+   "slope_first_half_kb_h": -89061.8,
+   "slope_second_half_kb_h": 24904.4,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a",
+   "comm": "modem-driver",
+   "pid": 1171591,
+   "minutes": 4.0,
+   "samples": 5,
+   "first_kb": 47468,
+   "at_10min_kb": null,
+   "last_kb": 47520,
+   "max_kb": 47520,
+   "slope_first_half_kb_h": null,
+   "slope_second_half_kb_h": 0.0,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a.r1",
+   "comm": "modem-driver",
+   "pid": 1180091,
+   "minutes": 15.0,
+   "samples": 16,
+   "first_kb": 47332,
+   "at_10min_kb": 15004,
+   "last_kb": 15080,
+   "max_kb": 47352,
+   "slope_first_half_kb_h": -378709.2,
+   "slope_second_half_kb_h": 2797.0,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b",
+   "comm": "modem-driver",
+   "pid": 1171596,
+   "minutes": 12.0,
+   "samples": 13,
+   "first_kb": 47348,
+   "at_10min_kb": 11040,
+   "last_kb": 11048,
+   "max_kb": 47404,
+   "slope_first_half_kb_h": 600.0,
+   "slope_second_half_kb_h": -319407.1,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b.r3",
+   "comm": "modem-driver",
+   "pid": 1229737,
+   "minutes": 7.0,
+   "samples": 8,
+   "first_kb": 45428,
+   "at_10min_kb": null,
+   "last_kb": 37656,
+   "max_kb": 45436,
+   "slope_first_half_kb_h": -75020.9,
+   "slope_second_half_kb_h": -3071.9,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-alarms",
+   "comm": "zenctl",
+   "pid": 1174062,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 26444,
+   "at_10min_kb": 5024,
+   "last_kb": 10456,
+   "max_kb": 26592,
+   "slope_first_half_kb_h": -120536.8,
+   "slope_second_half_kb_h": 41012.0,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-alarms",
+   "comm": "python3",
+   "pid": 1174066,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 9936,
+   "at_10min_kb": 3232,
+   "last_kb": 3236,
+   "max_kb": 9936,
+   "slope_first_half_kb_h": -38164.0,
+   "slope_second_half_kb_h": 19.6,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-health",
+   "comm": "zenctl",
+   "pid": 1174051,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 27632,
+   "at_10min_kb": 5128,
+   "last_kb": 10852,
+   "max_kb": 27780,
+   "slope_first_half_kb_h": -126786.7,
+   "slope_second_half_kb_h": 43226.4,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-health",
+   "comm": "python3",
+   "pid": 1174054,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 9956,
+   "at_10min_kb": 3244,
+   "last_kb": 3248,
+   "max_kb": 9956,
+   "slope_first_half_kb_h": -38177.1,
+   "slope_second_half_kb_h": 19.6,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-modem",
+   "comm": "zenctl",
+   "pid": 1174039,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 28852,
+   "at_10min_kb": 10144,
+   "last_kb": 12584,
+   "max_kb": 28872,
+   "slope_first_half_kb_h": -121867.7,
+   "slope_second_half_kb_h": 18695.2,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-modem",
+   "comm": "python3",
+   "pid": 1174042,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 9932,
+   "at_10min_kb": 3284,
+   "last_kb": 3288,
+   "max_kb": 9932,
+   "slope_first_half_kb_h": -37945.8,
+   "slope_second_half_kb_h": 19.6,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-rfcfg",
+   "comm": "zenctl",
+   "pid": 1174093,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 26604,
+   "at_10min_kb": 5268,
+   "last_kb": 11036,
+   "max_kb": 28192,
+   "slope_first_half_kb_h": -123008.0,
+   "slope_second_half_kb_h": 43069.3,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-rfcfg",
+   "comm": "python3",
+   "pid": 1174094,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 10000,
+   "at_10min_kb": 3352,
+   "last_kb": 3356,
+   "max_kb": 10320,
+   "slope_first_half_kb_h": -38606.2,
+   "slope_second_half_kb_h": 19.6,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-worker",
+   "comm": "zenctl",
+   "pid": 1174119,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 25956,
+   "at_10min_kb": 4984,
+   "last_kb": 10452,
+   "max_kb": 26100,
+   "slope_first_half_kb_h": -118039.5,
+   "slope_second_half_kb_h": 41409.0,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-worker",
+   "comm": "python3",
+   "pid": 1174120,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 9872,
+   "at_10min_kb": 3176,
+   "last_kb": 3180,
+   "max_kb": 9872,
+   "slope_first_half_kb_h": -38070.9,
+   "slope_second_half_kb_h": 19.6,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "gen",
+   "comm": "zenctl",
+   "pid": 1174307,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 12608,
+   "at_10min_kb": 11720,
+   "last_kb": 16152,
+   "max_kb": 36876,
+   "slope_first_half_kb_h": -51684.2,
+   "slope_second_half_kb_h": 28122.4,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "relay",
+   "comm": "python3",
+   "pid": 1171493,
+   "minutes": 20.0,
+   "samples": 21,
+   "first_kb": 21144,
+   "at_10min_kb": 3448,
+   "last_kb": 4896,
+   "max_kb": 22044,
+   "slope_first_half_kb_h": -101926.8,
+   "slope_second_half_kb_h": 9433.8,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a",
+   "comm": "zenohd",
+   "pid": 1171610,
+   "minutes": 8.0,
+   "samples": 9,
+   "first_kb": 12176,
+   "at_10min_kb": null,
+   "last_kb": 4812,
+   "max_kb": 12624,
+   "slope_first_half_kb_h": 3695.8,
+   "slope_second_half_kb_h": -139454.6,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a.r2",
+   "comm": "zenohd",
+   "pid": 1210460,
+   "minutes": 11.0,
+   "samples": 12,
+   "first_kb": 5396,
+   "at_10min_kb": 9524,
+   "last_kb": 9476,
+   "max_kb": 9524,
+   "slope_first_half_kb_h": 49656.4,
+   "slope_second_half_kb_h": 16298.7,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b",
+   "comm": "zenohd",
+   "pid": 1171782,
+   "minutes": 16.0,
+   "samples": 17,
+   "first_kb": 12860,
+   "at_10min_kb": 4396,
+   "last_kb": 9620,
+   "max_kb": 13424,
+   "slope_first_half_kb_h": -30814.7,
+   "slope_second_half_kb_h": 65828.1,
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b.r4",
+   "comm": "zenohd",
+   "pid": 1252934,
+   "minutes": 3.0,
+   "samples": 4,
+   "first_kb": 12152,
+   "at_10min_kb": null,
+   "last_kb": 12636,
+   "max_kb": 12636,
+   "slope_first_half_kb_h": null,
+   "slope_second_half_kb_h": null,
+   "grows_without_levelling": false
+  }
+ ]
+}
