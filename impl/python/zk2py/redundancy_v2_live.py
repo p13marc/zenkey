@@ -10,9 +10,13 @@ runner drives either::
 - **The incumbent** "is learnt as v1 §2.10 learns it: a watch on the
   provider's ``@zk/**``, a complete read, and the holder's descriptor.
   During a split, it is the lowest holder the follower sees." A liveliness
-  subscriber with history on a session of its own; a token counts at once,
-  and each holder's descriptor is read by a GET on the other session after
-  it.
+  subscriber with history on a session of its own, its round trip, then a
+  complete read on the other session: only then is an incumbent chosen
+  (round 128's mend). After that a token counts at once, and each holder's
+  descriptor is read by a GET on the other session after it.
+- **The read again** after a withdrawal that leaves no holder (observer
+  §3.6) never undoes a token the watch heard declared after it was asked
+  (observer 0.38), nor brings back one it heard withdrawn since (F-635).
 - **Each instance's runs** "are learnt from its descriptors": every GET of
   one, every put of one heard (delayed by ``--descriptor-delay-ms``, the
   scenarios' §14 hook), and each read of the address's descriptors. The
@@ -114,10 +118,19 @@ class Follower:
         #: each sample still held, by id: (key, its value, its run)
         self._samples: dict[str, tuple[str, dict[str, Any], r2.Run | None]] = {}
         self._work: queue.Queue[Any] = queue.Queue()
-        #: when the watch last heard each holder declared, against which a
-        #: read again's absence is weighed
+        #: when the watch last heard each holder declared, and withdrawn,
+        #: each stamped as the watch's callback heard it (round 128's mend),
+        #: against which a read again is weighed: observer 0.38 §3.6, "A
+        #: token the watch hears declared after the read is asked stands,
+        #: whatever the read shows"
         self._heard_at: dict[str, float] = {}
+        self._gone_at: dict[str, float] = {}
         self._rereading = False
+        self._again = False
+        #: False until the start: the history's tokens, the round trip and a
+        #: complete read; the tokens heard before it, by instance
+        self._started = False
+        self._early: dict[str, tuple[bool, float]] = {}
         self._stop = threading.Event()
         self.reader = live.open_client(endpoint)
         self.watch = live.open_client(endpoint)
@@ -135,9 +148,18 @@ class Follower:
                                            zenoh.handlers.Callback(lambda s: self._sample(s, heartbeat=True))),
         ]
         self.entities.append(live.declare_liveliness_subscriber(self.watch, f"zk2/{address}/@zk/**",
-                                                                lambda s: self._work.put(("token", s)),
+                                                                lambda s: self._work.put(("token",
+                                                                                          (s, time.monotonic()))),
                                                                 history=True))
+        # "The incumbent is learnt as v1 §2.10 learns it: a watch on the
+        # provider's @zk/**, a complete read, and the holder's descriptor."
+        # The round trip's final reply follows the history (observer §3.7),
+        # so the start item queued after it follows every token the history
+        # told; until it is taken up, no incumbent is chosen from part of
+        # the history ("before its first read, it accepts nothing new", v1
+        # §2.10; round 128's mend: §9's K took B, A's token not yet told)
         live.settle(self.watch, GET_TIMEOUT_S)
+        self._work.put(("start", None))
 
     # -- output -----------------------------------------------------------------------------
     def at_ms(self) -> float:
@@ -158,6 +180,8 @@ class Follower:
             try:
                 if kind == "token":
                     self._token(x)
+                elif kind == "start":
+                    self._start()
                 elif kind == "seed":
                     self._seed(x)
             except Exception as e:  # noqa: BLE001 - one event's failure is said, the follower goes on
@@ -195,12 +219,35 @@ class Follower:
                         self.hold.descriptor(*got)
                 return
 
-    def _token(self, sample: Any) -> None:
+    def _start(self) -> None:
+        """The history's tokens folded, then a complete read on the reading
+        session (:meth:`_reread`), then the incumbent, its descriptor read."""
+        with self.lock:
+            for inst, (put, at) in self._early.items():
+                if put:
+                    self.hold.token(inst, True)
+                    self._heard_at[inst] = at
+                else:
+                    self._gone_at[inst] = at
+            self._early.clear()
+            self._started = True
+        self._reread()
+        with self.lock:
+            unknown = [i for i in sorted(self.view.holders) if i not in self.view.instances]
+        for i in unknown:
+            self._get_descriptor(i)
+        self._incumbent_changed()
+
+    def _token(self, heard: tuple[Any, float]) -> None:
+        sample, at = heard
         p = zkeys.parse(str(sample.key_expr))
         if not p or p.get("form") != "alive" or p.get("iface") != self.iface \
                 or f"{p['system']}/{p['service']}" != self.address:
             return
         inst = p["instance"]
+        if not self._started:
+            self._early[inst] = (sample.kind == zenoh.SampleKind.PUT, at)
+            return
         if sample.kind == zenoh.SampleKind.PUT:
             # the token counts at once; its descriptor is read after it. Until
             # then "An incumbent whose major is not known, its descriptor not
@@ -210,13 +257,14 @@ class Follower:
             with self.lock:
                 known = inst in self.view.instances
                 self.hold.token(inst, True)
-                self._heard_at[inst] = time.monotonic()
+                self._heard_at[inst] = at
             self._incumbent_changed()
             if not known:
                 self._get_descriptor(inst)
             return
         with self.lock:
             self.hold.token(inst, False)
+            self._gone_at[inst] = at
             empty = not self.view.holders
         self._incumbent_changed()
         if empty:
@@ -225,8 +273,12 @@ class Follower:
             self._reread_soon()
 
     def _reread_soon(self) -> None:
+        """One read again for a burst of withdrawals (observer §3.6). A
+        withdrawal heard while one is in flight is not that read's to serve,
+        since it was asked before: another follows it (round 128's mend)."""
         with self.lock:
             if self._rereading:
+                self._again = True
                 return
             self._rereading = True
 
@@ -236,6 +288,9 @@ class Follower:
             finally:
                 with self.lock:
                     self._rereading = False
+                    again, self._again = self._again, False
+                if again:
+                    self._reread_soon()
 
         t = threading.Timer(0.1, go)
         t.daemon = True
@@ -243,11 +298,22 @@ class Follower:
 
     def _reread(self) -> None:
         """The read again after a withdrawal, on the reading session (observer
-        §3.7). It adds a holder the watch missed. It removes one only where
-        the read is complete and the holder's token was heard before the read
-        was asked: zenoh orders two sessions' messages at no router, so a
-        read asked before a token's appearance can be answered without it,
-        and never undoes what the watch heard after it (round 128)."""
+        §3.7), weighed against what the watch heard since it was asked
+        (observer 0.38 §3.6, "A read never undoes a token heard since it was
+        asked"; round 128, F-629): zenoh orders two sessions' messages at no
+        router, so the read can be answered without a token the watch heard
+        declared after the ask, or with one it heard withdrawn after it.
+        - It removes a holder only where the read is complete and the watch
+          last heard that holder declared before the read was asked: "A
+          reader MUST NOT apply such a read's absence to a token heard
+          since."
+        - It adds a holder the read shows that the watch missed, but not one
+          the watch heard withdrawn since the ask: the read's reply was sent
+          before that withdrawal, and the withdrawal stands (zk2py's reading
+          of the rule's mirror, as :class:`zk2py.presence.PresenceView`
+          folds it; F-635).
+        The watch's times are its callback's, not the worker's (round 128's
+        mend)."""
         asked = time.monotonic()
         p = live.list_presence(self.reader, f"zk2/{self.address}/@zk/**", GET_TIMEOUT_S)
         self.counts["presence_reads"] = self.counts.get("presence_reads", 0) + 1
@@ -257,14 +323,20 @@ class Follower:
                  and a["iface"] == self.iface}
         with self.lock:
             for i in shown - self.view.holders:
+                if self._gone_at.get(i, 0.0) > asked:
+                    self.counts["kept_withdrawn"] = self.counts.get("kept_withdrawn", 0) + 1
+                    continue
                 self.hold.token(i, True)
                 self._heard_at[i] = asked
             if p.kind == live.COMPLETE:
-                for i in [i for i in self.view.holders - shown if self._heard_at.get(i, 0.0) < asked]:
-                    self.hold.token(i, False)
-        for i in shown:
+                for i in sorted(self.view.holders - shown):
+                    if self._heard_at.get(i, 0.0) < asked:
+                        self.hold.token(i, False)
+                    else:
+                        self.counts["kept_heard_since"] = self.counts.get("kept_heard_since", 0) + 1
+        for i in sorted(shown):
             with self.lock:
-                known = i in self.view.instances
+                known = i in self.view.instances or i not in self.view.holders
             if not known:
                 self._get_descriptor(i)
         self._incumbent_changed()
@@ -426,18 +498,25 @@ class Follower:
                         target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
                         timeout=GET_TIMEOUT_S)
         replies = []
+        # "complete", as consume --follow's seeded line says it (round 128's
+        # mend: the reference's says true of a GET that drew no reply): the
+        # GET reached its final reply with no error reply
+        ended, errors = False, 0
         while True:
             try:
                 r = q.get(timeout=GET_TIMEOUT_S + 2)
             except queue.Empty:
                 break
             if r is done:
+                ended = True
                 break
             if r.ok is not None:
                 replies.append(r.ok)
+            else:
+                errors += 1
         tracker = ss.Tracker()
         snapshots = 0
-        complete = False
+        complete = ended and errors == 0
         with self.lock:
             self.counts["seeds"] += 1
             for smp in replies:
@@ -471,7 +550,6 @@ class Follower:
                         # "snapshots": those merged, the incumbent's, as the
                         # reference's line counts them
                         snapshots += 1
-                        complete = True
                     self._maybe_read(step.asks_read)
                     continue
                 # a reply per key: a mutation, or a delete
@@ -482,8 +560,6 @@ class Follower:
                          "delete": smp.kind == zenoh.SampleKind.DELETE, "seeded": True}
                 step = self.hold.sample(sid, key, "state", run, None if env is None or env.stamp is None
                                         else env.stamp.seq, stamp, value=value)
-                if step.accepted:
-                    complete = True
                 self._maybe_read(step.asks_read)
             self.emit({"follow": "seeded", "provider": self.address, "incumbent": incumbent,
                        "complete": complete, "snapshots": snapshots})

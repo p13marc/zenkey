@@ -1,0 +1,21 @@
+# zk2py's round 128's mend (#609, #987): a redundancy.v2 interface whose
+# state is a per-key resource by core §4.2's first row, a state that
+# declares freshness.ttl_s above 0 of a contract that does not use
+# freshness.v2. redundancy.v2 §2.6: "A state of an interface this major
+# governs is answered by snapshot ... unless another row of core §4.2's
+# list of per-key resources names it." Core §4.3's table gives it a Zenoh
+# timestamp its owner sets, where redundancy.v2 §2.10 gives a candidate's
+# puts none (F-637).
+[interface]
+name  = "tally"
+major = 1
+minor = 0
+uses  = ["freshness.v1", "redundancy.v2"]
+
+[defaults]
+annotations = { "redundancy.election" = "claim" }
+
+[resources.count]
+kind        = "state"
+type        = { raw = "text/plain" }
+annotations = { "freshness.ttl_s" = 5 }

@@ -2,7 +2,7 @@
 0.1), live, in both pairings (#609, round 128; #987)::
 
     python -m zk2py.redundancy_v2_scenarios --pairing zk2py-cand|ref-cand
-        [--only 1|9|13|14|15|hb|tool]... [--bin DIR]
+        [--only 1|9|13|14|15|hb|hb-takeover|perkey|tool]... [--bin DIR] [--repeat N]
 
 - ``zk2py-cand``: every candidate is zk2py's (``python -m
   zk2py.redundancy_owner``), and K is the reference's ``consume --follow``.
@@ -49,11 +49,15 @@ CONTRACTS = REPO / "zenkey" / "tests" / "contracts"
 LEDGER_RUN = str(CONTRACTS / "ledger-run.v1.toml")
 LEDGER_V1 = str(CONTRACTS / "ledger.v1.toml")
 BEACON_RUN = str(CONTRACTS / "beacon-governed-run.v2.toml")
+#: zk2py's own: a redundancy.v2 interface whose state is per key (round 128's mend)
+TALLY = str(REPO / "impl" / "python" / "interop" / "redundancy" / "tally.v1.toml")
 LEDGER = rs.LEDGER
 A_ID, B_ID, C_ID = rs.A_ID, rs.B_ID, rs.C_ID
 BALANCE = rs.BALANCE
-BIN = Path(os.environ.get("ZK2PY_BIN", "/srv/dev/scratch/zenkey/bin/91c62f0e"))
+BIN = Path(os.environ.get("ZK2PY_BIN", "/srv/dev/scratch/zenkey/bin/ea4f363c"))
 PAIRING = {"name": "zk2py-cand"}
+#: ``--repeat``: how many takeovers ``hb-takeover`` runs (round 128's mend)
+REPEAT = {"n": 3}
 
 
 def cand_impl() -> Any:
@@ -482,6 +486,30 @@ def section13(rp: Report) -> None:
                          v2 is not None and v2["run"] == rb and v2["record"] == "b1" and bool(within),
                          f"{v2}; seeded {None if not seeds or t_b is None else round(seeds[0][0] - t_b, 3)} s after "
                          f"B's token at S")
+                # Appendix B's bytes under this major (round 128's mend): B's
+                # descriptor puts, marked and unmarked, and its puts of balance
+                # as S received them, with the id each Zenoh timestamp names
+                dkey = f"zk2/{LEDGER}/@zk/instance/{B_ID}"
+                zr = rs.zid_value(str(bus.r1.zid()))
+                with bus.s.lock:
+                    raw = list(bus.s.raw)
+                descs = []
+                for t, key, pl, ts in raw:
+                    if key == dkey:
+                        try:
+                            mark = ((json.loads(pl).get("interfaces") or [{}])[0]).get("standby") is True
+                        except (ValueError, AttributeError, IndexError):
+                            mark = None
+                        descs.append(("marked" if mark else "unmarked", len(pl)))
+                bals = []
+                for t, key, pl, ts in raw:
+                    env = env_of(pl) if key == BALANCE and t >= t_k else None
+                    if env is not None and env.stamp is not None and env.stamp.run_hex() == rb:
+                        bals.append((len(pl), len(env.record or b""),
+                                     "R1's" if stamp_id(ts) == zr else ("none" if ts is None else "another's")))
+                rp.note(sec, f"({tag}) Appendix B under redundancy.v2: B's descriptor puts (mark, bytes) "
+                             f"{sorted(set(descs))}; B's puts of balance under its run (payload bytes, record "
+                             f"bytes, the stamp S records) {bals}")
             else:
                 om = k.of("omitted", after=t_k)
                 rp.check(sec, f"3. ({tag}) B's snapshot of balance is complete and lists no entry; K applies the "
@@ -753,15 +781,26 @@ def section_hb(rp: Report) -> None:
 
 
 def section_hb_takeover(rp: Report) -> None:
-    """§2.10 "How often. Never at a takeover, since a standby states its run
-    from its claim on (Appendix B)": both followers start after B's claim,
-    read nothing of B before its takeover, and B's first heartbeats after
-    its interface token are read. Run three times."""
+    """§2.10 "How often" and §13's Expected 2, as round 128's mend words
+    them, at the takeover of a ``beacon-governed-run.v2`` address: A serves,
+    B stands by, both followers start after B's claim, and A is killed.
+    - "How often" (F-631): a follower that holds none of B's runs "learns
+      the run from the new holder's descriptor, read at its token. A sample
+      between the two is held." A heartbeat that overtakes B's token is
+      discarded ``no_incumbent`` (the rule's step 1).
+    - §13's step (observer 0.38 §3.6, F-629): "K keeps B as its incumbent:
+      the read says nothing of that token. Over 39 takeovers, K never reads B
+      gone. It accepts each later heartbeat of B's."
+    Run ``--repeat`` times (3); round 128 ran it 39 times with the
+    reference's candidates and 15 with zk2py's."""
     sec = f"heartbeats at a takeover, followers started after B's claim [{label()}]"
-    for n in range(3):
+    addr = "lab/beacon"
+    alive_b = f"zk2/{addr}/@zk/alive/beacon.v2/{B_ID}"
+    tally: dict[str, dict[str, int]] = {w: {"runs": 0, "lost": 0, "held": 0, "late_discards": 0, "passed": 0}
+                                        for w in ("rust", "zk2py")}
+    for n in range(REPEAT["n"]):
         bus = V2Bus()
         try:
-            addr = "lab/beacon"
             a = bus.inst(cand_impl(), "a", A_ID, address=addr, contract=BEACON_RUN)
             _wait(a.serving, 6.0)
             b = bus.inst(cand_impl(), "b", B_ID, address=addr, contract=BEACON_RUN)
@@ -774,21 +813,130 @@ def section_hb_takeover(rp: Report) -> None:
             tk = a.kill()
             _wait(b.serving, 10.0, 0.05)
             time.sleep(2.5)
+            b_gone = bus.s.token_times("delete", alive_b, tk)
             for who, k in ks.items():
-                first = [(round(t - tk, 3), j["follow"], j.get("seq"), j.get("reason")) for t, j in
-                         k.timed("heartbeat", "heartbeat_held", "heartbeat_discarded", after=tk)
-                         if j.get("run") == rb][:3]
-                inc = [(round(t - tk, 3), j.get("incumbent")) for t, j in k.timed("incumbent", after=tk)]
-                held = [x for x in first if x[1] == "heartbeat_held"]
-                rp.note(sec, f"run {n + 1}, {who}'s follower: B's first heartbeats {first}; incumbent {inc}")
-                # rule step 1: one that overtakes B's token is no_incumbent;
-                # "Never at a takeover": none is held
-                rp.check(sec, f"run {n + 1}, {who}'s follower reads B's heartbeats under B's run after its takeover: "
-                              "none held, and none discarded but no_incumbent before B's token reached it",
-                         bool(first) and not held and any(x[1] == "heartbeat" for x in first)
-                         and all(x[3] == "no_incumbent" and bool(inc) and inc[-1][0] >= x[0] - 0.002
-                                 for x in first if x[1] == "heartbeat_discarded"),
-                         f"held {len(held)}")
+                lines = [(t, j) for t, j in k.timed("heartbeat", "heartbeat_held", "heartbeat_discarded", after=tk)
+                         if j.get("run") == rb]
+                first = [(round(t - tk, 3), j["follow"], j.get("seq"), j.get("reason")) for t, j in lines][:3]
+                inc = [(t, j.get("incumbent")) for t, j in k.timed("incumbent", after=tk)]
+                at_b = next((t for t, x in inc if x == B_ID), None)
+                lost = at_b is not None and any(x != B_ID for t, x in inc if t > at_b)
+                end = k.ask(f"incumbent {addr}").get("incumbent")
+                # zk2py's own counts: its reads again, and the tokens heard
+                # since each was asked that a read's absence did not undo
+                kept = ""
+                if who == "zk2py":
+                    cs = k.ask("counts")
+                    c_kept = cs.get("kept_heard_since", 0)
+                    tally[who]["kept"] = tally[who].get("kept", 0) + c_kept
+                    kept = f"; reads again {cs.get('presence_reads', 0)}, B kept over a read's absence {c_kept}"
+                held = {j.get("seq") for _, j in lines if j["follow"] == "heartbeat_held"}
+                took = {j.get("seq") for _, j in lines if j["follow"] == "heartbeat"}
+                # a discard after K made B its incumbent, beyond the 2 ms a
+                # line and the incumbent's line can be apart
+                late = [j for t, j in lines if j["follow"] == "heartbeat_discarded"
+                        and (at_b is None or t > at_b + 0.002 or j.get("reason") != "no_incumbent")]
+                c = tally[who]
+                c["runs"] += 1
+                c["lost"] += int(lost)
+                c["held"] += int(bool(held))
+                c["late_discards"] += len(late)
+                rp.note(sec, f"run {n + 1}, {who}'s follower: B's first heartbeats {first}; incumbent "
+                             f"{[(round(t - tk, 3), x) for t, x in inc]}; at the end {end}; B withdrawn at S "
+                             f"{len(b_gone)}{kept}")
+                ok = (bool(took) and not lost and end == B_ID and not late and held <= took and not b_gone)
+                c["passed"] += int(ok)
+                rp.check(sec, f"run {n + 1}, {who}'s follower: B its incumbent from B's token on, never read gone "
+                              "(observer 0.38 §3.6); each later heartbeat of B's accepted under B's run, one held "
+                              "between B's token and its descriptor's read accepted after it, and none discarded "
+                              "but no_incumbent before B's token reached it (§2.10 \"How often\")",
+                         ok, f"lost {lost}, at the end {end}, held {sorted(held)}, accepted {len(took)}, "
+                             f"discarded after B's token {[(j.get('seq'), j.get('reason')) for j in late]}")
+        finally:
+            bus.close()
+    for who, c in tally.items():
+        rp.note(sec, f"{who}'s follower over {c['runs']} takeovers: incumbent lost in {c['lost']}, a heartbeat held "
+                     f"in {c['held']}, {c['late_discards']} of B's heartbeats discarded after B's token, "
+                     f"{c['passed']} passed"
+                     + (f", B kept over a read's absence {c.get('kept', 0)} times" if who == "zk2py" else ""))
+
+
+def section_perkey(rp: Report) -> None:
+    """A per-key state under ``redundancy.v2`` (round 128's mend): zk2py's
+    ``tally.v1``, whose ``count`` declares ``freshness.ttl_s`` and whose
+    contract uses ``freshness.v1``, so core §4.2's first row makes it a
+    per-key resource, which §2.6 allows ("unless another row of core §4.2's
+    list of per-key resources names it"). A serves, B stands by, both
+    followers start after A's put, and A is killed; in run 2 B takes over
+    putting nothing.
+    - **The stamp** (F-637): core §4.3's table gives such a state "a Zenoh
+      timestamp the owner sets"; §2.10 gives a candidate of this major "no
+      Zenoh timestamp on a put or a delete of the interface's keys". S
+      records whose id each put carries, and G's GET whose each reply does.
+    - **The seed again** (F-636): §2.10's answers are "its snapshots, or its
+      replies per key under a ``redundancy.v1`` incumbent". Each follower's
+      seed at B's token, and what it holds when B answers nothing."""
+    import zenoh
+
+    sec = f"a per-key state under redundancy.v2 [{label()}]"
+    addr = "lab/tally"
+    key = f"zk2/{addr}/tally.v1/state/count"
+    for second in (False, True):
+        bus = V2Bus()
+        tag = "run 2, B puts nothing" if second else "run 1"
+        try:
+            a = bus.inst(cand_impl(), "a", A_ID, address=addr, contract=TALLY)
+            _wait(a.serving, 6.0)
+            b = bus.inst(cand_impl(), "b", B_ID, address=addr, contract=TALLY,
+                         flags=["--takeover-puts-nothing"] if second else [])
+            _wait(b.stands, 8.0)
+            ra, rb = run_of(a), run_of(b)
+            za, zb, zr = rs.zid_value(a.zid() or ""), rs.zid_value(b.zid() or ""), rs.zid_value(str(bus.r1.zid()))
+            who_of = {za: "A's", zb: "B's", zr: "R1's", None: "none"}
+            t0 = time.monotonic()
+            a.cmd("put tally.v1 state/count")
+            time.sleep(0.6)
+            puts_a = [stamp_id(ts) for t, k, kind, p, ts in bus.s.writes(key, t0) if k == key]
+            # G's GET: the replies, each its kind (a snapshot by its envelope's
+            # form, else a reply per key) and its Zenoh timestamp's id
+            replies = []
+            for r in bus.g.get(key, target=zenoh.QueryTarget.ALL, consolidation=zenoh.ConsolidationMode.NONE,
+                               timeout=2.0):
+                if r.ok is None:
+                    continue
+                env = env_of(r.ok.payload.to_bytes())
+                ts = r.ok.timestamp
+                replies.append(("snapshot" if env is not None and env.form == "snapshot" else "per key",
+                                who_of.get(None if ts is None else rs.zid_value(str(ts.get_id())), "another's")))
+            ks = {"rust": KProc("rust", bus.ep1, TALLY, "state/count", address=addr),
+                  "zk2py": KProc("zk2py", bus.ep1, TALLY, "state/count", address=addr)}
+            bus.ks += list(ks.values())
+            _wait(lambda: all(k.of("seeded") for k in ks.values()), 6.0, 0.05)
+            before = {w: k.value(key) for w, k in ks.items()}
+            tk = a.kill()
+            _wait(b.serving, 10.0, 0.05)
+            time.sleep(2.0)
+            puts_b = [stamp_id(ts) for t, k, kind, p, ts in bus.s.writes(key, tk) if k == key]
+            rp.note(sec, f"({tag}) A's puts of count carry the stamp of {[who_of.get(x, 'another') for x in puts_a]}; "
+                         f"B's at its takeover {[who_of.get(x, 'another') for x in puts_b]}; G's GET of count before "
+                         f"the takeover: {replies}")
+            if not second:
+                rp.check(sec, f"({tag}) core §4.2: count is a per-key resource, answered by a reply per key",
+                         bool(replies) and all(x[0] == "per key" for x in replies), f"{replies}")
+            for who, k in ks.items():
+                seeds = [j for j in k.of("seeded", after=tk)]
+                took = [j for j in k.of("accepted", after=tk) if j.get("seeded") and j.get("run") == rb]
+                v = k.value(key)
+                rp.note(sec, f"({tag}) {who}'s follower: before the takeover {before[who]}; seeded at B's token "
+                             f"{seeds}; B's seeded replies accepted {len(took)}; now {v}; {k.brief(tk)}")
+                if not second:
+                    rp.check(sec, f"({tag}) {who}'s follower seeds again at B's token and merges B's reply per key "
+                                  "under B's run, a redundancy.v2 incumbent's",
+                             len(seeds) == 1 and bool(took) and v is not None and v.get("run") == rb, f"{v}")
+                else:
+                    rp.check(sec, f"({tag}) {who}'s follower: B answers nothing, no omission rule applies to "
+                                  "replies per key, and it keeps A's value, the last incumbent's",
+                             v is not None and before[who] is not None and v.get("run") == ra, f"{v}")
         finally:
             bus.close()
 
@@ -936,6 +1084,7 @@ def _doctor_brief(doc: Any) -> str:
 
 SECTIONS = {"1": section1, "9": section9, "13": section13, "14": section14, "15": section15, "hb": section_hb,
             "hb-takeover": section_hb_takeover,
+            "perkey": section_perkey,
             "tool": section_tool}
 
 
@@ -944,7 +1093,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pairing", choices=("zk2py-cand", "ref-cand"), required=True)
     ap.add_argument("--only", action="append", choices=list(SECTIONS))
     ap.add_argument("--bin", help="the black boxes' directory (else $ZK2PY_BIN)")
+    ap.add_argument("--repeat", type=int, default=3, help="hb-takeover's takeovers (3)")
     a = ap.parse_args(argv)
+    REPEAT["n"] = a.repeat
     global BIN
     if a.bin:
         BIN = Path(a.bin)

@@ -6263,6 +6263,98 @@ def _round128b_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                 "round 128 read this entry cold and ran both majors' candidates live.")
                 + ["The reference still refuses a candidate whose session runs without timestamping" in clog],
                 [False, False]))
+
+    # -- the new rule over zk2py's redundancy.v2 follower, its read again stood in -----------------
+    import queue
+    import threading
+    import time
+    import types
+
+    import zenoh
+
+    from . import live, redundancy_v2 as r2, redundancy_v2_live as rl
+
+    a_id, b_id = "00000000000000a1", "00000000000000b2"
+
+    def tok(inst: str, put: bool) -> Any:
+        return types.SimpleNamespace(key_expr=f"zk2/lab/beacon/@zk/alive/beacon.v2/{inst}/0000000000000001",
+                                     kind=zenoh.SampleKind.PUT if put else zenoh.SampleKind.DELETE)
+
+    def follower() -> Any:
+        f = rl.Follower.__new__(rl.Follower)
+        f.lock, f.view = threading.RLock(), r2.View()
+        f.hold = rl._Hold(f.view, f)
+        f._heard_at, f._gone_at, f._samples = {}, {}, {}
+        f.counts = {"accepted": 0, "discarded": {}, "held": 0, "superseded": 0, "omitted": 0, "reads": 0,
+                    "seeds": 0}
+        f.address, f.iface, f.kind, f._incumbent = "lab/beacon", "beacon.v2", "state", None
+        f._work, f.reader, f.t0 = queue.Queue(), None, time.monotonic()
+        f._rereading = True  # the read again is made here, by hand, never by its timer
+        f._again, f._started, f._early = False, True, {}
+        f.emit_fn = lambda j: None
+        f._get_descriptor = lambda inst: None
+        return f
+
+    def reread(f: Any, during: list[tuple[str, bool, str]], shows: list[str]) -> list[Any]:
+        """A's token heard then withdrawn; the read again asked, the watch
+        hearing ``during`` meanwhile ("since", stamped after the ask, or
+        "before", stamped before it but taken up after); the read complete,
+        showing ``shows``. What the follower then holds, and its counts."""
+        f._token((tok(a_id, True), time.monotonic()))
+        before = time.monotonic()
+        f._token((tok(a_id, False), time.monotonic()))
+        for inst, put, when in during:
+            if when == "before":
+                f._token((tok(inst, put), time.monotonic()))
+        presence = live.Presence(alive=[{"system": "lab", "service": "beacon", "iface": "beacon.v2",
+                                         "instance": i} for i in shows], complete=True)
+
+        def stood_in(session: Any, selector: str, timeout: float) -> Any:
+            for inst, put, when in during:
+                if when == "since":
+                    f._token((tok(inst, put), time.monotonic()))
+                elif when == "late":
+                    # heard by the watch before the ask, taken up by the
+                    # worker after it
+                    f._token((tok(inst, put), before))
+            return presence
+
+        real = live.list_presence
+        live.list_presence = stood_in  # type: ignore[assignment]
+        f._again = False  # A's withdrawal asked this read
+        try:
+            f._reread()
+        finally:
+            live.list_presence = real  # type: ignore[assignment]
+        return [sorted(f.view.holders), f.view.incumbent(),
+                {k: f.counts.get(k, 0) for k in ("kept_heard_since", "kept_withdrawn")}, f._again]
+
+    got_f = {
+        "B heard since the ask, the read without it": reread(follower(), [(b_id, True, "since")], []),
+        "B heard before the ask, the read without it": reread(follower(), [(b_id, True, "before")], []),
+        "B heard before the ask, taken up after it, the read without it":
+            reread(follower(), [(b_id, True, "late")], []),
+        "B heard declared and withdrawn since, the read showing it":
+            reread(follower(), [(b_id, True, "since"), (b_id, False, "since")], [b_id]),
+        "B never heard, the read showing it": reread(follower(), [], [b_id]),
+    }
+    out.append(("observer 0.38 §3.6 over zk2py's redundancy.v2 follower (redundancy_v2_live.Follower, round 128's "
+                "mend), its read again stood in: a token heard declared after the ask stands over the read's "
+                "absence, B kept as the incumbent (F-629); one heard before the ask is undone, by the time the "
+                "watch heard it even where the worker takes it up after the ask; a withdrawal heard since the ask "
+                "stands over the read's showing, and owes another read, the one in flight asked before it (zk2py's "
+                "reading, F-635); a token the watch missed is added",
+                got_f,
+                {"B heard since the ask, the read without it":
+                     [[b_id], b_id, {"kept_heard_since": 1, "kept_withdrawn": 0}, False],
+                 "B heard before the ask, the read without it":
+                     [[], None, {"kept_heard_since": 0, "kept_withdrawn": 0}, False],
+                 "B heard before the ask, taken up after it, the read without it":
+                     [[], None, {"kept_heard_since": 0, "kept_withdrawn": 0}, False],
+                 "B heard declared and withdrawn since, the read showing it":
+                     [[], None, {"kept_heard_since": 0, "kept_withdrawn": 1}, True],
+                 "B never heard, the read showing it":
+                     [[b_id], b_id, {"kept_heard_since": 0, "kept_withdrawn": 0}, False]}))
     return out
 
 
