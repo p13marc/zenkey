@@ -1,4 +1,4 @@
-# Constrained scenarios (core §1.6, R7, §8.1, §8.2, §8.4, §8.5, §12)
+# Constrained scenarios (core §1.6, R7, §3.3, §8.1, §8.2, §8.4, §8.5, §12)
 
 Common setup: a vehicle router with 50 services, and a link to the ground
 shaped as a serial line at 2,400 bit/s with a 200 ms RTT.
@@ -154,7 +154,7 @@ runtime has declared the key's prefix toward the router.
 *The reference: `zenkey/tests/constrained.rs` (§8, §9 steps 1, 3 and 4)
 and `zenkey-fleet/tests/redeclare.rs` (step 2).*
 
-## §10 A first-hop device (§8.1, §8.2, §8.4, §8.5; observer §3.11, §7.1)
+## §10 A first-hop device (§3.3, §8.1, §8.2, §8.4, §8.5; observer §3.6, §3.11, §7.1)
 
 **Setup.**
 - One router. A device owner at `lab/probe-a` is its client through a
@@ -182,6 +182,11 @@ and `zenkey-fleet/tests/redeclare.rs` (step 2).*
    with no tokenless set and its bundles held.
 6. A device configured for a first hop that also implements
    `zs.catalog.v1`, whose contract uses `redundancy.v1`, is started.
+7. **The compact descriptor.** The device of step 1 starts again. It is
+   given the deployment catalog of its three revisions (§8.6). It takes
+   new runs, as at step 3. The proxy counts the bytes that cross toward
+   the router at each descriptor put, at step 3 too. A second tool and a
+   second consumer hold no catalog.
 
 **Expected.**
 1. Toward the router the proxy counts one `DeclareToken`, the instance
@@ -209,3 +214,21 @@ and `zenkey-fleet/tests/redeclare.rs` (step 2).*
    alone: the face denied the rest once it had crossed (Appendix B).
 6. The device does not start: step 2 of §8.2 refuses it, and no instance
    token crosses.
+7. The device writes its descriptor in the compact form (§3.3, §8.1).
+   - Its puts and its GET's reply are under `zenoh/bytes`. Each states the
+     run the device writes under.
+   - A put across the hop is less than a quarter of step 3's JSON put.
+   - The tool holding the catalog reads the members step 1's descriptor
+     states, its `meta.zid` among them. It retrieves the three revisions
+     from the near holder (§8.4).
+   - The consumer holding the catalog ends its wait.
+   - The second tool reads the descriptor as not read
+     (`unknown_catalog`).
+   - The second consumer's wait does not end. The device is unobservable
+     to it, never absent (observer §3.6).
+   - Toward the router the proxy still counts the instance token alone.
+
+*The reference: `zenkey/tests/constrained.rs` and
+`zenkey-fleet/tests/first_hop.rs`. Step 7's put measured 47 B across the
+hop, its payload 36 B with a 32-bit run and the zid, against step 3's
+695 B and 664 B.*
