@@ -24,16 +24,22 @@
 # talkers, captures). The other 12 (tls, matrix, elephant_flows, dns, http, quic, ssh, encrypted_dns,
 # ja4h, assets, ipfix, bandwidth) take the same shape: request = their selector parameters,
 # response = one record, replies = many, fanout allowed, and their v1 `when` as optional + gate.
+#
+# Revision 1.3 (#1149 Z2): telemetry.v2 in place of telemetry.v1, and link.v2. The 66 untemplated
+# and closed-family readings also cross in two frames, `frames/flows` and `frames/protocols`; the
+# open families (per source, method, ICMP kind, app, detector, parser) stay Point streams on the
+# host bus until templated series exist (telemetry.v2 Appendix A).
 
 [interface]
 name    = "zs.netring"
 major   = 1
-minor   = 2
+minor   = 3
 summary = "Wire-level flow, L7 and NDR telemetry of one host's capture points, and its controls"
-uses    = ["telemetry.v1", "freshness.v2"]
+uses    = ["telemetry.v2", "freshness.v2", "link.v2"]
 
 [schemas]
 jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.netring.v1.json"]
+packed     = ["schemas/zs.netring.v1-frames.json"]
 
 # --- configuration topics: state for the current value, an operation to replace it ---
 # v1 served the current value as a read procedure (`<topic>`) and the change as `<topic>/set`, both
@@ -567,3 +573,121 @@ params      = { quantile = "string" }
 cardinality = 5
 annotations = { "telemetry.unit" = "ms" }
 doc         = "flow-lifetime RED quantiles from the capture path"
+
+# --- telemetry: frames (telemetry.v2, since revision 1.3; #1149 Z2) ------------------------------
+# Core §7.7's frame resources over the packed records of schemas/zs.netring.v1-frames.json:
+# `frames/flows` (`Flows`, 35 readings) and `frames/protocols` (`Protocols`, 31).
+# - One record a frame, its time measured, so the cadence is the owner's configuration, put where
+#   it enables the frame (`config:frames.<name>`): a face's, one a minute. The Point streams above
+#   stay, on the host bus, as before (telemetry.v2 §1).
+# - A full record at least every 15, so a horizon of 300 s; deadbands on the readings that wander.
+#   Each frame's largest payload fits one RF SDU under the lean stack (the README's "Frames").
+# - Each field is an inline series of `telemetry.series`, its kind and unit stated there: a mirror
+#   would need a `telemetry.kind` on the Point stream, which none declares (telemetry.v2 §2.16).
+#   The field is the reading's template with / and . as _. The series is the frame key and the
+#   field, never the Point's key (§2.17), and its epoch is the frame's run (§2.19).
+# - Exposed `link`, the only resources of this contract that are: each crosses a face that lists
+#   it (link.v2 §2.7, §2.17), and is liveness evidence there (§2.12).
+
+[resources."frames/flows"]
+kind     = "stream"
+type     = "packed:Flows"
+optional = true
+gate     = "config:frames.flows"
+doc      = "netring's flow, L4, RED, TCP-close and capture readings, the closed families flattened, in one record: a delta each frame and a full record at least every 15, for a face that carries one a minute"
+
+[resources."frames/flows".frame]
+records        = 1
+keyframe_every = 15
+
+[resources."frames/flows".frame.deadband]
+flow_active = { delta = "64", max_records = 5 }
+
+[resources."frames/flows".annotations]
+"link.exposure"   = "link"
+"freshness.ttl_s" = 300
+
+[resources."frames/flows".annotations."telemetry.series"]
+flow_started_total              = { kind = "counter", unit = "1" }
+flow_ended_total                = { kind = "counter", unit = "1" }
+flow_active                     = { kind = "gauge", unit = "1" }
+flow_bytes_total                = { kind = "counter", unit = "By" }
+flow_packets_total              = { kind = "counter", unit = "1" }
+flow_retransmits_total          = { kind = "counter", unit = "1" }
+flow_reassembly_gaps_total      = { kind = "counter", unit = "1" }
+flow_reassembly_gap_bytes_total = { kind = "counter", unit = "By" }
+flow_by_l4_tcp_bytes_total      = { kind = "counter", unit = "By" }
+flow_by_l4_tcp_flows_total      = { kind = "counter", unit = "1" }
+flow_by_l4_udp_bytes_total      = { kind = "counter", unit = "By" }
+flow_by_l4_udp_flows_total      = { kind = "counter", unit = "1" }
+flow_by_l4_icmp_bytes_total     = { kind = "counter", unit = "By" }
+flow_by_l4_icmp_flows_total     = { kind = "counter", unit = "1" }
+flow_red_rate                   = { kind = "gauge", unit = "1/s" }
+flow_red_error_ratio            = { kind = "gauge", unit = "1" }
+flow_red_p50_ms                 = { kind = "gauge", unit = "ms" }
+flow_red_p95_ms                 = { kind = "gauge", unit = "ms" }
+flow_red_p99_ms                 = { kind = "gauge", unit = "ms" }
+tcp_closed_fin_total            = { kind = "counter", unit = "1" }
+tcp_closed_rst_total            = { kind = "counter", unit = "1" }
+tcp_closed_idle_total           = { kind = "counter", unit = "1" }
+tcp_resets_total                = { kind = "counter", unit = "1" }
+tcp_refused_total               = { kind = "counter", unit = "1" }
+capture_focus_packets           = { kind = "counter", unit = "1" }
+capture_focus_bytes             = { kind = "counter", unit = "By" }
+capture_disk_mode               = { kind = "text" }
+capture_disk_ring_packets       = { kind = "gauge", unit = "1" }
+capture_disk_ring_bytes         = { kind = "gauge", unit = "By" }
+capture_disk_retained_files     = { kind = "gauge", unit = "1" }
+capture_disk_retained_bytes     = { kind = "gauge", unit = "By" }
+capture_disk_dropped            = { kind = "counter", unit = "1" }
+capture_disk_evictions          = { kind = "counter", unit = "1" }
+capture_disk_triggers           = { kind = "counter", unit = "1" }
+capture_backend                 = { kind = "text" }
+
+[resources."frames/protocols"]
+kind     = "stream"
+type     = "packed:Protocols"
+optional = true
+gate     = "config:frames.protocols"
+doc      = "netring's DNS (its five rcode classes flattened), HTTP, ICMP, TLS, QUIC, SSH and asset readings, in one record: a delta each frame and a full record at least every 15, for a face that carries one a minute"
+
+[resources."frames/protocols".frame]
+records        = 1
+keyframe_every = 15
+
+[resources."frames/protocols".annotations]
+"link.exposure"   = "link"
+"freshness.ttl_s" = 300
+
+[resources."frames/protocols".annotations."telemetry.series"]
+dns_queries_total                     = { kind = "counter", unit = "1" }
+dns_unanswered_total                  = { kind = "counter", unit = "1" }
+dns_query_rtt_p50_ms                  = { kind = "gauge", unit = "ms" }
+dns_query_rtt_p95_ms                  = { kind = "gauge", unit = "ms" }
+dns_query_rtt_p99_ms                  = { kind = "gauge", unit = "ms" }
+dns_responses_by_rcode_noerror_total  = { kind = "counter", unit = "1" }
+dns_responses_by_rcode_nxdomain_total = { kind = "counter", unit = "1" }
+dns_responses_by_rcode_servfail_total = { kind = "counter", unit = "1" }
+dns_responses_by_rcode_refused_total  = { kind = "counter", unit = "1" }
+dns_responses_by_rcode_other_total    = { kind = "counter", unit = "1" }
+dns_encrypted_distinct                = { kind = "gauge", unit = "1" }
+dns_encrypted_dot                     = { kind = "counter", unit = "1" }
+dns_encrypted_doq                     = { kind = "counter", unit = "1" }
+dns_encrypted_doh                     = { kind = "counter", unit = "1" }
+dns_encrypted_unknown_resolver        = { kind = "counter", unit = "1" }
+http_requests_total                   = { kind = "counter", unit = "1" }
+http_status_2xx_total                 = { kind = "counter", unit = "1" }
+http_status_3xx_total                 = { kind = "counter", unit = "1" }
+http_status_4xx_total                 = { kind = "counter", unit = "1" }
+http_status_5xx_total                 = { kind = "counter", unit = "1" }
+http_latency_p50_ms                   = { kind = "gauge", unit = "ms" }
+http_latency_p95_ms                   = { kind = "gauge", unit = "ms" }
+icmp_unreachable_total                = { kind = "counter", unit = "1" }
+icmp_time_exceeded_total              = { kind = "counter", unit = "1" }
+icmp_mtu_signal_total                 = { kind = "counter", unit = "1" }
+tls_handshakes_total                  = { kind = "counter", unit = "1" }
+tls_distinct_fingerprints             = { kind = "gauge", unit = "1" }
+tls_pq_ratio                          = { kind = "gauge", unit = "1" }
+quic_distinct_sni                     = { kind = "gauge", unit = "1" }
+ssh_distinct_hassh                    = { kind = "gauge", unit = "1" }
+assets_discovered                     = { kind = "gauge", unit = "1" }

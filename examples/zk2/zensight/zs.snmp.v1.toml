@@ -27,16 +27,22 @@
 # catch-all. Trap counters (v1 {device}/trap/<name>) ride metrics/trap/<name>.
 # Cardinalities are v1's, which bound the WHOLE poller (up to 64 devices). Per device they are
 # lower, and draft 0 has no per-instance value (Gap G2).
+#
+# Revision 1.3 (#1149 Z2): telemetry.v2 in place of telemetry.v1, and link.v2. The device's 18
+# numeric untemplated readings also cross in one frame, `frames/device`; the tables (per
+# interface, storage, sensor, outlet, line) and `metrics/{metric...}` stay Point streams on the
+# host bus until templated series exist (telemetry.v2 Appendix A).
 
 [interface]
 name    = "zs.snmp"
 major   = 1
-minor   = 2
+minor   = 3
 summary = "One SNMP-polled device: its metric tree, interface table, traps and outlet control"
-uses    = ["telemetry.v1", "freshness.v2"]
+uses    = ["telemetry.v2", "freshness.v2", "link.v2"]
 
 [schemas]
 jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.snmp.v1.json"]
+packed     = ["schemas/zs.snmp.v1-frames.json"]
 
 # --- state ---
 
@@ -946,3 +952,61 @@ type        = "json:telemetry.v1.Point"
 params      = { index = "string" }
 cardinality = 512
 doc         = "PDU inlet load as a percentage (Eaton inputCurrentPercentLoad) (v1: {device}/pdu/input/{index}/percent_load)"
+
+# --- telemetry: frames (telemetry.v2, since revision 1.3; #1149 Z2) ------------------------------
+# Core §7.7's frame resources over the packed records of schemas/zs.snmp.v1-frames.json:
+# `frames/device` (`Device`, 18 readings).
+# - One record a frame, its time measured, so the cadence is the owner's configuration, put where
+#   it enables the frame (`config:frames.<name>`): a face's, one a minute. The Point streams above
+#   stay, on the host bus, as before (telemetry.v2 §1).
+# - A full record at least every 15, so a horizon of 300 s; deadbands on the readings that wander.
+#   Each frame's largest payload fits one RF SDU under the lean stack (the README's "Frames").
+# - Each field is an inline series of `telemetry.series`, its kind and unit stated there: a mirror
+#   would need a `telemetry.kind` on the Point stream, which none declares (telemetry.v2 §2.16).
+#   The field is the reading's template with / and . as _. The series is the frame key and the
+#   field, never the Point's key (§2.17), and its epoch is the frame's run (§2.19).
+# - Exposed `link`, the only resources of this contract that are: each crosses a face that lists
+#   it (link.v2 §2.7, §2.17), and is liveness evidence there (§2.12).
+
+[resources."frames/device"]
+kind     = "stream"
+type     = "packed:Device"
+optional = true
+gate     = "config:frames.device"
+doc      = "the device's numeric untemplated readings (its uptime, a NAS's system numbers, a UPS's), in one record: a delta each frame and a full record at least every 15, for a face that carries one a minute; a reading the device lacks is absent, one bit"
+
+[resources."frames/device".frame]
+records        = 1
+keyframe_every = 15
+
+[resources."frames/device".frame.deadband]
+system_uptime                 = { delta = "900", max_records = 15 }
+nas_system_temperature_c      = { delta = "1", max_records = 5 }
+ups_battery_minutes_remaining = { delta = "1", max_records = 5 }
+ups_battery_voltage_dv        = { delta = "2", max_records = 5 }
+ups_battery_current_da        = { delta = "2", max_records = 5 }
+ups_battery_temperature_c     = { delta = "1", max_records = 5 }
+
+[resources."frames/device".annotations]
+"link.exposure"   = "link"
+"freshness.ttl_s" = 300
+
+[resources."frames/device".annotations."telemetry.series"]
+system_uptime                  = { kind = "gauge", unit = "s" }
+nas_system_status              = { kind = "gauge", unit = "1" }
+nas_system_temperature_c       = { kind = "gauge", unit = "Cel" }
+nas_system_power_status        = { kind = "gauge", unit = "1" }
+nas_system_fan_status          = { kind = "gauge", unit = "1" }
+nas_system_cpu_fan_status      = { kind = "gauge", unit = "1" }
+ups_battery_status             = { kind = "gauge", unit = "1" }
+ups_battery_seconds_on_battery = { kind = "gauge", unit = "s" }
+ups_battery_minutes_remaining  = { kind = "gauge", unit = "min" }
+ups_battery_charge_percent     = { kind = "gauge", unit = "%" }
+ups_battery_voltage_dv         = { kind = "gauge", unit = "dV" }
+ups_battery_current_da         = { kind = "gauge", unit = "dA" }
+ups_battery_temperature_c      = { kind = "gauge", unit = "Cel" }
+ups_input_line_bads            = { kind = "counter", unit = "1" }
+ups_input_line_bads_rate       = { kind = "gauge", unit = "1/s" }
+ups_output_source              = { kind = "gauge", unit = "1" }
+ups_output_frequency_dhz       = { kind = "gauge", unit = "dHz" }
+ups_alarms_present             = { kind = "gauge", unit = "1" }

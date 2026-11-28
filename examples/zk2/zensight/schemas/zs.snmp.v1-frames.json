@@ -1,0 +1,28 @@
+{
+  "description": "zs.snmp.v1's frame record (core sections 7.6, 7.7; telemetry.v2; #1149 Z2): its untemplated readings, and its closed families flattened, one field each, named by the reading's template with / and . as _. Every field is optional: an owner writes a reading it does not have absent, never 0. A range and a resolution are the quantity's own bound where it has one, else a stated guess (examples/zk2/zensight/README.md, \"Frames\"). A counter's width holds its worst rate over 900 s, two keyframes apart at a frame a minute.",
+  "types": {
+    "Device": {
+      "description": "the record of frames/device",
+      "fields": [
+        {"name": "system_uptime", "type": "int", "minimum": 0, "maximum": 42949673, "reserved": ["out_of_range"], "optional": true, "description": "system/uptime: sysUpTime's TimeTicks / 100, at 1 s"},
+        {"name": "nas_system_status", "type": "int", "minimum": 1, "maximum": 2, "reserved": ["out_of_range"], "optional": true},
+        {"name": "nas_system_temperature_c", "type": "int", "minimum": -40, "maximum": 125, "reserved": ["out_of_range"], "optional": true},
+        {"name": "nas_system_power_status", "type": "int", "minimum": 1, "maximum": 2, "reserved": ["out_of_range"], "optional": true},
+        {"name": "nas_system_fan_status", "type": "int", "minimum": 1, "maximum": 2, "reserved": ["out_of_range"], "optional": true},
+        {"name": "nas_system_cpu_fan_status", "type": "int", "minimum": 1, "maximum": 2, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_battery_status", "type": "int", "minimum": 1, "maximum": 4, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_battery_seconds_on_battery", "type": "int", "minimum": 0, "maximum": 16777214, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_battery_minutes_remaining", "type": "int", "minimum": 0, "maximum": 65534, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_battery_charge_percent", "type": "int", "minimum": 0, "maximum": 100, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_battery_voltage_dv", "type": "int", "minimum": 0, "maximum": 65534, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_battery_current_da", "type": "int", "minimum": -32768, "maximum": 32767, "reserved": ["out_of_range"], "optional": true, "description": "ups/battery/current_da: a guess: signed: a battery's current can be negative"},
+        {"name": "ups_battery_temperature_c", "type": "int", "minimum": -40, "maximum": 125, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_input_line_bads", "type": "counter", "width": 12, "optional": true, "description": "ups/input/line_bads: its width holds a worst rate of 1 a second over 900 s, a guess"},
+        {"name": "ups_input_line_bads_rate", "type": "fixed", "minimum": "0", "maximum": "10", "resolution": "0.001", "reserved": ["out_of_range"], "optional": true, "description": "ups/input/line_bads.rate: a guess: a derived rate of a rare event"},
+        {"name": "ups_output_source", "type": "int", "minimum": 1, "maximum": 7, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_output_frequency_dhz", "type": "int", "minimum": 0, "maximum": 1000, "reserved": ["out_of_range"], "optional": true},
+        {"name": "ups_alarms_present", "type": "int", "minimum": 0, "maximum": 255, "reserved": ["out_of_range"], "optional": true}
+      ]
+    }
+  }
+}

@@ -19,13 +19,17 @@
 # alternative is a service per camera, parallax.cam0.
 # The service also implements health.v1, alarms.v1, zs.evidence.v1 (self + device/{camera}),
 # zs.thresholds.v1 and zs.artifacts.v1.
+#
+# Revision 1.3 (#1149 Z2): telemetry.v2 in place of telemetry.v1, by `uses` alone. Its Points read
+# as before (telemetry.v2 §1), and it declares no frame: every reading but streams/advertised is
+# per stream, and a frame resource has no parameter (core §7.7). Video never crosses a face.
 
 [interface]
 name    = "zs.parallax"
 major   = 1
-minor   = 2
+minor   = 3
 summary = "Live video streams of one host: codec tiers, previews, status and receiver feedback"
-uses    = ["media.v1", "telemetry.v1", "freshness.v2"]
+uses    = ["media.v1", "telemetry.v2", "freshness.v2"]
 
 [schemas]
 jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.parallax.v1.json"]

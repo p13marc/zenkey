@@ -24,16 +24,22 @@
 # target posture for telemetry is the baseline tier.
 # No resource declares telemetry.kind: v1 sysinfo declares none, and telemetry.v1.Point's tag
 # self-describes the value (r3.2 §4.9: "no back-fill").
+#
+# Revision 1.3 (#1149 Z2): telemetry.v2 in place of telemetry.v1, and link.v2. The 106 untemplated
+# and closed-family readings also cross in two frames, `frames/host` and `frames/pressure`; the
+# open families (per core, CPU, mount, disk, interface, sensor) stay Point streams on the host bus
+# until templated series exist (telemetry.v2 Appendix A).
 
 [interface]
 name    = "zs.sysinfo"
 major   = 1
-minor   = 2
+minor   = 3
 summary = "Host CPU, memory, disk, network, sensors and GPU metrics of one host"
-uses    = ["telemetry.v1", "freshness.v2"]
+uses    = ["telemetry.v2", "freshness.v2", "link.v2"]
 
 [schemas]
 jsonschema = ["../../../spec/profiles/telemetry/telemetry.v1.json", "schemas/zs.common.json", "schemas/zs.sysinfo.v1.json"]
+packed     = ["schemas/zs.sysinfo.v1-frames.json"]
 
 # --- state ---
 
@@ -920,3 +926,227 @@ cardinality = 32
 optional    = true
 gate        = ["build:nvml", "config:collect.gpu", "capability:nvidia-driver"]
 doc         = "VRAM held by one process on this card (#954). NVML only. Capped at 32 rows per card, largest first \u2014 one key per pid per card is otherwise an unbounded family keyed by something that changes every few seconds. Gate: NVML only: per-process attribution has no sysfs equivalent (#954)"
+
+# --- telemetry: frames (telemetry.v2, since revision 1.3; #1149 Z2) ------------------------------
+# Core §7.7's frame resources over the packed records of schemas/zs.sysinfo.v1-frames.json:
+# `frames/host` (`Host`, 57 readings) and `frames/pressure` (`Pressure`, 49).
+# - One record a frame, its time measured, so the cadence is the owner's configuration, put where
+#   it enables the frame (`config:frames.<name>`): a face's, one a minute. The Point streams above
+#   stay, on the host bus, as before (telemetry.v2 §1).
+# - A full record at least every 15, so a horizon of 300 s; deadbands on the readings that wander.
+#   Each frame's largest payload fits one RF SDU under the lean stack (the README's "Frames").
+# - Each field is an inline series of `telemetry.series`, its kind and unit stated there: a mirror
+#   would need a `telemetry.kind` on the Point stream, which none declares (telemetry.v2 §2.16).
+#   The field is the reading's template with / and . as _. The series is the frame key and the
+#   field, never the Point's key (§2.17), and its epoch is the frame's run (§2.19).
+# - Exposed `link`, the only resources of this contract that are: each crosses a face that lists
+#   it (link.v2 §2.7, §2.17), and is liveness evidence there (§2.12).
+
+[resources."frames/host"]
+kind     = "stream"
+type     = "packed:Host"
+optional = true
+gate     = "config:frames.host"
+doc      = "sysinfo's untemplated readings of system, cpu, memory and network, and cpu/times/{component} flattened, in one record: a delta each frame and a full record at least every 15, for a face that carries one a minute"
+
+[resources."frames/host".frame]
+records        = 1
+keyframe_every = 15
+
+[resources."frames/host".frame.deadband]
+system_uptime                         = { delta = "900", max_records = 15 }
+system_load                           = { delta = "0.1", max_records = 5 }
+system_processes_total                = { delta = "8", max_records = 5 }
+system_saturation_score               = { delta = "1", max_records = 5 }
+system_procs_running                  = { delta = "2", max_records = 5 }
+system_file_descriptors_used          = { delta = "64", max_records = 5 }
+cpu_usage                             = { delta = "1", max_records = 5 }
+cpu_times_user                        = { delta = "1", max_records = 5 }
+cpu_times_nice                        = { delta = "1", max_records = 5 }
+cpu_times_system                      = { delta = "1", max_records = 5 }
+cpu_times_idle                        = { delta = "1", max_records = 5 }
+cpu_times_iowait                      = { delta = "1", max_records = 5 }
+cpu_times_irq                         = { delta = "1", max_records = 5 }
+cpu_times_softirq                     = { delta = "1", max_records = 5 }
+cpu_times_steal                       = { delta = "1", max_records = 5 }
+memory_used                           = { delta = "16777216", max_records = 5 }
+memory_available                      = { delta = "16777216", max_records = 5 }
+memory_usage_percent                  = { delta = "0.5", max_records = 5 }
+memory_swap_used                      = { delta = "16777216", max_records = 5 }
+memory_swap_percent                   = { delta = "0.5", max_records = 5 }
+memory_cached                         = { delta = "16777216", max_records = 5 }
+memory_buffers                        = { delta = "16777216", max_records = 5 }
+memory_slab                           = { delta = "16777216", max_records = 5 }
+memory_dirty                          = { delta = "1048576", max_records = 5 }
+memory_writeback                      = { delta = "1048576", max_records = 5 }
+network_sockets_used                  = { delta = "16", max_records = 5 }
+network_sockets_tcp_inuse             = { delta = "16", max_records = 5 }
+network_sockets_tcp_mem_pages         = { delta = "16", max_records = 5 }
+network_sockets_udp_inuse             = { delta = "16", max_records = 5 }
+network_conntrack_count               = { delta = "64", max_records = 5 }
+network_conntrack_utilization_percent = { delta = "0.5", max_records = 5 }
+
+[resources."frames/host".annotations]
+"link.exposure"   = "link"
+"freshness.ttl_s" = 300
+
+[resources."frames/host".annotations."telemetry.series"]
+system_uptime                         = { kind = "gauge", unit = "s" }
+system_load                           = { kind = "gauge", unit = "1" }
+system_boot_time                      = { kind = "gauge", unit = "s" }
+system_processes_total                = { kind = "gauge", unit = "1" }
+system_processes_zombie               = { kind = "gauge", unit = "1" }
+system_saturation_score               = { kind = "gauge", unit = "1" }
+system_health_state                   = { kind = "text" }
+system_context_switches_total         = { kind = "counter", unit = "1" }
+system_forks_total                    = { kind = "counter", unit = "1" }
+system_procs_running                  = { kind = "gauge", unit = "1" }
+system_procs_blocked                  = { kind = "gauge", unit = "1" }
+system_file_descriptors_used          = { kind = "gauge", unit = "1" }
+system_file_descriptors_max           = { kind = "gauge", unit = "1" }
+system_file_descriptors_used_percent  = { kind = "gauge", unit = "%" }
+system_entropy_avail                  = { kind = "gauge", unit = "bit" }
+cpu_usage                             = { kind = "gauge", unit = "%" }
+cpu_schedstat_run_delay_ns_total      = { kind = "counter", unit = "ns" }
+cpu_times_user                        = { kind = "gauge", unit = "%" }
+cpu_times_nice                        = { kind = "gauge", unit = "%" }
+cpu_times_system                      = { kind = "gauge", unit = "%" }
+cpu_times_idle                        = { kind = "gauge", unit = "%" }
+cpu_times_iowait                      = { kind = "gauge", unit = "%" }
+cpu_times_irq                         = { kind = "gauge", unit = "%" }
+cpu_times_softirq                     = { kind = "gauge", unit = "%" }
+cpu_times_steal                       = { kind = "gauge", unit = "%" }
+memory_total                          = { kind = "gauge", unit = "By" }
+memory_used                           = { kind = "gauge", unit = "By" }
+memory_available                      = { kind = "gauge", unit = "By" }
+memory_usage_percent                  = { kind = "gauge", unit = "%" }
+memory_swap_total                     = { kind = "gauge", unit = "By" }
+memory_swap_used                      = { kind = "gauge", unit = "By" }
+memory_swap_percent                   = { kind = "gauge", unit = "%" }
+memory_cached                         = { kind = "gauge", unit = "By" }
+memory_buffers                        = { kind = "gauge", unit = "By" }
+memory_slab                           = { kind = "gauge", unit = "By" }
+memory_dirty                          = { kind = "gauge", unit = "By" }
+memory_writeback                      = { kind = "gauge", unit = "By" }
+memory_oom_kills_total                = { kind = "counter", unit = "1" }
+memory_page_faults_major_total        = { kind = "counter", unit = "1" }
+memory_page_faults_total              = { kind = "counter", unit = "1" }
+memory_paging_in_total                = { kind = "counter", unit = "{page}" }
+memory_paging_out_total               = { kind = "counter", unit = "{page}" }
+memory_pgpgin_total                   = { kind = "counter", unit = "KiBy" }
+memory_pgpgout_total                  = { kind = "counter", unit = "KiBy" }
+network_tcp_retrans_segs_total        = { kind = "counter", unit = "1" }
+network_tcp_listen_overflows_total    = { kind = "counter", unit = "1" }
+network_tcp_listen_drops_total        = { kind = "counter", unit = "1" }
+network_sockets_used                  = { kind = "gauge", unit = "1" }
+network_sockets_tcp_inuse             = { kind = "gauge", unit = "1" }
+network_sockets_tcp_mem_pages         = { kind = "gauge", unit = "{page}" }
+network_sockets_udp_inuse             = { kind = "gauge", unit = "1" }
+network_softnet_processed_total       = { kind = "counter", unit = "1" }
+network_softnet_dropped_total         = { kind = "counter", unit = "1" }
+network_softnet_squeezed_total        = { kind = "counter", unit = "1" }
+network_conntrack_count               = { kind = "gauge", unit = "1" }
+network_conntrack_max                 = { kind = "gauge", unit = "1" }
+network_conntrack_utilization_percent = { kind = "gauge", unit = "%" }
+
+[resources."frames/pressure"]
+kind     = "stream"
+type     = "packed:Pressure"
+optional = true
+gate     = "config:frames.pressure"
+doc      = "tcp/{state}, the host's PSI and the cgroup's readings with its PSI, flattened, in one record: a delta each frame and a full record at least every 15, for a face that carries one a minute"
+
+[resources."frames/pressure".frame]
+records        = 1
+keyframe_every = 15
+
+[resources."frames/pressure".frame.deadband]
+tcp_established                   = { delta = "8", max_records = 5 }
+tcp_syn_sent                      = { delta = "8", max_records = 5 }
+tcp_syn_recv                      = { delta = "8", max_records = 5 }
+tcp_fin_wait1                     = { delta = "8", max_records = 5 }
+tcp_fin_wait2                     = { delta = "8", max_records = 5 }
+tcp_time_wait                     = { delta = "8", max_records = 5 }
+tcp_close                         = { delta = "8", max_records = 5 }
+tcp_close_wait                    = { delta = "8", max_records = 5 }
+tcp_last_ack                      = { delta = "8", max_records = 5 }
+tcp_listen                        = { delta = "8", max_records = 5 }
+tcp_closing                       = { delta = "8", max_records = 5 }
+tcp_total                         = { delta = "8", max_records = 5 }
+pressure_cpu_some_avg10           = { delta = "0.5", max_records = 5 }
+pressure_cpu_some_avg60           = { delta = "0.5", max_records = 5 }
+pressure_cpu_some_avg300          = { delta = "0.5", max_records = 5 }
+pressure_memory_some_avg10        = { delta = "0.5", max_records = 5 }
+pressure_memory_some_avg60        = { delta = "0.5", max_records = 5 }
+pressure_memory_some_avg300       = { delta = "0.5", max_records = 5 }
+pressure_memory_full_avg10        = { delta = "0.5", max_records = 5 }
+pressure_memory_full_avg60        = { delta = "0.5", max_records = 5 }
+pressure_memory_full_avg300       = { delta = "0.5", max_records = 5 }
+pressure_io_some_avg10            = { delta = "0.5", max_records = 5 }
+pressure_io_some_avg60            = { delta = "0.5", max_records = 5 }
+pressure_io_some_avg300           = { delta = "0.5", max_records = 5 }
+pressure_io_full_avg10            = { delta = "0.5", max_records = 5 }
+pressure_io_full_avg60            = { delta = "0.5", max_records = 5 }
+pressure_io_full_avg300           = { delta = "0.5", max_records = 5 }
+cgroup_memory_current             = { delta = "16777216", max_records = 5 }
+cgroup_memory_used_percent        = { delta = "0.5", max_records = 5 }
+cgroup_cpu_pressure_some_avg10    = { delta = "0.5", max_records = 5 }
+cgroup_memory_pressure_some_avg10 = { delta = "0.5", max_records = 5 }
+cgroup_memory_pressure_full_avg10 = { delta = "0.5", max_records = 5 }
+cgroup_io_pressure_some_avg10     = { delta = "0.5", max_records = 5 }
+cgroup_io_pressure_full_avg10     = { delta = "0.5", max_records = 5 }
+
+[resources."frames/pressure".annotations]
+"link.exposure"   = "link"
+"freshness.ttl_s" = 300
+
+[resources."frames/pressure".annotations."telemetry.series"]
+tcp_established                      = { kind = "gauge", unit = "1" }
+tcp_syn_sent                         = { kind = "gauge", unit = "1" }
+tcp_syn_recv                         = { kind = "gauge", unit = "1" }
+tcp_fin_wait1                        = { kind = "gauge", unit = "1" }
+tcp_fin_wait2                        = { kind = "gauge", unit = "1" }
+tcp_time_wait                        = { kind = "gauge", unit = "1" }
+tcp_close                            = { kind = "gauge", unit = "1" }
+tcp_close_wait                       = { kind = "gauge", unit = "1" }
+tcp_last_ack                         = { kind = "gauge", unit = "1" }
+tcp_listen                           = { kind = "gauge", unit = "1" }
+tcp_closing                          = { kind = "gauge", unit = "1" }
+tcp_total                            = { kind = "gauge", unit = "1" }
+pressure_cpu_some_avg10              = { kind = "gauge", unit = "%" }
+pressure_cpu_some_avg60              = { kind = "gauge", unit = "%" }
+pressure_cpu_some_avg300             = { kind = "gauge", unit = "%" }
+pressure_cpu_some_total_us           = { kind = "counter", unit = "us" }
+pressure_memory_some_avg10           = { kind = "gauge", unit = "%" }
+pressure_memory_some_avg60           = { kind = "gauge", unit = "%" }
+pressure_memory_some_avg300          = { kind = "gauge", unit = "%" }
+pressure_memory_some_total_us        = { kind = "counter", unit = "us" }
+pressure_memory_full_avg10           = { kind = "gauge", unit = "%" }
+pressure_memory_full_avg60           = { kind = "gauge", unit = "%" }
+pressure_memory_full_avg300          = { kind = "gauge", unit = "%" }
+pressure_memory_full_total_us        = { kind = "counter", unit = "us" }
+pressure_io_some_avg10               = { kind = "gauge", unit = "%" }
+pressure_io_some_avg60               = { kind = "gauge", unit = "%" }
+pressure_io_some_avg300              = { kind = "gauge", unit = "%" }
+pressure_io_some_total_us            = { kind = "counter", unit = "us" }
+pressure_io_full_avg10               = { kind = "gauge", unit = "%" }
+pressure_io_full_avg60               = { kind = "gauge", unit = "%" }
+pressure_io_full_avg300              = { kind = "gauge", unit = "%" }
+pressure_io_full_total_us            = { kind = "counter", unit = "us" }
+cgroup_cpu_nr_throttled              = { kind = "counter", unit = "1" }
+cgroup_cpu_throttled_usec            = { kind = "counter", unit = "us" }
+cgroup_memory_current                = { kind = "gauge", unit = "By" }
+cgroup_memory_max                    = { kind = "gauge", unit = "By" }
+cgroup_memory_used_percent           = { kind = "gauge", unit = "%" }
+cgroup_memory_oom_kills_total        = { kind = "counter", unit = "1" }
+cgroup_memory_oom_total              = { kind = "counter", unit = "1" }
+cgroup_cpu_pressure_some_avg10       = { kind = "gauge", unit = "%" }
+cgroup_cpu_pressure_some_total_us    = { kind = "counter", unit = "us" }
+cgroup_memory_pressure_some_avg10    = { kind = "gauge", unit = "%" }
+cgroup_memory_pressure_some_total_us = { kind = "counter", unit = "us" }
+cgroup_memory_pressure_full_avg10    = { kind = "gauge", unit = "%" }
+cgroup_memory_pressure_full_total_us = { kind = "counter", unit = "us" }
+cgroup_io_pressure_some_avg10        = { kind = "gauge", unit = "%" }
+cgroup_io_pressure_some_total_us     = { kind = "counter", unit = "us" }
+cgroup_io_pressure_full_avg10        = { kind = "gauge", unit = "%" }
+cgroup_io_pressure_full_total_us     = { kind = "counter", unit = "us" }
