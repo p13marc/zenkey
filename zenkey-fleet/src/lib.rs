@@ -459,8 +459,9 @@ pub use model::skeleton::{
 // `Client`, `Fleet` and `Consumer` (`bus::operation`, `bus::consume`).
 pub use bus::consume::{
     Confirmations, StateRead, WATCH_BUFFER, Watch, WatchReads, get_state, get_state_in,
-    last_known as last_known_state, last_known_in as last_known_state_in, stamp,
-    watch as watch_resource, watch_across as watch_resource_across, watch_in as watch_resource_in,
+    last_known as last_known_state, last_known_in as last_known_state_in,
+    last_known_through as last_known_state_through, stamp, watch as watch_resource,
+    watch_across as watch_resource_across, watch_in as watch_resource_in,
 };
 pub use bus::operation::{OperationCall, call as call_operation};
 pub use model::target::{

@@ -75,6 +75,7 @@ pub mod acl;
 pub mod alarms;
 pub mod arbitration;
 pub mod attach;
+pub mod attachment;
 pub mod bounded;
 pub mod catalog;
 pub mod choice;

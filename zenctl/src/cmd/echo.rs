@@ -511,10 +511,11 @@ fn formatted(
         .as_ref()
         .map(crate::render::payload_text)
         .or_else(|| {
-            sample
-                .attachment
-                .as_ref()
-                .map(|a| super::sample::attachment_display(&a.to_bytes()))
+            sample.attachment.as_ref().map(|a| {
+                let key = zenkey_fleet::strip_namespace(namespace, &sample.key)
+                    .unwrap_or(sample.key.as_str());
+                super::sample::attachment_display_at(key, &a.to_bytes())
+            })
         });
     let declared = line.declared();
     format_sample(

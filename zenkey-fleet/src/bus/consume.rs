@@ -36,7 +36,7 @@ use zenoh::Session;
 use zenoh::sample::{Sample, SampleKind};
 
 use crate::model::catalog::Revision;
-use crate::model::deployment::{Dating, Epoch};
+use crate::model::deployment::{Catalogs, Dating, Epoch};
 use crate::model::lens::{Resolved, declared_qos, observed_qos, qos_mismatch, sample_conformance};
 use crate::model::render::{Member, render_frame, render_record, render_with, render_with_in};
 use crate::model::target::Target;
@@ -317,6 +317,21 @@ pub async fn last_known_in(
     archive: &Addr,
     epoch: impl Into<Dating>,
 ) -> Result<StateReport> {
+    last_known_through(session, read, archive, epoch, &Catalogs::default()).await
+}
+
+/// [`last_known_in`], a compact attachment's identity read through
+/// `catalogs` (core §4.4; #980 C3): the catalog the archive's descriptor
+/// names, among those given, and the revision read. Through none, a
+/// compact attachment's row states `confirmed` and no identity, never a
+/// guess.
+pub async fn last_known_through(
+    session: &Session,
+    read: StateRead<'_>,
+    archive: &Addr,
+    epoch: impl Into<Dating>,
+    catalogs: &Catalogs,
+) -> Result<StateReport> {
     let epoch: Dating = epoch.into();
     let StateRead {
         revision,
@@ -326,13 +341,19 @@ pub async fn last_known_in(
         timeout,
     } = read;
     let name = zenkey::implementation::resource_name(r);
+    let held = zenkey::presence::Held::new(
+        std::sync::Arc::new(catalogs.held().to_vec()),
+        vec![revision.shared_contract()],
+    );
     if !all_bound(r, values) {
-        return last_known_pattern(session, revision, owner, r, values, archive, timeout, epoch)
-            .await;
+        return last_known_pattern(
+            session, revision, owner, r, values, archive, timeout, epoch, &held,
+        )
+        .await;
     }
     let origin = member_key(owner, revision, r, values)?;
     let selector = zenkey::archive::archive_key(archive, &origin);
-    let got = zenkey::archive::last_known(session, archive, &origin, timeout)
+    let got = zenkey::archive::last_known_through(session, archive, &origin, &held, timeout)
         .await
         .map_err(|e| runtime("get", &selector, e))?;
     let rows = got
@@ -367,6 +388,7 @@ async fn last_known_pattern(
     archive: &Addr,
     timeout: Duration,
     epoch: Dating,
+    held: &zenkey::presence::Held,
 ) -> Result<StateReport> {
     let name = zenkey::implementation::resource_name(r);
     let address = owner.to_string();
@@ -387,7 +409,7 @@ async fn last_known_pattern(
     let mut selectors = Vec::new();
     for pattern in &patterns {
         let selector = zenkey::archive::archive_key(archive, pattern);
-        let got = zenkey::archive::last_known_all(session, archive, pattern, timeout)
+        let got = zenkey::archive::last_known_all_through(session, archive, pattern, held, timeout)
             .await
             .map_err(|e| runtime("get", &selector, e))?;
         selectors.push(selector);
