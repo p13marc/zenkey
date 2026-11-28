@@ -467,9 +467,16 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `TOOL_INTERESTS_TIMEOUT`, the deadline `OPEN_TIMEOUT` past the face's
   `open_timeout_ms`); `Monitor::watch_across(selector, horizon)` declares
   through `zenkey::redeclare::Redeclaring` (`Monitor::redeclared`,
-  `redeclare_failed`), `tests/redeclare.rs` is `constrained.md` §9 step 2
+  `repaired`, `redeclare_failed`), `tests/redeclare.rs` is `constrained.md` §9 step 2
   through a lossy relay, and #1047's `unwatch` returning while a re-declare
-  waits behind a stalled relay (no QoS, blocking puts). The scope itself
+  waits behind a stalled relay (no QoS, blocking puts). #1185 (core 0.121):
+  `horizon` is an `Option`; with none (an event's selector) the watch
+  follows the monitor's others, declared again and repaired beside them,
+  and zenctl's `FaceScope::watch` and zengui's `scope_across` watch every
+  selector through it where the face redeclares. `tests/redeclare.rs`'
+  step 5: two monitors behind a far router (`router(Some(relay))`), the
+  relay losing every batch for 1.5 s (`lose_for`), repaired at four
+  horizons by the first monitor's two repairs. The scope itself
   is `model::face_scope::FaceScope` since #990 V1 (observer 0.29 §7.5,
   moved from zenctl, for zengui and zenwatch at V7): each address's
   resources of the contracts in hand (a template's parameters and an

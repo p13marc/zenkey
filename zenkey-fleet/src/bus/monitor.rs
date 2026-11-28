@@ -811,9 +811,9 @@ pub struct Monitor {
     /// [`Monitor::shutdown`]; dropped with the monitor otherwise.
     liveliness: Vec<(String, zenoh::pubsub::Subscriber<()>)>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
-    /// The watches across a constrained face, declared again after silence
-    /// (core §8.5, observer §7.5): made at the first
-    /// [`Monitor::watch_across`].
+    /// The watches across a constrained face, declared again, and
+    /// repaired, after silence (core §8.5, observer §7.5): made at the
+    /// first [`Monitor::watch_across`].
     redeclaring: tokio::sync::OnceCell<zenkey::redeclare::Redeclaring>,
 }
 
@@ -978,15 +978,18 @@ impl Monitor {
     }
 
     /// [`Monitor::watch`] **across a constrained face** whose medium repairs
-    /// no lost frame (core §8.5, observer §7.5; #988 L4): the subscriber is
-    /// declared again whenever it hears nothing for two `horizon`s while the
-    /// session's transport stays up ([`zenkey::redeclare`]). zenoh 1.10.1
-    /// never repairs a declaration its medium lost, so a watch whose
-    /// declaration a radio dropped would otherwise stay silent for as long
-    /// as the transport stays up. `horizon` is that of what the selector
-    /// hears, from the contracts in hand. Each time is counted
-    /// ([`Monitor::redeclared`]).
-    pub async fn watch_across(&self, selector: &str, horizon: Duration) -> Result<WatchId> {
+    /// no lost frame (core §8.5, observer §7.5; #988 L4, #1185): the
+    /// subscriber is declared again whenever it hears nothing for two
+    /// `horizon`s while the session's transport stays up, and repaired
+    /// each later time, by a subscriber on a key expression its router
+    /// holds no other of ([`zenkey::redeclare`]). zenoh 1.10.1 never
+    /// repairs a declaration its medium lost, so a watch whose declaration
+    /// a radio dropped would otherwise stay silent for as long as the
+    /// transport stays up. `horizon` is that of what the selector hears,
+    /// from the contracts in hand; with none (an event's), the watch
+    /// follows the monitor's others across the face. Each time is counted
+    /// ([`Monitor::redeclared`], [`Monitor::repaired`]).
+    pub async fn watch_across(&self, selector: &str, horizon: Option<Duration>) -> Result<WatchId> {
         let redeclaring = self
             .redeclaring
             .get_or_try_init(|| zenkey::redeclare::Redeclaring::start(&self.session))
@@ -1028,8 +1031,17 @@ impl Monitor {
             .map_or(0, zenkey::redeclare::Redeclaring::redeclared)
     }
 
-    /// How many times declaring a watch across a face again failed, each
-    /// retried at the next check and warned of once a horizon (#1047).
+    /// How many repair subscriptions the watches across a face declared,
+    /// each after a declaration again that two more horizons of silence
+    /// followed (core §8.5, #1185).
+    pub fn repaired(&self) -> u64 {
+        self.redeclaring
+            .get()
+            .map_or(0, zenkey::redeclare::Redeclaring::repaired)
+    }
+
+    /// How many times declaring a watch across a face again, or a repair,
+    /// failed, each retried and warned of once a horizon (#1047).
     pub fn redeclare_failed(&self) -> u64 {
         self.redeclaring
             .get()

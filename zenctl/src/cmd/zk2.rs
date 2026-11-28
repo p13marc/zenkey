@@ -433,8 +433,9 @@ impl Reads {
 /// [`FaceScope::deployment`] opens every session with the face's transport
 /// and makes its `reply_timeout_ms` the default `--timeout` (core §8.1),
 /// and [`FaceScope::watch`] declares a selector again after two horizons of
-/// silence where the face's medium repairs no lost frame (core §8.5,
-/// observer §7.5), each selector's horizon read from the contracts in hand.
+/// silence where the face's medium repairs no lost frame, and repairs it
+/// each later two (core §8.5, observer §7.5), each selector's horizon read
+/// from the contracts in hand; one with none follows the others.
 #[derive(Debug, Clone)]
 pub struct FaceScope {
     scope: zenkey_fleet::FaceScope,
@@ -659,10 +660,10 @@ impl FaceScope {
         self.scope.far()
     }
 
-    /// Watches `selector` on `monitor`: declared again after two horizons
-    /// of silence where the face's medium repairs no lost frame and the
-    /// selector has a horizon (core §8.5, observer §7.5), declared once
-    /// otherwise.
+    /// Watches `selector` on `monitor`: where the face's medium repairs no
+    /// lost frame, declared again after two horizons of silence and
+    /// repaired each later two, or with no horizon beside the others
+    /// (core §8.5, observer §7.5); declared once otherwise.
     pub async fn watch(
         &self,
         monitor: &zenkey_fleet::Monitor,
@@ -671,9 +672,12 @@ impl FaceScope {
         let redeclares = self
             .far()
             .is_some_and(zenkey_model::link::FarSide::redeclares);
-        Ok(match self.horizon(selector).filter(|_| redeclares) {
-            Some(h) => monitor.watch_across(selector, h).await?,
-            None => monitor.watch(selector).await?,
+        Ok(if redeclares {
+            monitor
+                .watch_across(selector, self.horizon(selector))
+                .await?
+        } else {
+            monitor.watch(selector).await?
         })
     }
 
@@ -782,7 +786,8 @@ impl FaceScope {
                 f.reply_timeout_ms,
                 if f.redeclares() {
                     ", and each selector with a horizon declared again after two horizons of \
-                     silence, its medium repairing no lost frame (core §8.5)"
+                     silence and repaired each later two, one with none beside them, its medium \
+                     repairing no lost frame (core §8.5)"
                 } else {
                     ""
                 }
