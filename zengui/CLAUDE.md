@@ -346,3 +346,8 @@ catalogs, `run_why_through`), the admin sweep (`sweep::admin` takes a
 `Describing`, `topology_with_instances_through`) and the nodes pane's
 `arbitration.v1` reading (`sweep::nodes::arbitration`,
 `ArbitrationSpec::catalogs`) read through the window's catalogs too.
+
+C3 (#980): the Inspector's last-known read goes through the window's
+catalogs (`last_known_state_through`), and the attachment pane shows an
+archive's compact attachment by its fields (`detail::attachment_text`, the
+fleet's `model::attachment`; `the_attachment_pane_reads_an_archives_compact_attachment`).

@@ -750,3 +750,20 @@ Claude Code loads this file when working in `zenkey-model/`; the root `CLAUDE.md
   cases, none blessed, all passing, and `alarms_v2_standard_contract`
   holds `alarms.v2.toml` to the constants.
   `spec/profiles/.history/alarms.v2/` holds revision 2.0.
+
+**`attachment` (#980 C3, core 0.120 §4.4).** An archive reply's attachment
+in two forms, told by its length (`Form::of`: exactly 3 bytes is compact).
+`Compact { index (10), resource (7), confirmed }`, `write` and `read`
+(`extension`, `reserved`); `encode(revision, resource name, confirmed,
+catalog)` (`None` where the JSON form is written: the revision unlisted or
+the resource past the 128th); `resolve(c, origin, archive catalog id, held
+catalogs, revisions)` → `Identity { iface, contract, type }` (`to_json`, the
+JSON form's three members; the type object from `canonical`), refused in
+§4.4's order: `unknown_catalog` (none named too), `unknown_index`,
+`unknown_revision`, `resource` (past the revision's, or no `state`/`@state`),
+`origin` (the origin key's interface, kind token or template chunks);
+`Refusal::leaves_confirmed`; `read(bytes, origin, …)` → `Read { form,
+confirmed: Option, identity: Result<Value, String> }`, the JSON form
+parsed for its members. `tests/conformance.rs`' `archive_attachments` runs
+`spec/conformance/archive/attachments.json` as written (12 writes, 44
+reads, every refusal; every accepted read writes back).

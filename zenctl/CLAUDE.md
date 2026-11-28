@@ -649,3 +649,10 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   through `--catalog`; `admin graph` takes `ContractArgs`
   (`help-admin.trycmd` re-blessed). `live_zk2.rs`'s
   `why_reads_a_compact_descriptor_through_the_catalog`.
+
+  C3 (#980): `get state --last-known` reads through `--catalog`
+  (`last_known_state_through`); `sample::attachment_display_at` and
+  `attachment_json_at` (the keyed renderers, which replaced the unkeyed
+  ones) show an archive's compact attachment by its fields (`get`'s raw and
+  ndjson rows, `echo`'s lines, a namespaced key stripped first).
+  `sample.rs`'s `an_archives_compact_attachment_renders_by_its_fields`.
