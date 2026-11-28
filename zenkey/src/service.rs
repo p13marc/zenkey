@@ -348,7 +348,7 @@ fn find_mut<'s>(impls: &'s mut [ImplState], iface: &IfaceId) -> Result<&'s mut I
 /// interface `redundancy.v1` governs), or one with a horizon under
 /// `freshness.v2`. A `desired.v2` desired resource is no per-key resource
 /// (core 0.112), nor a state of an interface `redundancy.v2` governs (core
-/// 0.118, `redundancy.v2` §2.6).
+/// 0.119, `redundancy.v2` §2.6).
 fn answered(
     s: &ImplState,
     token: KindToken,

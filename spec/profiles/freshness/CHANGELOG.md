@@ -8,7 +8,7 @@ entry here ([`../README.md`](../README.md)).
 ## `v2.md` 0.14 — 2026-11-28: editorial: a standby of either major of `redundancy` sends no heartbeat, and only a `redundancy.v1` candidate's session stamps, no keyword changed (#987)
 
 `redundancy.v2` text 0.1 restates `redundancy.v1` without the session's
-HLC, and core 0.118 says so of §8.2's exception. Three sentences of this
+HLC, and core 0.119 says so of §8.2's exception. Three sentences of this
 text read a candidate's session as one that stamps, or a standby as
 `redundancy.v1`'s alone.
 
@@ -29,7 +29,7 @@ text read a candidate's session as one that stamps, or a standby as
   `beacon.v2`'s revision 2.1, which uses `redundancy.v1`, so its
   candidate's session still stamps.
 - **The header** is still written against core 0.108. The new sentence
-  restates core 0.118's §8.2.
+  restates core 0.119's §8.2.
 
 ## `v2.md` 0.13 — 2026-11-27: editorial: a read on the near side that draws no reply takes the deployment's word, and which catalog that word is, no keyword changed (#609, #986)
 

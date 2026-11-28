@@ -13,7 +13,7 @@ headed `redundancy.v2 0.N` is `v2.md`'s, and one headed `0.N` alone is
 new file, [`v2.md`](v2.md), and no entry of `v1.md`'s: it changes what a
 conforming candidate puts on the wire, and what its followers read. It
 restates `redundancy.v1` 0.11 by reference, and is written against core
-0.118. Its status is `experimental`: no adopter's mapping uses it yet.
+0.119. Its status is `experimental`: no adopter's mapping uses it yet.
 ZenSight's two singletons move in a later chunk of #987.
 
 **What it replaces.**
@@ -103,7 +103,7 @@ ZenSight's two singletons move in a later chunk of #987.
   so a contract can draw five reasons.
 - **The first hop's MUST NOT is this text's own.** Core §8.1 names
   `redundancy.v1` alone there. This text states the same of this major,
-  and `link.v2` 0.28's `presence_required` reads both.
+  and `link.v2` 0.29's `presence_required` reads both.
 - **An address's governance** is computed from its candidates'
   revisions as the fleet reads v1's today. A `redundancy.v1` revision
   and a `redundancy.v2` one with one election agree.

@@ -3,7 +3,7 @@
 Amendments to [`core.md`](core.md). Each entry records what changed, what
 deliberately did not, and why.
 
-## 0.118 — 2026-11-28: a candidate of either major of `redundancy` draws a 32-bit run and is refused a tokenless interface; only `redundancy.v1`'s session stamps, no keyword changed (#987)
+## 0.119 — 2026-11-28: a candidate of either major of `redundancy` draws a 32-bit run and is refused a tokenless interface; only `redundancy.v1`'s session stamps, no keyword changed (#987)
 
 `redundancy.v2` text 0.1 restates `redundancy.v1` without the session's
 HLC ([`profiles/redundancy/CHANGELOG.md`](profiles/redundancy/CHANGELOG.md)).
@@ -42,7 +42,7 @@ either major. Two now read both, and one stays `redundancy.v1`'s.
   and first hop, §10 and Appendix D. Each stays true of v1, and
   `redundancy.v2` states the same of itself.
   - §8.1's first hop keeps its MUST NOT for `redundancy.v1`.
-    `redundancy.v2` §2.13 states its own, and `link.v2` 0.28's
+    `redundancy.v2` §2.13 states its own, and `link.v2` 0.29's
     `presence_required` reads both majors.
   - Appendix D's `redundancy` row serves both majors: W105 reads it for
     a contract that lists either, as the reference does today.

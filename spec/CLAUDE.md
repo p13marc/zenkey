@@ -1058,7 +1058,7 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   one `no_entry` answer no run, which is no verdict only because that
   target holds nothing.
 - **`redundancy.v2`** (#987's N1, text 0.1, `experimental`, written
-  against core 0.118) sits beside `redundancy.v1` in
+  against core 0.119) sits beside `redundancy.v1` in
   `spec/profiles/redundancy/`: `v2.md`, `scenarios-v2.md`,
   `conformance/v2/{declarations,descriptors,fences}.json` with a
   `README.md`, and the one `CHANGELOG.md`, its entries headed
@@ -1071,18 +1071,18 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   ended, and seeds again when its incumbent changes; a governed state is
   answered by snapshot; §2.2 adds `majors` before v1's reasons and
   `explicit_stream` after them; no candidate on a first hop (§2.13); a
-  follower of a v1 incumbent reads its `meta.zid` (§2.17). Core 0.118:
+  follower of a v1 incumbent reads its `meta.zid` (§2.17). Core 0.119:
   §4.3's draw and §8.2's step 2 read either major, the posture's
   exception and §4.3's table row stay v1's, no keyword (298 rules).
-  `freshness.v2` 0.14 and `link.v2` 0.28 cite either major, and
-  `v2/plan.json`'s case 54 (case 25's device on a `redundancy.v2`
-  revision, `presence_required`; 55 cases) was written by reading the
+  `freshness.v2` 0.14 and `link.v2` 0.29 cite either major, and
+  `v2/plan.json`'s case 55 (case 25's device on a `redundancy.v2`
+  revision, `presence_required`; 56 cases) was written by reading the
   text. The fixtures (153 cases: 38 contracts and 16 addresses, 29
   descriptors, 49 samples, 13 sequences, 8 draws) were computed twice by
   two scripts of the drafter's (`/srv/dev/scratch/zenkey/py/987-n1/`),
   never blessed. The model ran every case as written
   (`zenkey-model/tests/profiles/redundancy_v2.rs`, a runner per file, none
-  able to bless) and all pass, case 54 too, no case, sentence or count
+  able to bless) and all pass, case 55 too, no case, sentence or count
   moved. Six answers only the fixtures gave are in 0.1's text since
   (`a5299e3a`): §2.10's step 2, a v1 incumbent decided by its stamp
   before `no_run`, `no_stamp` before an unheld `meta.zid` (sample 49,
@@ -1096,7 +1096,7 @@ Claude Code loads this file when working in `spec/`; the root `CLAUDE.md` is the
   major (by run under `redundancy.v2`, an unattributed sample
   `not_incumbent`, the read it asks attributing the next), §2.12's view by
   the one major its revisions list, its header naming both majors and
-  written against core 0.118, the index's row following; scenarios §11
+  written against core 0.119, the index's row following; scenarios §11
   runs again under `redundancy.v2` on `steer.v1` minor 2;
   `arbitrations.json` is unchanged (`incumbent: false` is the fence's
   word, either major's). N3 (the tools, #987): `hostid.v1` 0.10 (§2.12's

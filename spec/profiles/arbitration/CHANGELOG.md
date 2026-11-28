@@ -28,7 +28,7 @@ address was never eligible.
 every revision it holds lists.
 
 **Changed: the header.** "Uses" names both majors. Written against core
-0.118, where it said 0.83. The index's row follows.
+0.119, where it said 0.83. The index's row follows.
 
 **Scenarios.** §11 runs again under `redundancy.v2`, on `steer.v1` minor
 2: no candidate's session stamps, and `X` puts each sample in an

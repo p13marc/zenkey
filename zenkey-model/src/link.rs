@@ -1140,7 +1140,7 @@ pub enum Code {
     DeviceListed,
     /// A device that implements `archive.v1`, or an interface a revision
     /// given of which uses `redundancy.v1` or `redundancy.v2`: each needs
-    /// presence on its peers' side of the face (v2 §2.5, 0.28; core §8.1,
+    /// presence on its peers' side of the face (v2 §2.5, 0.29; core §8.1,
     /// `redundancy.v2` §2.13).
     PresenceRequired,
     /// On a device face, a template of a device's interface that declares
@@ -3014,7 +3014,7 @@ pub struct Deployment {
     pub catalog: Option<crate::catalog::Catalog>,
     /// The interface ids a revision given of which uses either major of
     /// `redundancy` ([`crate::redundancy::is_governed`]): a device
-    /// implementing one is `presence_required` (v2 §2.5, 0.28).
+    /// implementing one is `presence_required` (v2 §2.5, 0.29).
     pub governed: BTreeSet<String>,
     /// The principals the deployment binds by a usrpwd user name (core
     /// §11.1): a face the near router opens binds none of them, so a

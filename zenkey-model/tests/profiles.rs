@@ -1920,7 +1920,7 @@ fn link_resources(rs: &Value) -> Vec<link::Res> {
 /// One inline revision: its resources, or `{uses, resources}` (0.11: a
 /// revision that uses `freshness.v2` has a heartbeat; link.v2 0.7: one that
 /// uses `redundancy.v1` governs its interface, which a device may not
-/// implement, and since 0.28 one that uses `redundancy.v2`).
+/// implement, and since 0.29 one that uses `redundancy.v2`).
 fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
     match rev.get("resources") {
         Some(rs) => {
@@ -1934,7 +1934,7 @@ fn link_revision(d: &mut link::Deployment, iface: &str, rev: &Value) {
             if uses(zenkey_model::freshness::PROFILE_V2) {
                 d.heartbeats.insert(iface.to_owned());
             }
-            // link.v2 0.28: either major of redundancy governs it.
+            // link.v2 0.29: either major of redundancy governs it.
             if redundancy::Major::ALL.iter().any(|m| uses(m.profile())) {
                 d.governed.insert(iface.to_owned());
             }
