@@ -420,10 +420,12 @@ pub async fn get_v2(
 /// descriptors name for `alarms.v2`, its alarms' horizon and its
 /// heartbeat's layout. The standard revision is this reader's own, and is
 /// not retrieved; another is held offline or retrieved by fingerprint.
-/// Where they name several, the one whose alarms age soonest. Where none
-/// they name is in hand, the text names no other, and the standard
-/// revision's is read. The deployment's word is the `alarms.v2` revision
-/// held offline, the one whose alarms age soonest where several are.
+/// Where they name several, the one whose alarms age soonest. Where one
+/// they name is neither held nor retrieved, `None`: no horizon is in hand,
+/// so the owner's alarms' freshness is unobservable, never the standard's
+/// 900 s (§2.7, "A revision not in hand"). The deployment's word is the
+/// `alarms.v2` revision held offline, the one whose alarms age soonest
+/// where several are.
 pub(crate) async fn words_v2(
     session: &Session,
     spec: &AlarmSpec,
@@ -510,15 +512,17 @@ pub(crate) async fn words_v2(
         .map(|(w, r)| (w.clone(), m2::table_of(r.contract())))
         .collect();
     for (a, fingerprints) in own {
-        let revision = V2Revision::soonest(fingerprints.iter().filter_map(|w| {
-            if w.1 == standard.layout.fingerprint {
-                Some(standard.clone())
-            } else {
-                in_hand.get(w).map(|r| V2Revision::of(r.contract()))
-            }
-        }));
-        out.revisions
-            .insert(a, revision.unwrap_or_else(|| standard.clone()));
+        let each: Option<Vec<V2Revision>> = fingerprints
+            .iter()
+            .map(|w| {
+                if w.1 == standard.layout.fingerprint {
+                    Some(standard.clone())
+                } else {
+                    in_hand.get(w).map(|r| V2Revision::of(r.contract()))
+                }
+            })
+            .collect();
+        out.revisions.insert(a, each.and_then(V2Revision::soonest));
     }
     for (a, revisions) in named {
         let of: Vec<Option<&[m2::Rule]>> = revisions

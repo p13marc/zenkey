@@ -987,12 +987,16 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `am::horizon()`. `words_v2` takes it from the `alarms.v2` fingerprint the
   owner's descriptors name: the standard one is not retrieved, another is
   held offline or retrieved with the tables' revisions, several give the
-  soonest (`V2Revision::soonest`), and one not in hand falls back to the
-  standard (the text names nothing else); the word is the `alarms.v2`
-  revision held offline. Each owner's v2 view is made with its revision's
-  layout (`alarms_views(&self.v2, owner)`, the heartbeat's tag being the
+  soonest (`V2Revision::soonest`), and one not in hand makes the owner's
+  entry `None`: no horizon, so `slot_reading` judges its freshness
+  unobservable (`not_a_horizon`), never 900 s (§2.7, "A revision not in
+  hand", the lead's default); the word is the `alarms.v2` revision held
+  offline. Each owner's v2 view is made with its revision's layout
+  (`Slots::layout_of`, the standard's where none is in hand;
+  `alarms_views(&self.v2, owner)`, the heartbeat's tag being the
   revision's, core §7.5), and `v2_words` swaps a view read by another
   revision for an empty one, which the refresh's complete read then
   re-reads. `an_alarm_ages_at_the_horizon_of_its_owners_revision` is the
-  session-free test; zenctl's `alarms_v2_s6_*_at_the_copys_horizon` the
-  live one.
+  session-free test; zenctl's `alarms_v2_s6_*_at_the_copys_horizon` and
+  `alarms_v2_an_owner_naming_a_revision_not_in_hand_reads_unobservable`
+  the live ones.

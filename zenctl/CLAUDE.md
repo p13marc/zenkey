@@ -365,7 +365,10 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   runs §6 on the conventions' 4-s copy (`alarms_v2_copy`, owner by
   `alarms_v2_owner_on`): A yes while its heartbeat vouches (read with the
   copy's layout), then unobservable `stale` 7 s after its bit cleared,
-  given or retrieved, and `check conform`'s alarm cases on it. #819's TC added
+  given or retrieved, and `check conform`'s alarm cases on it;
+  `alarms_v2_an_owner_naming_a_revision_not_in_hand_reads_unobservable`
+  puts owners on a first hop (no bundle served): the copy not given reads
+  A unobservable `not_a_horizon`, the standard revision A firing. #819's TC added
   `telemetry [SELECTOR] [--for SECS] [--across-face] [--settle SECS]`, a root judgement
   over `telemetry.v1` (exit 1 a sample that does not conform or a decrease
   within an established epoch, 0 everything asked answered clean, 2

@@ -10573,29 +10573,22 @@ async fn alarms_v2_owner(
     tokenless: bool,
     runs: &Path,
 ) -> (Service, zenkey::alarms::v2::Alarms) {
-    alarms_v2_owner_on(
-        session,
-        address,
-        tokenless,
-        runs,
-        zenkey::alarms::v2::implementation(),
-    )
-    .await
-}
-
-/// [`alarms_v2_owner`] implementing `revision` of `alarms.v2`: the
-/// standard one, or a copy of it.
-async fn alarms_v2_owner_on(
-    session: &zenoh::Session,
-    address: &str,
-    tokenless: bool,
-    runs: &Path,
-    revision: Implementation,
-) -> (Service, zenkey::alarms::v2::Alarms) {
     let mut cfg = ServiceConfig::new(address.parse().expect("an address"));
     if tokenless {
         cfg = cfg.tokenless(zenkey::alarms::v2::iface());
     }
+    alarms_v2_owner_on(session, cfg, runs, zenkey::alarms::v2::implementation()).await
+}
+
+/// [`alarms_v2_owner`] configured by `cfg`, implementing `revision` of
+/// `alarms.v2`: the standard one, or a copy of it.
+async fn alarms_v2_owner_on(
+    session: &zenoh::Session,
+    cfg: ServiceConfig,
+    runs: &Path,
+    revision: Implementation,
+) -> (Service, zenkey::alarms::v2::Alarms) {
+    let address = cfg.address.to_string();
     let mut b = ServiceBuilder::new(session, cfg);
     std::fs::create_dir_all(runs).expect("a run directory");
     let record = runs.join(format!("{}.run", address.replace('/', "-")));
@@ -11344,8 +11337,7 @@ async fn alarms_v2_s6_a_hung_owner_goes_stale_at_the_copys_horizon() {
     );
     let (svc, alarms) = alarms_v2_owner_on(
         &bus.owners,
-        "lab/svc",
-        false,
+        ServiceConfig::new("lab/svc".parse().expect("an address")),
         &bus.home.join("runs"),
         Implementation::new(revision),
     )
@@ -11469,6 +11461,108 @@ async fn alarms_v2_s6_a_hung_owner_goes_stale_at_the_copys_horizon() {
     let key = conform_case(&doc, "alarm-key", "state/alarms/{slot}");
     assert_eq!(key["verdict"]["answer"], "not_established", "{run}");
     drop(alarms);
+}
+
+/// alarms.v2 §2.7, "A revision not in hand" (text 0.2, #984): two owners
+/// on a first hop, which holds no bundle (core §8.4), each holding A firing
+/// on slot 0 and B resolved on slot 1. `lab/svc` implements the 4-s copy,
+/// which no `--contracts` holds and the bus does not serve: T has no
+/// horizon for it, and judges A **unobservable**, `not_a_horizon`, at once,
+/// never firing at the standard's 900 s, and B no, `resolved`, at step 5.
+/// Given the copy, T judges A yes, `firing`, at the copy's 4 s. `lab/std`
+/// names the standard revision, this reader's own, never retrieved: A yes,
+/// `firing`, at 900 s with nothing served.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alarms_v2_an_owner_naming_a_revision_not_in_hand_reads_unobservable() {
+    use zenkey::alarms::Severity;
+    let mut bus = Bus::bare(None).await;
+    let copy = alarms_v2_copy(&bus.home.join("copy"));
+    let l = load_path(&copy);
+    let revision = l
+        .contract
+        .unwrap_or_else(|| panic!("the copy does not load:\n{}", l.report));
+    let first_hop =
+        |address: &str| ServiceConfig::new(address.parse().expect("an address")).first_hop();
+    let runs = bus.home.join("runs");
+    let (svc, on_copy) = alarms_v2_owner_on(
+        &bus.owners,
+        first_hop("lab/svc"),
+        &runs,
+        Implementation::new(revision),
+    )
+    .await;
+    let (std_svc, on_standard) = alarms_v2_owner_on(
+        &bus.owners,
+        first_hop("lab/std"),
+        &runs,
+        zenkey::alarms::v2::implementation(),
+    )
+    .await;
+    for a in [&on_copy, &on_standard] {
+        a.raise(v2_a(Severity::Warning)).await.expect("A raised");
+        a.raise(v2_b(Severity::Warning)).await.expect("B raised");
+        a.resolve(B_KEY).await.expect("B resolved").expect("B held");
+    }
+    bus.services.push(svc);
+    bus.services.push(std_svc);
+    wait_for(&bus, &["lab/std", "lab/svc"]).await;
+    let copy = copy.to_str().expect("a UTF-8 path");
+    let not_in_hand = [
+        "alarms",
+        LAB_V2,
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&not_in_hand, |r| {
+            v2_slot_of(r, "lab/svc", 0).is_some() && v2_slot_of(r, "lab/std", 0).is_some()
+        })
+        .await;
+    let a = v2_slot_of(&run, "lab/svc", 0).expect("lab/svc's slot 0");
+    assert_eq!(
+        (&a["firing"]["answer"], &a["firing"]["reason"]),
+        (&json!("unobservable"), &json!("not_a_horizon")),
+        "no horizon in hand, never 900 s: {run}"
+    );
+    assert_eq!(a["stale"]["answer"], "unobservable", "{run}");
+    let b = v2_slot_of(&run, "lab/svc", 1).expect("lab/svc's slot 1");
+    assert_eq!(
+        (&b["firing"]["answer"], &b["firing"]["reason"]),
+        (&json!("no"), &json!("resolved")),
+        "a resolved record is answered at step 5: {run}"
+    );
+    let a = v2_slot_of(&run, "lab/std", 0).expect("lab/std's slot 0");
+    assert_eq!(
+        (&a["firing"]["answer"], &a["firing"]["reason"]),
+        (&json!("yes"), &json!("firing")),
+        "the standard revision, never retrieved, at 900 s: {run}"
+    );
+    exits(&run, 1);
+
+    // Given the copy, its horizon is in hand.
+    let given = [
+        "alarms",
+        "zk2/lab/svc/alarms.v2/state/alarms/*",
+        "--contracts",
+        copy,
+        "--clocks-synced",
+        "--timeout",
+        "1",
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&given, |r| {
+            v2_slot_of(r, "lab/svc", 0).is_some_and(|a| a["firing"]["answer"] == "yes")
+        })
+        .await;
+    let a = v2_slot_of(&run, "lab/svc", 0).expect("lab/svc's slot 0");
+    assert_eq!(a["firing"]["reason"], "firing", "at the copy's 4 s: {run}");
+    exits(&run, 1);
+    drop((on_copy, on_standard));
 }
 
 // ─── telemetry.v1: scenarios.md §8, the tool's section (#819, TC) ──────────

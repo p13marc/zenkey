@@ -194,16 +194,18 @@ pub struct SlotRead {
 ///
 /// **And each owner's `alarms.v2` revision** (§2.7, text 0.2, F-613): the
 /// one its present descriptors name, which its alarms age at and its
-/// heartbeat is read with; across a face, or with no descriptor in hand,
-/// the deployment's word, an `alarms.v2` revision held offline
-/// (`word_revision`). With neither, the standard revision's.
+/// heartbeat is read with, `None` where one they name is neither held nor
+/// retrieved, whose horizon this reader does not have; across a face, or
+/// with no descriptor in hand, the deployment's word, an `alarms.v2`
+/// revision held offline (`word_revision`). With neither, the standard
+/// revision's.
 #[derive(Debug, Clone, Default)]
 pub struct V2Words {
     pub tables: BTreeMap<Addr, Option<Vec<m2::Rule>>>,
     pub epochs: BTreeMap<Addr, Option<i64>>,
     pub word: Option<Vec<m2::Rule>>,
     pub default_epoch: Option<i64>,
-    pub revisions: BTreeMap<Addr, V2Revision>,
+    pub revisions: BTreeMap<Addr, Option<V2Revision>>,
     pub word_revision: Option<V2Revision>,
 }
 
@@ -352,14 +354,27 @@ impl Slots {
     }
 
     /// The `alarms.v2` revision this reader reads `addr` by (§2.7): the one
-    /// its present, or its last, descriptors name; the deployment's word
-    /// for an owner none of whose descriptors reached this reader; the
-    /// standard revision where it holds neither.
-    pub(super) fn revision(&self, addr: &Addr) -> &V2Revision {
-        self.words
-            .revisions
-            .get(addr)
-            .or(self.words.word_revision.as_ref())
+    /// its present, or its last, descriptors name, `None` where one they
+    /// name is not in hand; the deployment's word for an owner none of
+    /// whose descriptors reached this reader; the standard revision where
+    /// it holds neither.
+    pub(super) fn revision(&self, addr: &Addr) -> Option<&V2Revision> {
+        match self.words.revisions.get(addr) {
+            Some(named) => named.as_ref(),
+            None => Some(
+                self.words
+                    .word_revision
+                    .as_ref()
+                    .unwrap_or_else(|| V2Revision::standard()),
+            ),
+        }
+    }
+
+    /// The revision `addr`'s heartbeat is read with: [`Slots::revision`],
+    /// the standard one's layout where that is not in hand, under which a
+    /// heartbeat of another revision is refused by its tag (core §7.5).
+    pub(super) fn layout_of(&self, addr: &Addr) -> &V2Revision {
+        self.revision(addr)
             .unwrap_or_else(|| V2Revision::standard())
     }
 
@@ -518,7 +533,7 @@ impl AlarmBook {
         held.revisions.extend(words.revisions);
         held.word_revision = words.word_revision;
         for (owner, views) in &mut self.views {
-            let revision = self.v2.revision(owner);
+            let revision = self.v2.layout_of(owner);
             if view_of(views).layout() != &*revision.layout {
                 views.insert(view(revision));
             }
@@ -1012,11 +1027,17 @@ impl AlarmBook {
             reading: m2::Reading {
                 presence,
                 // At the horizon of the revision its owner names (§2.7,
-                // §2.14 step 6, text 0.2): the standard's 900 s is one.
-                freshness: Some(fm::judge_all(
-                    &self.v2.revision(addr).horizon,
-                    &observations,
-                )),
+                // §2.14 step 6, text 0.2): the standard's 900 s is one. A
+                // revision not in hand gives no horizon: unobservable,
+                // never 900 s, which would call a stale alarm of a shorter
+                // horizon fresh.
+                freshness: Some(match self.v2.revision(addr) {
+                    Some(r) => fm::judge_all(&r.horizon, &observations),
+                    None => fm::Judged {
+                        verdict: fm::Verdict::Unobservable,
+                        reason: fm::Reason::NotAHorizon,
+                    },
+                }),
                 latest,
                 lost: lossy && !answered,
                 previous_instance,
@@ -1954,7 +1975,7 @@ mod tests {
         );
 
         let mut words = named("lab/svc", Some(table()));
-        words.revisions.insert(owner.clone(), copy.clone());
+        words.revisions.insert(owner.clone(), Some(copy.clone()));
         bk.v2_words(words);
         assert_eq!(tag(&bk), copy.layout.tag, "read by the copy's layout");
         assert_eq!(
@@ -1965,12 +1986,32 @@ mod tests {
         // An owner none of whose descriptors reached the reader is read by
         // the deployment's word, the revision held offline.
         let gone: Addr = "lab/gone".parse().unwrap();
-        assert_eq!(bk.v2.revision(&gone), standard);
+        assert_eq!(bk.v2.revision(&gone), Some(standard));
         bk.v2_words(V2Words {
             word_revision: Some(copy.clone()),
             ..named("lab/svc", Some(table()))
         });
-        assert_eq!(bk.v2.revision(&gone), &copy);
-        assert_eq!(bk.v2.revision(&owner), &copy, "its own word kept");
+        assert_eq!(bk.v2.revision(&gone), Some(&copy));
+        assert_eq!(bk.v2.revision(&owner), Some(&copy), "its own word kept");
+
+        // A revision its owner names that is not in hand gives no horizon:
+        // unobservable, never at the standard's 900 s, at once as 10 s on;
+        // its heartbeat read with the standard's layout, which refuses
+        // another revision's by its tag.
+        let mut words = named("lab/svc", Some(table()));
+        words.revisions.insert(owner.clone(), None);
+        bk.v2_words(words);
+        assert_eq!(bk.v2.revision(&owner), None);
+        assert_eq!(tag(&bk), standard.layout.tag);
+        assert_eq!(
+            firing(&bk),
+            (
+                Answer::Unobservable,
+                Reason::Freshness(fm::Reason::NotAHorizon)
+            ),
+            "no horizon in hand"
+        );
+        let j = bk.slot_reading(&owner, 0, t0, wall).unwrap().firing();
+        assert_eq!(j.answer, Answer::Unobservable, "fresh or not, no verdict");
     }
 }

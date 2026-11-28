@@ -689,7 +689,7 @@ fn alarms_views(v2: &v2::Slots, owner: &Addr) -> Views<Instant> {
     v.follow_resource(zenkey::alarms::ALARMS);
     let mut views = Views::new();
     views.insert(v);
-    views.insert(v2::view(v2.revision(owner)));
+    views.insert(v2::view(v2.layout_of(owner)));
     views
 }
 
