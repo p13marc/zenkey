@@ -690,3 +690,71 @@ async fn first_hop_token_finds_a_device_at_its_defaults() {
     assert!(reason.contains("1 device(s)"), "{reason}");
     svc.close().await.expect("close");
 }
+
+/// `constrained.md` §10 step 7 from the tools' side (#980 C5c): a device
+/// on its first hop given the deployment catalog writes its descriptor in
+/// the compact form (core §3.3, §8.1). The fleet's presence read through
+/// the catalog reads it to the JSON form's members, the revision it names
+/// held offline, since a device on its first hop holds no bundle (§8.4);
+/// through none it is `unread`, never guessed (§8.6).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_the_fleet_reads_a_first_hop_devices_compact_descriptor() {
+    use zenkey_fleet::{
+        Catalogs, ContractSet, Describing, DescriptorRead, Revision, observe_presence,
+        observe_presence_through,
+    };
+    use zenkey_model::canonical::Fingerprint;
+    let (_r, ep) = router(None).await;
+    let (device, tool) = (client(&ep).await, client(&ep).await);
+    let mut catalog = zenkey_model::catalog::Catalog::new(0).expect("a catalog");
+    catalog
+        .push(ping().iface.clone(), Fingerprint::of(&ping()))
+        .expect("an entry");
+    let mut b = ServiceBuilder::new(&device, config(DEVICE).first_hop());
+    b.catalog(catalog.clone()).expect("the catalog");
+    b.implement(Implementation::new(ping())).expect("implement");
+    for r in &ping().resources {
+        b.expose(&ping().iface, &zenkey::implementation::resource_name(r))
+            .expect("expose");
+    }
+    let svc = b.start().await.expect("start");
+    assert_eq!(
+        svc.descriptor_form(),
+        zenkey_model::descriptor::Form::Compact,
+        "a first hop given a catalog writes the compact form"
+    );
+    let scope = PresenceScope::service(&addr(DEVICE));
+    let mut offline = ContractSet::new();
+    offline.insert(Revision::from_contract(
+        ping(),
+        zenkey_fleet::report::ContractSource::File,
+    ));
+    let through = Describing::retrieving(&Catalogs::new(vec![catalog.clone()]), &offline, T);
+    let key = (addr(DEVICE), svc.instance().clone());
+    let mut read = None;
+    for _ in 0..50 {
+        let o = observe_presence_through(&tool, &scope, T, &through)
+            .await
+            .expect("a read");
+        if let Some(DescriptorRead::Served(d)) = o.descriptors.and_then(|mut m| m.remove(&key)) {
+            read = Some(d);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let d = read.expect("read through the catalog");
+    assert_eq!(d.catalog, Some(catalog.id().hex()));
+    let listed: Vec<(&str, bool)> = d
+        .interfaces
+        .iter()
+        .map(|e| (e.iface.as_str(), e.token))
+        .collect();
+    assert_eq!(listed, [("ping.v1", false)], "its one interface, tokenless");
+    let none = observe_presence(&tool, &scope, T).await.expect("a read");
+    match none.descriptors.and_then(|mut m| m.remove(&key)) {
+        Some(DescriptorRead::Unread(why)) => {
+            assert!(why.starts_with("unknown_catalog"), "{why}");
+        }
+        other => panic!("not read without the catalog: {other:?}"),
+    }
+}

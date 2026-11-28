@@ -4,8 +4,9 @@
 //! `zk2_core.rs` and zenctl's `live_zk2.rs` include this file and read it
 //! alike.
 //!
-//! No runtime writer is involved, since a real owner writing the compact
-//! form is C5c's: a raw session holds the instance token and no interface
+//! No runtime writer is involved, so both forms answer one descriptor (the
+//! runtime's writer, C5c, is `constrained.rs`' §10 step 7): a raw session
+//! holds the instance token and no interface
 //! token, and one raw `complete` queryable answers its descriptor GET with
 //! [`compact`]'s bytes under `zenoh/bytes`, or the same descriptor's JSON
 //! under `application/json`. Each revision the descriptor names can be held

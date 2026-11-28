@@ -48,7 +48,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, RwLock};
 
-use zenkey_model::descriptor::Cause;
+use zenkey_model::descriptor::{Cause, Form};
 use zenkey_model::grammar::{
     Addr, IfaceId, InstanceId, Key, KindToken, alive_key, contract_key, data_key, instance_key,
     member_key,
@@ -1205,6 +1205,40 @@ impl ServiceBuilder {
     /// Both rows go through the builder's own [`ServiceBuilder::expose`]
     /// and [`ServiceBuilder::unavailable`], so each is checked as an
     /// application's would be.
+    /// The form its descriptor is written in (core §3.3, §8.1; #980 C5c):
+    /// [`ServiceConfig::writes_compact`]. The compact form asked for
+    /// ([`ServiceConfig::compact_descriptor`](crate::ServiceConfig::compact_descriptor))
+    /// is refused, nothing declared, without a catalog (an entry names its
+    /// revision by its index there) and beside a role (the form carries no
+    /// `requires`).
+    fn descriptor_form(&self) -> Result<Form> {
+        let (catalog, role) = (self.catalog.is_some(), !self.roles.is_empty());
+        if self.config.compact_descriptor == Some(true) {
+            if !catalog {
+                return Err(Error::NotExposed(
+                    "`compact_descriptor` is set and the service was given no catalog: a \
+                     compact descriptor names each revision by its index in the deployment \
+                     catalog (core §3.3, §8.6). Give the service its catalog, or leave the \
+                     option off"
+                        .to_owned(),
+                ));
+            }
+            if role {
+                return Err(Error::NotExposed(
+                    "`compact_descriptor` is set and the service holds a role: the compact \
+                     descriptor has no `requires`, so an instance with a role writes the JSON \
+                     form (core §3.3, §8.1)"
+                        .to_owned(),
+                ));
+            }
+        }
+        Ok(if self.config.writes_compact(catalog, role) {
+            Form::Compact
+        } else {
+            Form::Json
+        })
+    }
+
     fn settle_owner_heartbeats(&mut self) -> Result<Vec<(IfaceId, u16)>> {
         if self.config.owner_heartbeat && self.catalog.is_none() {
             return Err(Error::NotExposed(
@@ -1558,6 +1592,9 @@ impl ServiceBuilder {
         // freshness.v2 §2.4 (#1110): the interfaces its owner heartbeats
         // cover, refused without a catalog, and the resource's row.
         let owner_cover = self.settle_owner_heartbeats()?;
+        // Core §3.3, §8.1 (#980 C5c): the descriptor's form, the compact
+        // one asked for refused without a catalog or beside a role.
+        let compact = self.descriptor_form()? == Form::Compact;
         // Exposure.
         check_exposure(&self.impls, &self.config)?;
         // timing.v1 §2.6 (#908): an owner of a stream declaring a lifespan
@@ -1654,19 +1691,22 @@ impl ServiceBuilder {
         let run = self.minter.run();
         let served = Arc::new(Served {
             session: self.session.clone(),
+            minter: Arc::clone(&self.minter),
             inputs: Mutex::new(Inputs {
                 addr: addr.clone(),
                 minted: self.minted.is_some(),
                 host: self.host.clone(),
                 instance: self.instance.clone(),
                 run,
-                catalog: self.catalog.as_ref().map(|c| c.id()),
+                catalog: self.catalog.clone(),
+                compact,
                 impls: self.impls.clone(),
                 roles: self.roles.clone(),
                 config: self.config.clone(),
             }),
-            current: Mutex::new(Arc::new(RwLock::new(Arc::from(Vec::new())))),
+            current: Mutex::new(Arc::new(RwLock::new(Bytes::empty()))),
             putting: Mutex::new(()),
+            fell_back: Mutex::new(None),
         });
         // A run change within the instance puts the descriptor stating it
         // first (§3.3).
@@ -1722,9 +1762,14 @@ impl ServiceBuilder {
                 h.watch_clock(svc.closed.subscribe());
             }
         }
-        // 3. The descriptor, then the contracts.
+        // 3. The descriptor, then the contracts. Its seq is the as-of
+        // mark's (§3.3): what was written before it, the health status and
+        // the state values put before the tokens among them.
         let run = svc.minter.run();
-        let (q, current) = svc.serve_descriptor(&svc.instance.clone(), run).await?;
+        let seq = svc.minter.last_seq(run);
+        let (q, current) = svc
+            .serve_descriptor(&svc.instance.clone(), run, seq)
+            .await?;
         svc.served.set_current(current);
         svc.descriptor_q = Some(q);
         // Core §8.4: an owner on a first hop holds no bundle; the deployment
@@ -2062,10 +2107,20 @@ impl Service {
         Ok(instance_key(&self.addr, &self.instance)?)
     }
 
-    /// The descriptor currently served, as JSON bytes.
+    /// The descriptor currently served, as its bytes: the JSON form's, or
+    /// the compact form's where [`Service::descriptor_form`] says so (core
+    /// §3.3).
     #[must_use]
     pub fn descriptor_bytes(&self) -> Arc<[u8]> {
-        self.served.bytes()
+        self.served.bytes().bytes
+    }
+
+    /// The form the descriptor is served in (core §3.3, §8.1): the JSON
+    /// one under `application/json`, or the compact one under
+    /// `zenoh/bytes` ([`ServiceConfig::compact_descriptor`](crate::ServiceConfig::compact_descriptor)).
+    #[must_use]
+    pub fn descriptor_form(&self) -> Form {
+        self.served.bytes().form
     }
 
     /// Its `redundancy.v1` elections, when [`ServiceBuilder::redundancy`]
@@ -2544,7 +2599,9 @@ impl Service {
             Some(r) => r.remint(&next).await,
             None => Vec::new(),
         };
-        let (q, current) = self.serve_descriptor(&next, run).await?;
+        // The put mints no seq, and none is minted under the new run yet.
+        let seq = zenkey_model::wire::Seq::new(0).expect("0");
+        let (q, current) = self.serve_descriptor(&next, run, seq).await?;
         self.minter.begin(run);
         self.served.set_run(run);
         // config.v1 §2.3, §2.12: the new instance's view and status, under
@@ -2978,15 +3035,18 @@ impl Service {
     }
 
     /// Declares the descriptor's queryable on `instance`'s key and puts the
-    /// descriptor there, stating `run` (§3.3).
+    /// descriptor there, stating `run` and, in the compact form, `seq`
+    /// (§3.3). The GET answers the form of the last put, under its
+    /// `Encoding`.
     async fn serve_descriptor(
         &self,
         instance: &InstanceId,
         run: zenkey_model::wire::Run,
-    ) -> Result<(Queryable<()>, Arc<RwLock<Arc<[u8]>>>)> {
-        let bytes: Arc<[u8]> = self.served.encode_with(instance, run)?.into();
+        seq: zenkey_model::wire::Seq,
+    ) -> Result<(Queryable<()>, Arc<RwLock<Bytes>>)> {
+        let bytes = self.served.encode_with(instance, run, seq)?;
         let key = instance_key(&self.addr, instance)?.into_keyexpr();
-        let current = Arc::new(RwLock::new(Arc::clone(&bytes)));
+        let current = Arc::new(RwLock::new(bytes.clone()));
         let shared = Arc::clone(&current);
         let reply_key = key.clone();
         let q = self
@@ -2994,20 +3054,15 @@ impl Service {
             .declare_queryable(key.clone())
             .complete(true)
             .callback(move |q| {
-                let now = Arc::clone(&shared.read().expect("not poisoned"));
+                let now = shared.read().expect("not poisoned").clone();
                 let _ = q
-                    .reply(reply_key.clone(), now.to_vec())
-                    .encoding(Encoding::APPLICATION_JSON)
+                    .reply(reply_key.clone(), now.bytes.to_vec())
+                    .encoding(now.encoding())
                     .wait();
             })
             .await
             .map_err(zenoh)?;
-        self.session
-            .put(key, bytes.to_vec())
-            .encoding(Encoding::APPLICATION_JSON)
-            .timestamp(self.session.new_timestamp())
-            .await
-            .map_err(zenoh)?;
+        bytes.put(&self.session, key).await?;
         Ok((q, current))
     }
 
@@ -3026,11 +3081,68 @@ struct Inputs {
     instance: InstanceId,
     /// The run the instance writes under (§3.3, §4.3).
     run: zenkey_model::wire::Run,
-    /// The catalog it writes under, stated as `catalog` (§3.3, §8.6).
-    catalog: Option<zenkey_model::catalog::CatalogId>,
+    /// The catalog it writes under, stated as `catalog` (§3.3, §8.6), and
+    /// what a compact descriptor's indices are read through.
+    catalog: Option<Arc<Catalog>>,
+    /// The descriptor is written in the compact form (§3.3, §8.1;
+    /// [`ServiceBuilder::descriptor_form`]).
+    compact: bool,
     impls: Vec<ImplState>,
     roles: Vec<Role>,
     config: ServiceConfig,
+}
+
+/// A descriptor's bytes as served (core §3.3, "What carries it"), and
+/// their form, which their `Encoding` tells.
+#[derive(Debug, Clone)]
+pub(crate) struct Bytes {
+    pub(crate) bytes: Arc<[u8]>,
+    pub(crate) form: Form,
+}
+
+impl Bytes {
+    fn empty() -> Bytes {
+        Bytes {
+            bytes: Arc::from(Vec::new()),
+            form: Form::Json,
+        }
+    }
+
+    /// `application/json` for the JSON form, `zenoh/bytes` for the
+    /// compact one.
+    fn encoding(&self) -> Encoding {
+        match self.form {
+            Form::Json => Encoding::APPLICATION_JSON,
+            Form::Compact => Encoding::ZENOH_BYTES,
+        }
+    }
+
+    /// The Zenoh timestamp its put carries: the JSON form's, from the
+    /// session's clock; none for the compact one, whose envelope's run and
+    /// seq order its puts (§3.3, §4.3's "What keeps its wire").
+    fn timestamp(&self, session: &zenoh::Session) -> Option<zenoh::time::Timestamp> {
+        (self.form == Form::Json).then(|| session.new_timestamp())
+    }
+
+    /// Puts it on the instance key `key`.
+    async fn put(&self, session: &zenoh::Session, key: OwnedKeyExpr) -> Result<()> {
+        session
+            .put(key, self.bytes.to_vec())
+            .encoding(self.encoding())
+            .timestamp(self.timestamp(session))
+            .await
+            .map_err(zenoh)
+    }
+
+    /// [`Bytes::put`], waiting.
+    fn put_wait(&self, session: &zenoh::Session, key: OwnedKeyExpr) -> Result<()> {
+        session
+            .put(key, self.bytes.to_vec())
+            .encoding(self.encoding())
+            .timestamp(self.timestamp(session))
+            .wait()
+            .map_err(zenoh)
+    }
 }
 
 /// The descriptor as served (§3.3), and what it is made of: the service's,
@@ -3039,23 +3151,29 @@ struct Inputs {
 /// gate (§2.6 step 3, §2.9 step 3).
 pub(crate) struct Served {
     session: zenoh::Session,
+    /// What a compact descriptor's seq is read from (§3.3): the as-of
+    /// mark's. Lock order: the minter's, then this one's.
+    minter: Arc<Minter>,
     inputs: Mutex<Inputs>,
     /// What the current descriptor queryable answers.
-    current: Mutex<Arc<RwLock<Arc<[u8]>>>>,
+    current: Mutex<Arc<RwLock<Bytes>>>,
     /// One encode-and-put at a time, so that puts go out in order.
     putting: Mutex<()>,
+    /// Why the compact form asked for was last written as JSON, said
+    /// once for each reason.
+    fell_back: Mutex<Option<String>>,
 }
 
 impl Served {
-    /// The descriptor of `instance`, encoded and checked, stating the run
-    /// the inputs hold.
-    fn encode(&self, instance: &InstanceId) -> Result<Vec<u8>> {
-        let run = self.inputs.lock().expect("not poisoned").run;
-        self.encode_with(instance, run)
-    }
-
-    /// The descriptor of `instance` stating `run`, encoded and checked.
-    fn encode_with(&self, instance: &InstanceId, run: zenkey_model::wire::Run) -> Result<Vec<u8>> {
+    /// The descriptor of `instance` stating `run` and, in the compact
+    /// form, `seq`, checked, then encoded in its form (§3.3). One with no
+    /// compact form is written as JSON, and why is said once.
+    fn encode_with(
+        &self,
+        instance: &InstanceId,
+        run: zenkey_model::wire::Run,
+        seq: zenkey_model::wire::Seq,
+    ) -> Result<Bytes> {
         let i = self.inputs.lock().expect("not poisoned");
         let zid = self.session.zid().to_string();
         let id = descriptor::Identity {
@@ -3064,10 +3182,42 @@ impl Served {
             host: i.host.as_deref(),
             zid: &zid,
             run,
-            catalog: i.catalog,
+            catalog: i.catalog.as_ref().map(|c| c.id()),
         };
         let d = descriptor::build(&id, instance, &i.impls, &i.roles, &i.config);
-        descriptor::encode_checked(&d, &i.impls)
+        let json = descriptor::encode_checked(&d, &i.impls)?;
+        let catalog = i.catalog.as_deref().filter(|_| i.compact);
+        let Some(catalog) = catalog else {
+            return Ok(Bytes {
+                bytes: json.into(),
+                form: Form::Json,
+            });
+        };
+        match descriptor::encode_compact(d, seq, i.minted, catalog, &i.impls) {
+            Ok(bytes) => {
+                *self.fell_back.lock().expect("not poisoned") = None;
+                Ok(Bytes {
+                    bytes: bytes.into(),
+                    form: Form::Compact,
+                })
+            }
+            Err(e) => {
+                let why = e.to_string();
+                let mut said = self.fell_back.lock().expect("not poisoned");
+                if said.as_deref() != Some(why.as_str()) {
+                    tracing::warn!(
+                        service = %i.addr,
+                        "the descriptor has no compact form, so it is written as JSON (core \
+                         §3.3, \"Which descriptors have one\"): {why}"
+                    );
+                    *said = Some(why);
+                }
+                Ok(Bytes {
+                    bytes: json.into(),
+                    form: Form::Json,
+                })
+            }
+        }
     }
 
     /// The run its descriptor states from now on, put at the next change.
@@ -3075,45 +3225,57 @@ impl Served {
         self.inputs.lock().expect("not poisoned").run = run;
     }
 
-    /// The bytes the current queryable answers.
-    fn bytes(&self) -> Arc<[u8]> {
+    /// The bytes the current queryable answers, and their form.
+    fn bytes(&self) -> Bytes {
         let current = self.current.lock().expect("not poisoned");
-        Arc::clone(&current.read().expect("not poisoned"))
+        current.read().expect("not poisoned").clone()
     }
 
-    fn set_current(&self, current: Arc<RwLock<Arc<[u8]>>>) {
+    fn set_current(&self, current: Arc<RwLock<Bytes>>) {
         *self.current.lock().expect("not poisoned") = current;
     }
 
     /// Re-encodes the descriptor, swaps it into the queryable and puts it
-    /// (§3.3: put on every change).
+    /// (§3.3: put on every change). A compact one's seq is the as-of
+    /// mark's, read from the minter before anything here is locked (the
+    /// lock order); a run moved meanwhile has minted nothing it reads, so
+    /// it states 0.
     pub(crate) fn publish(&self) -> Result<()> {
+        let run = self.inputs.lock().expect("not poisoned").run;
+        let seq = self.minter.last_seq(run);
+        self.publish_at(run, seq)
+    }
+
+    /// [`Served::publish`], the seq `seq` where the run is still `run`.
+    fn publish_at(&self, run: zenkey_model::wire::Run, seq: zenkey_model::wire::Seq) -> Result<()> {
         let _putting = self.putting.lock().expect("not poisoned");
-        let (instance, addr) = {
+        let (instance, addr, now) = {
             let i = self.inputs.lock().expect("not poisoned");
-            (i.instance.clone(), i.addr.clone())
+            (i.instance.clone(), i.addr.clone(), i.run)
         };
-        let bytes: Arc<[u8]> = self.encode(&instance)?.into();
+        let seq = if now == run {
+            seq
+        } else {
+            zenkey_model::wire::Seq::new(0).expect("0")
+        };
+        let bytes = self.encode_with(&instance, now, seq)?;
         {
             let current = self.current.lock().expect("not poisoned");
-            *current.write().expect("not poisoned") = Arc::clone(&bytes);
+            *current.write().expect("not poisoned") = bytes.clone();
         }
         let key = instance_key(&addr, &instance)?.into_keyexpr();
-        self.session
-            .put(key, bytes.to_vec())
-            .encoding(Encoding::APPLICATION_JSON)
-            .timestamp(self.session.new_timestamp())
-            .wait()
-            .map_err(zenoh)
+        bytes.put_wait(&self.session, key)
     }
 }
 
 /// A run change within the instance (core §4.3): the descriptor states it,
-/// and is put before anything is written under it (§3.3).
+/// and is put before anything is written under it (§3.3). Called under the
+/// minter's lock, so it reads nothing of the minter: the put mints no seq,
+/// and none is minted under the new run yet, so its seq is 0.
 impl crate::state::RunListener for Served {
     fn run_changed(&self, run: zenkey_model::wire::Run) {
         self.set_run(run);
-        if let Err(e) = self.publish() {
+        if let Err(e) = self.publish_at(run, zenkey_model::wire::Seq::new(0).expect("0")) {
             tracing::warn!(run = %run, "the descriptor stating a new run was not put: {e}");
         }
     }

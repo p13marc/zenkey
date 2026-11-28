@@ -5,8 +5,8 @@
 //! revision by its index in the deployment catalog (§8.6) and states
 //! capabilities as bits. [`decode`] gives today's [`Descriptor`], so
 //! [`super::check_descriptor`] reads it as it reads JSON; [`encode`] writes
-//! one back. No rule adopts the form yet: no owner writes it and no reader
-//! is required to read it (C5b, C5c).
+//! one back. A reader reads both forms, and an owner on a first hop given
+//! a catalog writes this one (core §3.3, §8.1; C5c).
 //!
 //! The reading takes §3.3's three steps: [`Head::parse`] with no catalog and
 //! no contract, [`Head::pairs`] through the catalogs held, then the rest

@@ -338,6 +338,19 @@ impl Minter {
         }
     }
 
+    /// The seq a descriptor put under `run` states (core §3.3, "The run
+    /// and the seq"): the last state or event seq minted under it, 0 when
+    /// it minted none. A run not written under now, a new instance's
+    /// before [`Minter::begin`], has minted none. It takes no run.
+    pub(crate) fn last_seq(&self, run: wire::Run) -> wire::Seq {
+        let r = self.runs.lock().expect("not poisoned");
+        let last = match r.run {
+            Some(now) if now == run => r.seq.saturating_sub(1).min(wire::Seq::MAX.get()),
+            _ => 0,
+        };
+        wire::Seq::new(last).expect("at most 2^24 - 1")
+    }
+
     /// A run never used by this instance: the store's next counter, else a
     /// random 32-bit draw (§4.3).
     fn draw(&self, used: &[wire::Run]) -> wire::Run {
