@@ -4354,7 +4354,8 @@ def family_readings(root: Path) -> list[Result]:
         + _round104_readings(root) + _round118_readings(root) + _round119_readings(root) \
         + _round120_readings(root) + _round121_readings(root) + _round122_readings(root) \
         + _round123_readings(root) + _round124_readings(root) + _round125_readings(root) \
-        + _round126_readings(root) + _round127_readings(root) + _round127b_readings(root)
+        + _round126_readings(root) + _round127_readings(root) + _round127b_readings(root) \
+        + _round127c_readings(root)
     return out + [_check(note, got, want) for note, got, want in computed]
 
 
@@ -6051,6 +6052,184 @@ def _round127b_readings(root: Path) -> list[tuple[str, Any, Any]]:
                              "it read once more, answered unchanged (§2.5).")
                 + missing(dlog, "- **§14's Expected 5** says the second read §2.5 makes after a whole answer (F-625)."),
                 []))
+    return out
+
+
+def _round127c_readings(root: Path) -> list[tuple[str, Any, Any]]:
+    """Round 127's second mend (#609; #984, #986): review-bot's two answers
+    on #1176, each read cold. desired.v2 0.3 §2.18's "The hold is bounded",
+    run over zk2py's target with a short ``hold_s`` and descriptor reads
+    that zk2py stands in for; and alarms.v2 0.2 §2.7's "No descriptor
+    read", run over zk2py's near reader with a descriptor it could not
+    read. No session is opened."""
+    import threading
+    import time
+    import types
+
+    from . import alarms as v1, alarms_v2 as a2, alarms_v2_live as al, desired_v2 as d2, freshness_v2 as f2
+    from .desired_v2_live import Target
+
+    spec = root.parent
+    flat = lambda rel: " ".join((spec / rel).read_text(encoding="utf-8").split())  # noqa: E731
+
+    def missing(text: str, *sentences: str) -> list[str]:
+        return [x for x in sentences if " ".join(x.split()) not in text]
+
+    d2t, dlog = flat("profiles/desired/v2.md"), flat("profiles/desired/CHANGELOG.md")
+    a2t, alog = flat("profiles/alarms/v2.md"), flat("profiles/alarms/CHANGELOG.md")
+    out: list[tuple[str, Any, Any]] = []
+
+    # -- desired.v2 §2.18, "The hold is bounded" ---------------------------------------
+    hold_s = 0.3
+    stop = "stopped:desired.v1:sha256:" + "0" * 64
+    r7 = d2.Run(16, 7)
+    put = lambda seq: ("sample", d2.Sample("owner", False, d2.Version(r7, seq)), True)  # noqa: E731
+
+    made: list[Any] = []
+
+    def target() -> tuple[Any, list[Any]]:
+        t = Target("lab/worker", "tcp/127.0.0.1:1", hold_s=hold_s)
+        t.owner = types.SimpleNamespace(session=object())  # type: ignore[assignment]
+        made.append(t)
+        order: list[Any] = []
+        t._receive = lambda x, live_: order.append(  # type: ignore[method-assign]
+            (x.version.text, t._revision_of_run(x.version.run.text), time.monotonic()))
+        return t, order
+
+    def at(order: list[Any], t0: float) -> list[Any]:
+        # each version judged, by what, and when: at once after its put
+        # (within 0.1 s), at the bound (hold_s to hold_s + 0.15 s after the
+        # first version, before any stood-in read out then ends), else the
+        # seconds
+        def when(dt: float) -> Any:
+            if dt < 0.1:
+                return "at once"
+            if hold_s <= dt < hold_s + 0.15:
+                return "at the bound"
+            return round(dt, 2)
+        return [(v, w, when(t - t0)) for v, w, t in order]
+
+    def descriptors(slow_after: int, slow_s: float, says: Any = None) -> Any:
+        n = [0]
+
+        def read(run: Any) -> tuple[str, Any]:
+            n[0] += 1
+            if n[0] > slow_after:
+                threading.Event().wait(slow_s)
+            return says(n[0]) if says is not None else ("none", None)
+        return read
+
+    real = f2.descriptors_of
+    f2.descriptors_of = lambda session, author, timeout: []  # type: ignore[assignment]
+    try:
+        # a run never stated, no token appearing: the word at hold_s; a later
+        # version of the run is judged at once by that word
+        a, a_order = target()
+        a0 = time.monotonic()
+        a._judge_or_wait(put(0))
+        threading.Event().wait(hold_s + 0.3)
+        a1 = time.monotonic()
+        a._judge_or_wait(put(1))
+        a_got = [a.hold_log, at(a_order[:1], a0), at(a_order[1:], a1), list(a._held_runs), sorted(a._bounds)]
+        # the read at a token out at hold_s (its instance silent): the word at
+        # the bound, never at the read's end, and that read keeps no hold
+        b, b_order = target()
+        b._descriptor_says = descriptors(1, 0.5)  # type: ignore[method-assign]
+        b0 = time.monotonic()
+        b._judge_or_wait(put(0))
+        threading.Event().wait(0.05)
+        b._token_appeared({"00000000000000cc"})
+        threading.Event().wait(0.8)
+        b_got = [b.hold_log, at(b_order, b0), sorted(b._asking), list(b._held_runs)]
+        # that read late, stating the run under a desired.v1 revision: the
+        # version that waited was judged by the word, the next by the stop
+        c, c_order = target()
+        late_stop = lambda n: ("none", None) if n == 1 else (stop, "0007")  # noqa: E731
+        c._descriptor_says = descriptors(1, 0.5, late_stop)  # type: ignore[method-assign]
+        c0 = time.monotonic()
+        c._judge_or_wait(put(0))
+        threading.Event().wait(0.05)
+        c._token_appeared({"00000000000000dd"})
+        threading.Event().wait(0.8)
+        c1 = time.monotonic()
+        c._judge_or_wait(put(1))
+        c_got = [c.hold_log, at(c_order[:1], c0), at(c_order[1:], c1)]
+        # the run's first read still out at hold_s: the word at the bound
+        d, d_order = target()
+        d._descriptor_says = descriptors(0, 0.5)  # type: ignore[method-assign]
+        d0 = time.monotonic()
+        d._judge_or_wait(put(0))
+        threading.Event().wait(0.8)
+        d_got = [d.hold_log, at(d_order, d0)]
+    finally:
+        f2.descriptors_of = real  # type: ignore[assignment]
+        for t in made:
+            t._stop.set()
+            with t.lock:
+                for x in t._bounds.values():
+                    x.cancel()
+    try:
+        Target("lab/worker", "tcp/127.0.0.1:1", hold_s=0)
+        refused = "started"
+    except ValueError as e:
+        refused = str(e)
+    w = "word"
+    out.append(("desired.v2 0.3 §2.18 (review-bot on #1176): \"The hold is bounded\"; zk2py's target, its hold_s "
+                "0.3 s here: a run never stated and no token appearing leaves the word at hold_s from its first "
+                "version, and its next version is judged at once by it; at hold_s the word is left whether a read "
+                "at a token, or the run's first read, is still out, and that read keeps no hold when it ends, a "
+                "revision it states (desired.v1's, a stop) judging the run's later versions; hold_s is 10 s "
+                "unless the deployment says otherwise (--desired-hold-s), and 0 is no bound",
+                [a_got, b_got, c_got, d_got, Target("lab/worker", "tcp/127.0.0.1:1").hold_s, refused]
+                + missing(d2t, "- **The hold is bounded.** A run that no read has stated within `hold_s` of its "
+                               "first version leaves the deployment's word, as across a face. `hold_s` is 10 s "
+                               "unless the deployment says otherwise. The race the hold guards takes "
+                               "milliseconds. A deployment that misreads where tokens reach, as behind an `@zk` "
+                               "deny, then acts late rather than never.")
+                + missing(dlog, "- **The hold is bounded** (review-bot on #1176): a run no read has stated within "
+                                "`hold_s` of its first version, 10 s by default, leaves the deployment's word. "
+                                "Unbounded, a deployment that misread where tokens reach left its target inert "
+                                "for ever."),
+                [[[("0007", "held", 0), ("0007", "bound", hold_s), ("0007", "released", w)],
+                  [("0007/0", w, "at the bound")], [("0007/1", w, "at once")], [], []],
+                 [[("0007", "held", 0), ("0007", "bound", hold_s), ("0007", "released", w), ("0007", "late", "none")],
+                  [("0007/0", w, "at the bound")], [], []],
+                 [[("0007", "held", 0), ("0007", "bound", hold_s), ("0007", "released", w), ("0007", "late", stop)],
+                  [("0007/0", w, "at the bound")], [("0007/1", stop, "at once")]],
+                 [[("0007", "bound", hold_s), ("0007", "released", w), ("0007", "late", "none")],
+                  [("0007/0", w, "at the bound")]],
+                 10.0, "a hold_s of 0 s is no bound (desired.v2 §2.18)"]))
+
+    # -- alarms.v2 §2.7, "No descriptor read" --------------------------------------------
+    std, cp = a2.standard(), al.standard(4)
+    real_presence = al._presence
+    al._presence = lambda tool, address, timeout: ("present", None)  # type: ignore[assignment]
+    try:
+        alone = al.read_owner(None, "lab/a")
+        given = al.read_owner(None, "lab/a", held={cp.fingerprint: cp.canonical})
+    finally:
+        al._presence = real_presence  # type: ignore[assignment]
+    rd = a2.Reading("present", None, None, al.NO_REVISION, "firing")
+    out.append(("alarms.v2 0.2 §2.7 (review-bot on #1176): \"No descriptor read\"; zk2py's near reader, an owner "
+                "present whose descriptor it could not read, held the standard alone or the copy given beside it: "
+                "no revision named, no horizon, never 900 s nor the copy's 4 s; its alarms unobservable, "
+                "no_descriptor (§2.14's step 2, before any freshness), and nothing read of them; a reading with "
+                "no descriptor and the freshness of a revision not in hand answers both questions so; across a "
+                "face, a word that names none is the standard's 900 s, as F-622's answer reads. zk2py read it "
+                "so since round 127, and nothing moved",
+                [[x.horizon_s, x.revision, x.revision_fp, (x.verdict.verdict, x.verdict.reason), x.slots,
+                  x.collection] for x in (alone, given)]
+                + [(y.answer, y.reason) for y in (a2.judge_reading(rd, q) for q in (v1.Q_FIRING, v1.Q_STALE))]
+                + [al.horizon_of(None, [], {std.fingerprint: std.canonical}, retrieve=False, across=True)[:2]]
+                + missing(a2t, "- **No descriptor read** names no revision. On the near side, an owner whose "
+                               "descriptor the reader could not read is read as a revision not in hand: "
+                               "unobservable, never 900 s. Only across a face does the deployment's word stand "
+                               "for it.")
+                + missing(alog, "- **No descriptor read** on the near side is read as a revision not in hand, "
+                                "unobservable (review-bot on #1176: zk2py and the reference disagreed). Only "
+                                "across a face does the word stand for it."),
+                [[None, "not_named", None, ("unobservable", "no_descriptor"), {}, None]] * 2
+                + [("unobservable", "no_descriptor")] * 2 + [(900, "standard")]))
     return out
 
 
