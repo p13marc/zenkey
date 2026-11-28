@@ -24,10 +24,10 @@ contracts it:
 
 ```toml
 [dependencies]
-zenkey = "0.22"
+zenkey = "0.23"
 
 [build-dependencies]
-zenkey-build = "0.22"
+zenkey-build = "0.23"
 ```
 
 Take `zenkey` and `zenkey-build` at the same 0.x: the generated code names
@@ -88,24 +88,32 @@ zenoh dependency (`zenkey` with `default-features = false`).
   contract that builds under 0.22 builds under 0.23, at the same
   fingerprint, unless one of the checks above refuses it.
 
-## What 0.22 does not promise
+## What 0.23 does not promise
 
 zk2c, the bandwidth-first wire (epic
 [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is not
-finished. Two things under 0.22 are still moving, and a 0.23 may break
-either:
+finished. These are still moving under 0.23, and a 0.24 may break them:
 
-- **The authoring format** and the canonical form a fingerprint is taken
-  over. A contract that builds under 0.22 may need editing under
-  0.23, its fingerprint may change, and so may the generated API.
-- **The wire and the profiles.** These are still open: `freshness.v2`'s
-  heartbeat, one put per interface, which the maintainer is deciding
-  ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110));
-  `link.v2`'s subjects by user name, in progress
-  ([#1107](https://git.marcpardo.eu/marcpardo/zenkey/issues/1107)); and
-  #980's C3, the archive attachment, and C5, the compact descriptor.
+- **The texts zk2py has not read yet.** The independent implementation's
+  rounds ([#609](https://git.marcpardo.eu/marcpardo/zenkey/issues/609))
+  were paused for zenoh-modem's needs. Core 0.120's compact descriptor and
+  archive attachment ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980))
+  and link.v2 0.30's batch allowance
+  ([#1136](https://git.marcpardo.eu/marcpardo/zenkey/issues/1136)) are the
+  reference's reading alone, and a round may amend them.
+- **Owners' defaults that wait for these readers.** #986's Q3 and #984's
+  S5 flip an owner's default once 0.23's readers are deployed: readers
+  move first.
+- **#980's rest:** the near side's descriptor size, and the minor.
+- **The generated API.** A packed type's struct may gain a constructor
+  or a `Default`
+  ([#1182](https://git.marcpardo.eu/marcpardo/zenkey/issues/1182)), and
+  a contract that builds under 0.23 may need editing under 0.24.
 
-A 0.22.x patch release changes neither.
+A 0.23.x patch release changes none of them. The rules are the spec's
+([`spec/core.md`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/main/spec/core.md),
+its version in its header), and a release implements the spec as it
+stood when it was cut.
 
 **Zenoh's unstable API:** none. This crate depends on no zenoh crate but
 `zenoh-keyexpr`, through `zenkey-model`.

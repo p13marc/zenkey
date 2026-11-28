@@ -18,7 +18,7 @@ something is *wrong* (`judge/`), does it turn a stream into a recording or
 back (`tape/`)? A new serde-pinned struct is not a module question at all —
 it goes to `report/`, by the rule that module's docs state.
 
-It reads a deployment through the zk2 runtime (`zenkey` 0.22) and its
+It reads a deployment through the zk2 runtime (`zenkey` 0.23) and its
 session-free model (`zenkey-model`): presence from instance and interface
 tokens, descriptors, contract bundles retrieved by fingerprint, and every
 payload rendered through the contract that declares it. **`main` is the zk2
@@ -191,25 +191,30 @@ library consumer of this crate does not pay for `dirs` and `toml`.
 - **Unchanged:** `.zrec` stays at version 4, and the doctor at its 37
   checks.
 
-## What 0.22 does not promise
+## What 0.23 does not promise
 
 zk2c, the bandwidth-first wire (epic
 [#975](https://git.marcpardo.eu/marcpardo/zenkey/issues/975)), is not
-finished. Two things under 0.22 are still moving, and a 0.23 may break
-either:
+finished. These are still moving under 0.23, and a 0.24 may break them:
 
-- **The wire and the profiles.** These are still open:
-  `freshness.v2`'s heartbeat, one put per interface, which the maintainer
-  is deciding ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110));
-  `link.v2`'s subjects by user name, in progress
-  ([#1107](https://git.marcpardo.eu/marcpardo/zenkey/issues/1107)); and
-  #980's C3, the archive attachment, and C5, the compact descriptor. What
-  the readers decode, and how the plans are drawn, moves with them.
-- **The authoring format** and the canonical form a fingerprint is taken
-  over, which the lens and the contract retrieval read. Neither moved
-  from 0.21 to 0.22.
+- **The texts zk2py has not read yet.** The independent implementation's
+  rounds ([#609](https://git.marcpardo.eu/marcpardo/zenkey/issues/609))
+  were paused for zenoh-modem's needs. Core 0.120's compact descriptor and
+  archive attachment ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980))
+  and link.v2 0.30's batch allowance
+  ([#1136](https://git.marcpardo.eu/marcpardo/zenkey/issues/1136)) are the
+  reference's reading alone, and a round may amend them.
+- **Owners' defaults that wait for these readers.** #986's Q3 and #984's
+  S5 flip an owner's default once 0.23's readers are deployed: readers
+  move first.
+- **#980's rest:** the near side's descriptor size, and the minor.
+- **What the readers decode, and how the plans are drawn,** move with the
+  texts above.
 
-A 0.22.x patch release changes neither.
+A 0.23.x patch release changes none of them. The rules are the spec's
+([`spec/core.md`](https://git.marcpardo.eu/marcpardo/zenkey/src/branch/main/spec/core.md),
+its version in its header), and a release implements the spec as it
+stood when it was cut.
 
 ## Zenoh's unstable API
 
