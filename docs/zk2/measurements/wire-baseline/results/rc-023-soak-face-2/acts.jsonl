@@ -1,0 +1,68 @@
+{"t": 1795861614.751015, "mark": "up"}
+{"t": 1795861627.768381, "mark": "device_ready"}
+{"t": 1795861627.772799, "mark": "gen_start"}
+{"t": 1795861747.789703, "mark": "loss_on", "loss": 0.05}
+{"t": 1795861747.789743, "mark": "soak_start"}
+{"t": 1795861807.789812, "mark": "probes_0"}
+{"t": 1795861807.789855, "round": 0, "probe": "telemetry", "done": 1795862068.073688, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795862347.789906, "mark": "reopen_1", "kind": "driver-a", "stopped": "driver-a", "pid": 1326606}
+{"t": 1795862347.84408, "mark": "restarted_1", "kind": "driver-a", "started": "driver-a.r1"}
+{"t": 1795862589.937845, "mark": "link_back_1", "after_s": 242.1}
+{"t": 1795862589.938161, "mark": "probes_1"}
+{"t": 1795862589.938179, "round": 1, "probe": "telemetry", "done": 1795862850.232184, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795862947.789984, "mark": "reopen_2", "kind": "zenohd-a", "stopped": "zenohd-a", "pid": 1326614}
+{"t": 1795862947.844931, "mark": "restarted_2", "kind": "zenohd-a", "started": "zenohd-a.r2"}
+{"t": 1795863189.97257, "mark": "link_back_2", "after_s": 242.1}
+{"t": 1795863189.972691, "mark": "probes_2"}
+{"t": 1795863189.972707, "round": 2, "probe": "telemetry", "done": 1795863450.277331, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795863547.790073, "mark": "reopen_3", "kind": "driver-b", "stopped": "driver-b", "pid": 1326609}
+{"t": 1795863547.845373, "mark": "restarted_3", "kind": "driver-b", "started": "driver-b.r3"}
+{"t": 1795863609.890905, "mark": "link_back_3", "after_s": 62.0}
+{"t": 1795863609.891023, "mark": "probes_3"}
+{"t": 1795863609.891043, "round": 3, "probe": "telemetry", "done": 1795863870.197433, "exit": 2, "stderr": " epoch was assumed, so no decrease could have been found (telemetry.v1 \u00a75); zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast field sdu_tx_sdus_total: no pair formed: 1 sample(s) of it in the window, and a pair needs two; 2 of its records were no sample: 2 absent \u2014 exit 2, the reserved non-verdict\n"}
+{"t": 1795864147.793836, "mark": "reopen_4", "kind": "zenohd-b", "stopped": "zenohd-b", "pid": 1326633}
+{"t": 1795864147.865508, "mark": "restarted_4", "kind": "zenohd-b", "started": "zenohd-b.r4"}
+{"t": 1795864568.263774, "mark": "link_not_back_4", "waited_s": 420}
+{"t": 1795864568.264646, "mark": "probes_4"}
+{"t": 1795864568.264755, "round": 4, "probe": "telemetry", "done": 1795864828.598172, "exit": 2, "stderr": "c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"}
+{"t": 1795864828.599177, "mark": "reopen_5", "kind": "driver-a", "stopped": "driver-a.r1", "pid": 1328493}
+{"t": 1795864828.707746, "mark": "restarted_5", "kind": "driver-a", "started": "driver-a.r5"}
+{"t": 1795865110.959529, "mark": "link_back_5", "after_s": 282.3}
+{"t": 1795865110.959967, "mark": "probes_5"}
+{"t": 1795865110.959992, "round": 5, "probe": "telemetry", "done": 1795865371.294838, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795865371.295372, "mark": "reopen_6", "kind": "zenohd-a", "stopped": "zenohd-a.r2", "pid": 1343548}
+{"t": 1795865371.3525, "mark": "restarted_6", "kind": "zenohd-a", "started": "zenohd-a.r6"}
+{"t": 1795865791.844198, "mark": "link_not_back_6", "waited_s": 420}
+{"t": 1795865791.844348, "mark": "probes_6"}
+{"t": 1795865791.844378, "round": 6, "probe": "telemetry", "done": 1795866052.132474, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795866052.132638, "mark": "reopen_7", "kind": "driver-b", "stopped": "driver-b.r3", "pid": 1392466}
+{"t": 1795866052.187423, "mark": "restarted_7", "kind": "driver-b", "started": "driver-b.r7"}
+{"t": 1795866130.266681, "mark": "link_back_7", "after_s": 78.1}
+{"t": 1795866130.266804, "mark": "probes_7"}
+{"t": 1795866130.26682, "round": 7, "probe": "telemetry", "done": 1795866390.552116, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795866547.789973, "mark": "reopen_8", "kind": "zenohd-b", "stopped": "zenohd-b.r4", "pid": 1421006}
+{"t": 1795866547.850136, "mark": "restarted_8", "kind": "zenohd-b", "started": "zenohd-b.r8"}
+{"t": 1795866609.947793, "mark": "link_back_8", "after_s": 62.1}
+{"t": 1795866609.947915, "mark": "probes_8"}
+{"t": 1795866609.947931, "round": 8, "probe": "telemetry", "done": 1795866870.26423, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795867147.792118, "mark": "reopen_9", "kind": "driver-a", "stopped": "driver-a.r5", "pid": 1471060}
+{"t": 1795867147.852412, "mark": "restarted_9", "kind": "driver-a", "started": "driver-a.r9"}
+{"t": 1795867450.324859, "mark": "link_back_9", "after_s": 302.5}
+{"t": 1795867450.325027, "mark": "probes_9"}
+{"t": 1795867450.325046, "round": 9, "probe": "telemetry", "done": 1795867710.62986, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795867747.789975, "mark": "reopen_10", "kind": "zenohd-a", "stopped": "zenohd-a.r6", "pid": 1500422}
+{"t": 1795867747.844981, "mark": "restarted_10", "kind": "zenohd-a", "started": "zenohd-a.r10"}
+{"t": 1795867990.186987, "mark": "link_back_10", "after_s": 242.3}
+{"t": 1795867990.187095, "mark": "probes_10"}
+{"t": 1795867990.18711, "round": 10, "probe": "telemetry", "done": 1795868250.473575, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795868347.79008, "mark": "reopen_11", "kind": "driver-b", "stopped": "driver-b.r7", "pid": 1501261}
+{"t": 1795868347.846784, "mark": "restarted_11", "kind": "driver-b", "started": "driver-b.r11"}
+{"t": 1795868470.122798, "mark": "link_back_11", "after_s": 122.3}
+{"t": 1795868470.122981, "mark": "probes_11"}
+{"t": 1795868470.122999, "round": 11, "probe": "telemetry", "done": 1795868730.41255, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795868947.78992, "mark": "reopen_12", "kind": "zenohd-b", "stopped": "zenohd-b.r8", "pid": 1530600}
+{"t": 1795868947.844016, "mark": "restarted_12", "kind": "zenohd-b", "started": "zenohd-b.r12"}
+{"t": 1795869009.946484, "mark": "link_back_12", "after_s": 62.1}
+{"t": 1795869009.946599, "mark": "probes_12"}
+{"t": 1795869009.946615, "round": 12, "probe": "telemetry", "done": 1795869270.230369, "exit": 0, "stderr": "du/rx_sdus_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/rx_unroutable_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_bytes_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_failed_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_oversize_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\n"}
+{"t": 1795869547.789816, "mark": "end"}

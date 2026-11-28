@@ -1,0 +1,702 @@
+[
+ {
+  "run": "rc-023-honesty-1",
+  "complete": true,
+  "marks_s": {
+   "gen1": 0.0,
+   "loss_on": 230.0,
+   "loss_off": 470.1,
+   "cut": 890.1,
+   "stale-watch": 1220.1,
+   "stale-telemetry": 1280.2,
+   "stale-doctor": 1340.5,
+   "restore": 1342.5,
+   "gen1_stop": 1792.5,
+   "gen2": 1812.6
+  },
+  "far_frames": [
+   {
+    "t": 1.6,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 0,
+    "follows": "first",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 60.7,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 1,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 121.0,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 2,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 180.7,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 3,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 361.4,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 6,
+    "follows": "gap",
+    "lost": 2,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 540.7,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 9,
+    "follows": "gap",
+    "lost": 2,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 601.4,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 10,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 660.7,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 11,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 721.4,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 12,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 780.7,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 13,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 841.4,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 14,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 1380.8,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 23,
+    "follows": "gap",
+    "lost": 8,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 1441.4,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 24,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 1500.8,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 25,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 1561.4,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 26,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 1620.8,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 27,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 1681.4,
+    "bytes": 207,
+    "run": "b8a0bc7c",
+    "seq": 28,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 1740.8,
+    "bytes": 23,
+    "run": "b8a0bc7c",
+    "seq": 29,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 1814.3,
+    "bytes": 207,
+    "run": "28fd6241",
+    "seq": 0,
+    "follows": "run",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 1873.4,
+    "bytes": 23,
+    "run": "28fd6241",
+    "seq": 1,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 1934.0,
+    "bytes": 207,
+    "run": "28fd6241",
+    "seq": 2,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 1993.4,
+    "bytes": 23,
+    "run": "28fd6241",
+    "seq": 3,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   },
+   {
+    "t": 2054.0,
+    "bytes": 207,
+    "run": "28fd6241",
+    "seq": 4,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "known": 73
+    }
+   },
+   {
+    "t": 2113.4,
+    "bytes": 23,
+    "run": "28fd6241",
+    "seq": 5,
+    "follows": "continues",
+    "lost": null,
+    "states": {
+     "absent": 73
+    }
+   }
+  ],
+  "watch_frames": [
+   {
+    "run": "b8a0bc7c",
+    "seq": 0,
+    "follows": "first",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 1,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 2,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 3,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 6,
+    "follows": "gap",
+    "lost": 2
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 9,
+    "follows": "gap",
+    "lost": 2
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 10,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 11,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 12,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 13,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 14,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 23,
+    "follows": "gap",
+    "lost": 8
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 24,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 25,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 26,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 27,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 28,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "b8a0bc7c",
+    "seq": 29,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "28fd6241",
+    "seq": 0,
+    "follows": "run",
+    "lost": null
+   },
+   {
+    "run": "28fd6241",
+    "seq": 1,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "28fd6241",
+    "seq": 2,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "28fd6241",
+    "seq": 3,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "28fd6241",
+    "seq": 4,
+    "follows": "continues",
+    "lost": null
+   },
+   {
+    "run": "28fd6241",
+    "seq": 5,
+    "follows": "continues",
+    "lost": null
+   }
+  ],
+  "telemetry": {
+   "telemetry": {
+    "judgement": {
+     "answer": "not_established",
+     "reason": "every one of the 219 sample(s) of 73 member(s) conforms; 102 pair(s), none decreased within an established epoch (102 established, 0 assumed); every counter or histogram read formed an established pair"
+    },
+    "totals": {
+     "assumed": 0,
+     "conforms": 219,
+     "decreased": 0,
+     "does_not": 0,
+     "established": 102,
+     "invalid": 0,
+     "members": 73,
+     "pairs": 102,
+     "resources": 1,
+     "samples": 219,
+     "unanswered": 0,
+     "unobservable": 0
+    },
+    "sdu_tx_sdus_total": {
+     "continuity": "2 pair(s) whose epoch was established (2 in-band, 0 by presence), none decreased; 0 assumed, 0 reset",
+     "pairs": [
+      {
+       "earlier": 60,
+       "later": 100,
+       "elapsed_s": 240.006,
+       "continuity": "same_epoch",
+       "rate": 0.16666250010416406,
+       "no_rate": null
+      },
+      {
+       "earlier": 100,
+       "later": 120,
+       "elapsed_s": 120.003,
+       "continuity": "same_epoch",
+       "rate": 0.16666250010416406,
+       "no_rate": null
+      }
+     ]
+    }
+   },
+   "telemetry2": {
+    "judgement": {
+     "answer": "not_established",
+     "reason": "every one of the 292 sample(s) of 73 member(s) conforms; 153 pair(s), none decreased within an established epoch (153 established, 0 assumed); every counter or histogram read formed an established pair"
+    },
+    "totals": {
+     "assumed": 0,
+     "conforms": 292,
+     "decreased": 0,
+     "does_not": 0,
+     "established": 153,
+     "invalid": 0,
+     "members": 73,
+     "pairs": 153,
+     "resources": 1,
+     "samples": 292,
+     "unanswered": 0,
+     "unobservable": 0
+    },
+    "sdu_tx_sdus_total": {
+     "continuity": "3 pair(s) whose epoch was established (3 in-band, 0 by presence), none decreased; 0 assumed, 1 reset",
+     "pairs": [
+      {
+       "earlier": 280,
+       "later": 0,
+       "elapsed_s": 132.594,
+       "continuity": "reset",
+       "rate": null,
+       "no_rate": "reset"
+      },
+      {
+       "earlier": 0,
+       "later": 20,
+       "elapsed_s": 120.02,
+       "continuity": "same_epoch",
+       "rate": 0.16663889351774705,
+       "no_rate": null
+      },
+      {
+       "earlier": 20,
+       "later": 40,
+       "elapsed_s": 120.004,
+       "continuity": "same_epoch",
+       "rate": 0.1666611112962901,
+       "no_rate": null
+      }
+     ]
+    }
+   }
+  },
+  "probes": {
+   "stale-watch": {
+    "exit": 2
+   },
+   "stale-telemetry": {
+    "exit": 2,
+    "judgement": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 60.0s: silence is never a verdict"
+    },
+    "totals": {
+     "assumed": 0,
+     "conforms": 0,
+     "decreased": 0,
+     "does_not": 0,
+     "established": 0,
+     "invalid": 0,
+     "members": 0,
+     "pairs": 0,
+     "resources": 1,
+     "samples": 0,
+     "unanswered": 0,
+     "unobservable": 0
+    }
+   },
+   "stale-doctor": {
+    "exit": 2,
+    "checks": {
+     "split-brain": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "binding-unsatisfied": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "contract-drift": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "contract-unavailable": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "descriptor-invalid": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "token-missing": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "presence-over-budget": {
+      "answer": "not_established",
+      "reason": "0 token(s) visible to this reader in the presence domain (0 zk2, under 0 namespace(s); 0 other), through `**` and `**/zk2/*/*/@zk/**`; within the budget 10000"
+     },
+     "storage-on-state": {
+      "answer": "unobservable",
+      "reason": "no router answered `@/*/router` through this reader: the admin space is disabled, the mesh is peer-only, or access control denies it"
+     },
+     "archive-unaligned": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "shm-memlock-low": {
+      "answer": "not_established",
+      "reason": "RLIMIT_MEMLOCK is 8192 KiB, at or above the 8 MiB floor: it admits a shared-memory pool of at most 6144 KiB, the limit less 2 MiB"
+     },
+     "admin-unreachable": {
+      "answer": "established"
+     },
+     "router-version-skew": {
+      "answer": "unobservable",
+      "reason": "no router answered `@/*/router` through this reader: the admin space is disabled, the mesh is peer-only, or access control denies it"
+     },
+     "health-failed": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "health-degraded": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "health-stale": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "health-inconsistent": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "hostid-duplicate": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "config-projection": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "config-overdue": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "config-unpersisted": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "config-desired": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "alarm-key": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "alarm-stale": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "telemetry-declaration": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "desired-refused": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "desired-behind": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "desired-last-known": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "redundancy-vacancy": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "timing-declaration": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "arbitration-declaration": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "catalog-missing": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     },
+     "first-hop-token": {
+      "answer": "unobservable",
+      "reason": "no zk2 token visible to this reader in the bus root (`zk2/*/*/@zk/**`): a run over an empty scope judged nothing, which is not a healthy deployment"
+     }
+    },
+    "notes": [
+     "read the bus root through `zk2/*/*/@zk/**`, twice, 2.0s apart: 0 service(s), 0 instance(s), 0 token(s), 0 instance(s) with no readable descriptor; 0 of 0 revision(s) named retrieved and verified",
+     "0 router(s) answered the admin space, read in no namespace"
+    ]
+   }
+  },
+  "relay": [
+   {
+    "t": 230.0,
+    "event": "loss 0.75"
+   },
+   {
+    "t": 470.1,
+    "event": "loss 0.05"
+   },
+   {
+    "t": 890.1,
+    "event": "cut"
+   },
+   {
+    "t": 1342.5,
+    "event": "restore"
+   }
+  ]
+ }
+]

@@ -1614,6 +1614,292 @@ far reader died when `/srv/dev` filled, so the far side undeclared its
 key midway. Their decoded batches agree with the runs kept, as far as they
 went.
 
+## Release candidate 0.23.0 (2026-11-29)
+
+Run 2026-11-28, for zenkey 0.23.0's release candidate (#975, #989), on main at 1dbce36f
+(`git describe` 0.14.0-2625-g1dbce36f). Since 0.22.0 (2026-11-08) main has #1110's owner
+heartbeat, desired.v2's, alarms.v2's and health.v2's readers, zenoh 1.10.2, #1176's hold and
+horizons, redundancy.v2, #980's compact descriptor and #1136's batch allowance. This section
+runs again what set the baselines above, on zenoh-modem's shape, and soaks it.
+
+- **Binaries.** `zenctl`, the owner example and `zk2` from main at 1dbce36f, release builds, on
+  zenoh 1.10.2. The fork's zenohd at `zm-1.10.2-r1` (2454b10c) and `modem-driver` at d8c62df,
+  zenoh-modem's head, a debug build with every feature: the binaries the W2 v2 runs used.
+- **The harness** is this directory at main, run from a frozen copy, every process on cores
+  4–5, up to eight paths at once. The host was short of memory throughout: other lanes' test
+  suites held it, and up to 0.9 GB was swapped out.
+- **The far side's blocks are the generator's** (`FAR=1`, wire.sh's default since the SF9
+  runs), where the RF and SF7 runs of 2026-11-08 were rendered with `FAR=0`. Both routers'
+  `timestamping` is `{ router: false, peer: false }`, and router A's plan grants each node's
+  `freshness.v2/stream/heartbeats/host` beside its heartbeats (#1110). Neither changes what
+  crosses: no owner on the face sends an owner heartbeat, and no put carried a router's stamp.
+
+| Run | Runs again | Path | Windows |
+|---|---|---|---|
+| `rc-023-w1-lean-1` | `zk2c-w1-lean-1` | RF, rf0's face, lean (`rf.zdict`), 16-bit | idle 600 s, W1-73 1,800 s |
+| `rc-023-w2-lean-1` | `zk2c-w2-lean-2` | RF, no face, lean (`w2.zdict`), owner heartbeats, 16-bit | steady 2,100 s, the acts, a 245-s cut, two config sets |
+| `rc-023-w2-bare-1` | `zk2c-w2-bare-2` | the same, no layers, 32-bit | the same, 12 minutes after it on a second path |
+| `rc-023-sf7-lean-1` | `zk2c-sf7-lean-1` | LoRa SF7, lora0's face, lean | idle 600 s, W1-73 1,800 s |
+| `rc-023-sf9-lean-1` | `zk2c-sf9-lean-1` | LoRa SF9, lora0's SF9 face, lean, a frame every 120 s | idle 1,920 s, W1-73 3,600 s |
+| `rc-023-honesty-1` | `zk2c-honesty-1`, `-reset-1` | RF, rf0's face, no layers | the three steps in one run; the cut 452 s |
+| `rc-023-soak-1` | | W2's path, lean: W2's v2 device and modem.v3's gen at rf0's address, the host's tools | 2 h, 12 reopens |
+| `rc-023-soak-face-2` | | W1-73's path, lean: gen as `rf-node`, the frame reader and `telemetry` | 2 h, 12 reopens |
+
+### Each figure against its baseline
+
+A day, as each baseline section states it:
+
+| Figure | Baseline | Main | Change |
+|---|---:|---:|---:|
+| RF, the idle link, each way | 1,440 keep-alives, 24.5 KB | 1,440, 24.5 KB | 0 |
+| **W1-73 across rf0's face, frames/fast, lean** | **207.3 KB** | **210.1 KB** | **+1.4 %** |
+| the same, `face/device_fault` | 162.9 KB | 157.4 KB | −3.4 % |
+| the same, the uplink's keep-alives | 336, 5.7 KB | 144, 2.4 KB | inside 0 to 1,440 |
+| the same, A->B in all | 377.2 KB, 1,257 s (1.46 %) | 372.8 KB, 1,243 s (1.44 %) | −1.2 % |
+| **W2 with owner heartbeats, W2's day, lean** | **610.1 KB** (2.35 %) | **640.7 KB** (2.47 %) | **+5.0 %** |
+| the same, the owner heartbeat, lean, placed | 3,045 SDUs, 176.6 KB, 588.6 s | 3,045, 176.6 KB, 588.6 s | 0 |
+| the same, bare, decoded | 134.0 KB | 134.0 KB | 0 |
+| the same, the steady window A->B, lean | 638.7 KB | 641.1 KB | +0.4 % |
+| the same, the steady window B->A, lean | 63.7 KB | 81.7 KB | +28 % |
+| LoRa SF7, the idle link, each way | 2,880 keep-alives, 148.2 s | 2,880, 148.2 s | 0 |
+| **SF7, W1-73's uplink** | **474.2 s (55 %)** | **481.8 s (56 %)** | **+1.6 %** |
+| SF7, gen's frames | 2,160 SDUs, 363.0 s | 2,160, 363.3 s | +0.1 % |
+| SF7, the uplink's keep-alives | 2,160, 111.1 s | 2,304, 118.6 s | inside 1,440 to 2,880 |
+| LoRa SF9, the idle link, each way | 720 keep-alives, 12.2 KB, 118.7 s | the same | 0 |
+| **SF9, W1-73's uplink** | **2,064 SDUs, 122.9 KB, 745.8 s (86 %)** | **2,160, 124.6 KB, 761.6 s (88 %)** | **+2.1 %** |
+| SF9, gen's frames | 1,440 SDUs, 112.3 KB, 642.9 s | 1,440, 112.3 KB, 642.9 s | 0 |
+| SF9, the uplink's keep-alives | 624, 102.9 s | 720, 118.7 s | inside 0 to 720 |
+
+With these runs in place of the baselines, `model.py --zk2c` holds every tolerance: gen's frames'
+air within 1 % at SF7 and SF9, each uplink's keep-alives inside link.v2 §2.16's range, the idle
+links exact, and the owner heartbeat's layout byte for byte and within 1.4 %. The one assertion
+that fails is section 10's record of the 2026-11-08 run itself, its 336 keep-alives.
+
+What moved, and why:
+
+- **W1-73's frames are the baseline's frames.** The far reader got 205-B and 21-B payloads, and
+  `face/device_fault` 97 B and 98 B, as before. In the window, 15 full records left in two SDUs,
+  and 15 records of none. One record of none left in one 135-B SDU with a `face/device_fault`,
+  where both had SDUs of their own before. So the README's split, the data less the events'
+  113-B and 114-B SDUs, counts that SDU as a frame: frames/fast +1.4 %, the event −3.4 %, and
+  the two together −0.7 %.
+- **The uplink's keep-alives fell to 3 of the window's 30 gaps,** from 7. This is the race of
+  link.v2 §2.16. At SF7, whose interval is half the cadence, the second keep-alive of a gap went
+  before its frame in 18 gaps of 30 (15 before). At SF9 a keep-alive went first in all 30 gaps
+  (26 before). SF9's uplink is therefore 2.1 % over its baseline, at the top of its range:
+  761.6 s, the model's most. Its frames are byte for byte the baseline's.
+- **W2's owner heartbeat is the baseline's, to the byte.** 74 puts in the window, 35-B payloads in
+  58-B SDUs lean, 37 B, 41 B and 44 B bare. W2's day rose 30.6 KB, for three reasons:
+  - **The target reads its author's descriptor** (81dcbd44, desired.v2 §2.18, which applies to a
+    target of either major). It reads `fleet/desired/@zk/instance/*` (a 43-B to 46-B request)
+    twice at its start and once at its first re-read, 300 s later, inside the steady window. Each
+    answer is a 419-B reply and a 7-B final. The window's one read is a one-off, which W2's day,
+    scaling the window, counts 41 times: 19.7 KB bare, 22.4 KB lean (`presence` in the decode).
+    §2.18 has the target read again at each appearance of the author's instance token, so a
+    reconnect whose link carries data would draw one more.
+  - **Two more of gen's events were lost on the air** (31 received where 33 were), and the day
+    cuts the events by what the far side received: 6.3 KB, as the baseline notes of `-lean-2`.
+  - **The reconnects cost 3.2 KB more, and the sets' requests crossed.** More of the reopen's
+    declarations crossed B->A before the stall, the author's presence among them (258 B, where
+    `zk2c-w2-bare-2` crossed 46 B), and the sets' requests crossed, 0.6 KB, where in `-bare-2`
+    router B took no session. The two sets drew silence again: the reopen stalled, as finding
+    7 says.
+
+  Leaving the window's descriptor read out, W2's day is 618 KB, 1.3 % over the baseline, and
+  the rest is the events' cut.
+- **Every descriptor read of the target timed out.** It waits the target's read timeout, 1 s by
+  default, and the 426-B answer takes 1.6 s at 2,400 bit/s. So the target takes the
+  deployment's word for its author's revision, as §2.18 says it then does, and three reads,
+  1.3 KB down, cross for nothing at each start and its first re-read. With the face's 15-s
+  reply timeout, as the V2 runs give it, each read would land (rc-023's finding 5).
+
+### The honesty checks
+
+`rc-023-honesty-1` ran `honesty.sh`'s three steps in one run, where the baseline needed a
+second run for the reset ([`results/rc-023-honesty.json`](results/rc-023-honesty.json)). Every
+check said what the baseline's said:
+
+1. **Loss is detected.** At 75 % loss, the far reader and `watch` both read seq 6 and seq 9 as
+   `gap, lost: 2`. After the cut, which ran 452 s here, they read seq 23 as `gap, lost: 8`.
+2. **No false "nothing fires".** `telemetry` over the loss: `not_established`, 102 pairs, the
+   counter's pair across the gap one rate over 240 s, as before.
+3. **Stale is never fresh.** Inside the cut, `watch` ended its 60-s window with a summary row,
+   `received: 0`, `heartbeats: 0`, and exit 2. `telemetry` said `unobservable`, "no sample …
+   arrived in 60.0s: silence is never a verdict". The doctor said `unobservable`: no zk2 token
+   is visible to it across the face. The baseline's `watch` probe was refused for `--format
+   json`; this one ran.
+4. **A reset is detected.** The new gen's first frame `follows: run`, and `telemetry` over both
+   runs read the counter's pair across them as `reset` (40, then 0), and the next pairs as rates.
+
+The link came back after the 452-s cut, router B opening a new transport.
+
+### The soak
+
+Two soaks, each 2 h 10 min from the end of its setup at the medium's 5 %, the link reopened
+every 10 minutes by one restart in turn: driver A, router A, driver B, router B, three of
+each ([`soak.py`](soak.py), [`soak-analyze.py`](soak-analyze.py)). A restart stops the process's
+`timeout`, which wire.sh started for the run, and starts the same command again. After each
+reopen the host's tools ran once from router B, each across the face; every minute each
+process's memory was read, its RssAnon and VmSwap together, since the host's memory pressure
+shrank every RSS.
+
+**`rc-023-soak-1`, W2's path**
+([`results/rc-023-soak-1/analysis.json`](results/rc-023-soak-1/analysis.json)). The owners
+are the zenoh-modem mapping's, as these runs have them: W2's v2 device (the owner example:
+health.v1, alarms.v2 with three alarms firing, config.v2 on rfcfg.v1, a desired.v2 target)
+and modem.v3's `zenctl gen` under zenoh-modem's catalog, both at rf0's address, the author on
+router B. The probes are `config set` and `config get` with rf0's face policy,
+`health --across-face crosses`, `alarms --across-face granted`, `desired --across-face` and
+`telemetry` over frames/fast, at a fixed 90 s after each restart.
+
+- **Before the first reopen every tool answered.** `config set`: the record, exit 0. `config
+  get`: exit 0. `telemetry`: 146 samples of 73 members, 51 established pairs, none decreased,
+  exit 0. `health`: healthy, its status fresh, exit 0. `alarms`: established, an alarm at
+  warning fires, exit 1. `desired`: converged, exit 0.
+- **After the first reopen, driver A's restart, the link never carried data again.** For 1 h
+  50 min and the 11 reopens after it, of every kind, no far reader got a sample: no frame, no
+  heartbeat, no event, nothing from the device.
+  - Each transport opened, crossed its declarations both ways, and then A->B carried nothing,
+    not even a keep-alive.
+  - A lease later, a router closed it with "Unable to push non droppable network message …
+    Closing transport!" (18 times on router B, 24 on router A), and the next transport did the
+    same, one every 245 s to 260 s.
+- **Every probe after it said so, and none said more.** All 72 exited 2. In 55, router B, waiting
+  out a stalled transport, took no session ("Unable to connect to any of
+  [tcp/127.0.0.1:18002]"). The other 17 drew silence:
+  - `config set`: `silent`, "a set that drew nothing started nothing a tool can name";
+  - `health`: `silent`;
+  - `alarms`: `owner_unobservable`;
+  - `desired`: `nothing_crossed`;
+  - `telemetry`: no sample in 260 s, "silence is never a verdict".
+- **This is zenoh-modem#210's shape, not #1109's.** The link itself never came back: its
+  transports opened and stalled at the lane, as #1109 found below zenkey's wire. A `config
+  set` drew silence because nothing crossed at all, and no tool can do better than say so.
+  - The rf0-face soak below came back from the same restarts.
+  - W2's own reconnect in `rc-023-w2-*-1` did as the soak did: a transport at the restore and
+    another a lease later, each stalled after its declarations, as in `zk2c-w2-*`.
+- **The far side opening does not save W2's device.** The soak smoke `rc-023-soak-smoke-2` ran
+  the same owners with the far side opening the lane and no plan (`FAR_OPENS=1`). Its first
+  transport stalled 14 s after it opened, at no loss, with 7 SDUs of declarations crossed, and
+  no reopen of the four recovered it.
+
+**`rc-023-soak-face-2`, W1-73's path across rf0's plan**
+([`results/rc-023-soak-face-2/analysis.json`](results/rc-023-soak-face-2/analysis.json)): gen as
+`rf-node`, the far frame reader and `telemetry` as the ground's tools, and nothing of the
+device's, which the plan would deny. The probes wait for a frame to cross after each restart,
+up to 420 s.
+
+- **The link came back from 11 of the 12 reopens, gen's frames with it,** in this many seconds
+  to the first frame:
+
+  | Restart | 1st | 2nd | 3rd |
+  |---|---:|---:|---:|
+  | driver A | 242 | 282 | 302 |
+  | router A | 242 | 457 | 242 |
+  | driver B | 62 | 78 | 122 |
+  | router B | never, to the next reopen 681 s later | 62 | 62 |
+
+  - A restart on the near side, driver A's or router A's, left router B holding its old
+    transport until its 240-s lease ran out; router B then opened anew.
+  - A restart on the far side opened a new transport at once, and the next frame crossed.
+  - After router A's second restart, its OpenAck was lost on the air, and router B's
+    InitSyns, every 12 s to 14 s, drew no answer for 200 s.
+  - After router B's first restart, one SDU of router B's declarations was lost, and the far
+    reader's re-declaration did not repair it (finding 2).
+- **`telemetry` answered every round the link was back in:** `not_established`, 146 samples of
+  73 members, 51 established pairs, exit 0, 11 times. It exited 2 twice. After the 3rd reopen a
+  full record was lost in its window, so no pair formed (`unobservable`). After the 4th no
+  sample arrived ("silence is never a verdict").
+
+**Memory** (`rc-023-soak-1`, each process's RssAnon and VmSwap, KB):
+
+| Process | First | Last | Largest | KB an hour, first half, second half | Grows on (`soak-analyze.py`) |
+|---|---:|---:|---:|---:|---|
+| the device (owner) | 3,564 | 4,176 | 4,180 | 421, 166 | no |
+| the author (owner) | 1,708 | 2,184 | 2,184 | 245, 196 | no |
+| gen (`zenctl gen`) | 8,436 | 9,392 | 9,392 | 673, 235 | no |
+| the frame reader (`zenctl echo`) | 5,164 | 5,776 | 5,776 | 405, 129 | no |
+| health.v1's reader | 3,352 | 3,888 | 3,888 | 408, 123 | no |
+| alarms.v2's reader | 3,308 | 3,892 | 3,892 | 342, 77 | no |
+| rfcfg.v1's reader | 3,352 | 3,884 | 3,884 | 296, 176 | no |
+| worker.v2's reader | 3,300 | 3,836 | 3,836 | 276, 130 | no |
+| driver A's management-plane reader | 31,852 | 40,788 | 43,356 | 1,286, 2,175 | no |
+| driver B's management-plane reader | 32,384 | 40,368 | 43,312 | 2,296, 2,834 | no |
+| the relay | 11,692 | 11,700 | 11,708 | 1, 2 | no |
+| driver A, the 5th to 9th reopen | 4,660 | 5,156 | 5,156 | 1,480, 0 | no |
+| router B, the 4th to 8th reopen | 1,680 | 3,996 | 3,996 | 4,325, 2,904 | yes |
+
+- **No zenkey process grew without levelling off.** The owners and `gen` grew by 0.5 MB to 1 MB
+  in two hours, each more slowly in the second half than the first. The far readers grew by
+  0.6 MB each, more slowly still. The management-plane readers, each a `zenctl echo` of about
+  100 foreign keys a second, reached 38–43 MB within 30 minutes and swung between the two
+  after it; their slopes are that swing.
+- **The routers and drivers lived 40 minutes each**, restarted in turn, so the soak tells their
+  memory over that alone: the drivers levelled at 5 MB. The router B that lived from the 4th
+  reopen to the 8th grew from 1.7 MB to 4.0 MB, opening a stalled transport every 250 s.
+- **In the face soak** gen grew from 8.6 MB to 9.0 MB and the frame reader from 5.3 MB to
+  5.7 MB (their thirds' medians), each more slowly in the second half. Driver B's
+  management-plane reader stepped from about 40 MB to 47–49 MB after the driver's second
+  restart, and held there for the last 40 minutes.
+
+### Findings (rc-023)
+
+1. **The wire is the baselines' wire.** Every figure is within 2 % of its baseline or explained:
+   SF9's uplink 2.1 % over, at the top of link.v2 §2.16's range, its frames byte for byte; W2's
+   day 5.0 % over, by desired.v2 §2.18's descriptor read that fell in the window, and the
+   events' cut. With these runs, `model.py --zk2c` holds every tolerance. The four honesty
+   checks hold.
+2. **A zenkey bug: a far reader's re-declaration repairs nothing while a second reader of the
+   key shares its router** (core §8.5, `zenkey::redeclare`, #988 L4). The repair declares the
+   reader's subscriber again on its own session, and its router declares toward the far router
+   only when the first subscriber of a key arrives and undeclares only when the last leaves.
+   With a second subscriber there, the router keeps its declaration, which the far router never
+   got, and nothing crosses.
+   - **`rc-023-redeclare-alone-1`** (bare, decoded, [`redeclare.sh`](redeclare.sh)): R1's four
+     DeclareSubscribers were lost in an 8.5-s cut, the key expressions already declared. At
+     601.3 s, two of frames/fast's horizons, R1's undeclaration and declaration crossed B->A,
+     and its first frame came 4.6 s later.
+   - **`rc-023-redeclare-shared-1`**: the same, and R2, the same reader, started 15 s after the
+     restore. R2's declaration did not cross: router B held R1's. Neither R1's re-declaration
+     at about 600 s nor R2's at about 625 s crossed. Neither reader got a frame in the 735 s
+     to the end. Only keep-alives crossed, both ways, and router A sent no frame, since it had
+     no subscriber.
+   - **In the soak.** After the 4th reopen of `rc-023-soak-face-2`, router B's restart, one
+     86-B B->A SDU of declarations was lost. No frame crossed for the 681 s to the next
+     reopen. The frame reader's re-declaration fell due at 600 s, while the round's
+     `telemetry` held frames/fast at router B, and no B->A declaration crossed then.
+   - **What it costs.** A ground with two readers of a key behind one router, a frame reader
+     beside zengui, zenwatch or a probe, never repairs that key while the transport stays up.
+     Each reader's silence is honest, but it is never ended.
+   - Not fixed here (the brief's rule). The evidence is
+     `results/rc-023-redeclare-{alone,shared}-1/`: the decoded declarations and what each
+     reader heard, and the bare captures.
+3. **On W2's path no reopen brought the link back, which is zenoh-modem#210's, not zenkey's.**
+   After driver A's first restart, W2's device and gen behind router A, no far reader got a
+   sample for 1 h 50 min, through 11 more reopens of all four kinds. Every probe exited 2,
+   none with a false verdict. The far side opening the lane stalled the first transport too.
+4. **Across rf0's plan the link came back from each restart within a lease or so**, the one
+   miss the reader's lost declaration (finding 2). Each restart of the near side's processes
+   left router B holding its old transport for a lease: 242 s to 302 s to the first frame, where a
+   far-side restart took 62 s to 122 s. Once a lost OpenAck held the link 200 s longer. This is
+   the lease and zenoh's handshake, not zenkey's.
+5. **desired.v2 §2.18's descriptor read times out on RF at a target's default read timeout.**
+   W2's target read its author's descriptor three times at its start and its first
+   re-read. Each 426-B answer took 1.6 s against the 1-s wait, so every read failed, and the
+   target took the deployment's word, as §2.18 says it then does. That is 1.3 KB down and
+   132 B up for nothing at each start, and §2.18 reads again at each appearance of the
+   author's token. A target given the face's `reply_timeout_ms`, as the V2 runs give it, would
+   read it.
+6. **An event's subscription is never declared again.** It has no horizon
+   (`zenkey::redeclare`: "a subscription to what has none is declared once"). In
+   `rc-023-redeclare-alone-1` the repaired reader got frames again and never another
+   `face/device_fault`, which gen put once a minute. A face that lists events loses them for
+   as long as the transport stays up once their declaration is lost.
+7. **Memory.** No zenkey process grew without levelling off in two hours: the owners and gen
+   by 0.5 MB to 1 MB, slowing; the far readers by 0.6 MB. The management-plane readers held
+   38–43 MB, but for driver B's in the face soak, which stepped to 47–49 MB at the driver's
+   second restart and held there. Two hours do not show where the owners' slow growth ends.
+
 ## Reproduce
 
 `WORK` defaults to `/srv/dev/targets/zenkey-989`. It holds the binaries and
@@ -1744,6 +2030,58 @@ python3 -I model.py --zk2c > results/model-zk2c.json   # Appendix A's zk2c colum
 python3 -I summary.py                                   # the zk2c tables
 ```
 
+Release candidate 0.23.0 (2026-11-28, main at 1dbce36f): the baselines' commands under new
+names, side by side on cores 4–5, and the soaks (about 2.2 h each), each from a frozen copy:
+
+```bash
+INST=rf BASE=17400 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-rf0.face.toml W1_S=1800 \
+  timeout 2h taskset -c 4-5 ./measure.sh rf-zk2c lean rc-023-w1-lean-1
+INST=w2 BASE=17500 LOSS_AT_STEADY=0.05 ZK2C=1 RUN_FILE=1 OWNER_HEARTBEAT=1 DICT=$PWD/w2.zdict \
+  CONTRACTS=$R/docs/zk2/measurements/wire-baseline/contracts \
+  timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c lean rc-023-w2-lean-1
+INST=w2b BASE=17700 LOSS_AT_STEADY=0.05 ZK2C=1 OWNER_HEARTBEAT=1 \
+  CONTRACTS=$R/docs/zk2/measurements/wire-baseline/contracts \
+  timeout 3h taskset -c 4-5 ./measure-w2.sh rf-zk2c bare rc-023-w2-bare-1
+INST=lora BASE=17800 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-lora0-sf7.face.toml \
+  DEVICE=h-c2a95e41d7f0/lora0 FACE=lora PRINCIPAL=lora-node W1_S=1800 \
+  timeout 2h taskset -c 4-5 ./measure.sh sf7-zk2c lean rc-023-sf7-lean-1
+INST=lora9 BASE=17600 LOSSLESS_SETUP=1 W1=73 RUN_FILE=1 FACE_POLICY=$F/zenohd-lora0-sf9.face.toml \
+  DEVICE=h-c2a95e41d7f0/lora0 FACE=lora PRINCIPAL=lora-node \
+  PERIOD_S=120 SETTLE_S=40 IDLE_S=1920 W1_LEAD_S=180 W1_S=3600 \
+  timeout 3h taskset -c 4-5 ./measure.sh sf9-zk2c lean rc-023-sf9-lean-1
+INST=honesty BASE=17900 LOSS_START=0.05 FACE_POLICY=$F/zenohd-rf0.face.toml \
+  timeout 2h taskset -c 4-5 ./honesty.sh rc-023-honesty-1
+# The soaks: W2's v2 device and gen on W2's path; gen alone across rf0's plan
+INST=soak BASE=18000 LIFE=3h timeout 170m taskset -c 4-5 python3 -I -u ./soak.py \
+  --harness $PWD --repo $R --logs $WORK/logs/rc-023-soak-1
+INST=soakf BASE=18200 LIFE=3h FACE_POLICY=$F/zenohd-rf0.face.toml timeout 170m taskset -c 4-5 \
+  python3 -I -u ./soak.py --face --harness $PWD --repo $R --logs $WORK/logs/rc-023-soak-face-2
+# W2's v2 device and gen with the far side opening the lane (20 minutes, 4 reopens)
+INST=soaksmoke2 BASE=18300 LIFE=1h FAR_OPENS=1 timeout 55m taskset -c 4-5 python3 -I -u ./soak.py \
+  --harness $PWD --repo $R --logs $WORK/logs/rc-023-soak-smoke-2 \
+  --cycles 4 --every-s 240 --probe-after-s 40 --telemetry-s 70 --settle-s 40
+# A far reader's re-declaration, alone and beside a second reader (about 15 minutes each)
+INST=rdA BASE=18400 CASE=alone FACE_POLICY=$F/zenohd-rf0.face.toml \
+  timeout 30m taskset -c 4-5 ./redeclare.sh rc-023-redeclare-alone-1
+INST=rdB BASE=18600 CASE=shared FACE_POLICY=$F/zenohd-rf0.face.toml \
+  timeout 30m taskset -c 4-5 ./redeclare.sh rc-023-redeclare-shared-1
+
+# Analysis: analyze.py as above for the five measured runs, then
+python3 -I honesty.py $WORK/logs/rc-023-honesty-1 --json results/rc-023-honesty.json
+python3 -I soak-analyze.py $WORK/logs/rc-023-soak-face-2 --json results/rc-023-soak-face-2/analysis.json
+python3 -I soak-analyze.py $WORK/logs/rc-023-soak-1 --rss $WORK/logs/rc-023-soak-1/rss-swap.jsonl \
+  --json results/rc-023-soak-1/analysis.json
+```
+
+`rc-023-soak-1` ran an earlier `soak.py`: its probes ran at a fixed 90 s after each restart,
+`telemetry` third, and it sampled VmRSS alone. Its RssAnon and VmSwap were read beside it from
+`/proc`, once a minute from its 7th minute, into `rss-swap.jsonl`. `rc-023-soak-face-1`, the
+face soak with the probes at 90 s, was stopped after two reopens, since `telemetry` there ran
+inside the lease the link takes to come back. The soak smoke of `rc-023-soak-smoke-2` ran the
+same earlier `soak.py`. `results/rc-023-redeclare-*/analysis.json` holds each declaration the
+bare capture decodes and what each reader heard, by a few lines of Python over
+`zdecode.decode`'s listing.
+
 The check that no owner heartbeat crosses to readers with no catalog was
 made by hand, and keeps no record in `results/`: `INST=nocat BASE=17800
 ./wire.sh up rf-zk2c bare`, health.v1's `zenctl echo --across-face` reader
@@ -1781,7 +2119,7 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | | |
 |---|---|
 | `configs/` | the driver and router templates, which `render.py` fills per medium, stack and path |
-| `render.py` | each medium's numbers (`MEDIA`), the layer stacks, the ports and directories of a path; `--ids` the routers' zenoh ids (#1136) |
+| `render.py` | each medium's numbers (`MEDIA`), the layer stacks, the ports and directories of a path; `--ids` the routers' zenoh ids (#1136); `--far-opens` the far side opening the lane with no face (rc-023) |
 | `wire.sh` | brings a path up (`up <medium> <stack>`), lists it (`status`), stops it (`down`), and tells the relay to `cut`, `restore` or take a `loss` |
 | `measure.sh` | one W1 run: the idle window, W1's setup, the W1 window, `marks.json`; `PERIOD_S` is gen's tick, a face's `every_s` |
 | `measure-w2.sh`, `w2-drive.py` | one W2 run: the device and the author through the owner example, the steady window, the acts, the reconnect, the config changes; `OWNER_HEARTBEAT=1` has the device send owner heartbeats under a catalog the far readers hold, and `WATCH=1` adds the host's `watch` and `health` (#1110); `V2=1` puts the desired target and the alarms on desired.v2 and alarms.v2, with a refresh, a change of document and the host's probes among the acts, and `DESIRED_TTL` the watch (#986's J5, #984's S4) |
@@ -1794,10 +2132,12 @@ lossy-setup runs (`w2-smoke-1`, `w2-smoke-2`, `w2-rf-bare-1`,
 | `honesty.sh`, `honesty.py` | #989's honesty checks across rf0's face (zk2c), and what each tool said in them; for #1110's honesty run, each owner heartbeat put, what `watch` printed with the catalog and with none, and the descriptor reads that crossed |
 | `setup-loss.py` | what a declaration lost in the setup cost a bare W2 run |
 | `bound.sh`, `bound.py` | #1136's bound: puts of chosen lengths and QoS across rf0's face, bare, the routers' ids fixing the first sequence number; each put's batch or fragments, decoded, and the largest payload that fit at each QoS and sequence width |
+| `soak.py`, `soak-analyze.py` | rc-023's soak: the zenoh-modem mapping's owners and the host's tools for hours, the link reopened every 10 minutes by a driver's or a router's restart, the probes once the link is back, each process's memory once a minute; `--face` W1-73's path across rf0's plan. Each reopen, what crossed after it, each probe's verdict, and each process's RssAnon and VmSwap over its life |
+| `redeclare.sh` | rc-023: a far reader's DeclareSubscriber lost in a cut across rf0's face, and whether its re-declaration (core §8.5) repairs it, alone (`CASE=alone`) and beside a second reader (`CASE=shared`) |
 | `model.py` | runs the report's Appendix A and states its figures per direction; `--zk2c` its zk2c column, each LoRa face's uplink a range by link.v2 §2.16, asserted against its run, and W2's owner heartbeat by its layout, asserted against `zk2c-w2-lean-2` and `-bare-2` |
 | `summary.py` | the README's W2, LoRa and zk2c tables, from `results/`, and the heartbeat element with three heartbeats and with one owner heartbeat; the v2 runs' messages, elements and acts |
 | `train-dictionary.sh`, `rf.zdict`, `w2.zdict` | the compress layer's dictionaries: `rf.zdict` from `bare-1` (W1), `w2.zdict` from `w2-rf-bare-2` (W2) |
-| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/`; for the bound runs (`bound-16bit-1`, `bound-32bit-1`) the capture `air.jsonl` too (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs; `zk2c-w2-owner-honesty.json` and each owner-heartbeat run's `catalog.json` for #1110's; each v2 run's probes, `probe_desired-*.json` and `probe_alarms-*.json`, as `zenctl` printed them, and the watch run's `tasking.v2.toml` (#986's J5, #984's S4) |
+| `results/` | each run's `analysis.json`, `marks.json`, relay summary and rendered `configs/`; for the bound runs (`bound-16bit-1`, `bound-32bit-1`) the capture `air.jsonl` too (a face's generated blocks among them, router B's test password redacted); the dictionaries' inputs (`bare-1/air.jsonl`, `w2-rf-bare-2/air.jsonl`); `setup-loss.json`; `model.json`, and `model-zk2c.json` and `zk2c-honesty.json` for the zk2c runs; `zk2c-w2-owner-honesty.json` and each owner-heartbeat run's `catalog.json` for #1110's; each v2 run's probes, `probe_desired-*.json` and `probe_alarms-*.json`, as `zenctl` printed them, and the watch run's `tasking.v2.toml` (#986's J5, #984's S4); rc-023's runs, `rc-023-honesty.json`, the soaks' `analysis.json`, and the re-declaration runs' bare captures (`rc-023-redeclare-*/air.jsonl`) |
 
 Each relay summary's `loss` is the loss it started with. Under `LOSS_START=0`
 that is 0, and the windows' loss was set later on the control port.
@@ -1839,3 +2179,10 @@ Versions:
   smoke run of the harness (`zk2c-w2-v2-smoke-1`, not kept), whose first
   late joiner without `--clocks-synced` read every firing alarm
   unobservable, its age untrusted.
+- release candidate 0.23.0 (2026-11-28): `zenctl`, the owner example and
+  `zk2` from zenkey at 1dbce36f (main, `git describe`
+  0.14.0-2625-g1dbce36f), release builds, zenoh 1.10.2; the fork at
+  `zm-1.10.2-r1` (2454b10c) and `modem-driver` at d8c62df, the W2 v2 runs'
+  binaries (sha256 b277f046… and dcac30ff…). Up to eight paths ran at once on
+  cores 4–5, after a soak smoke on W2's path (`rc-023-soak-smoke-1`, not
+  kept), while other lanes' suites held most of the host's memory.

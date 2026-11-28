@@ -1,0 +1,985 @@
+{
+ "run": "rc-023-soak-face-2",
+ "hours": 2.17,
+ "reopens": [
+  {
+   "reopen": 1,
+   "kind": "driver-a",
+   "at": 600.0,
+   "restart_s": 0.05,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 18,
+     "passed": 18,
+     "bytes": 1709,
+     "first_s": 181.4,
+     "last_s": 540.6
+    },
+    "ba": {
+     "sdus": 14,
+     "passed": 14,
+     "bytes": 635,
+     "first_s": 57.0,
+     "last_s": 542.5
+    }
+   },
+   "frames": 6,
+   "first_frame_s": 241.4,
+   "far_keys": {
+    "modem.v3/events/face/device_fault/000000b8": 1,
+    "modem.v3/events/face/device_fault/000000bx": 1,
+    "modem.v3/events/face/device_fault/000000cj": 1,
+    "modem.v3/events/face/device_fault/000000d7": 1,
+    "modem.v3/events/face/device_fault/000000dw": 1,
+    "modem.v3/events/face/device_fault/000000eh": 1,
+    "modem.v3/stream/frames/fast": 6
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 2,
+   "kind": "zenohd-a",
+   "at": 1200.0,
+   "restart_s": 0.05,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 21,
+     "passed": 20,
+     "bytes": 1845,
+     "first_s": 181.4,
+     "last_s": 540.6
+    },
+    "ba": {
+     "sdus": 17,
+     "passed": 16,
+     "bytes": 801,
+     "first_s": 2.5,
+     "last_s": 545.1
+    }
+   },
+   "frames": 6,
+   "first_frame_s": 241.4,
+   "far_keys": {
+    "modem.v3/events/face/device_fault/000000hr": 1,
+    "modem.v3/events/face/device_fault/000000jf": 1,
+    "modem.v3/events/face/device_fault/000000k3": 1,
+    "modem.v3/events/face/device_fault/000000kr": 1,
+    "modem.v3/events/face/device_fault/000000md": 1,
+    "modem.v3/events/face/device_fault/000000n2": 1,
+    "modem.v3/stream/frames/fast": 6
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 3,
+   "kind": "driver-b",
+   "at": 1800.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 28,
+     "passed": 27,
+     "bytes": 2715,
+     "first_s": 0.4,
+     "last_s": 540.6
+    },
+    "ba": {
+     "sdus": 17,
+     "passed": 16,
+     "bytes": 657,
+     "first_s": 1.1,
+     "last_s": 545.0
+    }
+   },
+   "frames": 8,
+   "first_frame_s": 60.8,
+   "far_keys": {
+    "modem.v3/events/face/device_fault/000000pc": 1,
+    "modem.v3/events/face/device_fault/000000q1": 1,
+    "modem.v3/events/face/device_fault/000000qp": 1,
+    "modem.v3/events/face/device_fault/000000rb": 1,
+    "modem.v3/events/face/device_fault/000000s0": 1,
+    "modem.v3/events/face/device_fault/000000sn": 1,
+    "modem.v3/events/face/device_fault/000000t9": 1,
+    "modem.v3/events/face/device_fault/000000tw": 1,
+    "modem.v3/events/face/device_fault/000000vh": 1,
+    "modem.v3/stream/frames/fast": 8
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 4,
+   "kind": "zenohd-b",
+   "at": 2400.0,
+   "restart_s": 0.07,
+   "span_s": 680.7,
+   "air": {
+    "ab": {
+     "sdus": 24,
+     "passed": 24,
+     "bytes": 1868,
+     "first_s": 0.4,
+     "last_s": 660.6
+    },
+    "ba": {
+     "sdus": 18,
+     "passed": 17,
+     "bytes": 655,
+     "first_s": 0.2,
+     "last_s": 663.2
+    }
+   },
+   "frames": 0,
+   "first_frame_s": null,
+   "far_keys": {
+    "modem.v3/events/face/device_fault/000000wx": 1,
+    "modem.v3/events/face/device_fault/000000xj": 1,
+    "modem.v3/events/face/device_fault/000000y8": 1,
+    "modem.v3/events/face/device_fault/000000ys": 1,
+    "modem.v3/events/face/device_fault/000000zg": 1,
+    "modem.v3/events/face/device_fault/00000105": 1,
+    "modem.v3/events/face/device_fault/0000010s": 1,
+    "modem.v3/events/face/device_fault/0000011e": 1,
+    "modem.v3/events/face/device_fault/00000123": 1,
+    "modem.v3/events/face/device_fault/0000012t": 1,
+    "modem.v3/events/face/device_fault/0000013h": 1
+   },
+   "link_back": false
+  },
+  {
+   "reopen": 5,
+   "kind": "driver-a",
+   "at": 3080.8,
+   "restart_s": 0.11,
+   "span_s": 542.6,
+   "air": {
+    "ab": {
+     "sdus": 15,
+     "passed": 13,
+     "bytes": 1217,
+     "first_s": 220.6,
+     "last_s": 520.2
+    },
+    "ba": {
+     "sdus": 13,
+     "passed": 13,
+     "bytes": 620,
+     "first_s": 42.4,
+     "last_s": 521.6
+    }
+   },
+   "frames": 5,
+   "first_frame_s": 280.3,
+   "far_keys": {
+    "modem.v3/events/face/device_fault/0000016t": 1,
+    "modem.v3/events/face/device_fault/0000017f": 1,
+    "modem.v3/stream/frames/fast": 5
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 6,
+   "kind": "zenohd-a",
+   "at": 3623.5,
+   "restart_s": 0.06,
+   "span_s": 680.8,
+   "air": {
+    "ab": {
+     "sdus": 17,
+     "passed": 13,
+     "bytes": 871,
+     "first_s": 218.4,
+     "last_s": 636.9
+    },
+    "ba": {
+     "sdus": 29,
+     "passed": 28,
+     "bytes": 1382,
+     "first_s": 39.0,
+     "last_s": 659.0
+    }
+   },
+   "frames": 3,
+   "first_frame_s": 457.7,
+   "far_keys": {
+    "modem.v3/stream/frames/fast": 3
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 7,
+   "kind": "driver-b",
+   "at": 4304.3,
+   "restart_s": 0.05,
+   "span_s": 495.6,
+   "air": {
+    "ab": {
+     "sdus": 18,
+     "passed": 17,
+     "bytes": 1323,
+     "first_s": 15.9,
+     "last_s": 436.0
+    },
+    "ba": {
+     "sdus": 17,
+     "passed": 17,
+     "bytes": 766,
+     "first_s": 1.1,
+     "last_s": 441.7
+    }
+   },
+   "frames": 6,
+   "first_frame_s": 76.2,
+   "far_keys": {
+    "modem.v3/stream/frames/fast": 6
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 8,
+   "kind": "zenohd-b",
+   "at": 4800.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 25,
+     "passed": 23,
+     "bytes": 1475,
+     "first_s": 0.3,
+     "last_s": 540.4
+    },
+    "ba": {
+     "sdus": 18,
+     "passed": 17,
+     "bytes": 714,
+     "first_s": 0.2,
+     "last_s": 555.1
+    }
+   },
+   "frames": 7,
+   "first_frame_s": 60.5,
+   "far_keys": {
+    "modem.v3/stream/frames/fast": 7
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 9,
+   "kind": "driver-a",
+   "at": 5400.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 17,
+     "passed": 15,
+     "bytes": 1071,
+     "first_s": 181.2,
+     "last_s": 540.5
+    },
+    "ba": {
+     "sdus": 14,
+     "passed": 13,
+     "bytes": 610,
+     "first_s": 75.1,
+     "last_s": 542.2
+    }
+   },
+   "frames": 5,
+   "first_frame_s": 300.6,
+   "far_keys": {
+    "modem.v3/stream/frames/fast": 5
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 10,
+   "kind": "zenohd-a",
+   "at": 6000.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 17,
+     "passed": 17,
+     "bytes": 1120,
+     "first_s": 181.3,
+     "last_s": 540.5
+    },
+    "ba": {
+     "sdus": 15,
+     "passed": 13,
+     "bytes": 626,
+     "first_s": 2.2,
+     "last_s": 482.3
+    }
+   },
+   "frames": 6,
+   "first_frame_s": 241.2,
+   "far_keys": {
+    "modem.v3/stream/frames/fast": 6
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 11,
+   "kind": "driver-b",
+   "at": 6600.0,
+   "restart_s": 0.06,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 26,
+     "passed": 25,
+     "bytes": 1740,
+     "first_s": 0.3,
+     "last_s": 540.5
+    },
+    "ba": {
+     "sdus": 21,
+     "passed": 20,
+     "bytes": 911,
+     "first_s": 1.1,
+     "last_s": 546.2
+    }
+   },
+   "frames": 8,
+   "first_frame_s": 121.2,
+   "far_keys": {
+    "modem.v3/stream/frames/fast": 8
+   },
+   "link_back": true
+  },
+  {
+   "reopen": 12,
+   "kind": "zenohd-b",
+   "at": 7200.0,
+   "restart_s": 0.05,
+   "span_s": 599.9,
+   "air": {
+    "ab": {
+     "sdus": 26,
+     "passed": 25,
+     "bytes": 1732,
+     "first_s": 1.0,
+     "last_s": 540.5
+    },
+    "ba": {
+     "sdus": 16,
+     "passed": 14,
+     "bytes": 668,
+     "first_s": 0.2,
+     "last_s": 543.8
+    }
+   },
+   "frames": 9,
+   "first_frame_s": 60.6,
+   "far_keys": {
+    "modem.v3/stream/frames/fast": 9
+   },
+   "link_back": true
+  }
+ ],
+ "probes": {
+  "0": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "1": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "2": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "3": {
+   "telemetry": {
+    "exit": 2,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "51 counter or histogram member(s) read could not tell whether they went backwards within one epoch: no pair formed, or only pairs whose epoch was assumed, so no decrease could have been found (telemetry.v1 \u00a75); zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast field sdu_tx_sdus_total: no pair formed: 1 sample(s) of it in the window, and a pair needs two; 2 of its records were no sample: 2 absent"
+    },
+    "stderr": "odem.v3/stream/frames/fast field sdu_tx_sdus_total: no pair formed: 1 sample(s) of it in the window, and a pair needs two; 2 of its records were no sample: 2 absent \u2014 exit 2, the reserved non-verdict\n"
+   }
+  },
+  "4": {
+   "telemetry": {
+    "exit": 2,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "unobservable",
+     "reason": "no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict"
+    },
+    "stderr": "_total, h-3fa9c2d41b7e/rf0 modem.v3 stream/sdu/tx_sdus_total\ntelemetry: no sample of the 1 metric resource(s) in scope arrived in 260.0s: silence is never a verdict \u2014 exit 2, the reserved non-verdict\n"
+   }
+  },
+  "5": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "6": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "7": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "8": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "9": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "10": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "11": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  },
+  "12": {
+   "telemetry": {
+    "exit": 0,
+    "seconds": 260.3,
+    "verdict": {
+     "answer": "not_established",
+     "reason": "every one of the 146 sample(s) of 73 member(s) conforms; 51 pair(s), none decreased within an established epoch (51 established, 0 assumed); every counter or histogram read formed an established pair"
+    }
+   }
+  }
+ },
+ "probe_exits": {
+  "telemetry": {
+   "0": 11,
+   "2": 2
+  }
+ },
+ "rss": [
+  {
+   "name": "counters-a",
+   "comm": "zenctl",
+   "pid": 1326647,
+   "minutes": 131.0,
+   "samples": 132,
+   "first_kb": 3800,
+   "at_10min_kb": 36084,
+   "last_kb": 40360,
+   "max_kb": 40960,
+   "slope_first_half_kb_h": 11696.6,
+   "slope_second_half_kb_h": 3507.6,
+   "median_by_third_kb": [
+    36156,
+    37816,
+    40180
+   ],
+   "grows_without_levelling": true
+  },
+  {
+   "name": "counters-a",
+   "comm": "python3",
+   "pid": 1326648,
+   "minutes": 131.0,
+   "samples": 132,
+   "first_kb": 3944,
+   "at_10min_kb": 4252,
+   "last_kb": 5360,
+   "max_kb": 5360,
+   "slope_first_half_kb_h": 1099.2,
+   "slope_second_half_kb_h": 50.7,
+   "median_by_third_kb": [
+    5192,
+    5300,
+    5348
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "counters-b",
+   "comm": "zenctl",
+   "pid": 1326666,
+   "minutes": 131.0,
+   "samples": 132,
+   "first_kb": 3872,
+   "at_10min_kb": 35792,
+   "last_kb": 49544,
+   "max_kb": 55392,
+   "slope_first_half_kb_h": 13607.8,
+   "slope_second_half_kb_h": 6198.2,
+   "median_by_third_kb": [
+    36712,
+    40048,
+    49052
+   ],
+   "grows_without_levelling": true
+  },
+  {
+   "name": "counters-b",
+   "comm": "python3",
+   "pid": 1326667,
+   "minutes": 131.0,
+   "samples": 132,
+   "first_kb": 3944,
+   "at_10min_kb": 4256,
+   "last_kb": 4520,
+   "max_kb": 4520,
+   "slope_first_half_kb_h": 288.8,
+   "slope_second_half_kb_h": 57.6,
+   "median_by_third_kb": [
+    4324,
+    4460,
+    4500
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a",
+   "comm": "modem-driver",
+   "pid": 1326608,
+   "minutes": 12.0,
+   "samples": 13,
+   "first_kb": 5160,
+   "at_10min_kb": 5196,
+   "last_kb": 5200,
+   "max_kb": 5200,
+   "slope_first_half_kb_h": 342.8,
+   "slope_second_half_kb_h": 77.1,
+   "median_by_third_kb": [
+    5192,
+    5192,
+    5196
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a.r1",
+   "comm": "modem-driver",
+   "pid": 1328494,
+   "minutes": 40.0,
+   "samples": 41,
+   "first_kb": 4860,
+   "at_10min_kb": 5068,
+   "last_kb": 5132,
+   "max_kb": 5132,
+   "slope_first_half_kb_h": 629.3,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    5020,
+    5132,
+    5132
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a.r5",
+   "comm": "modem-driver",
+   "pid": 1471061,
+   "minutes": 37.0,
+   "samples": 38,
+   "first_kb": 4704,
+   "at_10min_kb": 4956,
+   "last_kb": 5044,
+   "max_kb": 5044,
+   "slope_first_half_kb_h": 644.6,
+   "slope_second_half_kb_h": 28.6,
+   "median_by_third_kb": [
+    4972,
+    5028,
+    5044
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-a.r9",
+   "comm": "modem-driver",
+   "pid": 1585779,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 4552,
+   "at_10min_kb": 4968,
+   "last_kb": 5060,
+   "max_kb": 5060,
+   "slope_first_half_kb_h": 1054.7,
+   "slope_second_half_kb_h": 17.9,
+   "median_by_third_kb": [
+    4968,
+    5056,
+    5060
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b",
+   "comm": "modem-driver",
+   "pid": 1326610,
+   "minutes": 31.0,
+   "samples": 32,
+   "first_kb": 5148,
+   "at_10min_kb": 5280,
+   "last_kb": 5380,
+   "max_kb": 5380,
+   "slope_first_half_kb_h": 585.5,
+   "slope_second_half_kb_h": 198.0,
+   "median_by_third_kb": [
+    5220,
+    5340,
+    5380
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b.r11",
+   "comm": "modem-driver",
+   "pid": 1595401,
+   "minutes": 19.0,
+   "samples": 20,
+   "first_kb": 4520,
+   "at_10min_kb": 5044,
+   "last_kb": 5044,
+   "max_kb": 5044,
+   "slope_first_half_kb_h": 1854.5,
+   "slope_second_half_kb_h": 0.0,
+   "median_by_third_kb": [
+    5044,
+    5044,
+    5044
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b.r3",
+   "comm": "modem-driver",
+   "pid": 1392467,
+   "minutes": 41.0,
+   "samples": 42,
+   "first_kb": 684,
+   "at_10min_kb": 5088,
+   "last_kb": 5164,
+   "max_kb": 5208,
+   "slope_first_half_kb_h": 3872.7,
+   "slope_second_half_kb_h": 82.3,
+   "median_by_third_kb": [
+    5088,
+    5152,
+    5160
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "driver-b.r7",
+   "comm": "modem-driver",
+   "pid": 1501264,
+   "minutes": 37.0,
+   "samples": 38,
+   "first_kb": 4920,
+   "at_10min_kb": 5096,
+   "last_kb": 5188,
+   "max_kb": 5188,
+   "slope_first_half_kb_h": 384.4,
+   "slope_second_half_kb_h": 285.5,
+   "median_by_third_kb": [
+    5052,
+    5100,
+    5148
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-modem",
+   "comm": "zenctl",
+   "pid": 1326729,
+   "minutes": 131.0,
+   "samples": 132,
+   "first_kb": 5148,
+   "at_10min_kb": 5252,
+   "last_kb": 5732,
+   "max_kb": 5732,
+   "slope_first_half_kb_h": 448.7,
+   "slope_second_half_kb_h": 98.6,
+   "median_by_third_kb": [
+    5316,
+    5624,
+    5696
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "far-modem",
+   "comm": "python3",
+   "pid": 1326730,
+   "minutes": 131.0,
+   "samples": 132,
+   "first_kb": 3916,
+   "at_10min_kb": 4056,
+   "last_kb": 4160,
+   "max_kb": 4160,
+   "slope_first_half_kb_h": 65.4,
+   "slope_second_half_kb_h": 56.3,
+   "median_by_third_kb": [
+    4060,
+    4084,
+    4132
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "gen",
+   "comm": "zenctl",
+   "pid": 1326764,
+   "minutes": 131.0,
+   "samples": 132,
+   "first_kb": 1856,
+   "at_10min_kb": 8496,
+   "last_kb": 9040,
+   "max_kb": 9040,
+   "slope_first_half_kb_h": 1104.0,
+   "slope_second_half_kb_h": 73.5,
+   "median_by_third_kb": [
+    8632,
+    8976,
+    9032
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "relay",
+   "comm": "python3",
+   "pid": 1326603,
+   "minutes": 131.0,
+   "samples": 132,
+   "first_kb": 11692,
+   "at_10min_kb": 11692,
+   "last_kb": 11672,
+   "max_kb": 11700,
+   "slope_first_half_kb_h": -34.9,
+   "slope_second_half_kb_h": 2.6,
+   "median_by_third_kb": [
+    11692,
+    11668,
+    11668
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a",
+   "comm": "zenohd",
+   "pid": 1326616,
+   "minutes": 21.0,
+   "samples": 22,
+   "first_kb": 3476,
+   "at_10min_kb": 3844,
+   "last_kb": 4084,
+   "max_kb": 4084,
+   "slope_first_half_kb_h": 1012.3,
+   "slope_second_half_kb_h": 1799.9,
+   "median_by_third_kb": [
+    3844,
+    3844,
+    4084
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a.r10",
+   "comm": "zenohd",
+   "pid": 1594558,
+   "minutes": 29.0,
+   "samples": 30,
+   "first_kb": 3212,
+   "at_10min_kb": 3832,
+   "last_kb": 3908,
+   "max_kb": 3908,
+   "slope_first_half_kb_h": 1576.2,
+   "slope_second_half_kb_h": 138.9,
+   "median_by_third_kb": [
+    3832,
+    3884,
+    3908
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a.r2",
+   "comm": "zenohd",
+   "pid": 1343549,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 3684,
+   "at_10min_kb": 3916,
+   "last_kb": 4072,
+   "max_kb": 4072,
+   "slope_first_half_kb_h": 641.1,
+   "slope_second_half_kb_h": 279.8,
+   "median_by_third_kb": [
+    3860,
+    3992,
+    3996
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-a.r6",
+   "comm": "zenohd",
+   "pid": 1500423,
+   "minutes": 38.0,
+   "samples": 39,
+   "first_kb": 3684,
+   "at_10min_kb": 3944,
+   "last_kb": 3988,
+   "max_kb": 3988,
+   "slope_first_half_kb_h": 980.2,
+   "slope_second_half_kb_h": 34.1,
+   "median_by_third_kb": [
+    3820,
+    3968,
+    3988
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b",
+   "comm": "zenohd",
+   "pid": 1326635,
+   "minutes": 41.0,
+   "samples": 42,
+   "first_kb": 1276,
+   "at_10min_kb": 1400,
+   "last_kb": 1700,
+   "max_kb": 1700,
+   "slope_first_half_kb_h": 966.5,
+   "slope_second_half_kb_h": 309.2,
+   "median_by_third_kb": [
+    1396,
+    1620,
+    1700
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b.r12",
+   "comm": "zenohd",
+   "pid": 1595804,
+   "minutes": 9.0,
+   "samples": 10,
+   "first_kb": 868,
+   "at_10min_kb": null,
+   "last_kb": 1412,
+   "max_kb": 1412,
+   "slope_first_half_kb_h": 7295.8,
+   "slope_second_half_kb_h": 48.0,
+   "median_by_third_kb": [
+    1272,
+    1408,
+    1412
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b.r4",
+   "comm": "zenohd",
+   "pid": 1421007,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 556,
+   "at_10min_kb": 1400,
+   "last_kb": 1792,
+   "max_kb": 1792,
+   "slope_first_half_kb_h": 1739.7,
+   "slope_second_half_kb_h": 748.5,
+   "median_by_third_kb": [
+    1272,
+    1608,
+    1776
+   ],
+   "grows_without_levelling": false
+  },
+  {
+   "name": "zenohd-b.r8",
+   "comm": "zenohd",
+   "pid": 1530601,
+   "minutes": 39.0,
+   "samples": 40,
+   "first_kb": 872,
+   "at_10min_kb": 1412,
+   "last_kb": 1748,
+   "max_kb": 1748,
+   "slope_first_half_kb_h": 1410.5,
+   "slope_second_half_kb_h": 340.0,
+   "median_by_third_kb": [
+    1408,
+    1660,
+    1744
+   ],
+   "grows_without_levelling": false
+  }
+ ]
+}
