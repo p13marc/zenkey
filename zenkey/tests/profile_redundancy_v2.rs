@@ -3197,14 +3197,29 @@ async fn a_follower_reads_its_incumbents_heartbeats_alone() {
     let p = Consumer::for_tool(&ps, contract, &[BEACON], &BTreeMap::new()).unwrap();
     let p_reads: Arc<Mutex<Vec<HeartbeatRead>>> = Arc::default();
     let pr = Arc::clone(&p_reads);
+    let p_values = Arc::new(AtomicU64::new(0));
+    let pv = Arc::clone(&p_values);
     let p_sub = p
         .subscribe_heartbeats(
             "state/status",
-            |_: Delivery| {},
+            move |_: Delivery| {
+                pv.fetch_add(1, Ordering::Relaxed);
+            },
             move |h| pr.lock().unwrap().push(h),
         )
         .await
         .unwrap();
+    // A subscription resolves before its router registers it, and nothing
+    // orders P's declarations before A's put at the router: a round trip
+    // on P's session does ([`presence::settle`]). Without it, A's status
+    // could reach the router first and never reach P, whose view would then
+    // diverge from A's heartbeat and agree with B's two (3 runs in 10).
+    assert!(
+        presence::settle(&ps, "zk2/lab/beacon/@zk/alive/**", T)
+            .await
+            .unwrap(),
+        "P's round trip to the router"
+    );
     eventually("K follows A, the lowest holder", || async {
         following.incumbent(&beacon) == Some(id(0xa))
     })
@@ -3231,6 +3246,10 @@ async fn a_follower_reads_its_incumbents_heartbeats_alone() {
         following
             .value(STATUS)
             .is_some_and(|d| d.inband == Some(up))
+    })
+    .await;
+    eventually("P holds A's status", || async {
+        p_values.load(Ordering::Relaxed) > 0
     })
     .await;
     a.beat(0, &[(STATUS, up)]).await;
