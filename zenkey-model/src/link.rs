@@ -1791,6 +1791,60 @@ impl fmt::Display for FarSideRefusal {
     }
 }
 
+/// The most repair subscriptions one subscription declares (core §8.5).
+pub const REPAIRS: u32 = 3;
+
+/// The key expression of `selector`'s `n`-th repair subscription (core
+/// §8.5), `n` from 1: `selector` with `$*` placed in the last chunk of its
+/// literal prefix, the chunks before its first wildcard, at that chunk's
+/// end for the first repair and one character further left for each
+/// later one (`…/frames/fast$*`, then `…/frames/fas$*t`; an event's
+/// `…/face/device_fault$*/*`; a template's `…/port$*/*/rx`).
+///
+/// `$*` matches no character too, so a repair matches every key `selector`
+/// does, and it is canonical. No reader's own subscription declares it, so
+/// its router declares it toward the far side, and with a key expression
+/// of its own: its literal prefix ends a chunk earlier than `selector`'s.
+/// The selector may carry a namespace in front of `zk2`.
+///
+/// `None` for `n` past [`REPAIRS`] or past the chunk's first character,
+/// and for a selector that is no zk2 data selector or whose literal prefix
+/// ends before its resource (a template whose first chunk is a parameter):
+/// `$*` on its kind or its interface would leave the far side's grants
+/// (core §11.1).
+#[must_use]
+pub fn repair_key(selector: &str, n: u32) -> Option<String> {
+    if n == 0 || n > REPAIRS {
+        return None;
+    }
+    let chunks: Vec<&str> = selector.split('/').collect();
+    // The kind's chunk: `zk2`, the address, an interface, a kind token,
+    // and a resource after it.
+    let kind = (0..chunks.len()).find(|&z| {
+        chunks[z] == crate::grammar::GRAMMAR
+            && z + 5 < chunks.len()
+            && chunks[z + 3].parse::<crate::grammar::IfaceId>().is_ok()
+            && chunks[z + 4].parse::<KindToken>().is_ok()
+    })? + 4;
+    // The literal prefix's last chunk: a plain chunk is ASCII and holds no
+    // wildcard (core §1.2).
+    let literal = chunks
+        .iter()
+        .position(|c| c.contains(['*', '$']))
+        .unwrap_or(chunks.len());
+    let at = literal.checked_sub(1).filter(|&i| i > kind)?;
+    if !is_plain_chunk(chunks[at]) {
+        return None;
+    }
+    let split = chunks[at].len().checked_sub(usize::try_from(n - 1).ok()?)?;
+    let chunk = format!("{}$*{}", &chunks[at][..split], &chunks[at][split..]);
+    let mut out = chunks.clone();
+    out[at] = &chunk;
+    let repair = out.join("/");
+    keyexpr::new(repair.as_str()).ok()?;
+    Some(repair)
+}
+
 /// The horizon of a subscription to `r`, a resource of `c`, that a reader
 /// across a face declares again after silence (core §8.5): its
 /// `freshness.ttl_s` above 0, where its owner puts at least once a

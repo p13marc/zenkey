@@ -129,6 +129,32 @@ fn keys() {
     }
 }
 
+/// `repair/keys.json` (core §8.5, #1185): each subscription's repair
+/// subscriptions, in the order a reader declares them. Computed by a
+/// reading of the text, never blessed; each repair also matches every key
+/// its selector does, and none is declared twice.
+#[test]
+fn repairs() {
+    use zenkey_model::link::{REPAIRS, repair_key};
+    use zenoh_keyexpr::keyexpr;
+    let doc = read_json(&spec().join("conformance/repair/keys.json"));
+    for case in doc["cases"].as_array().unwrap() {
+        let selector = case["selector"].as_str().unwrap();
+        let got: Vec<String> = (1..=REPAIRS + 1)
+            .map_while(|n| repair_key(selector, n))
+            .collect();
+        let want: Vec<String> = serde_json::from_value(case["repairs"].clone()).unwrap();
+        assert_eq!(got, want, "{selector}");
+        let mut seen = std::collections::BTreeSet::new();
+        for r in &got {
+            let rk = keyexpr::new(r.as_str()).unwrap_or_else(|e| panic!("{r}: {e}"));
+            let sk = keyexpr::new(selector).unwrap();
+            assert!(rk.includes(sk), "{r} matches every key {selector} does");
+            assert!(seen.insert(r.clone()), "{r} once");
+        }
+    }
+}
+
 #[test]
 fn slugs() {
     let path = spec().join("conformance/slugs.json");
