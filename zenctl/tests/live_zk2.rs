@@ -2815,10 +2815,102 @@ async fn serve_with_a_run_file_takes_the_next_run() {
             .contains("--run-file: redundancy.v1 governs steer.v1"),
         "{refused}"
     );
+    // Beside either major (#987's N3): a redundancy.v2 candidate draws its
+    // runs at random too.
+    let governed_run = scenario_path("steer-governed-run.v1")
+        .to_str()
+        .expect("a UTF-8 path")
+        .to_owned();
+    let refused = bus
+        .zenctl(&[
+            "gen",
+            "lab/cmd-a",
+            "steer.v1",
+            "--run-file",
+            &path,
+            "--contracts",
+            &governed_run,
+            "--duration",
+            "1",
+        ])
+        .await;
+    exits(&refused, 2);
+    assert!(
+        refused
+            .stderr
+            .contains("--run-file: redundancy.v2 governs steer.v1"),
+        "{refused}"
+    );
     assert_eq!(
         std::fs::read(&record).expect("the record"),
         [0, 1],
         "a refusal takes no run"
+    );
+}
+
+/// `gen` of a `redundancy.v2` revision (#987's N3; `redundancy.v2`
+/// §2.10): the mock owner is a candidate, elected alone, and its session
+/// stamps nothing, as any owner's (core §8.2): no sample it puts carries a
+/// Zenoh timestamp of its own session's, whose zid its descriptor states.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gen_of_a_redundancy_v2_revision_elects_and_does_not_stamp() {
+    use std::sync::Mutex;
+    let bus = Bus::bare(None).await;
+    let governed_run = scenario_path("steer-governed-run.v1")
+        .to_str()
+        .expect("a UTF-8 path")
+        .to_owned();
+    let heard: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+    let h = Arc::clone(&heard);
+    let _sub = bus
+        .owners
+        .declare_subscriber("zk2/lab/cmd-a/steer.v1/**")
+        .callback(move |s| {
+            h.lock()
+                .unwrap()
+                .push(s.timestamp().map(|t| t.get_id().to_string()));
+        })
+        .await
+        .expect("a subscriber");
+    let mock = bus.spawn(&[
+        "gen",
+        "lab/cmd-a",
+        "steer.v1",
+        "--contracts",
+        &governed_run,
+        "--rate",
+        "20",
+        "--duration",
+        "6",
+    ]);
+    wait_for(&bus, &["lab/cmd-a"]).await;
+    let show = bus
+        .until(&["service", "show", "lab/cmd-a", "--format", "json"], |r| {
+            r.code == 0
+        })
+        .await;
+    let doc = show.json();
+    let zid = doc["rows"][0]["descriptor"]["descriptor"]["meta"]["zid"]
+        .as_str()
+        .expect("the owner's zid")
+        .to_owned();
+    let deadline = Instant::now() + SETTLE;
+    while heard.lock().unwrap().len() < 5 {
+        assert!(Instant::now() < deadline, "the elected mock writes");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let done = mock.await.expect("the mock");
+    exits(&done, 0);
+    assert!(
+        done.stderr
+            .contains("redundancy.v2 governs steer.v1: this mock is a candidate")
+            && done.stderr.contains("its session not stamping"),
+        "{done}"
+    );
+    let heard = heard.lock().unwrap().clone();
+    assert!(
+        heard.iter().all(|id| id.as_deref() != Some(zid.as_str())),
+        "no put of the candidate's carries its own session's stamp ({zid}): {heard:?}"
     );
 }
 
@@ -13799,22 +13891,52 @@ const LEDGER_A: &str = "000000000000000a";
 const LEDGER_B: &str = "000000000000000b";
 const LEDGER_X: &str = "000000000000000c";
 
-fn ledger_path() -> String {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../zenkey/tests/contracts/ledger.v1.toml")
-        .to_str()
-        .expect("a UTF-8 path")
-        .to_owned()
+/// The revision of `ledger.v1` a §12 run reads, with T holding it
+/// offline: `redundancy.v1`'s `ledger.v1`, or `redundancy.v2`'s
+/// `ledger-run.v1` (`scenarios-v2.md` §12, #987's N3), each with its
+/// `appendall` variant (step 8's second half, step 9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ledger {
+    V1,
+    V2,
 }
 
-fn ledger_contract() -> Contract {
-    let l = load_path(Path::new(&ledger_path()));
-    l.contract.unwrap_or_else(|| panic!("{}", l.report))
+impl Ledger {
+    fn file(self, appendall: bool) -> PathBuf {
+        let name = match (self, appendall) {
+            (Ledger::V1, false) => "ledger.v1",
+            (Ledger::V1, true) => "ledger-appendall.v1",
+            (Ledger::V2, false) => "ledger-run.v1",
+            (Ledger::V2, true) => "ledger-run-appendall.v1",
+        };
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../zenkey/tests/contracts")
+            .join(format!("{name}.toml"))
+    }
+
+    /// Its contract file, as T's `--contracts` names it.
+    fn path(self) -> String {
+        self.file(false).to_str().expect("a UTF-8 path").to_owned()
+    }
+
+    fn contract(self) -> Contract {
+        let l = load_path(&self.file(false));
+        l.contract.unwrap_or_else(|| panic!("{}", l.report))
+    }
+
+    /// The profile that governs it, as a finding names it.
+    fn profile(self) -> &'static str {
+        match self {
+            Ledger::V1 => "redundancy.v1",
+            Ledger::V2 => "redundancy.v2",
+        }
+    }
 }
 
-/// A candidate's session: a client of `ep`, its HLC on (§2.10), retrying
-/// fast after a cut.
-async fn candidate_session(ep: &str) -> zenoh::Session {
+/// A candidate's session: a client of `ep`, retrying fast after a cut; its
+/// HLC on for a `redundancy.v1` candidate (§2.10) and off for a
+/// `redundancy.v2` one, as any owner's (`redundancy.v2` §2.10).
+async fn candidate_session(ep: &str, stamping: bool) -> zenoh::Session {
     let mut c = base_config();
     c.insert_json5("mode", "\"client\"").expect("config");
     c.insert_json5("connect/endpoints", &format!("[\"{ep}\"]"))
@@ -13824,8 +13946,10 @@ async fn candidate_session(ep: &str) -> zenoh::Session {
         "{ period_init_ms: 100, period_max_ms: 500, period_increase_factor: 1.5 }",
     )
     .expect("config");
-    c.insert_json5("timestamping/enabled", "true")
-        .expect("config");
+    if stamping {
+        c.insert_json5("timestamping/enabled", "true")
+            .expect("config");
+    }
     zenoh::open(c).await.expect("a candidate's session")
 }
 
@@ -13881,16 +14005,24 @@ struct LedgerCandidate {
 }
 
 impl LedgerCandidate {
-    async fn up(
+    /// One candidate on `l`'s revision.
+    async fn up_l(
         ep: &str,
         name: &'static str,
         id: u64,
         minter: Option<&zenkey::hostid::HostIdMinter>,
+        l: Ledger,
     ) -> LedgerCandidate {
-        LedgerCandidate::up_on(ep, name, id, minter, ledger_contract()).await
+        LedgerCandidate::up_on(ep, name, id, minter, l.contract()).await
     }
 
-    /// [`LedgerCandidate::up`] on `contract`, a revision of `ledger.v1`:
+    /// The run its descriptor states (core §3.3), as it serves it.
+    fn run(&self) -> String {
+        let d: Value = serde_json::from_slice(&self.svc.descriptor_bytes()).expect("JSON");
+        d["run"].as_str().expect("a run").to_owned()
+    }
+
+    /// One candidate on `contract`, a revision of `ledger.v1`:
     /// `ledger-appendall.v1`'s `appendall` (F-221) is served too, its
     /// executions counted.
     async fn up_on(
@@ -13900,9 +14032,12 @@ impl LedgerCandidate {
         minter: Option<&zenkey::hostid::HostIdMinter>,
         contract: Contract,
     ) -> LedgerCandidate {
-        let claim = candidate_session(ep).await;
-        let watch = candidate_session(ep).await;
-        let reader = candidate_session(ep).await;
+        // Its sessions stamp under redundancy.v1 alone (redundancy.v2 §2.10).
+        let stamping = zenkey::model::redundancy::Major::of(&contract.uses)
+            == Some(zenkey::model::redundancy::Major::V1);
+        let claim = candidate_session(ep, stamping).await;
+        let watch = candidate_session(ep, stamping).await;
+        let reader = candidate_session(ep, stamping).await;
         let has = |r: &str| {
             contract
                 .resources
@@ -14025,16 +14160,19 @@ struct Shape {
 }
 
 impl Shape {
-    async fn up(ep: &str, standby: bool, holds: bool) -> Shape {
+    /// X, its descriptor naming `l`'s revision.
+    async fn up_l(ep: &str, l: Ledger, standby: bool, holds: bool) -> Shape {
         use zenoh::Wait;
         let session = client(ep, None).await;
-        let fp = zenkey::model::canonical::Fingerprint::of(&ledger_contract());
+        let contract = l.contract();
+        let fp = zenkey::model::canonical::Fingerprint::of(&contract);
+        let minor = contract.minor.unwrap_or(0);
         let instance = format!("zk2/{LEDGER}/@zk/instance/{LEDGER_X}");
         let body = serde_json::to_vec(&json!({
             "format": "zk2-descriptor/0.1",
             "service": LEDGER,
             "instance": LEDGER_X,
-            "interfaces": [{"iface": "ledger.v1", "contract": fp.to_string(), "minor": 0,
+            "interfaces": [{"iface": "ledger.v1", "contract": fp.to_string(), "minor": minor,
                             "standby": standby, "token": true}],
             "meta": {"zid": session.zid().to_string()},
         }))
@@ -14120,6 +14258,15 @@ fn t_instance(row: &Value, id: &str) -> (String, String) {
     )
 }
 
+/// The run T names beside an instance (`redundancy.v2` §2.15).
+fn t_run(row: &Value, id: &str) -> Option<String> {
+    row["instances"]
+        .as_array()
+        .and_then(|a| a.iter().find(|i| i["instance"] == id))
+        .and_then(|i| i["run"].as_str())
+        .map(str::to_owned)
+}
+
 fn t_answer(row: &Value, q: &str) -> String {
     format!(
         "{}:{}",
@@ -14128,8 +14275,9 @@ fn t_answer(row: &Value, q: &str) -> String {
     )
 }
 
-async fn t_until(bus: &Bus, address: &str, done: impl Fn(&Run) -> bool) -> Run {
-    let path = ledger_path();
+/// T until `done`, holding `l`'s revision offline.
+async fn t_until_l(bus: &Bus, l: Ledger, address: &str, done: impl Fn(&Run) -> bool) -> Run {
+    let path = l.path();
     let args = t_args(address, &path);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     bus.until(&args, |r| !r.stdout.is_empty() && done(r)).await
@@ -14145,14 +14293,13 @@ fn has_row(r: &Run) -> bool {
 /// incumbent, no vacancy, one standby, exact, A the incumbent and B a
 /// standby, exit 0; the doctor finds no split-brain and no token-missing
 /// for B (core §6, 0.39), nor a lasting vacancy.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn redundancy_s12_one_serves_one_stands_by() {
+async fn s12_one_serves_one_stands_by(l: Ledger) {
     use zenkey::redundancy::Role;
     let bus = Bus::bare(None).await;
-    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    let a = LedgerCandidate::up_l(&bus.endpoint, "A", 0xa, None, l).await;
     a.until(Role::Serving).await;
-    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, None).await;
-    let run = t_until(&bus, LEDGER, |r| {
+    let b = LedgerCandidate::up_l(&bus.endpoint, "B", 0xb, None, l).await;
+    let run = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
     })
     .await;
@@ -14180,6 +14327,37 @@ async fn redundancy_s12_one_serves_one_stands_by() {
         "{run}"
     );
     assert_eq!(b.role(), Role::Standby);
+
+    // Step 10 (scenarios-v2.md §12; redundancy.v2 §2.15): each candidate's
+    // run beside its instance, as its descriptor states it.
+    for (id, c) in [(LEDGER_A, &a), (LEDGER_B, &b)] {
+        assert_eq!(
+            t_run(&row, id),
+            Some(c.run()),
+            "{id}'s run, as its descriptor states it: {run}"
+        );
+    }
+    assert_ne!(a.run(), b.run(), "two candidates, two runs");
+    // The table names it beside the instance too.
+    let path = l.path();
+    let table = bus
+        .zenctl(&[
+            "redundancy",
+            LEDGER,
+            "--contracts",
+            &path,
+            "--format",
+            "table",
+            "--color",
+            "never",
+        ])
+        .await;
+    for c in [&a, &b] {
+        assert!(
+            table.stdout.contains(&format!("(run {}, zid ", c.run())),
+            "{table}"
+        );
+    }
 
     // Step 7, step 1's shape.
     let dr = bus
@@ -14212,17 +14390,16 @@ async fn redundancy_s12_one_serves_one_stands_by() {
 /// T: no, `split`; A yes, `split_lowest`; B yes, `split`; exit 1. The
 /// doctor: one `split-brain` finding naming A and B. Released, B steps
 /// down, and T reads one incumbent again.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn redundancy_s12_a_split_held_after_the_heal() {
+async fn s12_a_split_held_after_the_heal(l: Ledger) {
     use zenkey::redundancy::Role;
     let bus = Bus::bare(None).await;
     let proxy = Proxy::to(&bus.endpoint).await;
     let (_r2, ep2) = router_via(&proxy).await;
-    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    let a = LedgerCandidate::up_l(&bus.endpoint, "A", 0xa, None, l).await;
     a.until(Role::Serving).await;
-    let b = LedgerCandidate::up(&ep2, "B", 0xb, None).await;
+    let b = LedgerCandidate::up_l(&ep2, "B", 0xb, None, l).await;
     // B reads A's token across the link, and stands by on it.
-    let run = t_until(&bus, LEDGER, |r| {
+    let run = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
     })
     .await;
@@ -14235,7 +14412,7 @@ async fn redundancy_s12_a_split_held_after_the_heal() {
     // The heal, B's step-down held (§9's hold).
     b.red.hold_heal(true);
     proxy.heal();
-    let run = t_until(&bus, LEDGER, |r| {
+    let run = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 1 && has_row(r) && t_answer(&t_row(r), "one_incumbent") == "no:split"
     })
     .await;
@@ -14271,12 +14448,15 @@ async fn redundancy_s12_a_split_held_after_the_heal() {
         evidence.contains(LEDGER_A) && evidence.contains(LEDGER_B),
         "{dr}"
     );
-    assert!(evidence.contains("redundancy.v1 governs it"), "{dr}");
+    assert!(
+        evidence.contains(&format!("{} governs it", l.profile())),
+        "{dr}"
+    );
     exits(&dr, 1);
     // Released: B, the higher, steps down (§2.9), and A stands alone.
     b.red.hold_heal(false);
     b.until(Role::Standby).await;
-    let run = t_until(&bus, LEDGER, |r| {
+    let run = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 0 && has_row(r) && t_answer(&t_row(r), "one_incumbent") == "yes:one"
     })
     .await;
@@ -14292,13 +14472,12 @@ async fn redundancy_s12_a_split_held_after_the_heal() {
 /// with no token: X yes, `unmarked`; exit 1. 5: no instance runs, X holding
 /// the token marked standby: X yes, `marked_holding`; one incumbent yes,
 /// `one`, a holder being an incumbent whatever its mark; exit 1.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn redundancy_s12_the_shapes_x_builds() {
+async fn s12_the_shapes_x_builds(l: Ledger) {
     use zenkey::redundancy::Role;
     let bus = Bus::bare(None).await;
     // Step 3.
-    let x = Shape::up(&bus.endpoint, true, false).await;
-    let run = t_until(&bus, LEDGER, |r| {
+    let x = Shape::up_l(&bus.endpoint, l, true, false).await;
+    let run = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 1 && has_row(r) && t_answer(&t_row(r), "vacancy") == "yes:lasting"
     })
     .await;
@@ -14308,10 +14487,10 @@ async fn redundancy_s12_the_shapes_x_builds() {
     assert_eq!(t_answer(&row, "vacancy"), "yes:lasting", "{run}");
     x.down().await;
     // Step 4.
-    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    let a = LedgerCandidate::up_l(&bus.endpoint, "A", 0xa, None, l).await;
     a.until(Role::Serving).await;
-    let x = Shape::up(&bus.endpoint, false, false).await;
-    let run = t_until(&bus, LEDGER, |r| {
+    let x = Shape::up_l(&bus.endpoint, l, false, false).await;
+    let run = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 1
             && has_row(r)
             && t_row(r)["instances"]
@@ -14330,8 +14509,8 @@ async fn redundancy_s12_the_shapes_x_builds() {
     x.down().await;
     a.close().await;
     // Step 5.
-    let x = Shape::up(&bus.endpoint, true, true).await;
-    let run = t_until(&bus, LEDGER, |r| {
+    let x = Shape::up_l(&bus.endpoint, l, true, true).await;
+    let run = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 1
             && has_row(r)
             && t_row(r)["instances"]
@@ -14355,19 +14534,18 @@ async fn redundancy_s12_the_shapes_x_builds() {
 /// each descriptor listing the profile. Two session zids at one minted
 /// address, and B recognised a standby: not counted, and the doctor says
 /// so, no finding (hostid.v1 §2.12, 0.6, 0.7). T reads them as step 1.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn redundancy_s12_a_standby_on_a_minted_system() {
+async fn s12_a_standby_on_a_minted_system(l: Ledger) {
     use zenkey::redundancy::Role;
     let bus = Bus::bare(None).await;
     let root = tempfile::tempdir().expect("a root");
     std::fs::create_dir_all(root.path().join("var/lib")).expect("var/lib");
     let minter = zenkey::hostid::HostIdMinter::new(zenkey::hostid::HostIdSource::at(root.path()));
-    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, Some(&minter)).await;
+    let a = LedgerCandidate::up_l(&bus.endpoint, "A", 0xa, Some(&minter), l).await;
     a.until(Role::Serving).await;
-    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, Some(&minter)).await;
+    let b = LedgerCandidate::up_l(&bus.endpoint, "B", 0xb, Some(&minter), l).await;
     let address = a.svc.address().to_string();
     assert!(address.starts_with("h-"), "{address}");
-    let run = t_until(&bus, &address, |r| {
+    let run = t_until_l(&bus, l, &address, |r| {
         r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
     })
     .await;
@@ -14397,18 +14575,17 @@ async fn redundancy_s12_a_standby_on_a_minted_system() {
 /// reads, answers none of the probes over `ledger.v1`'s wildcards — the
 /// `append` probe answered by A alone, by replier zid across the router —
 /// and the case passes.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn redundancy_s12_a_probe_of_a_standby_and_of_a_twin() {
+async fn s12_a_probe_of_a_standby_and_of_a_twin(l: Ledger) {
     use zenkey::redundancy::Role;
     let bus = Bus::bare(None).await;
-    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    let a = LedgerCandidate::up_l(&bus.endpoint, "A", 0xa, None, l).await;
     a.until(Role::Serving).await;
-    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, None).await;
-    let _ = t_until(&bus, LEDGER, |r| {
+    let b = LedgerCandidate::up_l(&bus.endpoint, "B", 0xb, None, l).await;
+    let _ = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
     })
     .await;
-    let path = ledger_path();
+    let path = l.path();
     let args = [
         "check",
         "conform",
@@ -14443,7 +14620,7 @@ async fn redundancy_s12_a_probe_of_a_standby_and_of_a_twin() {
     assert!(said.contains("1 session(s) answered them"), "{run}");
     // X marks itself standby and holds `append`'s queryable anyway: its
     // session's reply to the probe is the violation, by its zid.
-    let x = Shape::up(&bus.endpoint, true, false).await;
+    let x = Shape::up_l(&bus.endpoint, l, true, false).await;
     let held = x
         .session
         .declare_queryable(format!("zk2/{LEDGER}/ledger.v1/@op/append"))
@@ -14488,12 +14665,10 @@ async fn redundancy_s12_a_probe_of_a_standby_and_of_a_twin() {
 /// naming `appendall`, and `appendall`'s handler never runs. Every case
 /// skipped, `check conform` sends nothing at all: `appendall`, idempotent,
 /// is not called either.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn redundancy_s12_a_probe_never_runs_an_operation_that_allows_fan_out() {
+async fn s12_a_probe_never_runs_an_operation_that_allows_fan_out(l: Ledger) {
     use zenkey::redundancy::Role;
     let bus = Bus::bare(None).await;
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../zenkey/tests/contracts/ledger-appendall.v1.toml");
+    let path = l.file(true);
     let variant = {
         let l = load_path(&path);
         l.contract.unwrap_or_else(|| panic!("{}", l.report))
@@ -14502,7 +14677,7 @@ async fn redundancy_s12_a_probe_never_runs_an_operation_that_allows_fan_out() {
     let a = LedgerCandidate::up_on(&bus.endpoint, "A", 0xa, None, variant.clone()).await;
     a.until(Role::Serving).await;
     let b = LedgerCandidate::up_on(&bus.endpoint, "B", 0xb, None, variant).await;
-    let _ = t_until(&bus, LEDGER, |r| {
+    let _ = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
     })
     .await;
@@ -14565,19 +14740,17 @@ async fn redundancy_s12_a_probe_never_runs_an_operation_that_allows_fan_out() {
 /// which no instance runs. `append`'s probe is still never made, its
 /// reason naming `appendall` and the revision held offline: the guard
 /// reads every revision in hand, not the named one alone (§2.15).
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn redundancy_s12_a_probe_guarded_by_a_revision_held_offline() {
+async fn s12_a_probe_guarded_by_a_revision_held_offline(l: Ledger) {
     use zenkey::redundancy::Role;
     let bus = Bus::bare(None).await;
-    let a = LedgerCandidate::up(&bus.endpoint, "A", 0xa, None).await;
+    let a = LedgerCandidate::up_l(&bus.endpoint, "A", 0xa, None, l).await;
     a.until(Role::Serving).await;
-    let b = LedgerCandidate::up(&bus.endpoint, "B", 0xb, None).await;
-    let _ = t_until(&bus, LEDGER, |r| {
+    let b = LedgerCandidate::up_l(&bus.endpoint, "B", 0xb, None, l).await;
+    let _ = t_until_l(&bus, l, LEDGER, |r| {
         r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
     })
     .await;
-    let offline = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../zenkey/tests/contracts/ledger-appendall.v1.toml");
+    let offline = l.file(true);
     let fp = {
         let l = load_path(&offline);
         zenkey::model::canonical::Fingerprint::of(
@@ -14618,6 +14791,144 @@ async fn redundancy_s12_a_probe_guarded_by_a_revision_held_offline() {
         "named: append, appendall and the revision held offline: {run}"
     );
     exits(&run, 2);
+    b.close().await;
+    a.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_one_serves_one_stands_by() {
+    s12_one_serves_one_stands_by(Ledger::V1).await;
+}
+
+/// `scenarios-v2.md` §12, as v1's, T reading `ledger-run.v1` offline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_v2_s12_one_serves_one_stands_by() {
+    s12_one_serves_one_stands_by(Ledger::V2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_split_held_after_the_heal() {
+    s12_a_split_held_after_the_heal(Ledger::V1).await;
+}
+
+/// `scenarios-v2.md` §12, as v1's, T reading `ledger-run.v1` offline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_v2_s12_a_split_held_after_the_heal() {
+    s12_a_split_held_after_the_heal(Ledger::V2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_the_shapes_x_builds() {
+    s12_the_shapes_x_builds(Ledger::V1).await;
+}
+
+/// `scenarios-v2.md` §12, as v1's, T reading `ledger-run.v1` offline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_v2_s12_the_shapes_x_builds() {
+    s12_the_shapes_x_builds(Ledger::V2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_standby_on_a_minted_system() {
+    s12_a_standby_on_a_minted_system(Ledger::V1).await;
+}
+
+/// `scenarios-v2.md` §12, as v1's, T reading `ledger-run.v1` offline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_v2_s12_a_standby_on_a_minted_system() {
+    s12_a_standby_on_a_minted_system(Ledger::V2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_probe_of_a_standby_and_of_a_twin() {
+    s12_a_probe_of_a_standby_and_of_a_twin(Ledger::V1).await;
+}
+
+/// `scenarios-v2.md` §12, as v1's, T reading `ledger-run.v1` offline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_v2_s12_a_probe_of_a_standby_and_of_a_twin() {
+    s12_a_probe_of_a_standby_and_of_a_twin(Ledger::V2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_probe_never_runs_an_operation_that_allows_fan_out() {
+    s12_a_probe_never_runs_an_operation_that_allows_fan_out(Ledger::V1).await;
+}
+
+/// `scenarios-v2.md` §12, as v1's, T reading `ledger-run.v1` offline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_v2_s12_a_probe_never_runs_an_operation_that_allows_fan_out() {
+    s12_a_probe_never_runs_an_operation_that_allows_fan_out(Ledger::V2).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_s12_a_probe_guarded_by_a_revision_held_offline() {
+    s12_a_probe_guarded_by_a_revision_held_offline(Ledger::V1).await;
+}
+
+/// `scenarios-v2.md` §12, as v1's, T reading `ledger-run.v1` offline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_v2_s12_a_probe_guarded_by_a_revision_held_offline() {
+    s12_a_probe_guarded_by_a_revision_held_offline(Ledger::V2).await;
+}
+
+/// `hostid.v1`'s scenarios §6 step 7 (text 0.10; #987's N3) on the bus: A
+/// serves `ledger.v1` (`redundancy.v1`) and B stands by on `ledger-run.v1`
+/// (`redundancy.v2`), on one minted system. One election of two majors: T
+/// reads the address governed, `claim`, both majors named, exit 0, and
+/// the doctor's `hostid-duplicate` recognises B a standby, no finding.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn redundancy_v2_s12_a_standby_of_the_other_major_on_a_minted_system() {
+    use zenkey::redundancy::Role;
+    let bus = Bus::bare(None).await;
+    let root = tempfile::tempdir().expect("a root");
+    std::fs::create_dir_all(root.path().join("var/lib")).expect("var/lib");
+    let minter = zenkey::hostid::HostIdMinter::new(zenkey::hostid::HostIdSource::at(root.path()));
+    let a = LedgerCandidate::up_l(&bus.endpoint, "A", 0xa, Some(&minter), Ledger::V1).await;
+    a.until(Role::Serving).await;
+    let b = LedgerCandidate::up_l(&bus.endpoint, "B", 0xb, Some(&minter), Ledger::V2).await;
+    let address = a.svc.address().to_string();
+    let (v1, v2) = (Ledger::V1.path(), Ledger::V2.path());
+    let args = [
+        "redundancy",
+        address.as_str(),
+        "--contracts",
+        &v1,
+        "--contracts",
+        &v2,
+        "--format",
+        "json",
+    ];
+    let run = bus
+        .until(&args, |r| {
+            r.code == 0 && has_row(r) && t_row(r)["standbys"]["count"] == 1
+        })
+        .await;
+    exits(&run, 0);
+    let row = t_row(&run);
+    assert_eq!(row["governance"], "claim", "one election: {run}");
+    assert_eq!(
+        row["majors"],
+        json!(["redundancy.v1", "redundancy.v2"]),
+        "{run}"
+    );
+    assert_eq!(t_instance(&row, LEDGER_B).0, "standby", "{run}");
+    let dr = bus
+        .zenctl(&doctor_args(&[
+            "--check",
+            "hostid-duplicate",
+            "--format",
+            "json",
+        ]))
+        .await;
+    let doc = dr.json();
+    let h = check_row(&doc, "hostid-duplicate");
+    assert_eq!(h["verdict"]["answer"], "not_established", "{dr}");
+    let said = h["verdict"]["reason"].as_str().unwrap_or_default();
+    assert!(said.contains("1 recognised standby"), "{dr}");
+    assert!(said.contains(LEDGER_B), "{dr}");
+    exits(&dr, 0);
+    assert_eq!(b.role(), Role::Standby);
     b.close().await;
     a.close().await;
 }
