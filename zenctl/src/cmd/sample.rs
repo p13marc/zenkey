@@ -282,7 +282,7 @@ impl Line {
         if let Some(a) = attachment {
             row.attachment = Some(match self.attachment.as_ref().map(|r| &r.rendered) {
                 Some(Rendered::Value { value, .. }) => value.clone(),
-                _ => attachment_json(a),
+                _ => attachment_json_at(&self.key, a),
             });
             row.attachment_bytes = Some(a.len());
         }
@@ -478,22 +478,24 @@ pub fn hex(bytes: &[u8]) -> String {
         .join(" ")
 }
 
-/// An attachment, rendered structurally (JSON → CBOR → text → hex) and
-/// tagged with its size: what a key no contract reaches gets (#117).
-pub fn attachment_display(bytes: &[u8]) -> String {
+/// An attachment on `key`, rendered structurally (JSON → CBOR → text →
+/// hex) and tagged with its size: what a key no contract reaches gets
+/// (#117). An archive's compact attachment (core §4.4; #980 C3), 3 bytes on
+/// its own key, is shown by its fields, never sniffed as text.
+pub fn attachment_display_at(key: &str, bytes: &[u8]) -> String {
     format!(
         "{} ({} bytes)",
-        zenkey_fleet::structural(bytes),
+        zenkey_fleet::model::attachment::attachment_text(key, bytes),
         bytes.len()
     )
 }
 
-/// The ndjson half: the attachment as a JSON value (parsed when it is JSON,
-/// a string otherwise). Callers add the key only when a wire attachment
-/// exists — present-only-when-present, never null-when-absent.
-pub fn attachment_json(bytes: &[u8]) -> serde_json::Value {
-    zenkey_fleet::structural_value(bytes)
-        .unwrap_or_else(|| serde_json::Value::String(zenkey_fleet::structural(bytes)))
+/// The ndjson half: the attachment on `key` as a JSON value (parsed when it
+/// is JSON, a string otherwise; an archive's compact one by its fields,
+/// core §4.4). Callers add the key only when a wire attachment exists —
+/// present-only-when-present, never null-when-absent.
+pub fn attachment_json_at(key: &str, bytes: &[u8]) -> serde_json::Value {
+    zenkey_fleet::model::attachment::attachment_value(key, bytes)
 }
 
 /// The wire's QoS axes as one stable token (#120) — the engine's spelling.
@@ -625,10 +627,37 @@ mod tests {
     /// structural string; the display form is size-tagged.
     #[test]
     fn attachments_render_structurally_and_stop_there() {
+        let key = "zk2/g/s/nav.v2/state/x";
         let json = br#"{"who":"me"}"#;
-        assert_eq!(attachment_json(json), serde_json::json!({"who": "me"}));
-        assert_eq!(attachment_display(json), r#"{"who":"me"} (12 bytes)"#);
-        assert_eq!(attachment_json(b"plain"), serde_json::json!("plain"));
+        assert_eq!(
+            attachment_json_at(key, json),
+            serde_json::json!({"who": "me"})
+        );
+        assert_eq!(
+            attachment_display_at(key, json),
+            r#"{"who":"me"} (12 bytes)"#
+        );
+        assert_eq!(
+            attachment_json_at(key, b"plain"),
+            serde_json::json!("plain")
+        );
+        assert_eq!(attachment_json_at(key, b"abc"), serde_json::json!("abc"));
+    }
+
+    /// Core §4.4 (#980 C3): on an archive's own key, 3 bytes are the
+    /// compact attachment, shown by its fields in both media, never as the
+    /// text the bytes might spell.
+    #[test]
+    fn an_archives_compact_attachment_renders_by_its_fields() {
+        let key = "zk2/v/archive/archive.v1/@state/g/s/nav.v2/state/x";
+        assert_eq!(
+            attachment_json_at(key, &[0x00, 0x41, 0xc0]),
+            serde_json::json!({"form": "compact", "index": 1, "resource": 3, "confirmed": true})
+        );
+        assert_eq!(
+            attachment_display_at(key, b"abc"),
+            r#"{"form":"compact","refused":"extension"} (3 bytes)"#
+        );
     }
 
     /// #120: the QoS token is stable and lowercase, never Debug output —

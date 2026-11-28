@@ -91,7 +91,12 @@ async fn state_read(
     let epoch = over.dating_of(&resolved.address);
     let report = match archive {
         None => zenkey_fleet::get_state_in(session, read, epoch).await,
-        Some(archive) => zenkey_fleet::last_known_state_in(session, read, archive, epoch).await,
+        // Core §4.4 (#980 C3): a compact attachment's identity through the
+        // catalogs given.
+        Some(archive) => {
+            zenkey_fleet::last_known_state_through(session, read, archive, epoch, &lens.catalogs)
+                .await
+        }
     }
     .map_err(ServiceError::of)?;
     let owner = resolved.address.to_string();

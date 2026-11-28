@@ -1810,7 +1810,7 @@ async fn held_bundle(
 
 /// One archive's keys: a GET over its whole `@state` (§4.4), target `All`
 /// and consolidation `None`, each value's attachment read for
-/// `confirmed`.
+/// `confirmed`, in either form (#980 C3).
 async fn archive_keys(s: &Session, addr: &Addr, timeout: Duration) -> Result<ArchiveKeys, String> {
     let selector = [
         GRAMMAR,
@@ -1843,10 +1843,20 @@ async fn archive_keys(s: &Session, addr: &Addr, timeout: Duration) -> Result<Arc
             continue;
         }
         keys.values += 1;
+        // Core §4.4: `confirmed` in either form, a compact attachment's bit
+        // read with no catalog; an unreadable one is unconfirmed.
         let confirmed = sample
             .attachment()
-            .and_then(|a| serde_json::from_slice::<serde_json::Value>(&a.to_bytes()).ok())
-            .and_then(|v| v["confirmed"].as_bool())
+            .and_then(|a| {
+                zenkey_model::attachment::read(
+                    &a.to_bytes(),
+                    sample.key_expr().as_str(),
+                    None,
+                    &[],
+                    &[],
+                )
+                .confirmed
+            })
             .unwrap_or(false);
         if !confirmed {
             keys.unconfirmed += 1;
