@@ -885,7 +885,8 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `link::repair_key(key, n)` (`$*` in the literal prefix's last chunk,
   each later one a character further left, up to `link::REPAIRS` = 3,
   then re-declared again), kept in the slot (`repairs`) until it is
-  undeclared, its callback delivering nothing (the session hands each
+  undeclared, three in the slot's life (the next is `repairs.len() + 1`,
+  so a second silent run re-declares only, #1185's review), its callback delivering nothing (the session hands each
   sample to every matching subscriber, so the slot's own delivers it
   once and a key only the repair matches is dropped); the run (`dues`)
   ends at a sample heard after the last act (`heard` > `acted`). It fixes
@@ -900,7 +901,9 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   `Consumer` holds one `Redeclaring` for itself and its clones (an
   `Arc<OnceCell>`, fresh at `across`), so its event subscription follows
   its stream's; a `Subscription` keeps its slot ids and forgets them on
-  drop (`Subscription::repaired`). Tests: `redeclare::tests`' run,
+  drop (`Subscription::repaired`), and one that fails partway forgets
+  those it declared (`Slots`, a guard; `consumer::tests`, through the
+  `cfg(test)` `Redeclaring::refuse_after`). Tests: `redeclare::tests`' run,
   `constrained.rs` §9 step 4 (a lost key expression repaired at four
   horizons) and step 5 (two readers behind a far router via
   `common::router_via`, the proxy losing every batch for 1.5 s,
