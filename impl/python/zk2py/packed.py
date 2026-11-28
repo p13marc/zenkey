@@ -1,7 +1,7 @@
 """The ``packed`` type kind (core §7.6, 0.75, #979 B1): a packed file's
 shape and its lints (§9.2's E038 to E043 and E045, cascade 7, and since
 core 0.117 E051, :func:`tag_zero`; E044, where a resource places a type, is
-:mod:`zk2py.contract`'s, core 0.119), each type's layout,
+:mod:`zk2py.contract`'s, core 0.118), each type's layout,
 layout form and tag, and its codec, a record written from its JSON reading
 and read back to it.
 
@@ -703,7 +703,7 @@ def _declaration_problem(item: dict[str, Any]) -> tuple[str, str] | None:
 
 def lint(doc: Any, where: str = "") -> Linted:
     """Read one packed document (§7.6 "The schema file"): its types, and
-    §9.2's E038 to E043 and E045 under cascade 7 (core 0.119: "Its
+    §9.2's E038 to E043 and E045 under cascade 7 (core 0.118: "Its
     declarations are linted E038 to E043 and E045, and its placement E044")."""
     out = Linted()
     if not isinstance(doc, dict):
@@ -790,7 +790,7 @@ def lint(doc: Any, where: str = "") -> Linted:
 def tag_zero(linted: Linted, where: str = "") -> list[tuple[str, str]]:
     """§9.2's E051 over one linted file, per type: "a packed type whose
     layout tag is 0 (§7.6), the tag a record of any other kind carries
-    (§7.5)". Cascade 7 (core 0.119): "E051 reads a type whose declaration
+    (§7.5)". Cascade 7 (core 0.118): "E051 reads a type whose declaration
     has none of E038 to E043 and E045, in a file without E028 ... It reads
     every type the file defines, whether a resource names it or not, as
     those lints do, but a type a profile derives (§7.6)." So it reads
@@ -802,7 +802,7 @@ def tag_zero(linted: Linted, where: str = "") -> list[tuple[str, str]]:
 
     E044 is a reference's, never a declaration's, so it takes no type out
     here. Round 126 read 0.117's "none of E038 to E045" so (F-618), and core
-    0.119 says it: "E044 is no finding of the declaration. It reads where a
+    0.118 says it: "E044 is no finding of the declaration. It reads where a
     resource places the type (§7.1), and leaves its layout form whole. So a
     type at the tag 0 that an explicit stream names draws both E044 and
     E051."
