@@ -4,6 +4,56 @@ Versions of the text of [`v1.md`](v1.md). Each entry records what changed,
 what deliberately did not, and why. A breaking change is a new major, a new
 file, never an entry here ([`../README.md`](../README.md)).
 
+## 0.10 — 2026-11-28: a recognised standby is one of either major of `redundancy` (#987)
+
+`redundancy.v2` (`redundancy/v2.md` 0.1) keeps `redundancy.v1`'s
+election, and its standby, whole. 0.9's §2.12 recognised a standby by
+`redundancy.v1` alone. So a `redundancy.v2` standby on a minted system
+was counted, and an incumbent with its standby read as two sessions on
+one address: a false finding. This is #987's N3, as its design's §5
+proposed.
+
+**Changed: §2.12's recognised standby.** `[Sc: §6]`
+- **The rule.** A recognised standby lists only interfaces whose
+  contracts use a major of `redundancy`, `redundancy.v1` or
+  `redundancy.v2`, at least one. Of each, that profile's question "is
+  this instance a standby, or a twin?" answers no, `standby`, from the
+  same two reads. 0.9 said "use `redundancy.v1`".
+- **Governance from both majors.** Each interface's governance is read
+  as `redundancy.v2` §2.15 reads it. A `redundancy.v1` candidate and a
+  `redundancy.v2` one with one election are one election, so a standby
+  of one major beside an incumbent of the other is recognised.
+- **Counted.** A twin still is, and so is an instance that lists an
+  interface no major of the profile governs. 0.9 said "no contract of
+  the profile".
+- **"Undecided"** and §5's last row read the standby question of
+  `redundancy`, of either major, where 0.9 named `redundancy.v1`'s.
+
+**Changed: the header.** The standby mark is read through either major
+of `redundancy`. The text is still written against core 0.40: no rule
+this text relies on moved in the core.
+
+**Changed: `scenarios.md` §6.** Step 7 is new: step 6 with B on
+`ledger-run.v1` of `redundancy.v2` and A on `ledger.v1`, then both on
+`ledger-run.v1`. Its Expected is step 6's: B recognised, no finding. The
+opening names the doctor's steps 6 and 7. `redundancy/scenarios-v2.md`
+§12's note, which waited for this version, says it is met.
+
+**How the keyword sentences were checked.** This text's 22 keyword
+sentences are unchanged: the changed sentences hold none. The finding,
+its causes, and its verdict, unobservable and never clean, are the
+same. No fixture moved: the finding is a scenario's.
+
+**Deliberately not changed.**
+- **The finding still compares `meta.zid`.** `redundancy.v2` takes the
+  zid out of its fence, not out of the descriptor. Core §3.3's SHOULD,
+  and §2.13's, still ask every instance to state it.
+- **"Run" in §2.6 and §2.7** still names one start of a process. Core
+  §4.3 gives the word to an owner's ordering epoch too. The design's
+  question 13 would make it "process"; that is editorial, and waits for
+  a pass of its own, as no reader confuses the two here.
+- **No section number, label or anchor.**
+
 ## 0.9 — 2026-10-30: editorial: round 86's F-328, no rule changed (#935)
 
 zk2py round 86 (PR #959) read 0.8 cold, beside core 0.62 and
