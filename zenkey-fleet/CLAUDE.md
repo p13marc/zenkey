@@ -1040,3 +1040,29 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   session-free test; zenctl's `alarms_v2_s6_*_at_the_copys_horizon` and
   `alarms_v2_an_owner_naming_a_revision_not_in_hand_reads_unobservable`
   the live ones.
+
+  The compact descriptor read (#980 C5b, core 0.120 §3.3): `bus::presence::Describing`
+  (`new(&Catalogs, &BundleStore)`, `read`) is what a read decodes a
+  compact descriptor through: the catalogs given and the store, each
+  revision its head names fetched there (`zenkey::presence::Served::names`);
+  `describe_each` and `describe_where` take one, `observe_through`
+  (`observe_presence_through` at the root) reads with one, and `observe`
+  and `describe` hold none. `DescriptorRead::Unread` (and
+  `DescriptorAnswer::Unread { reason }`, tag `unread`) is a compact one
+  not read for the reader's lack, never a verdict: the doctor's
+  `descriptor-invalid` leaves it unjudged, `token-missing` and the others
+  say `not read: …`, telemetry's and timing's openings count it
+  answered. Wired: `LensFeed::open_through` (catalogs; `open` none) for
+  zenctl's `echo` and zengui's presence link; the doctor
+  (`DoctorSpec::catalogs`) and its D-checks on the record read
+  (`descriptor::check_descriptor`, the JSON no longer re-encoded);
+  `RedundancySpec::catalogs` and `TimingSpec::catalogs` (zenctl's
+  `--catalog`), a compact one with no `meta.zid` naming no owner zid, so
+  its stamps `unattributed`. Every other `observe` (health, config,
+  alarms, desired, telemetry, conform, arbitration, why) reads a compact
+  one `Unread`. Tests: `zk2_core.rs`'s
+  `a_compact_descriptor_is_read_through_the_catalog_given` (presence, the
+  lens's providers, the feed), `zk2_doctor.rs`'s
+  `a_compact_descriptor_is_checked_on_its_decoding` (D005 on both forms;
+  unjudged with no catalog), `model::redundancy`'s and `model::timing`'s
+  session-free cases; `zk2_doctor.rs`'s `fake` states `application/json`.

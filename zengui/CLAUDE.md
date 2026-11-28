@@ -330,3 +330,13 @@ Claude Code loads this file when working in `zengui/`; the root `CLAUDE.md` is t
   `token-missing`, `state-stamp-foreign`), smoked in process by
   `tests/spray_smoke.rs`; `tests/live_bus.rs` (ignored, `just test-live`)
   brings it up in process on port 0.
+
+The compact descriptor (#980 C5b, core 0.120 §3.3): the presence link's
+`PresenceKey::catalogs` (the window's loaded `--catalog`, from
+`dep.contracts`) opens the lens with `LensFeed::open_through`, so the
+nodes pane shows a compact descriptor as its decoding (its zid, what it
+implements, its standby marks) and one not read as `Described::Unread`,
+"descriptor: compact, not read — …"; the pane's `redundancy.v1` reading
+reads through the same catalogs (`sweep::nodes::redundancy`,
+`RedundancySpec::catalogs`). No scene changed; `nodes.rs`'s
+`a_compact_descriptor_shows_as_its_decoding`.
