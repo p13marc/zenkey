@@ -1394,6 +1394,10 @@ pub struct TargetStartup {
     /// [`TargetStartup::across`], and by a service on a first hop. `false`
     /// by default.
     pub across_face: bool,
+    /// `hold_s` (`desired.v2` §2.18, "The hold is bounded"): a run no read
+    /// has stated within it of its first version leaves the deployment's
+    /// word, as across a face. 10 s by default.
+    pub hold: Duration,
 }
 
 impl Default for TargetStartup {
@@ -1406,6 +1410,7 @@ impl Default for TargetStartup {
             poll: PRESENCE_POLL,
             word_alone: false,
             across_face: false,
+            hold: HOLD,
         }
     }
 }
@@ -1594,6 +1599,14 @@ pub struct Seeded {
     pub revision: AuthorRevision,
 }
 
+/// `hold_s`'s default (`desired.v2` §2.18, "The hold is bounded").
+pub const HOLD: Duration = Duration::from_secs(10);
+
+/// How many runs a target keeps judged by the deployment's word after a
+/// read named none (`Revisions::by_word`): the runs a target remembers
+/// (§2.6).
+const BY_WORD: usize = 16;
+
 /// How many times the read at an author's instance token is made again
 /// while a run held before it is stated by none (`desired.v2` §2.18, text
 /// 0.3, F-628).
@@ -1687,6 +1700,9 @@ enum Event {
     EndedV2(model2::Ended),
     /// `desired.v2`: a heartbeat of the author's.
     Beat(v2::Heard),
+    /// A held run's `hold_s` ran out (`desired.v2` §2.18): the run, and the
+    /// hold it ends.
+    HoldDue(String, u64),
 }
 
 /// One role a target holds on a desired resource (§2.5–§2.10), from
@@ -1769,13 +1785,34 @@ struct Revisions {
     /// their versions held until a read after the author's instance token
     /// appears (§2.18, "None states the run yet", text 0.3, F-621).
     pending: BTreeMap<String, Pending>,
-    /// The runs a read after that token found stated by none: the
-    /// deployment's word, kept across reads.
+    /// The runs a read after that token found stated by none, or whose
+    /// `hold_s` ran out: the deployment's word, kept across reads until a
+    /// read states the run, [`BY_WORD`] at most.
     by_word: std::collections::BTreeSet<String>,
+    /// The holds made so far: the next one's id.
+    holds: u64,
+}
+
+impl Revisions {
+    /// `run` judged by the deployment's word from now on (§2.18): kept
+    /// with the runs so judged, one let go past [`BY_WORD`], whose next
+    /// version is read again.
+    fn by_word(&mut self, run: String) {
+        self.by_word.insert(run.clone());
+        self.runs.insert(run, Named::Unread);
+        while self.by_word.len() > BY_WORD {
+            let Some(first) = self.by_word.iter().next().cloned() else {
+                break;
+            };
+            self.by_word.remove(&first);
+        }
+    }
 }
 
 /// A run's versions held while no descriptor states it (§2.18).
 struct Pending {
+    /// Which hold this is: its `hold_s` timer ends this one alone.
+    id: u64,
     /// [`TargetInner::appearances`] when the read that found none was
     /// asked: a token appearing after it is one the next read follows.
     since: u64,
@@ -2246,13 +2283,16 @@ impl TargetInner {
             crate::answer::OwnerRevisions::Unreached => sweep.push(Named::Word),
             crate::answer::OwnerRevisions::Unread => sweep.push(Named::Unread),
         }
+        // A run a descriptor states now is judged by the revision it names,
+        // never by the word any more.
+        rv.by_word.retain(|r| !runs.contains_key(r));
         let mut release = Vec::new();
         for (run, p) in std::mem::take(&mut rv.pending) {
             if runs.contains_key(&run) {
                 release.extend(p.held);
             } else if seen > p.since {
                 tracing::debug!(role = %self.role, %run, "desired: no descriptor of the author's states the run after its instance token appeared: the deployment's word stands for it (desired.v2 §2.18)");
-                rv.by_word.insert(run);
+                rv.by_word(run);
                 release.extend(p.held);
             } else {
                 rv.pending.insert(run, p);
@@ -2330,14 +2370,23 @@ impl TargetInner {
                     RunRevision::Read(_) => false,
                 };
                 if hold {
-                    tracing::debug!(role = %self.role, run = %at, "desired: no descriptor of the author's states the run yet: its versions are held until a read after its instance token appears (desired.v2 §2.18)");
+                    tracing::debug!(role = %self.role, run = %at, hold_s = self.startup.hold.as_secs_f64(), "desired: no descriptor of the author's states the run yet: its versions are held until a read after its instance token appears, or hold_s (desired.v2 §2.18)");
+                    rv.holds += 1;
+                    let id = rv.holds;
                     rv.pending.insert(
-                        at,
+                        at.clone(),
                         Pending {
+                            id,
                             since,
                             held: held.into_iter().cloned().collect(),
                         },
                     );
+                    // "The hold is bounded": at hold_s, the word.
+                    let (tx, hold) = (self.tx.clone(), self.startup.hold);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(hold).await;
+                        let _ = tx.send(Event::HoldDue(at, id));
+                    });
                     return false;
                 }
                 let n = match read {
@@ -2365,6 +2414,28 @@ impl TargetInner {
                 false
             }
             _ => true,
+        }
+    }
+
+    /// A held run's `hold_s` ran out (§2.18, "The hold is bounded"): where
+    /// that hold still stands, the run leaves the deployment's word, as
+    /// across a face, and its versions are judged again in the order they
+    /// arrived.
+    async fn hold_due(&self, run: &str, id: u64) {
+        let held = {
+            let mut rv = self.revisions.lock().await;
+            if rv.pending.get(run).is_none_or(|p| p.id != id) {
+                return;
+            }
+            let Some(p) = rv.pending.remove(run) else {
+                return;
+            };
+            tracing::debug!(role = %self.role, run, hold_s = self.startup.hold.as_secs_f64(), "desired: no read stated the run within hold_s of its first version: the deployment's word stands for it (desired.v2 §2.18)");
+            rv.by_word(run.to_owned());
+            p.held
+        };
+        for i in held {
+            let _ = self.tx.send(Event::Sample(i));
         }
     }
 
@@ -2830,6 +2901,7 @@ impl TargetInner {
         match ev {
             // desired.v2's alone.
             Event::Read(_) | Event::EndedV2(_) | Event::Beat(_) => {}
+            Event::HoldDue(run, id) => self.hold_due(&run, id).await,
             Event::Seed(why) => self.seed_soon(why),
             Event::Called => {
                 let report = {

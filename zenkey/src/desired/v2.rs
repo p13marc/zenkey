@@ -660,6 +660,7 @@ impl TargetInner {
         let Some(v2) = &self.v2 else { return };
         match ev {
             Event::Seed(why) => self.seed_soon(why),
+            Event::HoldDue(run, id) => self.hold_due(&run, id).await,
             Event::Ended(_) => {}
             Event::Called => {
                 let report = {

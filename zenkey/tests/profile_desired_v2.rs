@@ -3369,6 +3369,62 @@ async fn s16_a_target_before_its_author_holds_a_version_put_before_its_descripto
     session.close().await.unwrap();
 }
 
+/// §16, the bounded hold (§2.18, "The hold is bounded", review-bot on
+/// #1176): a run no read has stated within `hold_s` of its first version
+/// leaves the deployment's word, as across a face. The target is not
+/// across a face, its `hold_s` 2 s, and its author's tokens never reach
+/// it: X puts v1 under a run of its own, with no descriptor and no token.
+/// The target holds v1, and acts on nothing for a while; at about 2 s it
+/// acts on v1, its report converged on X's version.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s16_a_hold_ends_at_hold_s() {
+    const HOLD: Duration = Duration::from_secs(2);
+    let bus = one_router().await;
+    let s = record(&bus.ep1).await;
+    let (session, b, target, d) = target_of(
+        &bus.ep1,
+        imp("worker.v2"),
+        &tasking(0),
+        true,
+        TargetStartup {
+            hold: HOLD,
+            ..TargetStartup::default()
+        },
+    )
+    .await;
+    let target = target.expect("its word names a revision it can report");
+    let svc = b.start().await.expect("the target starts");
+    eventually("the target's first seed", || async {
+        target.last_seed().is_some()
+    })
+    .await;
+    s.until("the baseline's report", |r| *r == Report::baseline())
+        .await;
+    let x = client(&bus.ep1).await;
+    let s1 = Stamp {
+        run: Run::U16(0x0b01),
+        seq: Seq::new(1).unwrap(),
+    };
+    let mark = s.mark();
+    put_as(&x, s1, &v(1)).await;
+    let put = Instant::now();
+    eventually("X's put at S", || async { !s.on(D, mark).is_empty() }).await;
+    tokio::time::sleep_until((put + HOLD / 2).into()).await;
+    assert_eq!(target.acts(), 0, "held within hold_s");
+    assert!(s.on(RUN, mark).is_empty(), "Run receives nothing yet");
+    s.until("converged on v1 at hold_s", |r| converged_on(r, s1, 1))
+        .await;
+    let waited = put.elapsed();
+    assert!(
+        waited >= HOLD - Duration::from_millis(100) && waited < HOLD + Duration::from_secs(2),
+        "acted at about hold_s: {waited:?}"
+    );
+    assert_eq!(d.with(|x| x.running.clone()), v(1), "v1 runs");
+    assert_eq!(target.acts(), 1, "acted on v1 once");
+    svc.close().await.unwrap();
+    session.close().await.unwrap();
+}
+
 /// §16 Both majors side by side (§2.18): runs A to E, each on a router of
 /// its own, at once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
