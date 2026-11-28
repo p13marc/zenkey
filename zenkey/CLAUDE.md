@@ -630,7 +630,8 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   warning read from the binary's `zenkey::desired` log, `desired_log`),
   `s16_a_version_put_before_its_descriptor_waits_for_its_token` (X plays
   the next instance: a put, then the descriptor, then the token, and the
-  held put acted on only after the token),
+  held put acted on only after the token; §2's step 4 plays a new instance
+  so too, both through `answer_descriptor`),
   with `config_v2_as_a_target`; the owner example's `--desired-v2`,
   `--desired-ttl <s>` and `--desired-timeout-ms <ms>` drive it (`desired
   gets` listing `<held>=<unchanged|whole>`, `desired delete-unheld`,

@@ -765,6 +765,36 @@ async fn put_as(x: &zenoh::Session, stamp: Stamp, doc: &Value) {
         .unwrap();
 }
 
+/// X as a new instance of the author's (§2, §16): the author's descriptor
+/// `desc`, its instance `instance` and its run `run`, answered on its
+/// instance key by X's queryable. Returns the queryable and the key, where
+/// X then declares its instance token.
+async fn answer_descriptor(
+    x: &zenoh::Session,
+    mut desc: zenkey::model::descriptor::Descriptor,
+    instance: &str,
+    run: Run,
+) -> (zenoh::query::Queryable<()>, String) {
+    use zenoh::Wait as _;
+    desc.instance = instance.to_owned();
+    desc.run = Some(run.hex());
+    let served = serde_json::to_vec(&desc).unwrap();
+    let key = format!("zk2/lab/author/@zk/instance/{instance}");
+    let reply_key = key.clone();
+    let q = x
+        .declare_queryable(key.clone())
+        .complete(true)
+        .callback(move |q| {
+            let _ = q
+                .reply(reply_key.clone(), served.clone())
+                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
+                .wait();
+        })
+        .await
+        .unwrap();
+    (q, key)
+}
+
 /// §2 Never an older version (§2.6, §2.7).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s2_never_an_older_version() {
@@ -839,13 +869,33 @@ async fn s2_never_an_older_version() {
     assert_eq!(w.target.acts(), acts, "acted on nothing");
     assert!(converged_on(&w.target.report_v2().await.unwrap(), sv2, 2));
 
-    // 4. v3's content under a 32-bit run of X's own, at seq 0: another run
-    //    is admitted, and its document differs, so the target acts on it.
+    // 4. X, as a new instance of the author, puts v3's content under a
+    //    32-bit run of its own, at seq 0, then answers a descriptor stating
+    //    that run and declares its instance token. The put waits, since no
+    //    descriptor states X's run yet (§2.18); at X's token the target
+    //    reads again, another run is admitted, and its document differs,
+    //    so the target acts on it.
     let xs = Stamp {
         run: Run::U32(0x0bad_cafe),
         seq: Seq::new(0).unwrap(),
     };
+    let g = client(&bus.ep1).await;
+    let desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .unwrap();
+    let mark = s.mark();
     put_as(&x, xs, &v(3)).await;
+    eventually("X's put delivered", || async { !s.on(D, mark).is_empty() }).await;
+    let (_descriptor, key) = answer_descriptor(&x, desc, "00000000000000cc", xs.run).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(
+        s.on(RP, mark).is_empty() && s.on(RUN, mark).is_empty(),
+        "the put waits for X's token"
+    );
+    assert_eq!(w.target.acts(), acts, "acted on nothing before the token");
+    let _token = x.liveliness().declare_token(key).await.unwrap();
     s.until("converged on v3, under X's version", |r| {
         converged_on(r, xs, 3)
     })
@@ -3139,7 +3189,6 @@ async fn s16_run_e() {
 /// converged on it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn s16_a_version_put_before_its_descriptor_waits_for_its_token() {
-    use zenoh::Wait as _;
     let bus = one_router().await;
     let rec = records();
     let s = record(&bus.ep1).await;
@@ -3164,7 +3213,7 @@ async fn s16_a_version_put_before_its_descriptor_waits_for_its_token() {
     let acts = target.acts();
     // The author's descriptor, which X serves for its next instance.
     let g = client(&bus.ep1).await;
-    let mut desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
+    let desc = presence::descriptor(&g, &addr(AUTHOR), a.svc.instance(), T)
         .await
         .unwrap()
         .into_descriptor()
@@ -3189,23 +3238,7 @@ async fn s16_a_version_put_before_its_descriptor_waits_for_its_token() {
     assert!(s.on(RUN, mark).is_empty(), "Run receives nothing");
 
     // Its descriptor, stating the run: no read before the token.
-    let instance = "00000000000000bb";
-    desc.instance = instance.to_owned();
-    desc.run = Some(run.hex());
-    let served = serde_json::to_vec(&desc).unwrap();
-    let key = format!("zk2/lab/author/@zk/instance/{instance}");
-    let reply_key = key.clone();
-    let _descriptor = x
-        .declare_queryable(key.clone())
-        .complete(true)
-        .callback(move |q| {
-            let _ = q
-                .reply(reply_key.clone(), served.clone())
-                .encoding(zenoh::bytes::Encoding::APPLICATION_JSON)
-                .wait();
-        })
-        .await
-        .unwrap();
+    let (_descriptor, key) = answer_descriptor(&x, desc, "00000000000000bb", run).await;
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(target.acts(), acts, "held until the token");
     assert!(s.on(RUN, mark).is_empty(), "Run receives nothing yet");
