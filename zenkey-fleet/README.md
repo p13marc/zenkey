@@ -190,6 +190,7 @@ library consumer of this crate does not pay for `dirs` and `toml`.
     take one argument more; `ViewBook::described` is gone.
 - **Unchanged:** `.zrec` stays at version 4, and the doctor at its 37
   checks.
+- **A watch across a face is repaired as the runtime's is** (core 0.121 §8.5, [#1185](https://git.marcpardo.eu/marcpardo/zenkey/issues/1185)): `Monitor::repaired()` counts the repair subscriptions.
 
 ## What 0.23 does not promise
 
@@ -201,8 +202,10 @@ finished. These are still moving under 0.23, and a 0.24 may break them:
   rounds ([#609](https://git.marcpardo.eu/marcpardo/zenkey/issues/609))
   were paused for zenoh-modem's needs. Core 0.120's compact descriptor and
   archive attachment ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980))
-  and link.v2 0.30's batch allowance
-  ([#1136](https://git.marcpardo.eu/marcpardo/zenkey/issues/1136)) are the
+  link.v2 0.30's batch allowance
+  ([#1136](https://git.marcpardo.eu/marcpardo/zenkey/issues/1136)) and
+  core 0.121's repair subscription
+  ([#1185](https://git.marcpardo.eu/marcpardo/zenkey/issues/1185)) are the
   reference's reading alone, and a round may amend them.
 - **Owners' defaults that wait for these readers.** #986's Q3 and #984's
   S5 flip an owner's default once 0.23's readers are deployed: readers

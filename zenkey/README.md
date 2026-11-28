@@ -171,6 +171,7 @@ its standard input.
     ([#1166](https://git.marcpardo.eu/marcpardo/zenkey/issues/1166)).
   - `presence::Found` gains `Unread`, a descriptor not read (above).
   - `archive::LastKnown` gains `unresolved`.
+- **A subscription across a face that re-declaring cannot repair is repaired** (core 0.121 §8.5, [#1185](https://git.marcpardo.eu/marcpardo/zenkey/issues/1185)). Where another reader of the key shares the far router, a re-declaration sends nothing across. The consumer declares a repair subscription on a key new at that router, the last literal chunk with `$*`, at most three for a subscription's life, and filters its samples locally. An event's subscription is re-declared with the others. `Subscription::repaired()` counts them.
 
 ## What 0.23 does not promise
 
@@ -182,8 +183,10 @@ finished. These are still moving under 0.23, and a 0.24 may break them:
   rounds ([#609](https://git.marcpardo.eu/marcpardo/zenkey/issues/609))
   were paused for zenoh-modem's needs. Core 0.120's compact descriptor and
   archive attachment ([#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980))
-  and link.v2 0.30's batch allowance
-  ([#1136](https://git.marcpardo.eu/marcpardo/zenkey/issues/1136)) are the
+  link.v2 0.30's batch allowance
+  ([#1136](https://git.marcpardo.eu/marcpardo/zenkey/issues/1136)) and
+  core 0.121's repair subscription
+  ([#1185](https://git.marcpardo.eu/marcpardo/zenkey/issues/1185)) are the
   reference's reading alone, and a round may amend them.
 - **Owners' defaults that wait for these readers.** #986's Q3 and #984's
   S5 flip an owner's default once 0.23's readers are deployed: readers
