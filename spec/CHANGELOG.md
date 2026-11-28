@@ -81,6 +81,12 @@ next frame. A fourth, on `…/device_fault$*/*`, did the same (55 B and
 24 B), and both got the next event. zenctl refuses `$*` in a selector
 (tooling guide §8.2), so the two sessions were zenoh-python's.
 
+**The re-soak** (`rc-023-redeclare-shared-2`, the reference with this
+entry). Both readers declared their four subscriptions again, at 600 s
+and 624 s, and nothing crossed. At 1,202 s the first reader's four
+repairs crossed, 205 B. Both readers then got every frame and event,
+each once, and the second declared no repair.
+
 **The reference.** `zenkey_model::link::repair_key` and `REPAIRS`.
 `zenkey::redeclare::Redeclaring` declares again, then repairs, with a
 subscription of no horizon following the others; `Redeclaring::repaired`

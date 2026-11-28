@@ -1,0 +1,424 @@
+{
+ "run": "rc-023-redeclare-shared-2",
+ "marks_s": {
+  "gen": -115.1,
+  "r0": -80.0,
+  "r0_stop": -10.0,
+  "cut": 0.0,
+  "r1": 0.5,
+  "restore": 8.5,
+  "r2": 23.6,
+  "end": 1403.6
+ },
+ "declarations": [
+  {
+   "t_s": -118.3,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "@/5577916e91ceda670a3a236d73cd1a83/peer/config",
+   "bytes": 58,
+   "sdu": 124,
+   "lost": false
+  },
+  {
+   "t_s": -118.3,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "@/5577916e91ceda670a3a236d73cd1a83/peer",
+   "bytes": 46,
+   "sdu": 124,
+   "lost": false
+  },
+  {
+   "t_s": -118.3,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "@/5577916e91ceda670a3a236d73cd1a83/peer/config/**",
+   "bytes": 10,
+   "sdu": 124,
+   "lost": false
+  },
+  {
+   "t_s": -118.3,
+   "dir": "ba",
+   "kind": "declare-queryable",
+   "key": "@/5577916e91ceda670a3a236d73cd1a83/peer/**",
+   "bytes": 10,
+   "sdu": 124,
+   "lost": false
+  },
+  {
+   "t_s": -79.5,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault",
+   "bytes": 68,
+   "sdu": 143,
+   "lost": false
+  },
+  {
+   "t_s": -79.5,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*",
+   "bytes": 9,
+   "sdu": 143,
+   "lost": false
+  },
+  {
+   "t_s": -79.5,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change",
+   "bytes": 66,
+   "sdu": 143,
+   "lost": false
+  },
+  {
+   "t_s": -79.5,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*",
+   "bytes": 14,
+   "sdu": 14,
+   "lost": false
+  },
+  {
+   "t_s": -79.0,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change",
+   "bytes": 67,
+   "sdu": 139,
+   "lost": false
+  },
+  {
+   "t_s": -79.0,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*",
+   "bytes": 9,
+   "sdu": 139,
+   "lost": false
+  },
+  {
+   "t_s": -79.0,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+   "bytes": 57,
+   "sdu": 139,
+   "lost": false
+  },
+  {
+   "t_s": -79.0,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+   "bytes": 6,
+   "sdu": 139,
+   "lost": false
+  },
+  {
+   "t_s": -9.9,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 10,
+   "sdu": 25,
+   "lost": false
+  },
+  {
+   "t_s": -9.9,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 25,
+   "lost": false
+  },
+  {
+   "t_s": -9.9,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 25,
+   "lost": false
+  },
+  {
+   "t_s": -9.9,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 25,
+   "lost": false
+  },
+  {
+   "t_s": 0.6,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*",
+   "bytes": 14,
+   "sdu": 23,
+   "lost": true
+  },
+  {
+   "t_s": 0.6,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*",
+   "bytes": 9,
+   "sdu": 23,
+   "lost": true
+  },
+  {
+   "t_s": 0.7,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*",
+   "bytes": 14,
+   "sdu": 20,
+   "lost": true
+  },
+  {
+   "t_s": 0.7,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+   "bytes": 6,
+   "sdu": 20,
+   "lost": true
+  },
+  {
+   "t_s": 1202.2,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face",
+   "bytes": 55,
+   "sdu": 79,
+   "lost": false
+  },
+  {
+   "t_s": 1202.2,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault$*/*",
+   "bytes": 24,
+   "sdu": 79,
+   "lost": false
+  },
+  {
+   "t_s": 1202.3,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change$*/*",
+   "bytes": 32,
+   "sdu": 32,
+   "lost": false
+  },
+  {
+   "t_s": 1202.6,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change$*/*",
+   "bytes": 28,
+   "sdu": 94,
+   "lost": false
+  },
+  {
+   "t_s": 1202.6,
+   "dir": "ba",
+   "kind": "declare-keyexpr",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames",
+   "bytes": 52,
+   "sdu": 94,
+   "lost": false
+  },
+  {
+   "t_s": 1202.6,
+   "dir": "ba",
+   "kind": "declare-subscriber",
+   "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast$*",
+   "bytes": 14,
+   "sdu": 94,
+   "lost": false
+  },
+  {
+   "t_s": 1404.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 10,
+   "sdu": 45,
+   "lost": false
+  },
+  {
+   "t_s": 1404.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 45,
+   "lost": false
+  },
+  {
+   "t_s": 1404.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 45,
+   "lost": false
+  },
+  {
+   "t_s": 1404.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 45,
+   "lost": false
+  },
+  {
+   "t_s": 1404.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 45,
+   "lost": false
+  },
+  {
+   "t_s": 1404.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 45,
+   "lost": false
+  },
+  {
+   "t_s": 1404.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 45,
+   "lost": false
+  },
+  {
+   "t_s": 1404.0,
+   "dir": "ba",
+   "kind": "declare-unsubscriber",
+   "key": "",
+   "bytes": 5,
+   "sdu": 45,
+   "lost": false
+  }
+ ],
+ "heard": {
+  "r0": {
+   "frames_fast_at_s": [
+    -54.4
+   ],
+   "events": 1,
+   "other": 0
+  },
+  "r1": {
+   "frames_fast_at_s": [
+    1206.4,
+    1265.8,
+    1326.4,
+    1385.7
+   ],
+   "events": 4,
+   "other": 0
+  },
+  "r2": {
+   "frames_fast_at_s": [
+    1206.4,
+    1265.8,
+    1326.4,
+    1385.7
+   ],
+   "events": 4,
+   "other": 0
+  }
+ },
+ "reader_acts": {
+  "r1": [
+   {
+    "utc": "2026-11-28T13:49:12.810749Z",
+    "act": "redeclare",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*"
+   },
+   {
+    "utc": "2026-11-28T13:49:12.811739Z",
+    "act": "redeclare",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*"
+   },
+   {
+    "utc": "2026-11-28T13:49:12.811794Z",
+    "act": "redeclare",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*"
+   },
+   {
+    "utc": "2026-11-28T13:49:12.811906Z",
+    "act": "redeclare",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast"
+   },
+   {
+    "utc": "2026-11-28T13:59:13.468317Z",
+    "act": "repair",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*",
+    "repair": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault$*/*"
+   },
+   {
+    "utc": "2026-11-28T13:59:13.469175Z",
+    "act": "repair",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*",
+    "repair": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change$*/*"
+   },
+   {
+    "utc": "2026-11-28T13:59:13.469254Z",
+    "act": "repair",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*",
+    "repair": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change$*/*"
+   },
+   {
+    "utc": "2026-11-28T13:59:13.469491Z",
+    "act": "repair",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast",
+    "repair": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast$*"
+   }
+  ],
+  "r2": [
+   {
+    "utc": "2026-11-28T13:49:35.845002Z",
+    "act": "redeclare",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/device_fault/*"
+   },
+   {
+    "utc": "2026-11-28T13:49:35.845496Z",
+    "act": "redeclare",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/identity_change/*"
+   },
+   {
+    "utc": "2026-11-28T13:49:35.845544Z",
+    "act": "redeclare",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/events/face/oper_change/*"
+   },
+   {
+    "utc": "2026-11-28T13:49:35.845621Z",
+    "act": "redeclare",
+    "key": "zk2/h-3fa9c2d41b7e/rf0/modem.v3/stream/frames/fast"
+   }
+  ]
+ },
+ "notes": [
+  "redeclare.sh CASE=shared WATCH_S=1380, zenctl from #1185's branch (core 0.121's repair), release; the fork's zenohd and modem-driver as rc-023's.",
+  "Each reader's acts from its log (READER_LOG warn,zenkey::redeclare=info): R1 declared its four subscriptions again at 600 s and repaired them at 1,200 s; R2 declared again at 624 s and heard before its own repairs fell due."
+ ]
+}
