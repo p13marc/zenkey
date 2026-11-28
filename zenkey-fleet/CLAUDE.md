@@ -1005,3 +1005,30 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `a_compact_descriptor_is_checked_on_its_decoding` (D005 on both forms;
   unjudged with no catalog), `model::redundancy`'s and `model::timing`'s
   session-free cases; `zk2_doctor.rs`'s `fake` states `application/json`.
+
+  C5b2 (#980): every other reader goes through `Describing` too.
+  `Describing::retrieving(catalogs, offline, timeout)` (a store of its own,
+  seeded) for a reader with none: health (`observe`, `archived`), config
+  (`ConfigSpec::describing`, its store or its own), alarms (`AlarmFeed`'s,
+  handed to each `AlarmRefresh` and `archived`). With the reader's store:
+  desired (`observe_with`, the uncovered authors, `archive_providers`),
+  telemetry (`TelemetrySpec::catalogs`, no longer `Copy`), conform (the
+  run's store; the telemetry, timing and desired sub-readings take its
+  catalogs; `standby_suite`), arbitration (`ArbitrationSpec::catalogs`,
+  `listen`'s and `Follow`'s), why (`run_why_through`, `observe` takes the
+  catalogs; `state_answer`'s strays), the windowed lens
+  (`bus::lens::read_through`, `read_lens_through`; the watchdog's
+  `WatchdogSpec::catalogs`, the trigger's), and `admin graph`
+  (`topology_with_instances_through`). `bus::query::OwnerRevisions::new`
+  takes the catalogs (`EntryEpochs::catalogs`), so a stray `reply_del` is
+  judged by a compact owner's revision; `config::get_records` takes them.
+  Left catalog-less: `bus::seed`'s `Revisions` (the seeded watch, zengui's),
+  which reads either form and leaves a compact owner's snapshot under no
+  omission rule; telemetry's `owners_answer` and `bus::presence::observe`
+  itself, which count or describe with none. `tests/compact_readers.rs`: a
+  router keeps a runtime owner's own descriptor from readers by its
+  session's zid (`compact_owner::deny_descriptors`) and a raw session
+  answers its compact twin (`compact_owner::twin_of`, `answer`); health
+  and alarms, config, desired (the author's), telemetry and why read it as
+  the JSON one, and unread with no catalog. `tempfile` is a dev-dependency
+  for the runtime's example owners it includes.

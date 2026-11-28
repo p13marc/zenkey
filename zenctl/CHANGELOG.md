@@ -6,6 +6,20 @@ of carrying it — and what it costs is this file, which has to be complete
 enough that a script written against the old spellings can be moved in one
 sitting.
 
+## Unreleased (`main`, zk2) — every reader reads the compact descriptor (#980's C5b2)
+
+Core 0.120 §3.3. C5b taught `service`, `echo`'s lens, `doctor`,
+`redundancy` and `timing`; every other verb that reads a descriptor now
+reads a compact one through its `--catalog` too, each revision it names
+held by `--contracts` or retrieved. Two flags are new on `admin graph`:
+`--contracts` and `--catalog`. No exit code changed.
+
+| Before | Now | Notes |
+|---|---|---|
+| `health`, `config` (`show`, `watch`, `set`'s pre-check), `alarms`, `desired`, `telemetry`, `check conform`, `arbitration`, `why` and the windowed verbs' lens (`get`, `rate`, `field`, `snapshot`, `timeline`, `record`): a compact descriptor not read, whatever `--catalog` gave | read through `--catalog`: the answers its owner's JSON descriptor gives | given no catalog that is or succeeds the one it names, it is not read, never guessed: `health`'s service `unobservable`, `config`'s premise `descriptor_unread`, `telemetry` with no metric resource of it in scope, `why` stopped at the descriptor |
+| a stray `reply_del`, an omission: judged by the owner's revision its JSON descriptor names | its compact one's too, read through `--catalog` | one not read is no word: the `reply_del` merges as a deletion, as before |
+| `admin graph`: no `--catalog` | `--contracts`, `--catalog`: an instance whose descriptor is compact joins its router by its `meta.zid` | without, it attaches nothing |
+
 ## Unreleased (`main`, zk2) — the compact descriptor read (#980's C5b)
 
 Core 0.120 §3.3's compact form, which no owner writes before C5c: a

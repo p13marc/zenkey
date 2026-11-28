@@ -340,3 +340,9 @@ implements, its standby marks) and one not read as `Described::Unread`,
 reads through the same catalogs (`sweep::nodes::redundancy`,
 `RedundancySpec::catalogs`). No scene changed; `nodes.rs`'s
 `a_compact_descriptor_shows_as_its_decoding`.
+
+C5b2 (#980): the Why ladder (`services::value::why` takes the window's
+catalogs, `run_why_through`), the admin sweep (`sweep::admin` takes a
+`Describing`, `topology_with_instances_through`) and the nodes pane's
+`arbitration.v1` reading (`sweep::nodes::arbitration`,
+`ArbitrationSpec::catalogs`) read through the window's catalogs too.
