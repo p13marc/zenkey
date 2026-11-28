@@ -5171,14 +5171,15 @@ def _round122_readings(root: Path) -> list[tuple[str, Any, Any]]:
                   "wait_under_lease transport.wait_before_close_ms"], [stock, two], True, True, 6]))
     out.append(("link.v2 0.25's plan case (zk2py agrees): 51 is case 0's router on zenoh-1.10.2, its policy case 0's "
                 "but the binding, its plan case 0's but the plan's binding, and each principal narrowed over the "
-                "same nine; 52 cases, 53 since 0.26 (round 125) and 54 since 0.27 (round 126)",
+                "same nine; 52 cases, 53 since 0.26 (round 125), 54 since 0.27 (round 126) and 55 since 0.29 "
+                "(round 127)",
                 [len(plan), moved(plan[0]["policy"], plan[51]["policy"]),
                  differs(plan[0]["expect"], plan[51]["expect"]), plan[51]["expect"].get("binding"),
                  plan[51]["expect"]["narrowed"] == plan[0]["expect"]["narrowed"],
                  [c for c in ("contracts", "implements", "narrow") if plan[0].get(c) != plan[51].get(c)]]
                 + missing(llog, "Case 51 is case 0's router on `zenoh-1.10.2`. Its plan is case 0's but for its "
                                 "`binding`, and each principal is narrowed over the same nine. 52 cases."),
-                [54, [stock, two], ["/binding"], "zenoh-1.10.2", True, []]))
+                [55, [stock, two], ["/binding"], "zenoh-1.10.2", True, []]))
     return out
 
 
@@ -5455,7 +5456,7 @@ def _round126_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out: list[tuple[str, Any, Any]] = []
     out.append(("round 126's texts at their versions or later, each with its entry: core 0.117 by its header, "
                 "observer 0.37, link.v1 0.21 and link.v2 0.27, each still written against core 0.108, 0.32 and "
-                "0.108; the index's rows say 0.21 and 0.27",
+                "0.108; the index's rows say 0.21 and 0.27, link.v2's 0.29 since round 127, or later",
                 [core_at is not None and _at_least(core_at.group(1), "0.117"), _at_least(at("observer.md"), "0.37"),
                  _at_least(at("profiles/link/v1.md"), "0.21"), _at_least(at("profiles/link/v2.md"), "0.27")]
                 + missing(flat("CHANGELOG.md"), "## 0.117 — 2026-11-28: §9.2's E051, a packed type whose layout tag "
@@ -5470,8 +5471,10 @@ def _round126_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                        "(../../core.md)) |")
                 + missing(flat("profiles/link/v2.md"), "| **Written against** | core 0.108 ([`../../core.md`]"
                                                        "(../../core.md)) |")
-                + missing(index, "| [`link.v1`](link/v1.md) | 0.21 | draft | zenoh-modem | 0.32 |",
-                          "| [`link.v2`](link/v2.md) | 0.27 | draft | zenoh-modem | 0.108 |"),
+                + missing(index, "| [`link.v1`](link/v1.md) | 0.21 | draft | zenoh-modem | 0.32 |")
+                + ([] if (row2 := re.search(r"\| \[`link\.v2`\]\(link/v2\.md\) \| (\d+\.\d+) \| draft \| "
+                                             r"zenoh-modem \| 0\.108 \|", index)) is not None
+                   and _at_least(row2.group(1), "0.27") else ["the link.v2 row below 0.27"]),
                 [True] * 4))
     out += _round126_e051(root, core, flat, missing)
     out += _round126_owner_heartbeats(root, flat, missing)
@@ -5814,10 +5817,13 @@ def _round124_readings(root: Path) -> list[tuple[str, Any, Any]]:
     # The index: its row, and what its layout says .history holds.
     held = sorted(p_.name for p_ in (spec / "profiles" / ".history").iterdir() if p_.is_dir())
     layout_line = re.search(r"\.history/ published revisions of the profiles' standard contracts \(([^)]*)\)", idx)
-    out.append(("profiles/README.md at alarms.v2 0.1: its row says 0.1, experimental, used by none, core 0.115; "
+    row_v2 = re.search(r"\| \[`alarms\.v2`\]\(alarms/v2\.md\) \| (\d+\.\d+) \| experimental \| none \| 0\.115 \|",
+                       idx)
+    out.append(("profiles/README.md at alarms.v2 0.1: its row says 0.1, 0.2 since round 127's alarms.v2 0.2, or "
+                "later, experimental, used by none, core 0.115; "
                 "spec/profiles/.history holds alarms.v2 beside five others, and the layout's .history line names "
                 "every one of them, alarms.v2 included (F-612, resolved in #1170)",
-                [missing(idx, "| [`alarms.v2`](alarms/v2.md) | 0.1 | experimental | none | 0.115 |"), held,
+                [[] if row_v2 is not None and _at_least(row_v2.group(1), "0.1") else ["the alarms.v2 row"], held,
                  None if layout_line is None else sorted(x.strip() for x in layout_line.group(1).split(","))],
                 [[], ["alarms.v1", "alarms.v2", "config.v1", "freshness.v2", "health.v1", "health.v2"],
                  ["alarms.v1", "alarms.v2", "config.v1", "freshness.v2", "health.v1", "health.v2"]]))
@@ -9956,9 +9962,11 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
     v1_cases = sorted({i for i, _ in crossing if plan2[i]["expect"]["transport"] is None})
     out.append(("link.v2 0.19's entry, its evidence: v2/plan.json held 48 cases then, 49 since link.v2 0.22's case "
                 "48 (round 117), 50 since 0.23's case 49 (round 118), 51 since 0.24's case 50 (round 121), 52 since 0.25's "
-                "case 51 (round 122), 53 since 0.26's case 52 (round 125) and 54 since 0.27's case 53 (round 126); fourteen "
+                "case 51 (round 122), 53 since 0.26's case 52 (round 125), 54 since 0.27's case 53 (round 126) and 55 "
+                "since 0.29's case 54 (round 127); fourteen "
                 "faces let a heartbeat cross, in the twelve cases the entry names and in "
-                "cases 46 and 47, and case 48's one more, and case 53's, case 46's face (round 126); each under a link.v2 policy "
+                "cases 46 and 47, and case 48's one more, and case 53's, case 46's face (round 126), and case 54's, "
+                "case 48's face (round 127); each under a link.v2 policy "
                 "denies the host key by name, nothing under heartbeats/link, and lists the link key as evidence; "
                 "case 10, a link.v1 policy, denies both classes' and lists none; case 6 draws horizon_under_face at "
                 "the link key",
@@ -9969,7 +9977,7 @@ def _round113_readings(root: Path) -> list[tuple[str, Any, Any]]:
                                                 for x in f["findings"])]]
                 + missing(llog, "**Fourteen faces let `probe.v1`'s heartbeat cross**, in cases 5, 6, 8, 9, 10, 12, 19, "
                                 "20, 22, 23, 44 and 45."),
-                [54, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48, 53], 14, [10],
+                [55, [5, 6, 8, 9, 10, 12, 19, 20, 22, 23, 44, 45, 46, 47, 48, 53, 54], 14, [10],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/host/**",), True)],
                  [(("zk2/*/*/freshness.v2/stream/heartbeats/**",), False)], [6]]))
     c46 = plan2[46]
@@ -10626,7 +10634,8 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
 
     out.append(("link.v2 0.18's evidence as zk2py counts it (F-529, resolved): v2/plan.json 46 cases then, 48 since "
                 "0.19 (round 113), 49 since 0.22 (round 117), 50 since 0.23 (round 118), 51 since 0.24 (round 121), 52 since "
-                "0.25 (round 122), 53 since 0.26 (round 125) and 54 since 0.27 (round 126), v2/transport.json 27 then, 32 since 0.22, 34 since 0.25 "
+                "0.25 (round 122), 53 since 0.26 (round 125), 54 since 0.27 (round 126) and 55 since 0.29 (round 127), "
+                "v2/transport.json 27 then, 32 since 0.22, 34 since 0.25 "
                 "and 36 since 0.26; case 44 asks a full record every 675 s at 45 s, plans, draws frame_over_interval and no "
                 "keep_alive_not_suppressed; case 45 is case 5's face under a lease of 240,001 ms and draws none, "
                 "where case 5 at 240,000 ms does: §2.16's inequality pinned on both sides; transport.json's cases "
@@ -10637,7 +10646,7 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
                  lease_of(case(5)), draws(case(5)), with_null,
                  [[f["code"] + " " + f["at"] for f in tr[i]["expect"]["findings"]] for i in sorted(with_null)]]
                 + missing(llog, "`v2/plan.json` gains case 45", "`v2/transport.json` gains cases 24 to 26."),
-                [54, 36, True, False, False, True, 240_001, False, 240_000, True,
+                [55, 36, True, False, False, True, 240_001, False, 240_000, True,
                  {24: ["transport/link/tx/lease"], 25: ["routing/interests/timeout"],
                   26: ["routing/interests/timeout"]},
                  [["transport_differs transport.lease_ms"], ["transport_differs transport.interests_timeout_ms"], []]]))
@@ -10646,10 +10655,10 @@ def _round112_readings(root: Path) -> list[tuple[str, Any, Any]]:
     out.append(("F-530 and F-534, resolved (link.v2 0.18): v2/plan.json's description says what a case's users is; "
                 "Appendix B names zenoh-modem's plans as cases 14 to 18, which hold RF, LoRa at SF7, SF9 and SF12, "
                 "then SBD, in that order, of 46 then, 48 since 0.19, 49 since 0.22, 50 since 0.23, 51 since 0.24, "
-                "52 since 0.25, 53 since 0.26 and 54 since 0.27",
+                "52 since 0.25, 53 since 0.26, 54 since 0.27 and 55 since 0.29",
                 ["A case may give `users`, the principals the deployment binds by a user name" in desc, modem,
                  [medium(plan[i]["note"]) for i in modem], len(plan)],
-                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 54]))
+                [True, [14, 15, 16, 17, 18], [0, 1, 2, 3, 4], 55]))
     zm = repo / "examples" / "zk2" / "zenoh-modem"
     zflat = lambda rel: " ".join((zm / rel).read_text(encoding="utf-8").split())  # noqa: E731
     # link.md's notes are block quotes: their lines' "> " is no word of theirs.
@@ -10919,10 +10928,10 @@ def _round110_readings(root: Path) -> list[tuple[str, Any, Any]]:
                 "above their intervals as before, and by the eleven the entry names, each at its interval; "
                 "v2/plan.json held 45 cases then, 46 since 0.18, 48 since 0.19 (round 113), 49 since 0.22 (round "
                 "117), 50 since 0.23 (round 118), 51 since 0.24 (round 121), 52 since 0.25 (round 122), 53 since 0.26 "
-                "(round 125) and 54 since 0.27 (round 126)",
+                "(round 125), 54 since 0.27 (round 126) and 55 since 0.29 (round 127)",
                 [len(plan), [i for i, c in enumerate(plan) if draws(c)]]
                 + missing(log, "Cases 5, 8, 9, 12, 14, 16, 17, 18, 20, 22 and 23 draw it now, each at its interval"),
-                [54, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
+                [55, [5, 6, 8, 9, 12, 14, 15, 16, 17, 18, 19, 20, 22, 23]]))
     # review-bot's note 5 on #1121: stamps() reads a shape the text does not
     # name as stamping. No spec case hits it; zk2py's own cases pin it.
     shapes_ok = lambda r: (r.get("mode") in (None, "router", "peer", "client")  # noqa: E731
