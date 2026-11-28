@@ -3,8 +3,8 @@
 //! and, given no catalog that reads it, reads it `unread`: never a guess
 //! (§8.6).
 //!
-//! The owner is the runtime's, unchanged, since no runtime writes the
-//! compact form before C5c. So on the compact bed a router's access control
+//! The owner is the runtime's, writing JSON (C5b2 came before the
+//! runtime's compact writer, C5c). So on the compact bed a router's access control
 //! keeps the owner's own descriptor from every reader
 //! (`compact_owner::deny_descriptors`, by its session's zid), and a raw
 //! session answers its compact twin in its place (`compact_owner::answer`),

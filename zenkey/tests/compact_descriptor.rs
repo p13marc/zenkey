@@ -2,7 +2,8 @@
 //! the runtime's readers, `presence::serving` through a consumer,
 //! `answer::owner_revision_held` and the retrieval of a revision a compact
 //! descriptor names (§8.4). Each owner is `common::compact_owner`'s, a raw
-//! session: no runtime writes the compact form before C5c.
+//! session, so both forms answer one descriptor; the runtime's own writer
+//! (C5c) is `constrained.rs`' §10 step 7.
 //!
 //! A reader tells the forms apart by the reply's `Encoding` alone, reads a
 //! compact one through the catalogs it holds, and without one reads none

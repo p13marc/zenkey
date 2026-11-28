@@ -176,6 +176,34 @@ pub(crate) fn encode_checked(desc: &Descriptor, impls: &[ImplState]) -> Result<V
     Ok(text.into_bytes())
 }
 
+/// The compact form of `desc` (core §3.3, "The compact form"; #980 C5c),
+/// its envelope's seq `seq`, its system minted where `minted`, its indices
+/// read through `catalog` and its bitmaps through the revisions
+/// implemented. It leaves out what the form does: `minor`, `meta` but its
+/// zid, and each `reason`.
+///
+/// # Errors
+/// Why `desc` has no compact form (§3.3, "Which descriptors have one").
+pub(crate) fn encode_compact(
+    desc: Descriptor,
+    seq: zenkey_model::wire::Seq,
+    minted: bool,
+    catalog: &zenkey_model::catalog::Catalog,
+    impls: &[ImplState],
+) -> std::result::Result<Vec<u8>, d::compact::EncodeError> {
+    let revisions: Vec<&zenkey_model::contract::Contract> =
+        impls.iter().map(|s| s.imp.contract()).collect();
+    d::compact::encode(
+        &d::compact::Compact {
+            descriptor: desc,
+            seq,
+            minted,
+        },
+        std::slice::from_ref(catalog),
+        &revisions,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::profiles;

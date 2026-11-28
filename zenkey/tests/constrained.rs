@@ -658,9 +658,21 @@ async fn device(
     session: &zenoh::Session,
     config: zenkey::ServiceConfig,
 ) -> zenkey::Result<zenkey::Service> {
+    device_under(session, config, None).await
+}
+
+/// [`device`], given `catalog` where one is (core §8.6).
+async fn device_under(
+    session: &zenoh::Session,
+    config: zenkey::ServiceConfig,
+    catalog: Option<zenkey::model::catalog::Catalog>,
+) -> zenkey::Result<zenkey::Service> {
     let probe = link_probe();
     let iface = probe.iface.clone();
     let mut b = ServiceBuilder::new(session, config);
+    if let Some(c) = catalog {
+        b.catalog(c)?;
+    }
     b.implement(zenkey::Implementation::new(probe))?;
     for res in [
         "stream/frames/link",
@@ -882,6 +894,284 @@ async fn s10_a_first_hop_device() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!declared(&link.captured_up()).0, "no instance token");
     session.close().await.unwrap();
+}
+
+/// The device's three revisions: `probe.v1`, `health.v1` and
+/// `freshness.v2`, as the device implements them.
+fn device_revisions() -> [zenkey::Implementation; 3] {
+    [
+        zenkey::Implementation::new(link_probe()),
+        zenkey::health::implementation(),
+        zenkey::heartbeat::implementation(),
+    ]
+}
+
+/// The deployment catalog of the device's three revisions (core §8.6).
+fn device_catalog() -> zenkey::model::catalog::Catalog {
+    let mut c = zenkey::model::catalog::Catalog::new(0).unwrap();
+    for imp in device_revisions() {
+        c.push(imp.iface().clone(), imp.fingerprint().clone())
+            .unwrap();
+    }
+    c
+}
+
+/// What one descriptor put of `svc` costs across the hop, toward its
+/// router: the bytes `link` carries up while `svc` takes a new run, whose
+/// descriptor `heard` hears put, the median of 9. Each round is read once
+/// the put was heard, so little else rides beside it.
+async fn descriptor_put(
+    link: &common::Link,
+    svc: &zenkey::Service,
+    heard: &zenoh::pubsub::Subscriber<flume::Receiver<Sample>>,
+) -> (usize, usize) {
+    let mut rounds = Vec::new();
+    for _ in 0..9 {
+        let _ = heard.drain().count();
+        link.capture_up();
+        svc.new_run();
+        let s = tokio::time::timeout(common::SETTLE, heard.recv_async())
+            .await
+            .expect("the descriptor put crosses")
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        rounds.push((link.captured_up().len(), s.payload().len()));
+    }
+    rounds.sort_unstable();
+    rounds[4]
+}
+
+/// §10 step 7 (#980 C5c): a device on a first hop given the deployment
+/// catalog writes its descriptor in the compact form (core §3.3, §8.1),
+/// under `zenoh/bytes`, which crosses the hop in a few tens of bytes where
+/// the JSON form takes some hundreds. The tool holding the catalog reads it
+/// to the members the JSON form states, retrieving the revisions it names
+/// from the near holder (§8.4), and the consumer holding it finds the
+/// device (observer §3.6). Holding none, neither reads it: the tool's read
+/// is `unknown_catalog`, and the consumer's wait does not end, the device
+/// unobservable, never absent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn s10_a_first_hop_device_writes_its_descriptor_compact() {
+    use zenkey::consumer::Consumer;
+    use zenkey::model::descriptor::{Form, compact};
+    let (_r1, ep) = common::router_with(
+        None,
+        &[("access_control", &device_block(DEVICE_ZID, false))],
+    )
+    .await;
+    let link = common::link_to(&ep).await;
+    let tool = client(&ep).await;
+    let holder = client(&ep).await;
+    let mut held = Vec::new();
+    for imp in device_revisions() {
+        held.push(hold(&holder, &imp).await);
+    }
+    let at = common::addr("lab/probe-a");
+    let catalog = device_catalog();
+    let heard = tool
+        .declare_subscriber("zk2/lab/probe-a/@zk/instance/*")
+        .with(flume::unbounded::<Sample>())
+        .await
+        .unwrap();
+
+    // The JSON form first: a first hop given no catalog.
+    let session = device_session(link.endpoint(), DEVICE_ZID).await;
+    let svc = device(&session, config("lab/probe-a").first_hop())
+        .await
+        .unwrap();
+    assert_eq!(svc.descriptor_form(), Form::Json, "no catalog: JSON");
+    eventually("the JSON device is heard", || async {
+        heard.drain().count() > 0 || {
+            svc.new_run();
+            false
+        }
+    })
+    .await;
+    let (json_up, json_payload) = descriptor_put(&link, &svc, &heard).await;
+    let json = presence::descriptor(&tool, &at, svc.instance(), T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .expect("the JSON descriptor reads with nothing held");
+    drop(svc);
+    session.close().await.unwrap();
+
+    // 7. The same device given the catalog: the compact form, by default.
+    let session = device_session(link.endpoint(), DEVICE_ZID).await;
+    let svc = device_under(
+        &session,
+        config("lab/probe-a").first_hop(),
+        Some(catalog.clone()),
+    )
+    .await
+    .expect("a first-hop device given a catalog starts");
+    assert_eq!(svc.descriptor_form(), Form::Compact, "§8.1's SHOULD");
+    let key = svc.instance_key().unwrap().to_string();
+    eventually("the compact device is heard", || async {
+        heard.drain().count() > 0 || {
+            svc.new_run();
+            false
+        }
+    })
+    .await;
+    let (compact_up, compact_payload) = descriptor_put(&link, &svc, &heard).await;
+    eprintln!(
+        "constrained.md §10 step 7: the descriptor's put across the hop, JSON {json_up} B \
+         (payload {json_payload} B), compact {compact_up} B (payload {compact_payload} B)"
+    );
+    assert!(
+        compact_payload < 64 && compact_up < 160,
+        "the compact form's put: {compact_up} B, its payload {compact_payload} B"
+    );
+    assert!(
+        json_payload > 400 && compact_up * 4 < json_up,
+        "JSON {json_up} B against compact {compact_up} B"
+    );
+
+    // Its put and its GET's reply are under `zenoh/bytes`, the envelope's run
+    // the one the instance writes under. (The router stamps what it
+    // forwards, so a subscriber's sample carries the router's timestamp.)
+    let s = tokio::time::timeout(common::SETTLE, async {
+        loop {
+            let _ = heard.drain().count();
+            let run = svc.new_run();
+            let s = heard.recv_async().await.unwrap();
+            if compact::Head::parse(&s.payload().to_bytes()).is_ok_and(|h| h.stamp.run == run) {
+                break s;
+            }
+        }
+    })
+    .await
+    .expect("a put stating the new run");
+    assert_eq!(s.encoding().to_string(), "zenoh/bytes");
+    let reply = presence::descriptor_reply(&tool, &at, svc.instance(), T)
+        .await
+        .unwrap()
+        .expect("the GET is answered");
+    assert_eq!(reply.form, Form::Compact);
+    assert_eq!(&*reply.bytes, &*svc.descriptor_bytes());
+
+    // The tool holding the catalog reads it to the JSON form's members,
+    // retrieving the three revisions from the near holder.
+    let through = presence::Held::new(Arc::new(vec![catalog.clone()]), Vec::new()).retrieving();
+    let d = presence::descriptor_held(&tool, &at, svc.instance(), &through, T)
+        .await
+        .unwrap()
+        .into_descriptor()
+        .expect("read through the catalog");
+    let pairs = |d: &zenkey::model::descriptor::Descriptor| {
+        let mut p: Vec<(String, String, bool)> = d
+            .interfaces
+            .iter()
+            .map(|e| (e.iface.clone(), e.contract.clone(), e.token))
+            .collect();
+        p.sort_unstable();
+        p
+    };
+    assert_eq!(pairs(&d), pairs(&json), "the members the JSON form states");
+    assert_eq!(d.capabilities, json.capabilities);
+    assert_eq!(d.catalog, Some(catalog.id().hex()));
+    assert_eq!(d.meta.get("zid"), json.meta.get("zid"), "the zid stays");
+    // Holding none: not read, never guessed.
+    match presence::descriptor(&tool, &at, svc.instance(), T)
+        .await
+        .unwrap()
+    {
+        Found::Unread(why) => assert!(why.starts_with("unknown_catalog"), "{why}"),
+        other => panic!("not read without the catalog: {other:?}"),
+    }
+
+    // The consumer holding the catalog finds the device by its instance
+    // token and its descriptor; holding none, its wait does not end.
+    let consumer = |catalog: Option<&zenkey::model::catalog::Catalog>| {
+        let c = Consumer::for_tool(
+            &tool,
+            Arc::new(link_probe()),
+            &["lab/probe-a"],
+            &Default::default(),
+        )
+        .unwrap();
+        match catalog {
+            Some(cat) => c.with_catalog(cat),
+            None => c,
+        }
+    };
+    assert_eq!(
+        consumer(Some(&catalog))
+            .wait_for_provider(common::SETTLE)
+            .await
+            .unwrap(),
+        Some(at.clone()),
+        "found through the catalog"
+    );
+    assert_eq!(
+        consumer(None)
+            .wait_for_provider(Duration::from_secs(3))
+            .await
+            .unwrap(),
+        None,
+        "not found without it, and never concluded absent"
+    );
+    assert_eq!(
+        presence::liveliness_keys(&tool, "zk2/lab/probe-a/@zk/**", T)
+            .await
+            .unwrap(),
+        [key],
+        "its instance token alone crosses"
+    );
+    drop(held);
+}
+
+/// Core §3.3, §8.1 (#980 C5c): the compact form asked for needs a catalog
+/// and no role, each refused at start, nothing declared; asked off, a
+/// first hop given a catalog writes JSON.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_compact_form_asked_for_needs_a_catalog_and_no_role() {
+    use zenkey::model::descriptor::Form;
+    let (_r1, ep) = router(None).await;
+    let session = client(&ep).await;
+    let Err(e) = device(&session, config("lab/a").compact_descriptor(true)).await else {
+        panic!("refused without a catalog");
+    };
+    assert!(e.to_string().contains("no catalog"), "{e}");
+    let mut b = ServiceBuilder::new(
+        &session,
+        config("lab/b")
+            .compact_descriptor(true)
+            .bind("p", &["lab/x"]),
+    );
+    b.catalog(device_catalog()).unwrap();
+    b.require("p", "probe.v1".parse().unwrap(), false);
+    let Err(e) = b.start().await else {
+        panic!("refused beside a role");
+    };
+    assert!(e.to_string().contains("role"), "{e}");
+    let svc = device_under(
+        &session,
+        config("lab/c").first_hop().compact_descriptor(false),
+        Some(device_catalog()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(svc.descriptor_form(), Form::Json, "asked off");
+    // Off a first hop, the MAY: the compact form when asked.
+    let svc = device_under(
+        &session,
+        config("lab/d").compact_descriptor(true),
+        Some(device_catalog()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(svc.descriptor_form(), Form::Compact);
+    let svc_json = device_under(&session, config("lab/e"), Some(device_catalog()))
+        .await
+        .unwrap();
+    assert_eq!(
+        svc_json.descriptor_form(),
+        Form::Json,
+        "the near side's default"
+    );
+    drop(svc);
 }
 
 /// What `start` refuses of a first-hop owner implementing `imps`, nothing
