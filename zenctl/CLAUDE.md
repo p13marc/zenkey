@@ -149,7 +149,10 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   unfilled; `check-face.trycmd` runs the RF router of
   `examples/zk2/link/media/` and a hand-edited `wait_before_close`, and
   zenoh-modem's rf0 router on the fork's binding, read as data, with a
-  hand edit that does not read (exit 2).
+  hand edit that does not read (exit 2). Since link.v1 0.22 and link.v2
+  0.30 (#1136) rf0's plan there warns `frame_over_batch` of `frames/fast`:
+  its 216 B and the 10 B zenoh writes beside it do not fit the 222 B batch
+  (`zenkey_model::link::allowance`).
   FJ8a's writes and captures: `gen <address>` and `serve <address> <iface>
   <operation>` are mock owners — real zk2 services through
   `zenkey::ServiceBuilder` (`zenkey_fleet::tape::{generate, mock}`), refused

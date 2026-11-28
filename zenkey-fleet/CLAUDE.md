@@ -1118,3 +1118,8 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `why`'s last-known rung reading the compact bit, an owner kept present and
   silent by a twin holding its tokens and descriptor. Its archives watch a
   router no owner reaches, so they align only when asked.
+- **`frame_over_batch` and `block_over_batch`'s words** (`model/acl.rs`'s
+  `link_says`, #1136): a largest frame or longest put that does not fit one
+  batch with what zenoh writes beside it (link.v1 0.22 §2.8), which `acl gen
+  --face-policy` and `check face` print; `check-face.trycmd`'s zenoh-modem
+  RF router gains `frame_over_batch` of `frames/fast`.
