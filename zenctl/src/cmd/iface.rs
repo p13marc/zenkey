@@ -14,11 +14,13 @@ use crate::bus::Deployment;
 use crate::cmd::zk2;
 use crate::exit::unanswered;
 
-/// `iface list`.
+/// `iface list`: a compact descriptor (core §3.3) read through
+/// `--catalog`, so a first-hop owner's interfaces are listed too.
 pub async fn list(cli: crate::cli::IfaceListArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
+    let describing = zk2::describing(&dep, &cli.contracts)?;
     let session = dep.session().await?;
-    let catalog = zk2::presence(&dep, &session, &PresenceScope::all()).await?;
+    let catalog = zk2::presence_through(&dep, &session, &PresenceScope::all(), &describing).await?;
     crate::render::emit_with(
         &mut std::io::stdout(),
         &catalog.ifaces(),
@@ -33,13 +35,16 @@ pub async fn list(cli: crate::cli::IfaceListArgs) -> Result<()> {
 /// tokenless provider (U22) holds no interface token to select, so only its
 /// descriptor says it provides the interface (spec §8.1). Every revision a
 /// descriptor names is retrieved once (or found in `--contracts`), so each
-/// provider's exposure can be computed by the compact rule.
+/// provider's exposure can be computed by the compact rule. A compact
+/// descriptor (core §3.3) reads through `--catalog` and that store.
 pub async fn show(cli: crate::cli::IfaceShowArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
     let contracts = zk2::load_contracts(&cli.contracts)?;
-    let session = dep.session().await?;
-    let catalog = zk2::presence(&dep, &session, &PresenceScope::all()).await?;
+    let catalogs = zk2::load_catalogs(&cli.contracts)?;
     let store = zk2::store(&dep, &contracts);
+    let describing = zenkey_fleet::Describing::new(&catalogs, &store);
+    let session = dep.session().await?;
+    let catalog = zk2::presence_through(&dep, &session, &PresenceScope::all(), &describing).await?;
     let iface = &cli.target.iface;
     let wanted: Vec<_> = catalog
         .wanted()

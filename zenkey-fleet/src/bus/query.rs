@@ -675,6 +675,9 @@ impl<'a> OwnerRevisions<'a> {
             store: store
                 .cloned()
                 .unwrap_or_else(|| crate::bus::contracts::BundleStore::new(timeout)),
+            // The standard revisions are read beside these, so a
+            // first-hop owner's compact descriptor reads with the catalogs
+            // alone (`zenkey::standard`, core §8.4).
             described: zenkey::presence::Held::new(
                 std::sync::Arc::new(catalogs.held().to_vec()),
                 held.iter()

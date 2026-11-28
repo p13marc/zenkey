@@ -39,49 +39,69 @@ zk2 contract compat --history contracts/.history contracts/thruster.v1.toml
 zk2 contract bundle contracts/thruster.v1.toml --history contracts/.history
 ```
 
-## Changes since 0.21
+## Changes since 0.22
 
-- **The wire breaks 0.21's: an event's key ends in its owner's run and
-  seq** (core 0.101 and 0.103,
-  [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C2). An
-  events key's last chunk is an occurrence chunk, the run and the seq in
-  lowercase Crockford base32, 8 characters for a 16-bit run and 12 for a
-  32-bit one, where a ULID took 26. The grammar refuses a ULID there, so
-  a 0.21 owner's event keys are no zk2 keys to 0.22.
-  - `chunk::occurrence` reads the stamp a chunk names, `is_occurrence`
-    asks whether it names one, and `write_occurrence` writes it.
-  - The put's payload is form 4, `CH · t32 · ms16 · record`: the
-    occurrence's time from the deployment epoch, known or unknown, and its
-    stamp its key's. `wire::Event` writes it, and `wire::read_event` and
-    `read_put` (`Reading::Event`) read it. Its refusals are `key_stamp`
-    and `time` (`Refusal::{KeyStamp, Time}`). A 0.21 reader refuses form
-    4.
-  - A put or a delete on an events key that carries no event is never
-    delivered (core 0.104 and 0.105).
-  - A `reply_del` is a stray by the owner's revision under its run, never
-    the reader's (core 0.102,
-    [#1094](https://git.marcpardo.eu/marcpardo/zenkey/issues/1094)): give
-    `collection::stray_reply_del` the revision the owner's descriptor
-    names.
-- **`link.v2` 0.12 to 0.14**
-  ([#1098](https://git.marcpardo.eu/marcpardo/zenkey/issues/1098),
-  [#1106](https://git.marcpardo.eu/marcpardo/zenkey/issues/1106)):
-  - A face lists the events it carries, `events = [...]`, as it lists its
-    `frames` (`Face::events`). On a face with `events`, each other exposed
-    event is denied by name, and an entry that names no event of a listed
-    interface is `event_unknown`.
-  - A face router stamps nothing. `TIMESTAMPING_OFF` is the
-    `timestamping` block the plan writes, `StatedTransport::stamps` reads
-    a router's at its `mode`, and the check warns `face_timestamping`.
-- **Removed:** `chunk::is_lower_ulid`. Use `chunk::is_occurrence`, or
-  `chunk::occurrence` for the stamp.
-- **Grown:** `wire::Reading::Event`, `wire::Refusal::{KeyStamp, Time}`,
-  `link::Code::{FaceTimestamping, EventUnknown}` and the field
-  `link::Face::events`. A `match` over those enums, or a `Face` written
-  field by field, needs them.
-- **The authoring format and the canonical form did not move:** a
-  contract that lints under 0.21 lints under 0.22, at the same
-  fingerprint.
+- **The wire breaks 0.22's: a 0.22 reader does not read a 0.23 owner's
+  descriptor.** Move a deployment's readers first, then its owners: a
+  0.23 reader reads a 0.22 owner's descriptor, which states minor 0.
+  - `descriptor::InterfaceEntry::minor` is an `Option<u64>` (core 0.107,
+    [#1127](https://git.marcpardo.eu/marcpardo/zenkey/issues/1127)). An
+    entry states the minor of the revision it names, and none where its
+    owner holds only the bundle, as generated code and the standard
+    profiles do. 0.22 requires the member, and refuses the whole
+    descriptor ("missing field `minor`").
+  - The compact form (core 0.120,
+    [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C5):
+    `descriptor::compact` encodes and decodes it through a catalog and
+    the revisions it names, and `descriptor::Form` tells the two forms
+    apart by their `Encoding`. An owner on a first hop given a catalog
+    writes it. 0.22 reads none.
+  - A heartbeat's time may be the ahead time (core 0.113): the owner's
+    clock guard holds (`heartbeat::Time::Ahead`,
+    `health::ClockReason::Ahead`). A reader before 0.113 refuses it.
+  - `freshness.v2` 0.8 to 0.14: the owner heartbeat, one put per class of
+    exposure with a group per interface
+    ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110);
+    `heartbeat::Collection::class`, `freshness::SectionRead::OtherClass`),
+    and the standard contract's revision 1.1.
+  - A conditional read (core 0.110,
+    [#986](https://git.marcpardo.eu/marcpardo/zenkey/issues/986)'s J1):
+    an unchanged member is answered by its held stamp alone
+    (`wire::SampleKind::Get`, `wire::Refusal::{Held, HeldTag}`;
+    `SampleKind::ALL` has six entries).
+- **Four profiles' second majors,** session-free: `health::v2`,
+  `alarms::v2`, `desired::v2` and `redundancy::v2`, each its text's.
+- **`link.v2` 0.14 to 0.30, `link.v1` 0.19 to 0.22:**
+  - subjects by user name, the far end opening the face
+    ([#1107](https://git.marcpardo.eu/marcpardo/zenkey/issues/1107);
+    `Face::opens`, `Deployment::users`, `Code::NearOpensUser`);
+  - the owner heartbeat in the plans
+    ([#1145](https://git.marcpardo.eu/marcpardo/zenkey/issues/1145);
+    `Deployment::owner_heartbeats`, `Code::OwnerHeartbeatDenied`);
+  - zenoh 1.10.2 ([#1165](https://git.marcpardo.eu/marcpardo/zenkey/issues/1165);
+    `Binding::Zenoh1_10_2`, and `Binding: FromStr`);
+  - a frame weighed with what zenoh writes beside it
+    ([#1136](https://git.marcpardo.eu/marcpardo/zenkey/issues/1136);
+    `Res::{priority_data, express}`), and `Res::cardinality`.
+- **One lint more: E051** refuses a contract that declares a packed type
+  at layout tag 0, a profile-derived type aside
+  ([#1152](https://git.marcpardo.eu/marcpardo/zenkey/issues/1152)). The
+  authoring format and the canonical form did not move: a contract that
+  lints under 0.22 lints under 0.23, at the same fingerprint, unless
+  E051 refuses it.
+- **Grown, so a `match` over them or a literal of them needs the new
+  members:** `desired::Finding::{Escape, RunFields}`,
+  `desired::Invalid::HorizonV1`, `redundancy::Invalid::{Majors,
+  ExplicitStream}`, eight `alarms::Reason`s (`Rebound`, `Snapshot`,
+  `SnapshotIncomplete`, `SnapshotRun`, `Table`, `NoWords`, `NoRecord`,
+  `Unreadable`), `arbitration::Event::Read`'s `asked` and
+  `redundancy::Holding::Read`'s fourth field. `link::Code`'s
+  discriminants moved, which only an `as` cast sees.
+- **Moved:** `desired::Ended<R = Refusal>` takes the refusal's type
+  ([#1153](https://git.marcpardo.eu/marcpardo/zenkey/issues/1153)), and
+  `desired::{in_force, last_known, refused}` take one more type
+  parameter with it. `arbitration::Incumbents` is `redundancy::Fence`
+  ([#987](https://git.marcpardo.eu/marcpardo/zenkey/issues/987)'s N1).
 
 ## What 0.22 does not promise
 

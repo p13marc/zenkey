@@ -256,13 +256,17 @@ pub async fn read_tokens(session: &Session, scope: &Scope, timeout: Duration) ->
 
 /// What a presence read decodes a compact descriptor with (core §3.3,
 /// "Reading"; #980 C5b): the deployment catalogs given (`--catalog`,
-/// §8.6), which read its indices, and the store that holds the revisions
-/// its entries name, or retrieves them (§8.4), since a bitmap's width is
-/// its revision's. A JSON descriptor needs neither. With no catalog that
-/// is or succeeds the one it names, a compact descriptor is
-/// [`DescriptorRead::Unread`] (`unknown_catalog`); with a revision the
-/// store cannot have, `unknown_revision`: never guessed. The default holds
-/// nothing, which is [`describe`]'s and [`observe`]'s.
+/// §8.6), which read its indices, and the revisions its entries name,
+/// since a bitmap's width is its revision's. A standard revision `zenkey`
+/// embeds is this reader's own ([`crate::model::standard`]), never
+/// retrieved: an owner on a first hop holds no bundle, and a deployment
+/// provisions its bundles to each reader (§8.4). Every other is the
+/// store's, held or retrieved (§8.4). A JSON descriptor needs neither.
+/// With no catalog that is or succeeds the one it names, a compact
+/// descriptor is [`DescriptorRead::Unread`] (`unknown_catalog`); with a
+/// revision neither the standard set nor the store can have,
+/// `unknown_revision`: never guessed. The default holds no catalog, which
+/// is [`describe`]'s and [`observe`]'s.
 #[derive(Debug, Clone, Default)]
 pub struct Describing {
     catalogs: Arc<Vec<DeploymentCatalog>>,
@@ -300,8 +304,10 @@ impl Describing {
     }
 
     /// One descriptor reply that came on `addr`'s instance key, read by
-    /// its form: a compact one's revisions named fetched through the store
-    /// first, each cached there.
+    /// its form: each revision a compact one names a standard one this
+    /// reader holds, or fetched through the store, each held there after,
+    /// so what reads on after the descriptor has the revision it was read
+    /// with.
     pub async fn read(
         &self,
         session: &Session,
@@ -310,11 +316,16 @@ impl Describing {
         instance: &zenkey_model::grammar::InstanceId,
     ) -> DescriptorRead {
         let mut revisions: Vec<Arc<Contract>> = Vec::new();
-        if let Some(store) = &self.store {
-            for (iface, fp) in served.names(&self.catalogs) {
-                if let Ok(Some(c)) = store.contract(session, &iface, &fp).await {
-                    revisions.push(c);
+        for (iface, fp) in served.names(&self.catalogs) {
+            if let Some(r) = crate::model::standard::revision(&iface, &fp) {
+                if let Some(store) = &self.store {
+                    store.hold(r);
                 }
+                revisions.push(r.shared_contract());
+            } else if let Some(store) = &self.store
+                && let Ok(Some(c)) = store.contract(session, &iface, &fp).await
+            {
+                revisions.push(c);
             }
         }
         let revisions: Vec<&Contract> = revisions.iter().map(|c| &**c).collect();

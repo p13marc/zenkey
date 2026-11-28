@@ -560,12 +560,28 @@ pub(crate) struct DoctorArgs {
     pub(crate) count: Option<u64>,
     /// The deployment catalog (core §8.6), repeatable: `catalog-missing`
     /// judges every running revision against the one its descriptor names,
-    /// or against every one given where it names none. Without one,
-    /// `catalog-missing` is not asked: a catalog is a file the deployment
-    /// provisions, never served. A file that is not a catalog is refused
-    /// (exit 2).
+    /// or against every one given where it names none, and an owner's
+    /// compact descriptor (core §3.3) reads through it. Without one,
+    /// `catalog-missing` is not asked, and a compact descriptor is not read,
+    /// never guessed: a catalog is a file the deployment provisions, never
+    /// served. A file that is not a catalog is refused (exit 2).
     #[arg(long = "catalog", value_name = "PATH")]
     pub(crate) catalog: Vec<PathBuf>,
+    /// Contracts known offline, repeatable: an authoring file (`*.toml`), a
+    /// directory of them, or a `.history` root.
+    ///
+    /// A compact descriptor reads through --catalog and every revision it
+    /// names: one held here, a standard one every tool holds compiled in
+    /// (health.v1, health.v2, freshness.v2, alarms.v1, alarms.v2,
+    /// config.v1), or one a holder serves. An owner on a first hop holds
+    /// no bundle (core §8.4): give its other contracts here where no
+    /// holder on this side of its hop serves them. A revision held here is
+    /// never retrieved (§8.5), so contract-unavailable does not ask its
+    /// holders. A standard one compiled in proves nothing of an owner: its
+    /// holders are asked unless every owner naming it is a device
+    /// --face-policy lists. A path that loads nothing is refused (exit 2).
+    #[arg(long = "contracts", value_name = "PATH")]
+    pub(crate) contracts: Vec<PathBuf>,
     /// A `link.v2` face policy whose device faces (`attach = "device"`)
     /// list owners on a first hop (link.v2 §2.5): `first-hop-token` asks
     /// whether each holds an interface token or a contract queryable, which
@@ -1579,7 +1595,8 @@ pub(crate) enum CheckCmd {
     /// on one resource:
     ///
     ///   contract-served  the bundle the descriptor names is served and
-    ///                    verifies (§8.4)
+    ///                    verifies (§8.4); not asked of an owner on a first
+    ///                    hop, which holds none, where no holder serves it
     ///   resource-served  each exposed stream, state and event resource is
     ///                    heard in the --for window, or answers a GET (§8.2)
     ///   payload-type     every sample and reply decodes as its declared type
@@ -2418,8 +2435,8 @@ pub(crate) struct ServiceListArgs {
     #[command(flatten)]
     pub(crate) first_hop: FirstHopArgs,
     /// An owner's compact descriptor (core §3.3) is read through --catalog,
-    /// each revision it names held here or retrieved; without the catalog
-    /// it names it is not read, never guessed.
+    /// each revision it names held here, a standard one, or retrieved;
+    /// without the catalog it names it is not read, never guessed.
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
@@ -2448,9 +2465,9 @@ pub(crate) struct ServiceShowArgs {
     #[command(flatten)]
     pub(crate) first_hop: FirstHopArgs,
     /// An owner's compact descriptor (core §3.3) is read through --catalog,
-    /// each revision it names held here or retrieved, and shown as the JSON
-    /// form's members; without the catalog it names it is not read, never
-    /// guessed.
+    /// each revision it names held here, a standard one, or retrieved, and
+    /// shown as the JSON form's members; without the catalog it names it is
+    /// not read, never guessed.
     #[command(flatten)]
     pub(crate) contracts: ContractArgs,
     #[command(flatten)]
@@ -2460,6 +2477,11 @@ pub(crate) struct ServiceShowArgs {
 /// `iface list`'s flags.
 #[derive(clap::Args)]
 pub(crate) struct IfaceListArgs {
+    /// An owner's compact descriptor (core §3.3) is read through --catalog,
+    /// each revision it names held here, a standard one, or retrieved;
+    /// without the catalog it names it is not read, never guessed.
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -2514,6 +2536,10 @@ pub(crate) struct GraphArgs {
     // #243, and see `refuse_foreign_format` for why not `conflicts_with`.
     #[arg(long)]
     pub(crate) dot: bool,
+    /// An owner's compact descriptor (core §3.3) is read through --catalog,
+    /// so its roles and tokenless interfaces are in the graph.
+    #[command(flatten)]
+    pub(crate) contracts: ContractArgs,
     #[command(flatten)]
     pub(crate) ns: NamespaceArgs,
 }
@@ -3543,8 +3569,10 @@ pub(crate) struct CheckConformArgs {
     /// The routers' face policy (TOML, `link.v2` §2.1): its `[transport]`
     /// is what they run, so its lease and wait_before_close are the
     /// defaults of --lease and --wait-before-close, and its keep_alive the
-    /// stall bound's (#1011). A `link.v1` policy states no transport and
-    /// is refused, exit 2.
+    /// stall bound's (#1011). A device its device faces list (`attach =
+    /// "device"`, link.v2 §2.5) is on a first hop (observer §3.11) and
+    /// holds no bundle (core §8.4), so contract-served asks it none. A
+    /// `link.v1` policy states no transport and is refused, exit 2.
     #[arg(long = "face-policy", value_name = "FILE")]
     pub(crate) face_policy: Option<PathBuf>,
     #[command(flatten)]

@@ -8,11 +8,14 @@ use zenkey_fleet::PresenceScope;
 use crate::bus::Deployment;
 use crate::cmd::zk2;
 
-/// `graph [--dot]`.
+/// `graph [--dot]`: a compact descriptor (core §3.3) read through
+/// `--catalog`, so a first-hop owner's roles and tokenless interfaces are
+/// in the graph too.
 pub async fn run(cli: crate::cli::GraphArgs) -> Result<()> {
     let dep = Deployment::resolve(&cli.ns)?;
+    let describing = zk2::describing(&dep, &cli.contracts)?;
     let session = dep.session().await?;
-    let catalog = zk2::presence(&dep, &session, &PresenceScope::all()).await?;
+    let catalog = zk2::presence_through(&dep, &session, &PresenceScope::all(), &describing).await?;
     let graph = catalog.graph();
     if cli.dot {
         // A foreign schema: Graphviz's, not one of zenctl's renderings

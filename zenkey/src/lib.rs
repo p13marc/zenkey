@@ -11,6 +11,7 @@
 //! | [`hostid`]: a system minted from the machine id, once per run | `hostid.v1` §2.3–§2.8, §2.13 |
 //! | [`service`]: bring-up, the descriptor, tokens, epochs, members | §1.5, §3.3, §8.1–§8.2 |
 //! | [`presence`]: reading tokens and descriptors | §8.1 |
+//! | [`standard`]: the standard contracts embedded, every reader's own, so a first-hop owner's compact descriptor reads through the catalog alone | §3.3, §8.4; §10 |
 //! | [`retrieval`]: fetching a contract bundle | §8.4 |
 //! | [`writer`]: the contract's QoS and `Encoding` on every sample; events | §2.4–§2.6, §7.2 |
 //! | [`budget`]: a new member refused at the bound, an occurrence beyond the rate (#741) | §2.7 |
@@ -175,6 +176,8 @@ pub mod run;
 pub mod service;
 #[cfg(feature = "zenoh")]
 pub mod shm;
+#[cfg(feature = "zenoh")]
+pub mod standard;
 #[cfg(feature = "zenoh")]
 pub mod state;
 pub mod telemetry;

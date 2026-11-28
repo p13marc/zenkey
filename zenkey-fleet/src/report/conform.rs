@@ -43,8 +43,9 @@ use super::judgement::Judgement;
 #[serde(rename_all = "kebab-case")]
 pub enum CaseId {
     /// The bundle the descriptor names is served by a holder and verifies
-    /// (§8.2, §8.4): an owner holds the bundle of every interface it
-    /// implements.
+    /// (§8.2, §8.4): an owner off a first hop holds the bundle of every
+    /// interface it implements. One on a first hop holds none (§8.4), so
+    /// none served is not asked of it.
     ContractServed,
     /// An exposed stream, state or event resource is served: a sample in
     /// the window, or a state reply (§8.2, §3.3).

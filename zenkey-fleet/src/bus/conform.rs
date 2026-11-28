@@ -136,6 +136,14 @@ pub struct ConformSpec {
     /// `redundancy-standby` is (text 0.4 of `redundancy.v1`, F-222). The
     /// rows themselves are marked by [`crate::report::ConformReport::skip`].
     pub skip: Skipped,
+    /// The deployment's word that the owner is on a first hop (core §8.1):
+    /// a face policy lists it on a device face (`link.v2` §2.5), which is
+    /// how a tool knows (observer §3.11). Such an owner holds no bundle
+    /// (core §8.2 step 3, §8.4), so `contract-served` asks none of it: a
+    /// holder on this side of its hop serving one passes, and none is not
+    /// asked, never the owner's violation. A tool told nothing reads the
+    /// owner as any owner.
+    pub first_hop: bool,
 }
 
 /// The cases a run skips, as a set over [`CaseId`]: `Copy`, as
@@ -305,7 +313,8 @@ pub struct ConformObservation {
     /// revision could be told from the descriptors.
     pub served: Option<std::result::Result<ContractState, String>>,
     /// The revision the suite decodes with: the one served, else the one
-    /// `--contracts` holds.
+    /// `--contracts` holds, else the standard one every tool holds compiled
+    /// in (`model::standard`).
     pub revision: Option<Arc<Revision>>,
     /// Each exposed stream, state and event resource's subscription.
     pub heard: BTreeMap<String, std::result::Result<Heard, String>>,
@@ -764,9 +773,15 @@ async fn suite(
         .fetch(session, &obs.iface, &fp)
         .await
         .map_err(|e| crate::one_line(&e));
+    // None served: the revision --contracts holds, or the standard one
+    // every tool holds compiled in, which a first-hop owner's deployment
+    // gives each reader for want of a holder (core §8.4).
     obs.revision = match &served {
         Ok(ContractState::Held(r)) => Some(Arc::clone(r)),
-        _ => offline.get(&obs.iface, &fp).cloned(),
+        _ => offline
+            .get(&obs.iface, &fp)
+            .or_else(|| crate::model::standard::revision(&obs.iface, &fp))
+            .cloned(),
     };
     obs.served = Some(served);
     let Some(rev) = obs.revision.clone() else {
@@ -1754,6 +1769,7 @@ mod tail_tests {
                 ..Default::default()
             },
             skip: Skipped::default(),
+            first_hop: false,
         }
     }
 

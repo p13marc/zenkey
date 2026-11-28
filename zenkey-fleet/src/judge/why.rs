@@ -719,8 +719,9 @@ impl<'o> Ladder<'o> {
                 CONTRACT,
                 format!(
                     "{iface} {fp} is unavailable: no holder served a bundle that verified ({}) — \
-                     an owner MUST hold the bundle of every interface it implements (§8.2), and \
-                     a tool never decodes with an unverified one",
+                     an owner off a first hop MUST hold the bundle of every interface it \
+                     implements (§8.2), a first-hop owner's deployment holds it on this side of \
+                     the hop (§8.4), and a tool never decodes with an unverified one",
                     if refused.is_empty() {
                         "no reply".to_owned()
                     } else {
@@ -812,7 +813,9 @@ impl<'o> Ladder<'o> {
                 RungId::Contract,
                 CONTRACT,
                 format!(
-                    "{}: an owner MUST hold the bundle of every interface it implements (§8.2)",
+                    "{}: an owner off a first hop MUST hold the bundle of every interface it \
+                     implements (§8.2), and a first-hop owner's deployment holds it on this side \
+                     of the hop (§8.4)",
                     bad.join("; ")
                 ),
             )

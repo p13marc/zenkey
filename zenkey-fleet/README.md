@@ -133,60 +133,63 @@ Explorer *configuration* — named connection contexts, `~/.config`, the
 completion cache — is not here; it lives in `zenkey-explorer-config`, so a
 library consumer of this crate does not pay for `dirs` and `toml`.
 
-## Changes since 0.21
+## Changes since 0.22
 
-- **The wire breaks 0.21's: an event's key ends in its owner's run and
-  seq** (core 0.101 to 0.105,
-  [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C2).
-  - A key that ends in a ULID is no zk2 key: the lens reads it raw, and no
-    event replay keeps it.
-  - An event's time is form 4's, read under its owner's epoch by
-    `model::occurrence` (`event_time`, `OccurrenceTime`, `time_of`,
-    `words`). `tape::{mock, generate}` key each event by run and seq.
-  - A watch, through the runtime's `Consumer`, shows a sample on an
-    events key that carries no event, a put or a delete, as undecodable,
-    `form`, never as a sample (core 0.104 and 0.105).
-  - A `reply_del` is a stray by the owner's revision under its run,
-    retrieved where the tool holds another (core 0.102,
-    [#1094](https://git.marcpardo.eu/marcpardo/zenkey/issues/1094)).
-- **`.zrec` version 4**
-  ([#990](https://git.marcpardo.eu/marcpardo/zenkey/issues/990)'s V4).
-  `ZREC_VERSION` is 4, and `ZREC_READS` reads 1 to 4; a 0.21 reader
-  refuses a version-4 file. `ZrecHeader` gains `catalog`, `revisions` and
-  `bundles` (`ZrecCatalog`, `ZrecAncestor`, `ZrecRevision`,
-  `ZrecBundle`), so a capture resolves offline as its live window did
-  (`model::recorded::Recorded`, `Lens::recorded`). `read_header` refuses
-  a header by its token (`HeaderRefusal`), and `reader_catalogs` reads a
-  given `--catalog` against the recorded one. `TriggerSpec` gains `served`
-  and `catalogs`.
-- **Dated values and bounds** (the tooling guide's O8, #990's V3):
-  `model::deployment::Dating` (`Catalogs::dating`, `Lens::dating_of`)
-  dates a time in UTC under the epoch it names (`report::Dated`,
-  `DatedEpoch`), and `model::frame::bound_of` gives a field's bound
-  (`report::Bound`). `bus::consume::{get_state, last_known, watch}` and
-  their `_in` forms take an `impl Into<Dating>`, which an `Epoch` still
-  is.
-- **The doctor, `watch` and `field`** (#990's V5, V6 and V2c):
-  - `CheckId::ALL` holds 37 checks, `packed-refused` and
-    `state-unconfirmed` added (`StateStamps::{packed_read,
-    packed_refused, confirmations}`, `EntryConfirmed`);
-  - `WatchConfirmation` gains `lost`, `diverged` and `absent`,
-    `WatchSummary` gains `heartbeats`, `heartbeats_lost` and
-    `heartbeats_diverged`, and `WatchSample` gains `occurred`;
-  - `FieldRow` and `PathStats` gain `absent` and `unknown`, and
-    `FieldObservation::observe_record` reads a frame's records
-    (`RecordField`).
-- **The catalog and the face in every reader**
-  ([#1087](https://git.marcpardo.eu/marcpardo/zenkey/issues/1087), #990's
-  V7 and V8):
-  - `HealthSpec`, `AlarmSpec` and `WatchdogSpec` gain `catalogs`, which
-    date a snapshot's confirmations; `HealthSpec` and `AlarmSpec` are no
-    longer `Copy`;
-  - `run_conform` takes the `&Catalogs` too;
-  - `watch_resource_across` (`bus::consume::watch_across`) watches
-    through a face's far side;
-  - `Publication::retire_with` deletes with an attachment, so a replayed
-    delete's stamp rides.
+- **The wire breaks 0.22's, as the runtime's does:** a 0.22 tool refuses
+  a 0.23 owner's descriptor that states no `minor` (core 0.107), and
+  reads no compact one (core 0.120,
+  [#980](https://git.marcpardo.eu/marcpardo/zenkey/issues/980)'s C5).
+  Move the tools before the owners. Every reader here reads both forms:
+  a compact descriptor through the catalogs it was given and each
+  revision it names, held or retrieved, and never guessed; the standard
+  revisions `zenkey` embeds are every reader's own (`model::standard`),
+  so a first-hop owner, which holds no bundle, reads without them given
+  (core §8.4). One not read is
+  `report::presence::DescriptorAnswer::Unread` and
+  `model::catalog::DescriptorRead::Unread`, with why (`unknown_catalog`,
+  `unknown_revision`), and the read is not complete.
+- **The readers' transport by their routers' binding**
+  ([#1011](https://git.marcpardo.eu/marcpardo/zenkey/issues/1011)):
+  `ConformSpec`, `AlarmSpec`, `BookSpec`, `TelemetrySpec`, `TimingSpec`
+  and `ArbitrationSpec` hold `routers: budget::Routers` in place of
+  `lease` and `wait_before_close`, and `WatchdogSpec` and `TriggerSpec`
+  gain `routers`. `--binding` names it on the tools, `zenoh-1.10.2`
+  among the bindings
+  ([#1165](https://git.marcpardo.eu/marcpardo/zenkey/issues/1165)).
+- **The owner heartbeat, read**
+  ([#1110](https://git.marcpardo.eu/marcpardo/zenkey/issues/1110),
+  observer 0.34): a watch reads each group (`WatchConfirmation::group`),
+  `tape::generate` writes one (`GenSpec::owner_heartbeat`), and the
+  plans weigh it (`report::acl::ServiceSpec::owner_heartbeat`;
+  `owner_heartbeat_denied` behind a `link.v1` face, #1145).
+  `FaceCheck` gains `warnings`, `face_warnings` and `refusals`.
+- **The catalog in more readers:** `TelemetrySpec`, `TimingSpec`,
+  `ArbitrationSpec`, `DesiredSpec` and `RedundancySpec` gain `catalogs`;
+  `bus::consume::watch_across` (`watch_resource_across`) takes the
+  `&Catalogs` and a `WatchReads { far, across_face, timeout }`
+  ([#1146](https://git.marcpardo.eu/marcpardo/zenkey/issues/1146));
+  `get_config_records` and `observe_why` take the `&Catalogs` too, and
+  `bus::presence::describe_where` what it describes through.
+- **Four profiles' second majors, read beside the first:** `health.v2`
+  (`HealthSpec::contracts`, `HealthGet::v2`, `HealthWindow::{heard_v2,
+  status_v2}`, `ServiceReading::horizon`, and each health row's `word`),
+  `alarms.v2` (`AlarmSpec::{contracts, face_major}`, `BookSpec::face_major`,
+  and each alarm row's `profile`, `slot`, `words` and `record`),
+  `desired.v2` (`report::desired::DesiredCurrentState::{Unstamped,
+  Entry, Tombstone, NoEntry}`, and each desired row's `profile`) and
+  `redundancy.v2` (`RedundancyRow::majors`, `Governed::majors`;
+  `judge::redundancy::row` takes each instance's run).
+- **Grown or changed, and what to write instead:**
+  - a report or spec struct written field by field needs its new
+    members, above, and `ConformSpec::first_hop` (the face policy's word
+    that the owner is on a first hop, so `contract-served` asks it no
+    bundle, core §8.4);
+  - `TelemetrySpec` is no longer `Copy`, and `bus::health::ServiceHeard`
+    gains private fields, so no literal builds it;
+  - `TimingBook::seed` and `owed_read`, and `ViewBook::sample` and `read`,
+    take one argument more; `ViewBook::described` is gone.
+- **Unchanged:** `.zrec` stays at version 4, and the doctor at its 37
+  checks.
 
 ## What 0.22 does not promise
 

@@ -934,12 +934,16 @@ pub enum Found {
 
 /// What a reader holds to read a compact descriptor (core §3.3,
 /// "Reading"): the deployment catalogs it was given (§8.6) and the
-/// revisions in hand. A compact descriptor's head and catalog name every
-/// revision the rest needs, so a reader [`Held::retrieving`] retrieves one
-/// it lacks by its fingerprint (§8.4) before it reads the rest. Without a
-/// catalog a compact descriptor is [`Found::Unread`] (`unknown_catalog`),
-/// never guessed. [`Held::default`] holds nothing: what [`descriptor()`]
-/// reads with. The JSON form needs none of it.
+/// revisions in hand, the standard contracts this crate embeds among them
+/// ([`crate::standard`]): an owner on a first hop holds no bundle, and its
+/// deployment provisions them to each reader (§8.4), so one a compact
+/// descriptor names is never retrieved. A compact descriptor's head and
+/// catalog name every revision the rest needs, so a reader
+/// [`Held::retrieving`] retrieves one it lacks by its fingerprint (§8.4)
+/// before it reads the rest. Without a catalog a compact descriptor is
+/// [`Found::Unread`] (`unknown_catalog`), never guessed. [`Held::default`]
+/// holds no catalog: what [`descriptor()`] reads with. The JSON form needs
+/// none of it.
 #[derive(Debug, Clone, Default)]
 pub struct Held {
     catalogs: Arc<Vec<Catalog>>,
@@ -974,10 +978,38 @@ impl Held {
         &self.catalogs
     }
 
-    /// The revisions held.
+    /// The revisions held, as given: the standard contracts a compact
+    /// descriptor names are read beside them ([`crate::standard`]).
     #[must_use]
     pub fn revisions(&self) -> &[Arc<Contract>] {
         &self.revisions
+    }
+
+    /// The revisions held, and the standard contracts a compact `served`
+    /// names through the catalogs held that they lack (§8.4); with the
+    /// pairs it names that neither holds, which a reader that retrieves
+    /// asks for.
+    fn with_standard(&self, served: &Served) -> (Vec<Arc<Contract>>, Vec<(IfaceId, Fingerprint)>) {
+        let mut revisions = self.revisions.clone();
+        let mut lacked = Vec::new();
+        if served.form != Form::Compact {
+            return (revisions, lacked);
+        }
+        let held: Vec<(&IfaceId, Fingerprint)> = self
+            .revisions
+            .iter()
+            .map(|c| (&c.iface, Fingerprint::of(c)))
+            .collect();
+        for (iface, fp) in served.names(&self.catalogs) {
+            if held.iter().any(|(i, f)| **i == iface && *f == fp) {
+                continue;
+            }
+            match crate::standard::contract(&iface, &fp) {
+                Some(c) => revisions.push(c),
+                None => lacked.push((iface, fp)),
+            }
+        }
+        (revisions, lacked)
     }
 }
 
@@ -1200,19 +1232,18 @@ pub(crate) async fn decode_held(
     served.decode(addr, instance, &held.catalogs, &revisions)
 }
 
-/// The revisions `held` holds, and those a compact `served` names that it
-/// lacks, retrieved where it retrieves.
+/// The revisions `held` holds, the standard ones a compact `served` names,
+/// and those it names that neither holds, retrieved where it retrieves.
 async fn held_for(
     session: &zenoh::Session,
     served: &Served,
     held: &Held,
     timeout: Duration,
 ) -> Vec<Arc<Contract>> {
-    let mut revisions = held.revisions.clone();
-    if held.retrieve && served.form == Form::Compact {
-        let named = served.names(&held.catalogs);
+    let (mut revisions, lacked) = held.with_standard(served);
+    if held.retrieve && !lacked.is_empty() {
         revisions
-            .extend(crate::retrieval::revisions(session, &named, &held.revisions, timeout).await);
+            .extend(crate::retrieval::revisions(session, &lacked, &held.revisions, timeout).await);
     }
     revisions
 }
@@ -1220,7 +1251,8 @@ async fn held_for(
 /// A descriptor put heard on an instance key (core §3.3: an owner puts
 /// each it serves), read by its form through what `held` holds, here and
 /// now: no revision is retrieved, since a subscriber's callback cannot
-/// wait, so a compact one naming a revision `held` lacks is
+/// wait, so a compact one naming a revision `held` lacks, and no standard
+/// one ([`crate::standard`]), is
 /// [`Found::Unread`] and its reader asks [`descriptor_held`] instead.
 /// `None` for a delete or a key that is no instance key.
 #[must_use]
@@ -1231,8 +1263,10 @@ pub fn heard(sample: &zenoh::sample::Sample, held: &Held) -> Option<(Addr, Insta
     let Ok(ZkKey::Instance { addr, instance }) = parse(sample.key_expr().as_str()) else {
         return None;
     };
-    let revisions: Vec<&Contract> = held.revisions.iter().map(|c| &**c).collect();
-    let found = Served::of(sample).read(&addr, &instance, &held.catalogs, &revisions);
+    let served = Served::of(sample);
+    let (revisions, _) = held.with_standard(&served);
+    let revisions: Vec<&Contract> = revisions.iter().map(|c| &**c).collect();
+    let found = served.read(&addr, &instance, &held.catalogs, &revisions);
     Some((addr, instance, found))
 }
 

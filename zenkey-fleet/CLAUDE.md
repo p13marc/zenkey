@@ -1125,6 +1125,39 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   `why`'s last-known rung reading the compact bit, an owner kept present and
   silent by a twin holding its tokens and descriptor. Its archives watch a
   router no owner reaches, so they align only when asked.
+
+  rc-023's part B (#975): a first hop read with the catalog alone (core
+  §8.4, a deployment provisions its bundles to each reader).
+  `model::standard` holds the six bundles `zenkey` embeds (`health.v1`,
+  `health.v2`, `freshness.v2`, `alarms.v1`, `alarms.v2`, `config.v1`) as
+  revisions, read from `zenkey::standard`'s one list, its test checking
+  the two agree. `Describing::read` takes a
+  standard revision a compact descriptor names from there, never retrieved,
+  and holds it in the store (`BundleStore::hold`, `pub(crate)`), so the
+  doctor's checks after the read have it; every other revision is the
+  store's, held or retrieved, and one none has stays `unknown_revision`.
+  `OwnerRevisions`' `described`, a `zenkey::presence::Held`, reads them
+  as every runtime `Held` does, and the lens's #990 heartbeat revision is
+  `standard`'s. The doctor's `contract-unavailable`
+  counts the revisions `--contracts` gave, never retrieved (§8.5), in its
+  summary; a standard revision held compiled in (`standard::is_compiled`,
+  by pointer, so a copy `--contracts` gave is not one) is asked of the
+  holders all the same where an owner off a first hop names it
+  (`DoctorObservation::holders`, a store of their own), and counted the
+  reader's own, §8.4, only where devices `DoctorSpec::first_hop` lists
+  name it alone; a bundle no holder serves of such a device is a warning,
+  the deployment's (§8.4), where any other owner's is the error (§8.2). `ConformSpec::first_hop`
+  (the face policy's word, observer §3.11): `contract-served` passes a
+  first hop's bundle a near-side holder serves and does not ask one none
+  serves; `bus::conform::observe` judges against `--contracts`, else the
+  standard revision, where none is served. `why`'s contract rung cites
+  §8.2 for an owner off a first hop. Tests: `standard`'s two,
+  `judge::conform`'s
+  `contract_served_asks_no_bundle_of_an_owner_on_a_first_hop`,
+  `judge::doctor`'s
+  `a_first_hop_owners_bundle_no_holder_serves_is_the_deployments_warning`
+  and `a_compiled_in_standard_revision_is_asked_of_an_off_hop_owners_holders`,
+  zenctl's `a_first_hop_owner_reads_with_the_catalog_alone`.
 - **`frame_over_batch` and `block_over_batch`'s words** (`model/acl.rs`'s
   `link_says`, #1136): a largest frame or longest put that does not fit one
   batch with what zenoh writes beside it (link.v1 0.22 §2.8), which `acl gen

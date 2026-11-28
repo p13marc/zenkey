@@ -38,7 +38,10 @@
 //! ([`face_scope`], observer §7.5, #990 V1); with no descriptor in hand,
 //! the revision of a key is the deployment's word, then CH's tag
 //! ([`choice`], #990 V2a). A `.zrec` version-4 header stands in presence's
-//! place for a capture read offline ([`recorded`], #990 V4).
+//! place for a capture read offline ([`recorded`], #990 V4). The standard
+//! revisions `zenkey` embeds are every tool's own, held with no
+//! `--contracts`, so a first-hop owner's compact descriptor reads with the
+//! deployment catalog alone ([`standard`], core §8.4).
 //!
 //! The rest is generation-neutral: a stream of samples becomes rates and
 //! latencies ([`stats`]) or a tree ([`tree`]), two payloads become a diff
@@ -104,6 +107,7 @@ pub mod retain;
 pub mod skeleton;
 pub mod snapshot;
 pub mod snapshot_diff;
+pub mod standard;
 pub mod stats;
 pub mod storage;
 pub mod structural;

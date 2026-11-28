@@ -1193,20 +1193,20 @@ pub fn template_chunks(kind: zenkey_model::grammar::KindToken, chunks: &[String]
 }
 
 /// `freshness.v2`'s standard revision, the bundle `zenkey` embeds byte for
-/// byte (freshness.v2 §3), for `iface` when it is `freshness.v2`: what a
-/// tool holds of a heartbeat's own key with no contract given for it
-/// (#990). Its body is read with the covered revision all the same
-/// (observer §7.5).
+/// byte (freshness.v2 §3; [`crate::model::standard`]), for `iface` when it
+/// is `freshness.v2`: what a tool holds of a heartbeat's own key with no
+/// contract given for it (#990). Its body is read with the covered
+/// revision all the same (observer §7.5).
 fn standard_revision(iface: &IfaceId) -> Option<Arc<Revision>> {
-    static FRESHNESS_V2: std::sync::LazyLock<Arc<Revision>> = std::sync::LazyLock::new(|| {
-        let bundle = zenkey_model::bundle::Bundle::verify(zenkey::heartbeat::BUNDLE)
-            .expect("the published freshness.v2 bundle verifies");
-        Arc::new(
-            Revision::from_bundle(bundle, crate::report::ContractSource::Bundle)
-                .expect("the published freshness.v2 bundle reads"),
-        )
-    });
-    (iface.to_string() == zenkey_model::heartbeat::PROFILE).then(|| Arc::clone(&FRESHNESS_V2))
+    if iface.to_string() != zenkey_model::heartbeat::PROFILE {
+        return None;
+    }
+    let fp = zenkey_model::canonical::Fingerprint::parse(&format!(
+        "sha256:{}",
+        zenkey::heartbeat::FINGERPRINT
+    ))
+    .expect("the published freshness.v2 fingerprint parses");
+    crate::model::standard::revision(iface, &fp).cloned()
 }
 
 /// A control key's address and form.

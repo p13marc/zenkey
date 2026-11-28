@@ -112,13 +112,21 @@ impl BundleStore {
     /// side with no holder). A revision already held is kept.
     pub fn seed(&self, set: &ContractSet) {
         for r in set.iter() {
-            let key = (r.iface().clone(), r.fingerprint().clone());
-            let held = self
-                .cached(&key, false)
-                .is_some_and(|(s, _)| s.revision().is_some());
-            if !held {
-                self.put(key, ContractState::Held(Arc::clone(r)));
-            }
+            self.hold(r);
+        }
+    }
+
+    /// Holds `revision`, as [`BundleStore::seed`] holds each of a set's: a
+    /// revision already held is kept. What a compact descriptor was read
+    /// with, a standard revision this reader holds compiled in, is held so
+    /// (`bus::presence::Describing`).
+    pub(crate) fn hold(&self, revision: &Arc<Revision>) {
+        let key = (revision.iface().clone(), revision.fingerprint().clone());
+        let held = self
+            .cached(&key, false)
+            .is_some_and(|(s, _)| s.revision().is_some());
+        if !held {
+            self.put(key, ContractState::Held(Arc::clone(revision)));
         }
     }
 

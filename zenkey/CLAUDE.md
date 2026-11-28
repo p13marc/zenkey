@@ -1028,6 +1028,19 @@ v1's `zenkey` (0.11.x on crates.io) is the `v1` branch's, and that branch's
   catalog-less: the pub `presence::descriptor`, `answer::owner_revision`
   and `owner_catalog`, which read either form and leave a compact one
   unread.
+
+  rc-023's part B (#975, core §8.4): `standard` (new, `pub`) is the one
+  list of the six embedded standard contracts (`implementations()`,
+  `contract(iface, fp)`), its test pinning it to `bundles/`, and the
+  fleet's `model::standard` reads it. `Held` reads every standard contract
+  a compact descriptor names beside its revisions, never retrieved
+  (`Held::with_standard`, used by `held_for` and `heard`; `revisions()`
+  stays what was given), so a consumer holding only its own contract and
+  the catalog reads a first-hop device's descriptor and binds where it
+  retrieved `health.v1` and `freshness.v2` from no holder before.
+  `tests/compact_descriptor.rs`'s
+  `a_consumer_holding_its_own_contract_binds_a_first_hop_device`, over
+  the runtime's own first-hop owner of `health.v1` and `ping.v1`.
   `tests/compact_descriptor.rs`' `a_client_and_a_put_read_the_compact_form`.
 
   C5c (#980, core 0.120's §8.1 SHOULD): the owner writes the compact form.

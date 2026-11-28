@@ -207,6 +207,108 @@ async fn serving_reads_a_tokenless_provider_by_its_compact_descriptor() {
     );
 }
 
+/// A consumer of a first-hop device's own interface (core §8.4; rc-023's
+/// part B): `lab/hop`, the runtime's owner on its first hop given the
+/// catalog, implements `health.v1`, which uses `freshness.v2`, and
+/// `ping.v1`. It writes its descriptor compact, all three tokenless, and
+/// holds no bundle, nor does anyone else. A consumer of `ping.v1` holding
+/// only its own contract and the catalog reads the descriptor, the two
+/// standard contracts this crate's own (`zenkey::standard`), and binds:
+/// the device serves, the read complete. Before, it retrieved them from
+/// no holder, and the device was undescribed, never bound.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_consumer_holding_its_own_contract_binds_a_first_hop_device() {
+    use zenkey::{Implementation, ServiceBuilder, ServiceConfig};
+    const HOP: &str = "lab/hop";
+    let (_r, ep) = router(None).await;
+    let (device, ground) = (client(&ep).await, client(&ep).await);
+    let ping = contract("ping.v1");
+    let fp = |hex: &str| Fingerprint::parse(&format!("sha256:{hex}")).expect("a fingerprint");
+    let mut catalog = Catalog::new(0).expect("a catalog");
+    for (iface, f) in [
+        (zenkey::health::iface(), fp(zenkey::health::FINGERPRINT)),
+        (
+            zenkey::heartbeat::iface(),
+            fp(zenkey::heartbeat::FINGERPRINT),
+        ),
+        (ping.iface.clone(), Fingerprint::of(&ping)),
+    ] {
+        catalog.push(iface, f).expect("an entry");
+    }
+    let mut b = ServiceBuilder::new(&device, ServiceConfig::new(addr(HOP)).first_hop());
+    b.catalog(catalog.clone()).expect("the catalog first");
+    let health = b.health().await.expect("health.v1");
+    b.implement(Implementation::new(ping.clone()))
+        .expect("ping.v1");
+    for r in &ping.resources {
+        let _ = b.expose(&ping.iface, &zenkey::implementation::resource_name(r));
+    }
+    let svc = b.start().await.expect("lab/hop starts");
+    assert_eq!(
+        svc.descriptor_form(),
+        Form::Compact,
+        "a first hop given a catalog"
+    );
+
+    let consumer = Consumer::for_tool(&ground, Arc::new(ping.clone()), &[HOP], &BTreeMap::new())
+        .expect("a consumer")
+        .with_catalogs([catalog.clone()]);
+    eventually("the device serves, its descriptor read", || async {
+        consumer
+            .presence(T)
+            .await
+            .is_ok_and(|p| p.complete && p.providers == vec![addr(HOP)])
+    })
+    .await;
+    assert_eq!(
+        consumer.wait_for_provider(T).await.expect("a read"),
+        Some(addr(HOP)),
+        "bound"
+    );
+
+    // What it read: every interface, from its own contract, the standard
+    // two and the catalog; no holder of any bundle answered.
+    let held = Held::new(Arc::new(vec![catalog]), vec![Arc::new(ping)]).retrieving();
+    match presence::descriptor_held(&ground, &addr(HOP), svc.instance(), &held, T)
+        .await
+        .expect("a GET")
+    {
+        Found::Descriptor(d, _) => {
+            let listed: std::collections::BTreeSet<(String, bool)> = d
+                .interfaces
+                .iter()
+                .map(|e| (e.iface.clone(), e.token))
+                .collect();
+            assert_eq!(
+                listed,
+                [
+                    ("freshness.v2", false),
+                    ("health.v1", false),
+                    ("ping.v1", false)
+                ]
+                .map(|(i, t)| (i.to_owned(), t))
+                .into(),
+            );
+        }
+        other => panic!("read through its own contract and the catalog: {other:?}"),
+    }
+    let replies = ground
+        .get("zk2/@zk/contract/**")
+        .timeout(T)
+        .await
+        .expect("a GET");
+    let mut served = 0;
+    while let Ok(r) = replies.recv_async().await {
+        served += usize::from(r.result().is_ok());
+    }
+    assert_eq!(
+        served, 0,
+        "a first hop holds no bundle, and nobody else does"
+    );
+    drop(health);
+    svc.close().await.expect("close");
+}
+
 /// `answer::owner_revision_held`: the descriptor stating the snapshot's
 /// run names the revision, in either form; a compact one read through no
 /// catalog is no word (`Unread`), never a guess.

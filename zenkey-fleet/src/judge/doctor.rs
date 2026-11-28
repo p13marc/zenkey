@@ -279,6 +279,13 @@ pub struct DoctorObservation {
     pub after: Option<Result<Observed, String>>,
     /// What asking for each revision the descriptors name found.
     pub contracts: BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
+    /// The holders' answer for each standard revision this reader holds
+    /// compiled in (`model::standard`) that an owner off a first hop names:
+    /// asked of the bus all the same, since the reader's own copy says
+    /// nothing of whether the owner holds its bundle (core §8.2).
+    /// `contract-unavailable` reads it; empty when that check was not
+    /// asked, or no such owner names one.
+    pub holders: BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
     /// The routers' admin space.
     pub admin: Option<Result<AdminSpace, String>>,
     /// The presence domain's tokens.
@@ -644,6 +651,7 @@ pub async fn observe(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec) ->
         before: p.before,
         after: p.after,
         contracts: p.contracts,
+        holders: p.holders,
         admin,
         domain,
         archives: p.archives,
@@ -671,6 +679,7 @@ struct PresencePhase {
     before: Option<Result<Observed, String>>,
     after: Option<Result<Observed, String>>,
     contracts: BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
+    holders: BTreeMap<(IfaceId, Fingerprint), Result<ContractState, String>>,
     archives: BTreeMap<Addr, Result<ArchiveKeys, String>>,
     stamps: BTreeMap<(Addr, IfaceId), Result<StateStamps, String>>,
     health: Vec<Result<HealthGet, String>>,
@@ -771,9 +780,30 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         );
     }
     store.forget_absences();
+    // The standard revisions an owner off a first hop names (core §8.2):
+    // its holders are asked of each, through a store of their own, since
+    // the one compiled in that the read decoded with proves nothing of them.
+    let mut off_hop: BTreeSet<(IfaceId, Fingerprint)> = BTreeSet::new();
+    if spec.asks(CheckId::ContractUnavailable) {
+        let reads = std::iter::once(observed).chain(before.iter().flatten());
+        for o in reads {
+            for (a, _, d) in served(o) {
+                if spec.first_hop.contains(a) {
+                    continue;
+                }
+                off_hop.extend(d.interfaces.iter().filter_map(|e| {
+                    let pair = (
+                        IfaceId::from_str(&e.iface).ok()?,
+                        Fingerprint::parse(&e.contract).ok()?,
+                    );
+                    crate::model::standard::revision(&pair.0, &pair.1).map(|_| pair)
+                }));
+            }
+        }
+    }
     let contracts = async {
         let answers = store.fetch_all(s, &wanted).await;
-        wanted
+        let contracts = wanted
             .iter()
             .cloned()
             .zip(
@@ -781,7 +811,25 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
                     .into_iter()
                     .map(|a| a.map_err(|e| crate::one_line(&e))),
             )
-            .collect::<BTreeMap<_, _>>()
+            .collect::<BTreeMap<_, _>>();
+        let ask: Vec<(IfaceId, Fingerprint)> = off_hop
+            .iter()
+            .filter(|pair| {
+                matches!(contracts.get(*pair),
+                    Some(Ok(ContractState::Held(r))) if crate::model::standard::is_compiled(r))
+            })
+            .cloned()
+            .collect();
+        let holders = BundleStore::new(t).fetch_all(s, &ask).await;
+        let holders = ask
+            .into_iter()
+            .zip(
+                holders
+                    .into_iter()
+                    .map(|a| a.map_err(|e| crate::one_line(&e))),
+            )
+            .collect::<BTreeMap<_, _>>();
+        (contracts, holders)
     };
     let archives = async {
         if !spec.asks(CheckId::ArchiveUnaligned) {
@@ -801,7 +849,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
     let epochs = crate::bus::query::EntryEpochs::observed(&spec.catalogs, observed);
     let epochs = &epochs;
     let contracts_then_stamps = async {
-        let contracts = contracts.await;
+        let (contracts, holders) = contracts.await;
         let mut out = BTreeMap::new();
         if !spec.asks(CheckId::StateStampForeign)
             && !spec.asks(CheckId::PopulationOverBound)
@@ -811,7 +859,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             // host's: asked only on the deployment's word that they agree.
             && !(spec.asks(CheckId::StateUnconfirmed) && spec.clocks_synced)
         {
-            return (contracts, out);
+            return (contracts, holders, out);
         }
         for (addr, iface) in owners_in(observed) {
             let revision = metric_revision(observed, &contracts, &addr, &iface);
@@ -825,7 +873,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             let read = state_stamps(s, &addr, &iface, t, revision, keep, epochs).await;
             out.insert((addr, iface), read);
         }
-        (contracts, out)
+        (contracts, holders, out)
     };
     let second = async {
         if spec.asks_health() {
@@ -866,7 +914,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
             .into_iter()
             .collect::<BTreeMap<_, _>>()
     };
-    let ((contracts, stamps), archives, second, second_config, alarms, first_hop) = tokio::join!(
+    let ((contracts, holders, stamps), archives, second, second_config, alarms, first_hop) = tokio::join!(
         contracts_then_stamps,
         archives,
         second,
@@ -919,6 +967,7 @@ async fn presence_phase(bus: &DoctorBus, store: &BundleStore, spec: &DoctorSpec)
         before,
         after: Some(after),
         contracts,
+        holders,
         archives,
         stamps,
         health: readings,
@@ -2076,7 +2125,7 @@ pub fn judge(obs: &DoctorObservation, spec: &DoctorSpec) -> DoctorReport {
                 CheckId::SplitBrain => split_brain(p),
                 CheckId::BindingUnsatisfied => binding_unsatisfied(p),
                 CheckId::ContractDrift => contract_drift(p),
-                CheckId::ContractUnavailable => contract_unavailable(p),
+                CheckId::ContractUnavailable => contract_unavailable(p, spec),
                 CheckId::DescriptorInvalid => descriptor_invalid(p),
                 CheckId::TokenMissing => token_missing(p),
                 CheckId::ArchiveUnaligned => archive_unaligned(p),
@@ -2918,9 +2967,22 @@ fn classify((a, ma): (&Revision, Option<u64>), (b, mb): (&Revision, Option<u64>)
 }
 
 /// §8.4: every revision a descriptor names, as retrieval found it.
-fn contract_unavailable(p: &Presence<'_>) -> CheckReport {
+///
+/// A revision `--contracts` gave is never retrieved (§8.5), so its holders
+/// are not asked, and the summary says how many. A standard revision this
+/// reader holds compiled in (`model::standard`) is asked of the holders
+/// all the same where an owner off a first hop names it
+/// (`DoctorObservation::holders`): its holding proves nothing of the
+/// owner's. Named by first-hop devices alone, it is the reader's own, as
+/// their deployment provisions it (§8.4), and counted so. One no holder
+/// serves is the owner's finding, an error (§8.2), unless every owner
+/// naming it is a device `--face-policy` lists on a first hop
+/// (`DoctorSpec::first_hop`, observer §3.11): such an owner holds no
+/// bundle (§8.2, §8.4), so it is the deployment's, a warning, which holds
+/// it on this side of the hop or gives it to each reader (§8.4).
+fn contract_unavailable(p: &Presence<'_>, spec: &DoctorSpec) -> CheckReport {
     const C: CheckId = CheckId::ContractUnavailable;
-    let mut named: BTreeMap<(IfaceId, Fingerprint), Vec<String>> = BTreeMap::new();
+    let mut named: BTreeMap<(IfaceId, Fingerprint), Vec<(String, bool)>> = BTreeMap::new();
     for (a, i, d) in p.served() {
         for e in &d.interfaces {
             if let (Ok(iface), Ok(fp)) =
@@ -2929,39 +2991,83 @@ fn contract_unavailable(p: &Presence<'_>) -> CheckReport {
                 named
                     .entry((iface, fp))
                     .or_default()
-                    .push(format!("{a}@{i}"));
+                    .push((format!("{a}@{i}"), spec.first_hop.contains(a)));
             }
         }
     }
     let mut findings = Vec::new();
     let mut undecided = p.undescribed("the revisions it implements are unknown");
-    for ((iface, fp), by) in &named {
+    let (mut offline, mut compiled) = (0usize, 0usize);
+    for (pair, by) in &named {
+        let (iface, fp) = pair;
         let subject = format!("{iface} {fp}");
-        match p.obs.contracts.get(&(iface.clone(), fp.clone())) {
-            Some(Ok(ContractState::Held(_))) => {}
-            Some(Ok(ContractState::Unavailable { refused })) => findings.push(finding(
-                C,
-                DoctorSeverity::Error,
-                subject,
-                format!(
-                    "named by {}; no holder served a bundle that verified ({}): an owner MUST \
-                     hold the bundle of every interface it implements (§8.2), and a tool never \
-                     decodes with an unverified one",
-                    by.join(", "),
-                    if refused.is_empty() {
-                        "no reply".to_owned()
-                    } else {
-                        format!("refused: {}", refused.join(", "))
-                    }
-                ),
-            )),
+        let names = |hop: Option<bool>| {
+            by.iter()
+                .filter(|(_, h)| hop.is_none_or(|want| *h == want))
+                .map(|(s, _)| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let all_hop = by.iter().all(|(_, hop)| *hop);
+        let in_hand = p.obs.contracts.get(pair);
+        let answer = match in_hand {
+            Some(Ok(ContractState::Held(r))) if crate::model::standard::is_compiled(r) => {
+                if all_hop {
+                    compiled += 1;
+                    continue;
+                }
+                p.obs.holders.get(pair)
+            }
+            other => other,
+        };
+        match answer {
+            Some(Ok(ContractState::Held(r))) => {
+                if r.source() != crate::report::ContractSource::Bus {
+                    offline += 1;
+                }
+            }
+            Some(Ok(ContractState::Unavailable { refused })) => {
+                let replies = if refused.is_empty() {
+                    "no reply".to_owned()
+                } else {
+                    format!("refused: {}", refused.join(", "))
+                };
+                findings.push(if all_hop {
+                    finding(
+                        C,
+                        DoctorSeverity::Warning,
+                        subject,
+                        format!(
+                            "named by {}, on a first hop (--face-policy lists it on a device \
+                             face): an owner there holds no bundle (§8.2, §8.4), and no holder \
+                             on this side of its hop served one that verified ({replies}); the \
+                             deployment holds it in a holder here or gives it to each reader \
+                             (--contracts), and a tool never decodes with an unverified one",
+                            names(None)
+                        ),
+                    )
+                } else {
+                    finding(
+                        C,
+                        DoctorSeverity::Error,
+                        subject,
+                        format!(
+                            "named by {}; no holder served a bundle that verified ({replies}): \
+                             an owner off a first hop MUST hold the bundle of every interface \
+                             it implements (§8.2), and a tool never decodes with an unverified \
+                             one",
+                            names(Some(false))
+                        ),
+                    )
+                });
+            }
             Some(Ok(ContractState::Unreadable { reason })) => findings.push(finding(
                 C,
                 DoctorSeverity::Error,
                 subject,
                 format!(
                     "named by {}; a bundle verified and its contract does not read: {reason}",
-                    by.join(", ")
+                    names(None)
                 ),
             )),
             Some(Err(e)) => undecided.push(unjudged(
@@ -2971,15 +3077,24 @@ fn contract_unavailable(p: &Presence<'_>) -> CheckReport {
             None => undecided.push(unjudged(subject, "not retrieved")),
         }
     }
-    CheckReport::of(
-        C,
-        findings,
-        undecided,
-        format!(
-            "{} revision(s) named by descriptors, each retrieved from a holder and verified",
-            named.len()
-        ),
-    )
+    let mut summary = format!(
+        "{} revision(s) named by descriptors, each retrieved from a holder and verified",
+        named.len()
+    );
+    if offline > 0 {
+        summary.push_str(&format!(
+            ", or given by --contracts ({offline}), never retrieved (§8.5), so their holders \
+             were not asked"
+        ));
+    }
+    if compiled > 0 {
+        summary.push_str(&format!(
+            ", or a standard revision this reader holds compiled in ({compiled}), named by \
+             owners on a first hop alone, which hold no bundle and whose deployment gives it \
+             to each reader (§8.4)"
+        ));
+    }
+    CheckReport::of(C, findings, undecided, summary)
 }
 
 /// §3.3: every descriptor through `zenkey_model::descriptor::check`, with
@@ -6092,6 +6207,123 @@ mod tests {
         clean(&check(&o, CheckId::ContractUnavailable));
         let o = obs(one(DescriptorRead::Silent), &[], &[]);
         assert!(unseen(&check(&o, CheckId::ContractUnavailable)).contains("did not read"));
+    }
+
+    /// Core §8.2 step 3 and §8.4: an owner on a first hop holds no bundle,
+    /// and its deployment holds each on this side of the hop, in a holder
+    /// or given to each reader. No holder serving one a device the face
+    /// policy lists names is the deployment's warning, never the owner's
+    /// error; told nothing, the owner is any owner. A revision this reader
+    /// holds (`--contracts`, a standard one) was never retrieved, and the
+    /// summary says its holders were not asked.
+    #[test]
+    fn a_first_hop_owners_bundle_no_holder_serves_is_the_deployments_warning() {
+        let c = tc(0, false, false);
+        let observed_one = || {
+            observed(
+                &[inst("h1/tc", A)],
+                vec![(("h1/tc", A), descriptor("h1/tc", A, &[entry(&c)], &[]))],
+            )
+        };
+        let hop = DoctorSpec {
+            first_hop: crate::model::first_hop::FirstHop::default()
+                .with("h1/tc".parse().unwrap(), "rf"),
+            ..spec()
+        };
+        let o = obs(observed_one(), &[], &[&c]);
+        let r = judge(&o, &hop)
+            .check(CheckId::ContractUnavailable)
+            .expect("asked")
+            .clone();
+        let f = found(&r);
+        assert_eq!(f.severity, DoctorSeverity::Warning, "{f:?}");
+        assert!(
+            f.evidence.contains("on a first hop") && f.evidence.contains("--contracts"),
+            "{f:?}"
+        );
+        let f = found(&check(&o, CheckId::ContractUnavailable)).clone();
+        assert_eq!(f.severity, DoctorSeverity::Error, "told nothing: {f:?}");
+        assert!(
+            f.evidence.contains("an owner off a first hop MUST hold"),
+            "{f:?}"
+        );
+
+        let mut o = obs(observed_one(), &[], &[]);
+        let r = Revision::from_contract(c.clone(), ContractSource::File);
+        o.contracts.insert(
+            (c.iface.clone(), fp(&c)),
+            Ok(ContractState::Held(Arc::new(r))),
+        );
+        let summary = clean(&check(&o, CheckId::ContractUnavailable));
+        assert!(
+            summary.contains("given by --contracts (1), never retrieved (§8.5)")
+                && summary.contains("not asked"),
+            "{summary}"
+        );
+    }
+
+    /// The standard revision this reader holds compiled in decodes a
+    /// descriptor, and says nothing of the owner (core §8.2): named by an
+    /// owner off a first hop, its holders are asked all the same
+    /// (`DoctorObservation::holders`), and none serving it is the owner's
+    /// error, as before the reader held it; one serving it is clean. Named
+    /// by a device the face policy lists alone, it is the reader's own, its
+    /// deployment's to give each reader (§8.4): no finding, no holder
+    /// asked, and the summary cites §8.4, never §8.5.
+    #[test]
+    fn a_compiled_in_standard_revision_is_asked_of_an_off_hop_owners_holders() {
+        let iface = zenkey::health::iface();
+        let fp_std = Fingerprint::parse(&format!("sha256:{}", zenkey::health::FINGERPRINT))
+            .expect("a fingerprint");
+        let compiled = crate::model::standard::revision(&iface, &fp_std).expect("health.v1's");
+        let c = compiled.shared_contract();
+        assert_eq!(fp(&c), fp_std);
+        let observed_one = || {
+            observed(
+                &[inst("h1/tc", A)],
+                vec![(("h1/tc", A), descriptor("h1/tc", A, &[entry(&c)], &[]))],
+            )
+        };
+        let pair = (iface.clone(), fp_std.clone());
+        let with = |holders: Option<ContractState>| {
+            let mut o = obs(observed_one(), &[], &[]);
+            o.contracts
+                .insert(pair.clone(), Ok(ContractState::Held(Arc::clone(compiled))));
+            if let Some(h) = holders {
+                o.holders.insert(pair.clone(), Ok(h));
+            }
+            o
+        };
+
+        let o = with(Some(ContractState::Unavailable { refused: vec![] }));
+        let f = found(&check(&o, CheckId::ContractUnavailable)).clone();
+        assert_eq!(f.severity, DoctorSeverity::Error, "{f:?}");
+        assert!(
+            f.evidence.contains("an owner off a first hop MUST hold")
+                && f.evidence.contains("named by h1/tc@"),
+            "{f:?}"
+        );
+        let served = Revision::from_contract((*c).clone(), ContractSource::Bus);
+        let o = with(Some(ContractState::Held(Arc::new(served))));
+        let summary = clean(&check(&o, CheckId::ContractUnavailable));
+        assert!(!summary.contains("compiled in"), "{summary}");
+
+        let hop = DoctorSpec {
+            first_hop: crate::model::first_hop::FirstHop::default()
+                .with("h1/tc".parse().unwrap(), "rf"),
+            ..spec()
+        };
+        let r = judge(&with(None), &hop)
+            .check(CheckId::ContractUnavailable)
+            .expect("asked")
+            .clone();
+        let summary = clean(&r);
+        assert!(
+            summary.contains("compiled in (1)")
+                && summary.contains("(§8.4)")
+                && !summary.contains("§8.5"),
+            "{summary}"
+        );
     }
 
     // ── descriptor-invalid (§3.3) ───────────────────────────────────────

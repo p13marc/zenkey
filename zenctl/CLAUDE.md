@@ -677,6 +677,29 @@ Claude Code loads this file when working in `zenctl/`; the root `CLAUDE.md` is t
   (`help-admin.trycmd` re-blessed). `live_zk2.rs`'s
   `why_reads_a_compact_descriptor_through_the_catalog`.
 
+  rc-023's part B (#975), on zenoh-modem's path: a first-hop device reads
+  with `--catalog` alone, the standard revisions every tool's own
+  (`zenkey_fleet::model::standard`, core §8.4). `zk2::describing` (moved
+  from `cmd/service.rs`) is every verb's; `doctor` gains `--contracts`
+  (its run's store seeded, `contract-unavailable` saying what it held;
+  a compiled-in standard revision still asked of the holders for an owner
+  `--face-policy` does not list),
+  and `iface list` and `graph` gain `ContractArgs`, while `iface show`
+  now reads through its `--catalog` (`help-doctor`, `help-iface`,
+  `help-wire` re-blessed). `cache refresh` still reads none: it remembers
+  addresses. `check conform --face-policy`: a device its device faces list
+  is on a first hop (`zk2::devices_listed`, no refusal of a policy with
+  none), so `contract-served` asks it no bundle (core §8.2, §8.4; the
+  case's help in `check-conform.trycmd`). `check face`'s transport rows
+  show `wait_before_close_ms` in ms, as the policy's key names it
+  (`render/impls/acl.rs`'s `in_policy_units`, link.v2 §2.18), the JSON
+  rows still in zenoh's units beside `path` (`check-face.trycmd`).
+  `live_zk2.rs`'s `a_first_hop_owner_reads_with_the_catalog_alone`: a
+  runtime owner on its first hop (`health.v1`, `meter.v1`), `unknown_revision`
+  until a near-side holder serves `meter.v1` or `doctor --contracts` gives
+  it, then `service show`, the doctor and `telemetry` with `--catalog`
+  alone, and `check conform … health.v1` with and without a device policy.
+
   C3 (#980): `get state --last-known` reads through `--catalog`
   (`last_known_state_through`); `sample::attachment_display_at` and
   `attachment_json_at` (the keyed renderers, which replaced the unkeyed

@@ -214,14 +214,14 @@ face radio: interval_over_horizon radio.v1/stream/air/dropped_total: a crossing 
 face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 tests/cmd/fixtures/link/router-rf.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
 transport (link.v2 §2.19), an omitted key read at zenoh-1.10.1's default:
-    transport.lease_ms              planned 240000     runs 240000     far end 240000
-    transport.keep_alive            planned 4          runs 4          far end 4
-    transport.wait_before_close_ms  planned 240000000  runs 240000000  far end 240000000
-    transport.sequence              planned "16bit"    runs "16bit"    far end "16bit"
-    transport.batch_bytes           planned 222        runs 222        far end 222
-    transport.open_timeout_ms       planned 10000      runs 10000      far end 10000
-    transport.accept_timeout_ms     planned 10000      runs 10000      far end 10000
-    transport.interests_timeout_ms  planned 10000      runs 10000      far end 10000
+    transport.lease_ms              planned 240000   runs 240000   far end 240000
+    transport.keep_alive            planned 4        runs 4        far end 4
+    transport.wait_before_close_ms  planned 240000   runs 240000   far end 240000
+    transport.sequence              planned "16bit"  runs "16bit"  far end "16bit"
+    transport.batch_bytes           planned 222      runs 222      far end 222
+    transport.open_timeout_ms       planned 10000    runs 10000    far end 10000
+    transport.accept_timeout_ms     planned 10000    runs 10000    far end 10000
+    transport.interests_timeout_ms  planned 10000    runs 10000    far end 10000
 PASS
 judged against the config file tests/cmd/fixtures/link/router-rf.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
@@ -246,14 +246,14 @@ tests/cmd/fixtures/link/router-rf-wbc.json5: face radio (far ground): 8 deny rul
   ✗ transport_differs  face -  transport.wait_before_close_ms
   ✗ wait_under_lease   face -  transport.wait_before_close_ms
 transport (link.v2 §2.19), an omitted key read at zenoh-1.10.1's default:
-    transport.lease_ms              planned 240000     runs 240000
-    transport.keep_alive            planned 4          runs 4
-  ✗ transport.wait_before_close_ms  planned 240000000  runs 120000000
-    transport.sequence              planned "16bit"    runs "16bit"
-    transport.batch_bytes           planned 222        runs 222
-    transport.open_timeout_ms       planned 10000      runs 10000
-    transport.accept_timeout_ms     planned 10000      runs 10000
-    transport.interests_timeout_ms  planned 10000      runs 10000
+    transport.lease_ms              planned 240000   runs 240000
+    transport.keep_alive            planned 4        runs 4
+  ✗ transport.wait_before_close_ms  planned 240000   runs 120000
+    transport.sequence              planned "16bit"  runs "16bit"
+    transport.batch_bytes           planned 222      runs 222
+    transport.open_timeout_ms       planned 10000    runs 10000
+    transport.accept_timeout_ms     planned 10000    runs 10000
+    transport.interests_timeout_ms  planned 10000    runs 10000
 against the plan: 1 difference(s)
   ✗ transport_differs  transport/link/tx/queue/congestion_control/block/wait_before_close  planned 240000000; configured 120000000
 FAIL
@@ -286,14 +286,14 @@ tests/cmd/fixtures/link/router-rf-1102-nowbc.json5: face radio (far ground): 8 d
   ✗ transport_differs  face -  transport.wait_before_close_ms
   ✗ wait_under_lease   face -  transport.wait_before_close_ms
 transport (link.v2 §2.19), an omitted key read at zenoh-1.10.2's default:
-    transport.lease_ms              planned 240000     runs 240000
-    transport.keep_alive            planned 4          runs 4
-  ✗ transport.wait_before_close_ms  planned 240000000  runs 5000000 (the default)
-    transport.sequence              planned "16bit"    runs "16bit"
-    transport.batch_bytes           planned 222        runs 222
-    transport.open_timeout_ms       planned 10000      runs 10000
-    transport.accept_timeout_ms     planned 10000      runs 10000
-    transport.interests_timeout_ms  planned 10000      runs 10000
+    transport.lease_ms              planned 240000   runs 240000
+    transport.keep_alive            planned 4        runs 4
+  ✗ transport.wait_before_close_ms  planned 240000   runs 5000 (the default)
+    transport.sequence              planned "16bit"  runs "16bit"
+    transport.batch_bytes           planned 222      runs 222
+    transport.open_timeout_ms       planned 10000    runs 10000
+    transport.accept_timeout_ms     planned 10000    runs 10000
+    transport.interests_timeout_ms  planned 10000    runs 10000
 against the plan: 1 difference(s)
   ✗ transport_differs  transport/link/tx/queue/congestion_control/block/wait_before_close  planned 240000000; configured 5000000, zenoh-1.10.2's default: the file states none
 FAIL
@@ -323,14 +323,14 @@ face radio: interval_over_horizon radio.v1/stream/air/dropped_total: a crossing 
 face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource whose type is not packed: its contract does not list link.v2, so it crosses as link.v1 says, at its unpacked size (link.v2 §2.17)
 tests/cmd/fixtures/link/router-rf-null-interests.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
 transport (link.v2 §2.19), an omitted key read at zenoh-1.10.1's default:
-    transport.lease_ms              planned 240000     runs 240000
-    transport.keep_alive            planned 4          runs 4
-    transport.wait_before_close_ms  planned 240000000  runs 240000000
-    transport.sequence              planned "16bit"    runs "16bit"
-    transport.batch_bytes           planned 222        runs 222
-    transport.open_timeout_ms       planned 10000      runs 10000
-    transport.accept_timeout_ms     planned 10000      runs 10000
-    transport.interests_timeout_ms  planned 10000      runs 10000 (the default)
+    transport.lease_ms              planned 240000   runs 240000
+    transport.keep_alive            planned 4        runs 4
+    transport.wait_before_close_ms  planned 240000   runs 240000
+    transport.sequence              planned "16bit"  runs "16bit"
+    transport.batch_bytes           planned 222      runs 222
+    transport.open_timeout_ms       planned 10000    runs 10000
+    transport.accept_timeout_ms     planned 10000    runs 10000
+    transport.interests_timeout_ms  planned 10000    runs 10000 (the default)
 PASS
 judged against the config file tests/cmd/fixtures/link/router-rf-null-interests.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
 tombstone windows not asked: pass --window ADDRESS=SECS for each listed owner of state (link.v1 §2.11)
@@ -356,14 +356,14 @@ face radio: not_packed radio.v1/stream/air/dropped_total: a crossing resource wh
 tests/cmd/fixtures/link/router-rf-stamps.json5: face radio (far ground): 8 deny rule(s) across subject(s) ground; 2 downsampling rule(s) on its transports
   ✗ face_timestamping  face -  timestamping
 transport (link.v2 §2.19), an omitted key read at zenoh-1.10.1's default:
-    transport.lease_ms              planned 240000     runs 240000
-    transport.keep_alive            planned 4          runs 4
-    transport.wait_before_close_ms  planned 240000000  runs 240000000
-    transport.sequence              planned "16bit"    runs "16bit"
-    transport.batch_bytes           planned 222        runs 222
-    transport.open_timeout_ms       planned 10000      runs 10000
-    transport.accept_timeout_ms     planned 10000      runs 10000
-    transport.interests_timeout_ms  planned 10000      runs 10000
+    transport.lease_ms              planned 240000   runs 240000
+    transport.keep_alive            planned 4        runs 4
+    transport.wait_before_close_ms  planned 240000   runs 240000
+    transport.sequence              planned "16bit"  runs "16bit"
+    transport.batch_bytes           planned 222      runs 222
+    transport.open_timeout_ms       planned 10000    runs 10000
+    transport.accept_timeout_ms     planned 10000    runs 10000
+    transport.interests_timeout_ms  planned 10000    runs 10000
 FAIL
 face_timestamping timestamping: the router stamps every unstamped put it routes, read at its mode: each frame crosses the face with the router's 26-B timestamp (core §8.2, link.v2 §2.19)
 judged against the config file tests/cmd/fixtures/link/router-rf-stamps.json5 through zenoh's own loader: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
@@ -390,14 +390,14 @@ tests/cmd/fixtures/link/router-rf.json5: face radio (far ground): 8 deny rule(s)
   ✗ catalog_mismatch  face -  catalog
   ✗ peer_differs      face -  transport.lease_ms
 transport (link.v2 §2.19), an omitted key read at zenoh-1.10.1's default:
-  ✗ transport.lease_ms              planned 240000     runs 240000     far end 10000
-    transport.keep_alive            planned 4          runs 4          far end 4
-    transport.wait_before_close_ms  planned 240000000  runs 240000000  far end 5000000
-    transport.sequence              planned "16bit"    runs "16bit"    far end "32bit"
-    transport.batch_bytes           planned 222        runs 222        far end 65535
-    transport.open_timeout_ms       planned 10000      runs 10000      far end 10000
-    transport.accept_timeout_ms     planned 10000      runs 10000      far end 10000
-    transport.interests_timeout_ms  planned 10000      runs 10000      far end 10000
+  ✗ transport.lease_ms              planned 240000   runs 240000   far end 10000
+    transport.keep_alive            planned 4        runs 4        far end 4
+    transport.wait_before_close_ms  planned 240000   runs 240000   far end 5000
+    transport.sequence              planned "16bit"  runs "16bit"  far end "32bit"
+    transport.batch_bytes           planned 222      runs 222      far end 65535
+    transport.open_timeout_ms       planned 10000    runs 10000    far end 10000
+    transport.accept_timeout_ms     planned 10000    runs 10000    far end 10000
+    transport.interests_timeout_ms  planned 10000    runs 10000    far end 10000
 catalog: the far side holds feb61e3d, the policy names none
 FAIL
 catalog_mismatch catalog: the catalog the far side holds is not the policy's: it decodes with another (link.v2 §2.19)
@@ -437,14 +437,14 @@ face rf: frame_unlisted modem.v3/stream/frames/slow: an exposed frame resource t
 face rf: keep_alive_not_suppressed transport.keep_alive: the face's shortest crossing cadence is the keep-alive interval or above it: the uplink pays keep-alives beside its data, at the interval one before each batch later than the one before (link.v2 §2.16)
 tests/cmd/fixtures/link/router-zm-rf0.json5: face rf (far ground): 13 deny rule(s) across subject(s) ground; 0 downsampling rule(s) on its transports
 transport (link.v2 §2.19), an omitted key read at zm-1.10.2-r1's default:
-    transport.lease_ms              planned 240000     runs 240000     far end 240000
-    transport.keep_alive            planned 4          runs 4          far end 4
-    transport.wait_before_close_ms  planned 240000000  runs 240000000  far end 240000000
-    transport.sequence              planned "16bit"    runs "16bit"    far end "16bit"
-    transport.batch_bytes           planned 222        runs 222        far end 222
-    transport.open_timeout_ms       planned 10000      runs 10000      far end 10000
-    transport.accept_timeout_ms     planned 10000      runs 10000      far end 10000
-    transport.interests_timeout_ms  planned 10000      runs 10000      far end 10000
+    transport.lease_ms              planned 240000   runs 240000   far end 240000
+    transport.keep_alive            planned 4        runs 4        far end 4
+    transport.wait_before_close_ms  planned 240000   runs 240000   far end 240000
+    transport.sequence              planned "16bit"  runs "16bit"  far end "16bit"
+    transport.batch_bytes           planned 222      runs 222      far end 222
+    transport.open_timeout_ms       planned 10000    runs 10000    far end 10000
+    transport.accept_timeout_ms     planned 10000    runs 10000    far end 10000
+    transport.interests_timeout_ms  planned 10000    runs 10000    far end 10000
 catalog: the far side holds 8982cc41, the policy names 8982cc41
 PASS
 judged against the config file tests/cmd/fixtures/link/router-zm-rf0.json5 read as data, in zenoh 1.10.1's shapes and zm-1.10.2-r1's link protocols: what a router runs is not observable on the bus, so a file that differs from what it was started with is invisible here (core §11.3, link.v1 §2.14)
