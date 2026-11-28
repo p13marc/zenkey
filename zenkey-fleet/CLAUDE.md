@@ -949,7 +949,14 @@ Claude Code loads this file when working in `zenkey-fleet/`; the root `CLAUDE.md
   revision its descriptors name (the standard contract skipped), held
   offline (`HealthSpec::contracts`) or retrieved by fingerprint, into
   `Tables::of_instance` (`HealthObservation::tables`); across a face the
-  revisions held. An absent owner's archive is asked for the v2 status
+  revisions held. Across a face the one held revision of the face's major
+  is the owner's too (#1151): `HealthSpec::status_contract` builds the
+  window's consumer of it (its heartbeats under its tag) and
+  `status_horizon` judges each `ServiceReading` at its horizon
+  (`ServiceReading::within`, `judged` through `hm::judge_status`), the
+  standard's 60 s otherwise; `ConfigSpec::v1_contract`/`v1_horizon` do
+  the same for `config.v1` (`doc_read_within`). So a test's short-horizon
+  copy given by `--contracts` is read as its owner writes it. An absent owner's archive is asked for the v2 status
   key, then v1's (`ArchivedStatus::major`). The judge: the clock question
   is `v2::clock_ahead` over `clock` (the last read heartbeat, a fault
   nothing), the agreement `model::health::agreement_over_v2` (a break the
