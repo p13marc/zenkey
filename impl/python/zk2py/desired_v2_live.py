@@ -308,6 +308,13 @@ class Target:
         self.revision_said = "not-read" if word_alone else "word"
         #: the runs whose descriptor a read is out for
         self._asking: set[str] = set()
+        #: §2.18 (0.3): "A new run is read first. A target MUST NOT judge a
+        #: version under a run whose descriptor it has not read, nor a
+        #: snapshot with no entry under it, before it reads its author's
+        #: descriptors for that run." What waits for that read, by run, in
+        #: its order of arrival: ("sample", the sample, heard live) or
+        #: ("no_entry", the snapshot's run and asof)
+        self._waiting: dict[str, list[tuple[str, Any, bool]]] = {}
         #: v1 §2.9, which §2.9 keeps: "With its author absent, by a complete
         #: read without its instance token (core §8.1), ... a target MAY read
         #: its slice's last-known from an archive, through the key's archive
@@ -585,11 +592,10 @@ class Target:
             run = next((version_of(r.inband).run.text for r in mine if version_of(r.inband) is not None), None)
             if run is None and no_entry:
                 run = d2.Run(no_entry[0].header["run_width"], no_entry[0].header["run"]).text
-            with self.lock:
-                # each seed reads the descriptor afresh: what an earlier one
-                # named stands no longer
-                self.revisions.clear()
-            said = self._read_revision(run)
+            # each seed reads the descriptor afresh: what an earlier one
+            # named stands no longer, and is put aside only once the read
+            # answers, so a version heard meanwhile is not asked twice
+            said = self._read_revision(run, afresh=True)
             with self.lock:
                 self.revision_said = said
             self.seeds += 1
@@ -606,16 +612,20 @@ class Target:
             return "unchanged"
         if mine or no_entry:
             # "Answered whole, by a snapshot, the target judges the entry as
-            # §2.6 says."
+            # §2.6 says." §2.18 (0.3): an entry or a snapshot with no entry
+            # under a run whose descriptor the target has not read waits for
+            # that read, "a read's answer among them" (a seed has read it
+            # above).
             with self.lock:
                 self.role.asked = None
                 self.watch.whole()
                 drew = "entry" if mine else "no_entry"
                 self.read_log.append((why, None if sent is None else sent.text, drew))
             for r in mine:
-                self._receive(self._sample(desired.OWNER, r.deleted, r.inband, r.payload), False)
+                self._judge_or_wait(("sample", self._sample(desired.OWNER, r.deleted, r.inband, r.payload), False))
             for h in no_entry if not mine else []:
-                self._receive_no_entry(d2.NoEntry(d2.Run(h.header["run_width"], h.header["run"]), h.header["asof"]))
+                self._judge_or_wait(("no_entry", d2.NoEntry(d2.Run(h.header["run_width"], h.header["run"]),
+                                                            h.header["asof"]), False))
             return drew
         # "A held stamp it did not send is no answer (core §4.2, held)"; "No
         # reply at all is still no verdict (core O5)"; "A read that ends at
@@ -636,7 +646,7 @@ class Target:
 
     # -- the author's revision (§2.18) -----------------------------------------------
 
-    def _read_revision(self, run: str | None) -> str:
+    def _read_revision(self, run: str | None, afresh: bool = False) -> str:
         """§2.18 (0.2): the revision the author's descriptor names for
         ``run`` (any present instance's where ``run`` is None), as the
         reference's ``desired seeds`` words it: ``given``, ``another:<fp>``
@@ -651,6 +661,8 @@ class Target:
             return "not-read"
         state, stated = self._descriptor_says(run)
         with self.lock:
+            if afresh:
+                self.revisions = {r: w for r, w in self.revisions.items() if r in self._asking}
             self.revisions[stated if stated is not None else run] = state
         return state
 
@@ -769,29 +781,65 @@ class Target:
         # ignores it (unstamped)": its stamp reads None, and the role says so.
         s = self._sample(desired.OWNER, sample.kind == zenoh.SampleKind.DELETE,
                          read.stamp if read.enveloped else None, read.record if read.record is not None else b"")
-        run = None if s.version is None else s.version.run.text
+        self._judge_or_wait(("sample", s, True))
+
+    def _judge_or_wait(self, item: tuple[str, Any, bool]) -> None:
+        """§2.18 (0.3), "A new run is read first": "A target MUST NOT judge
+        a version under a run whose descriptor it has not read, nor a
+        snapshot with no entry under it, before it reads its author's
+        descriptors for that run. It reads them once (core §3.3). It then
+        judges what that run carries by the revision they name." "Each
+        version of that run that arrives meanwhile waits too, a read's
+        answer among them. §2.6 orders them by seq, whatever their order of
+        arrival."
+
+        The read is made in the background, never in zenoh's callback (a
+        GET on its own session there). Round 125's zk2py judged by the last
+        read and read beside the version; review-bot's note on #1171 and
+        0.3's MUST NOT move it. A target that reads no descriptor
+        (``word_alone``, one built before this major) judges at once."""
+        kind, x, live_ = item
+        run = (None if x.version is None else x.version.run.text) if kind == "sample" else x.run.text
         with self.lock:
-            # §2.18: the revision is "the one the author's descriptor names
-            # for the version's run". A run no descriptor was read for is
-            # read in the background, never in zenoh's callback (a GET on its
-            # own session there), and never ahead of the version: holding
-            # the sample would reorder it against the watch's reads (round
-            # 125's §14 step 5). Until that read answers, the last one stands
-            # (:meth:`_revision_of_run`), so a role stopped stays stopped.
-            ask = (not self.word_alone and run is not None and run not in self.revisions
-                   and run not in self._asking)
-            if ask:
-                self._asking.add(run)
+            wait = not self.word_alone and run is not None and (run not in self.revisions or run in self._asking)
+            if wait:
+                self._waiting.setdefault(run, []).append(item)
+                ask = run not in self._asking
+                if ask:
+                    self._asking.add(run)
+        if not wait:
+            self._judge(item)
+            return
         if ask:
             threading.Thread(target=self._read_run, args=(run,), daemon=True).start()
-        self._receive(s, True)
+
+    def _judge(self, item: tuple[str, Any, bool]) -> None:
+        kind, x, live_ = item
+        if kind == "sample":
+            self._receive(x, live_)
+        else:
+            self._receive_no_entry(x)
 
     def _read_run(self, run: str) -> None:
+        """The one read of a new run's descriptors, then what waited for it,
+        in its order of arrival. What arrives while that is judged waits
+        too, and is judged after it: the run stays asked until none is
+        left."""
         said = self._read_revision(run)
         with self.lock:
             self.revision_said = said
             self.revisions.setdefault(run, said)  # asked once per run, whatever it named
-            self._asking.discard(run)
+            if self.last_seed is not None:
+                # §2.18: "It says so where it says what its seed found"
+                self.last_seed["revision"] = said
+        while True:
+            with self.lock:
+                batch = self._waiting.pop(run, [])
+                if not batch:
+                    self._asking.discard(run)
+                    return
+            for item in batch:
+                self._judge(item)
 
     def _receive(self, s: d2.Sample, heard_live: bool) -> None:
         if s.version is not None and self._stopped(s.version.run.text):
