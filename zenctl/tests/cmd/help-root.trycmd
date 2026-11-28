@@ -64,7 +64,7 @@ Commands:
   telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
   timing       Read timing.v1 streams: deadline met, period kept, a sample expired
   desired      Read desired.v1 and v2 targets: has each converged on its author's document?
-  redundancy   Read redundancy.v1: does exactly one instance serve each governed interface?
+  redundancy   Read redundancy: does exactly one instance serve each governed interface?
   arbitration  Read arbitration.v1: which provider does each arbitrated role follow?
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)
@@ -140,7 +140,7 @@ Commands:
   telemetry    Read telemetry.v1 metrics: kind and unit, conformance, continuity, rate
   timing       Read timing.v1 streams: deadline met, period kept, a sample expired
   desired      Read desired.v1 and v2 targets: has each converged on its author's document?
-  redundancy   Read redundancy.v1: does exactly one instance serve each governed interface?
+  redundancy   Read redundancy: does exactly one instance serve each governed interface?
   arbitration  Read arbitration.v1: which provider does each arbitrated role follow?
   watchdog     Watch conditions on the bus and print each state change as ndjson
   context      Manage named connection contexts (config file)

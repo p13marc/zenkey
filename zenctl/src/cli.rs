@@ -310,7 +310,7 @@ pub(crate) struct GenArgs {
     /// there before anything is written under it. A file that does not
     /// exist yet starts at run 0. Keep it with the service wherever it
     /// runs. Without it, each instance draws a random 32-bit run. Refused
-    /// (exit 2) beside an interface redundancy.v1 governs, whose
+    /// (exit 2) beside an interface a major of redundancy governs, whose
     /// candidates draw 32-bit runs.
     #[arg(long = "run-file", value_name = "PATH")]
     pub(crate) run_file: Option<PathBuf>,
@@ -1019,8 +1019,8 @@ pub(crate) enum Command {
     /// Judge a zk2 deployment against the core: one verdict per check.
     ///
     /// Thirty-seven checks, each a question whose finding is the yes:
-    /// split-brain (§6; of an interface redundancy.v1 governs, its first
-    /// question's split, whatever the holders' marks), binding-unsatisfied
+    /// split-brain (§6; of an interface a major of redundancy governs, its
+    /// first question's split, whatever the holders' marks), binding-unsatisfied
     /// (§3.2), contract-drift (§9.8), contract-unavailable (§8.4),
     /// descriptor-invalid (§3.3), token-missing (§8.1), presence-over-budget
     /// (§8.3), storage-on-state (§4.2 S4), archive-unaligned (§4.4),
@@ -1053,9 +1053,10 @@ pub(crate) enum Command {
     /// --clocks-synced: one reading never finds a target behind) and
     /// desired-last-known (info: a target running a document read from an
     /// archive), each reading a desired.v2 role by its own major, whose
-    /// version has no time for desired-behind to age; and redundancy.v1's redundancy-vacancy (a warning: a
-    /// governed interface with candidates and no incumbent in both of two
-    /// complete presence reads); and timing.v1's timing-declaration (a
+    /// version has no time for desired-behind to age; and redundancy's
+    /// redundancy-vacancy (a warning: an interface either major governs,
+    /// with candidates and no incumbent in both of two complete presence
+    /// reads); and timing.v1's timing-declaration (a
     /// warning, from the contracts: an invalid timing value, a deadline
     /// below its period, or timing keys on a resource that is not a stream
     /// or on a requirement); and arbitration.v1's arbitration-declaration (a
@@ -1384,16 +1385,20 @@ pub(crate) enum Command {
     /// `since_s`, `by`: `window` or `clock`) when a target was behind past
     /// --for.
     Desired(DesiredArgs),
-    /// Read redundancy.v1: does exactly one instance serve each governed interface?
+    /// Read redundancy: does exactly one instance serve each governed interface?
     ///
-    /// redundancy.v1's tool (spec/profiles/redundancy/v1.md §2.15, §5),
-    /// through a session in the deployment's namespace that holds no
-    /// liveliness subscriber and no claim: two reads of the address's @zk/**
-    /// a grace apart (core §6), each with the descriptor of every instance
-    /// it found, and the revisions they name (retrieved, or held by
-    /// --contracts). An interface is governed when its contract lists
-    /// redundancy.v1 in uses; every one in scope is asked, an interface not
-    /// governed only when named by --iface. Per address and interface, §5's
+    /// redundancy's tool, of either major (spec/profiles/redundancy/v1.md
+    /// §2.15, §5; v2.md §2.15), through a session in the deployment's
+    /// namespace that holds no liveliness subscriber and no claim: two reads
+    /// of the address's @zk/** a grace apart (core §6), each with the
+    /// descriptor of every instance it found, and the revisions they name
+    /// (retrieved, or held by --contracts). An interface is governed when
+    /// its contract lists redundancy.v1 or redundancy.v2 in uses, the
+    /// governance read from every candidate's revision: a redundancy.v1
+    /// candidate and a redundancy.v2 one with one election are one
+    /// election. Every one in scope is asked, an interface not governed only
+    /// when named by --iface. Each instance is shown with the run and the
+    /// zid its descriptor states. Per address and interface, §5's
     /// four questions: is it served by exactly one incumbent (no: a split,
     /// two or more holders of its token in both reads, or a vacancy in
     /// both); is there a vacancy (yes, lasting: no holder in either read,
@@ -1414,12 +1419,14 @@ pub(crate) enum Command {
     /// and `notes`, and `unobservable` when nothing could be read. An
     /// `interface` row, one per governed interface: `address`, `iface`,
     /// `governance` (`claim`, `external`, `not_governed`, `no_contract`,
-    /// `disagree`) and `governance_says`, `holders`, `one_incumbent`,
+    /// `disagree`) and `governance_says`, `majors` (the majors its governed
+    /// revisions use, `redundancy.v1`, `redundancy.v2`), `holders`, `one_incumbent`,
     /// `vacancy` and `standbys` (each an `answer` — `yes`, `no`,
     /// `unobservable`, `not_asked`, `not_this_profiles` — a `reason` in
     /// conclusions.json's tokens and `says` in words; `standbys` with its
-    /// `count` and `exact`), and `instances` (each `instance`, `zid`, `first`
-    /// and `second` as the reads showed it — `token`, `listing` — its `twin`
+    /// `count` and `exact`), and `instances` (each `instance`, `run` and
+    /// `zid` as its descriptor states them, `first` and `second` as the
+    /// reads showed it — `token`, `listing` — its `twin`
     /// answer and its `role`: `incumbent`, `standby`, `twin`,
     /// `not_a_candidate`, `unknown`).
     Redundancy(RedundancyArgs),
@@ -1675,11 +1682,12 @@ pub(crate) enum CheckCmd {
     ///                    in the window with no horizon passes, naming
     ///                    §2.11's SHOULD (desired.v1 §2.2, §2.11)
     ///   redundancy-declaration
-    ///                    when its revision uses redundancy.v1, the
-    ///                    declaration is valid and no descriptor puts the
-    ///                    interface in a tokenless set: one running under
-    ///                    an invalid one is the violation, since a runtime
-    ///                    refuses to start it (redundancy.v1 §2.2, §2.14)
+    ///                    when its revision uses a major of redundancy, the
+    ///                    declaration is valid, read by that major, and no
+    ///                    descriptor puts the interface in a tokenless set:
+    ///                    one running under an invalid one is the
+    ///                    violation, since a runtime refuses to start it
+    ///                    (redundancy.v1 §2.2, §2.14; redundancy.v2 §2.2)
     ///   redundancy-standby
     ///                    when a descriptor marks the interface standby,
     ///                    every instance so marked in two presence reads
@@ -3215,7 +3223,7 @@ pub(crate) struct ServeArgs {
     /// there before anything is written under it. A file that does not
     /// exist yet starts at run 0. Keep it with the service wherever it
     /// runs. Without it, each instance draws a random 32-bit run. Refused
-    /// (exit 2) beside an interface redundancy.v1 governs, whose
+    /// (exit 2) beside an interface a major of redundancy governs, whose
     /// candidates draw 32-bit runs.
     #[arg(long = "run-file", value_name = "PATH")]
     pub(crate) run_file: Option<PathBuf>,
@@ -3946,7 +3954,7 @@ pub(crate) struct RedundancyArgs {
           add = ArgValueCandidates::new(completion::services))]
     pub(crate) address: Option<zenkey_model::grammar::Addr>,
     /// Only this interface, `<name>.v<major>`: asked even when its contract
-    /// does not use redundancy.v1, which answers not this profile's.
+    /// uses no major of redundancy, which answers not this profile's.
     #[arg(long, value_name = "IFACE", value_parser = iface_arg)]
     pub(crate) iface: Option<zenkey_model::grammar::IfaceId>,
     /// Seconds between the two presence reads (core §6): longer than the

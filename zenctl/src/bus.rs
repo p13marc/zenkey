@@ -324,8 +324,9 @@ impl Deployment {
     /// owner's session SHOULD (core §8.2): the runtime stamps each value in
     /// band, and sets a Zenoh timestamp only on §4.3's table. A `governed`
     /// owner, a candidate of an interface `redundancy.v1` governs, has it on
-    /// (that profile's §2.10). `--zenoh-config` stating the setting is
-    /// obeyed either way.
+    /// (that profile's §2.10); a `redundancy.v2` candidate's runs without,
+    /// as any owner's (`redundancy.v2` §2.10), and is not `governed` here.
+    /// `--zenoh-config` stating the setting is obeyed either way.
     pub(crate) async fn owner_session(&self, governed: bool) -> Result<zenoh::Session> {
         let t = &self.link.transport;
         zenkey_fleet::open_owner_in_namespace(

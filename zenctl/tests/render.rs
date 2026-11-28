@@ -1130,31 +1130,37 @@ fn a_redundancy_reading_spells_every_answer_apart_in_every_medium() {
     assert_data_eq!(
         table(&report),
         str![[r#"
-redundancy.v1 in namespace "acme" — 4 interface(s), two reads 2.0s apart
+redundancy in namespace "acme" — 5 interface(s), two reads 2.0s apart
 ✓  lab/ledger ledger.v1  exactly one incumbent: yes (one) — one holder of its token, the read complete
     governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
     vacancy: no (held) — a holder of its token in the second read
     standbys: yes (standing_by, 1 exact) — marked standby, holding none of its tokens
-    3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
-    3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a standby: no (standby) — marked standby, no token, the read complete
+    3fa9c2d41b7e0012 (run 8b030000, zid 3fa9c2d41b7e00120) the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
+    3fa9c2d41b7e0013 (run 8b030001, zid 3fa9c2d41b7e00130) a standby: no (standby) — marked standby, no token, the read complete
+✓  lab/mixed ledger.v1   exactly one incumbent: yes (one) — one holder of its token, the read complete
+    governance claim — ledger.v1's revisions sha256:12ed59cbfa7a49a819134be27f779a1a76062712389e9ffbc5f4e35ce95b5a87, sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1 and redundancy.v2, one election, claim (redundancy.v2 §2.17)
+    vacancy: no (held) — a holder of its token in the second read
+    standbys: yes (standing_by, 1 exact) — marked standby, holding none of its tokens
+    3fa9c2d41b7e0012 (run 8b030008, zid 3fa9c2d41b7e00120) the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
+    3fa9c2d41b7e0013 (run 8b030009, zid 3fa9c2d41b7e00130) a standby: no (standby) — marked standby, no token, the read complete
 ✗  lab/split ledger.v1   exactly one incumbent: no (split) — two or more holders of its token in both reads a grace apart (core §6)
     governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
     vacancy: no (held) — a holder of its token in the second read
     standbys: no (none, 0 exact) — no instance marked standby and holding none of its tokens
-    3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) a TWIN: yes (split_lowest) — a holder of a split, the lowest, which the heal keeps
-    3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a TWIN: yes (split) — two or more holders of its token in both reads a grace apart (core §6)
+    3fa9c2d41b7e0012 (run 8b030002, zid 3fa9c2d41b7e00120) a TWIN: yes (split_lowest) — a holder of a split, the lowest, which the heal keeps
+    3fa9c2d41b7e0013 (run 8b030003, zid 3fa9c2d41b7e00130) a TWIN: yes (split) — two or more holders of its token in both reads a grace apart (core §6)
 ✗  lab/twin ledger.v1    exactly one incumbent: yes (one) — one holder of its token, the read complete
     governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
     vacancy: no (held) — a holder of its token in the second read
     standbys: no (none, 0 exact) — no instance marked standby and holding none of its tokens
-    3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
-    3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a TWIN: yes (unmarked) — it lists the interface unmarked and holds no token, in both reads: an exposure no token covers
+    3fa9c2d41b7e0012 (run 8b030006, zid 3fa9c2d41b7e00120) the incumbent: no (incumbent) — the sole incumbent, unmarked, the read complete
+    3fa9c2d41b7e0013 (run 8b030007, zid 3fa9c2d41b7e00130) a TWIN: yes (unmarked) — it lists the interface unmarked and holds no token, in both reads: an exposure no token covers
 ✗  lab/vacant ledger.v1  exactly one incumbent: no (vacant) — no holder, a candidate present
     governance claim — ledger.v1's revision(s) sha256:ceaf58c627b70bb6a1bcfbeee2ce6c8fcf9bb1072683d7fec487906070f0bc30 use redundancy.v1, election claim
     vacancy: yes (lasting) — no holder in either read, both complete, a candidate present: the election did not end, or no instance holds the lock
     standbys: yes (standing_by, 2 exact) — marked standby, holding none of its tokens
-    3fa9c2d41b7e0012 (zid 3fa9c2d41b7e00120) a standby: no (standby) — marked standby, no token, the read complete
-    3fa9c2d41b7e0013 (zid 3fa9c2d41b7e00130) a standby: no (standby) — marked standby, no token, the read complete
+    3fa9c2d41b7e0012 (run 8b030004, zid 3fa9c2d41b7e00120) a standby: no (standby) — marked standby, no token, the read complete
+    3fa9c2d41b7e0013 (run 8b030005, zid 3fa9c2d41b7e00130) a standby: no (standby) — marked standby, no token, the read complete
 
 "#]]
     );
