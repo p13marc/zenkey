@@ -1291,11 +1291,10 @@ impl<'h> Through<'h> {
             if let Ok(crate::presence::Found::Descriptor(d, _)) =
                 crate::presence::descriptor_held(session, archive, &instance, self.held, timeout)
                     .await
+                && let Some(id) = d.stated_catalog()
             {
-                if let Some(id) = d.stated_catalog() {
-                    named = Some(id);
-                    break;
-                }
+                named = Some(id);
+                break;
             }
         }
         self.named = Some(named);
